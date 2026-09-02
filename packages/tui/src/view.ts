@@ -472,7 +472,13 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
       state = withField(state, toLineEdge(field, "start"));
     } else if (name === "end") {
       state = withField(state, toLineEdge(field, "end"));
-    } else if (key.ctrl !== true && key.meta !== true && sequence !== "" && !/[ -]/.test(sequence)) {
+    } else if (key.ctrl === true && name === "c") {
+      // A field is modal, so ctrl+c leaves the field rather than the app: the
+      // text just typed is the thing most easily lost, and `esc` then `q` quits.
+      state = closeField(state, "cancelled");
+    } else if (key.ctrl !== true && key.meta !== true && sequence !== "" && !CONTROL_BYTE.test(sequence)) {
+      // Anything that produced visible characters is typing, a space and a
+      // hyphen included, which is most of what an instruction is made of.
       state = withField(state, insertInto(field, sequence));
     } else {
       return;

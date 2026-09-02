@@ -169,6 +169,22 @@ test("the pack the model was sent carries the style rules and the work's rules (
   expect(sent).toContain("tighten");
 });
 
+test("a real instruction is typed whole: spaces, hyphens and punctuation (AC1)", async () => {
+  const endpoint = startFakeEndpoint({ tokens: ["Colder."], gapMs: 1 });
+  endpoints.push(endpoint);
+  const [handle, setup] = await view(workspace(), endpoint);
+
+  // Every character goes through the same key path a terminal drives, which is
+  // the point: an instruction is mostly the characters between the words.
+  const instruction = "cut this by a third, and keep the well-lit half";
+  await prompt(handle, setup, instruction);
+  await handle.idle();
+
+  expect(handle.state().receipt).not.toBe("");
+  const body = endpoint.requests[0]?.body as { messages?: { content?: string }[] };
+  expect(String(body.messages?.[0]?.content)).toContain(`# What to do to it\n\n${instruction}`);
+});
+
 test("a zero-width selection prompts into an addition, not a substitution (AC1)", async () => {
   const endpoint = startFakeEndpoint({ tokens: ["The door stood open."], gapMs: 1 });
   endpoints.push(endpoint);
@@ -537,6 +553,21 @@ test("esc cancels a field and changes nothing (AC2)", async () => {
   setup.mockInput.pressEscape();
   await until(() => handle.state().field === undefined);
 
+  expect(space.text()).toBe(CHAPTER);
+});
+
+test("ctrl+c in a field leaves the field, not the app (AC2)", async () => {
+  const space = workspace();
+  const [handle, setup] = await view(space);
+
+  setup.mockInput.pressKey("e");
+  await setup.mockInput.typeText(" and then some");
+  expect(handle.state().field?.value).toBe(`${FIRST} and then some`);
+
+  setup.mockInput.pressCtrlC();
+  await until(() => handle.state().field === undefined);
+
+  expect(handle.state().running).toBe(true);
   expect(space.text()).toBe(CHAPTER);
 });
 
