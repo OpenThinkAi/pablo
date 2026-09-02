@@ -1,0 +1,14 @@
+{
+  "name": "@openthink/pablo-core",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "TTY-free core of pablo: the document and span model the renderer consumes.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": ["src"]
+}
