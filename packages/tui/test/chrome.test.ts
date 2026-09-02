@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import { parse } from "@openthink/pablo-core";
-import { briefLines, helpLines, statusSegments } from "../src/chrome";
+import { briefLines, fieldLines, helpLines, overlayLines, statusSegments } from "../src/chrome";
+import { openField } from "../src/field";
 import { BINDINGS } from "../src/keymap";
 import { frameText } from "../src/render";
 import { CARET_GLYPH } from "../src/theme";
-import { applyAction, initialState } from "../src/view-state";
+import { applyAction, initialState, type RunState, type ViewState } from "../src/view-state";
 
 const text = "# One\n\nAlpha beta gamma.\n\nDelta epsilon zeta.\n";
 const manuscript = { doc: { path: "/tmp/chapter-01.md", text }, model: parse(text) };
@@ -96,4 +97,98 @@ test("the status line names the brief while its pane is open (AC2)", () => {
   expect(status).toContain("brief");
   expect(status).toContain("ice-house");
   expect(status).toContain("esc to close");
+});
+
+/** AGT-1204: the run, the receipt, the field and the dry-run page. */
+
+function running(overrides: Partial<RunState> = {}): ViewState {
+  return {
+    ...state(),
+    run: {
+      phase: "sending",
+      instruction: "tighten",
+      providerId: "local",
+      summary: "span edit pack: 6 slices, 1,203 of 10,000 tokens. Estimated wait: 5s total.",
+      size: "1,203 tokens sent",
+      elapsedMs: 4000,
+      timeToFirstTokenMs: undefined,
+      tokensWritten: 0,
+      tokensPerSecond: undefined,
+      error: undefined,
+      ...overrides,
+    },
+  };
+}
+
+function statusText(view: ViewState): string {
+  return statusSegments(view)
+    .map((segment) => segment.text)
+    .join("");
+}
+
+test("before a run the status carries the pack size, the estimate and a moving clock (AC6)", () => {
+  const status = statusText({ ...running(), width: 200 });
+  expect(status).toContain("waiting 4s");
+  expect(status).toContain("span edit pack");
+  expect(status).toContain("Estimated wait");
+});
+
+test("during a run the estimate gives way to the measurement (AC6)", () => {
+  const status = statusText({
+    ...running({ phase: "streaming", timeToFirstTokenMs: 1900, tokensPerSecond: 27.4, elapsedMs: 6000 }),
+    width: 200,
+  });
+
+  expect(status).toContain("6s");
+  expect(status).toContain("1,203 tokens sent");
+  expect(status).toContain("first token 1.9s");
+  expect(status).toContain("27 tok/s");
+  expect(status).not.toContain("Estimated wait");
+});
+
+test("a failed run keeps the retry key even when the row has to be cut (AC5)", () => {
+  const failed = running({
+    phase: "failed",
+    error: "pablo: the model at http://127.0.0.1:8002/v1 sent nothing for 60s (61s in total) — is the server running?",
+  });
+
+  expect(statusText({ ...failed, width: 200 })).toContain("R retries");
+  // Narrow enough that the explanation cannot fit; the way out of it still does.
+  expect(statusText({ ...failed, width: 40 })).toContain("R retries");
+  for (const view of [failed, { ...failed, width: 40 }]) {
+    const row = statusText(view);
+    expect(row.length).toBeLessThanOrEqual(view.width);
+  }
+});
+
+test("the receipt outlives the reload it paid for, and the position gives way to it (AC6)", () => {
+  const after = { ...state(), width: 46, receipt: "read 4,900 tokens in 19s, wrote 1,500 in 50s" };
+  const status = statusText(after);
+
+  expect(status).toContain("read 4,900 tokens in 19s");
+  expect(status.length).toBeLessThanOrEqual(46);
+});
+
+test("the field is drawn under the manuscript with its title, its text and its keys (AC1, AC2)", () => {
+  const rows = frameText(fieldLines(openField("manual", "The cellar was cold."), 40));
+
+  expect(rows).toContain("manual edit");
+  expect(rows).toContain("The cellar was cold.");
+  expect(rows).toContain("ctrl+s saves");
+});
+
+test("the dry-run page is the preview plus a way out (AC6)", () => {
+  const rows = frameText(overlayLines({ title: "dry run — nothing was sent", lines: ["slice  tokens", "style  17"] }));
+
+  expect(rows).toContain("dry run — nothing was sent");
+  expect(rows).toContain("style  17");
+  expect(rows).toContain("esc closes");
+});
+
+test("the help documents the field keys, which are a mode and not bindings", () => {
+  const help = frameText(helpLines());
+
+  expect(help).toContain("In a field");
+  expect(help).toContain("save a manual edit");
+  expect(help).toContain("Verbs on the selection");
 });

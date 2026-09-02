@@ -1,4 +1,16 @@
 export {
+  cutEdit,
+  lineOf,
+  manualEdit,
+  markFor,
+  moveEdit,
+  proposalEdit,
+  writeDocument,
+  type Edit,
+  type EditRefusal,
+  type EditResult,
+} from "./apply";
+export {
   BRIEF_TIMEOUT_MS,
   briefCommand,
   detectWork,
@@ -16,7 +28,40 @@ export {
   type Spawner,
   type Work,
 } from "./brief";
-export { briefLines, helpLines, statusSegments } from "./chrome";
+export { briefLines, fieldLines, helpLines, overlayLines, statusSegments } from "./chrome";
+export {
+  editorArgv,
+  NO_EDITOR,
+  openInEditor,
+  parseEditor,
+  type EditorCommand,
+  type EditorRun,
+  type OpenInEditorOptions,
+} from "./editor";
+export {
+  backspace,
+  deleteForward,
+  fieldRows,
+  insertInto,
+  moveCaret,
+  openField,
+  toLineEdge,
+  type Field,
+  type FieldKind,
+} from "./field";
+export { buildSpanEditInputs, type BuiltSpanEditInputs, type SpanEditInputsOptions } from "./pack-inputs";
+export {
+  failureMessage,
+  planSpanEdit,
+  PROMPT_INTENT,
+  receiptLine,
+  runSpanEdit,
+  type PlanOptions,
+  type RunHooks,
+  type RunOutcome,
+  type RunProgress,
+  type SpanEditPlan,
+} from "./run";
 export {
   blockIndexAt,
   blockRowCount,
@@ -37,6 +82,7 @@ export {
   BINDINGS,
   BRIEF_KEY,
   GROUP_LABELS,
+  VIEW_OWNED,
   chordsFor,
   matchBinding,
   type Binding,
@@ -57,19 +103,36 @@ export {
 export {
   ACTIONS,
   IDLE_BRIEF,
+  applied,
   applyAction,
+  beginMove,
   briefLoaded,
   briefNotice,
   briefStarted,
+  clearMove,
+  closeField,
   follow,
   initialState,
+  openManual,
+  openPrompt,
   reloaded,
   resized,
+  runFailed,
+  runFinished,
+  runProgress,
+  runStarted,
+  runWaiting,
+  showOverlay,
   stepUnit,
   unitAt,
   viewportOf,
+  withField,
   type Action,
   type BriefPane,
+  type Overlay,
+  type PendingMove,
+  type RunPhase,
+  type RunState,
   type Size,
   type ViewState,
 } from "./view-state";

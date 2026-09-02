@@ -15,6 +15,13 @@ In the view — no action needs a function key or a number key:
   r            re-read from disk       ?       all keys
   B            the work brief          q       quit
 
+Verbs on the selection:
+
+  >            prompt the model        e       edit it by hand
+  x            cut it                  m       move it (m again at a boundary)
+  o            open $EDITOR here       d       dry run: show the pack, send nothing
+  R            retry the last prompt
+
 The file is re-read whenever it changes on disk, so editing it elsewhere is a
 supported way to work.
 

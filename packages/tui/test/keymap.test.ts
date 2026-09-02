@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { BINDINGS, chordsFor, matchBinding } from "../src/keymap";
+import { BINDINGS, VIEW_OWNED, chordsFor, matchBinding } from "../src/keymap";
 import { ACTIONS } from "../src/view-state";
 
 /** The chord vocabulary: a printable character, or one of these named keys. */
@@ -17,9 +17,20 @@ test("no action needs a function key or a number key (AC5)", () => {
 });
 
 test("every action in the map exists, and no chord is bound twice", () => {
-  // `reload` is the one action the view owns, because it touches the disk.
-  const missing = BINDINGS.filter((binding) => binding.action !== "reload" && !(binding.action in ACTIONS));
+  // An action is served either by a pure entry in ACTIONS or by the view, which
+  // owns the ones that reach the disk, `$EDITOR` or a provider. Never neither.
+  const missing = BINDINGS.filter(
+    (binding) => !VIEW_OWNED.has(binding.action) && !(binding.action in ACTIONS),
+  );
   expect(missing.map((binding) => binding.action)).toEqual([]);
+
+  // And never both: a view-owned action with a pure twin would be dispatched twice.
+  const doubled = [...VIEW_OWNED].filter((action) => action in ACTIONS);
+  expect(doubled).toEqual([]);
+
+  // Everything the view claims is actually bound to a key.
+  const bound = new Set(BINDINGS.map((binding) => binding.action));
+  expect([...VIEW_OWNED].filter((action) => !bound.has(action))).toEqual([]);
 
   const seen = new Set<string>();
   const duplicates = BINDINGS.flatMap((binding) => binding.chords).filter((chord) => {

@@ -17,6 +17,7 @@
 
 import {
   expand as expandSelection,
+  selectionText,
   shrink as shrinkSelection,
   type Document,
   type Granularity,
@@ -24,6 +25,7 @@ import {
   type Selection,
   type Span,
 } from "@openthink/pablo-core";
+import { openField, type Field } from "./field";
 import {
   blockIndexAt,
   blockRowCount,
@@ -55,6 +57,39 @@ export interface BriefPane {
 }
 
 export const IDLE_BRIEF: BriefPane = { open: false, offset: 0, status: "none" };
+/** A full-screen page of text over the manuscript: the dry-run pack preview (AC6). */
+export interface Overlay {
+  readonly title: string;
+  readonly lines: readonly string[];
+}
+
+/** A span cut by `move` and waiting for the boundary it lands on (AC3). */
+export interface PendingMove {
+  readonly span: Span;
+  readonly text: string;
+  /** A structural unit lands as a block, with a blank line each side; a phrase splices in. */
+  readonly asBlock: boolean;
+}
+
+export type RunPhase = "sending" | "streaming" | "failed";
+
+/** What a model run looks like on the status line, from the ask to the receipt (AC5, AC6). */
+export interface RunState {
+  readonly phase: RunPhase;
+  readonly instruction: string;
+  readonly providerId: string;
+  /** The pack's size and estimated wait, shown from the ask to the first byte. */
+  readonly summary: string;
+  /** Just the size, which is what stays on screen once the estimate is moot. */
+  readonly size: string;
+  /** Wall time since the request went out, so a long prefill is visibly a wait. */
+  readonly elapsedMs: number;
+  readonly timeToFirstTokenMs: number | undefined;
+  readonly tokensWritten: number;
+  readonly tokensPerSecond: number | undefined;
+  /** Set when the run failed; the message names the endpoint and the retry key. */
+  readonly error: string | undefined;
+}
 
 export interface ViewState {
   readonly doc: Document;
@@ -71,6 +106,17 @@ export interface ViewState {
   readonly brief: BriefPane;
   /** A transient line for the status bar: a reload notice, a read error. */
   readonly message: string;
+  /**
+   * The receipt of the last run. Separate from `message` because AC6 asks for
+   * it to survive the re-read that follows the write it paid for, and to stay
+   * until the author does something else.
+   */
+  readonly receipt: string;
+  /** Open text entry: an instruction, or a manual replacement. Absent in reading mode. */
+  readonly field: Field | undefined;
+  readonly run: RunState | undefined;
+  readonly overlay: Overlay | undefined;
+  readonly pendingMove: PendingMove | undefined;
   /** False once the author has quit; the view tears down on the next tick. */
   readonly running: boolean;
 }
@@ -247,8 +293,14 @@ function scrolled(state: ViewState, rows: number, cache?: LineCache): ViewState 
   return anchor === state.anchor ? state : { ...state, anchor };
 }
 
+/**
+ * Move the selection. Moving is "the next action" for AC6's purposes, so the
+ * receipt clears here rather than lingering over a part of the manuscript it
+ * has nothing to do with. A run does not: an in-flight one is still running and
+ * a failed one still has a retry key, and both are dismissed with `esc`.
+ */
 function select(state: ViewState, selection: Selection, cache?: LineCache): ViewState {
-  return follow({ ...state, selection, message: "" }, cache);
+  return follow({ ...state, selection, message: "", receipt: "" }, cache);
 }
 
 function edge(state: ViewState, which: "start" | "end", direction: 1 | -1, cache?: LineCache): ViewState {
@@ -265,16 +317,17 @@ function edge(state: ViewState, which: "start" | "end", direction: 1 | -1, cache
 export type Action = (state: ViewState, cache?: LineCache) => ViewState;
 
 /**
- * While the help is open the scroll keys scroll the help, so a key map taller
- * than the terminal is still readable to the end. The upper bound depends on
- * the rendered help, so it is clamped where that is known — in the view's draw.
+ * While the help or an overlay is open the scroll keys scroll *it*, so a key
+ * map or a dry-run preview taller than the terminal is still readable to the
+ * end. The upper bound depends on the rendered page, so it is clamped where
+ * that is known — in the view's draw.
  */
 function scrollAny(state: ViewState, rows: number, cache?: LineCache): ViewState {
   if (state.brief.open) {
     const offset = Math.max(0, state.brief.offset + rows);
     return offset === state.brief.offset ? state : { ...state, brief: { ...state.brief, offset } };
   }
-  if (!state.help) return scrolled(state, rows, cache);
+  if (!state.help && state.overlay === undefined) return scrolled(state, rows, cache);
   const helpOffset = Math.max(0, state.helpOffset + rows);
   return helpOffset === state.helpOffset ? state : { ...state, helpOffset };
 }
@@ -293,38 +346,44 @@ export function briefNotice(brief: BriefPane): string {
   }
 }
 
-export const ACTIONS: Readonly<Record<string, Action>> = {
-  quit: (state) => ({ ...state, running: false }),
-  toggleHelp: (state) => ({
-    ...state,
-    help: !state.help,
-    helpOffset: 0,
-    brief: { ...state.brief, open: false, offset: 0 },
-    message: "",
-  }),
-  dismiss: (state) => ({
+/**
+ * Close every full-screen page: the help, the brief, and the dry-run preview.
+ *
+ * There are three of them now and only one screen, so every action that opens
+ * one starts by closing the others. Doing it in one place is what stops the
+ * fourth page from being the one that forgets.
+ */
+function closePages(state: ViewState): ViewState {
+  return {
     ...state,
     help: false,
     helpOffset: 0,
+    overlay: undefined,
     brief: { ...state.brief, open: false, offset: 0 },
+  };
+}
+
+export const ACTIONS: Readonly<Record<string, Action>> = {
+  quit: (state) => ({ ...state, running: false }),
+  toggleHelp: (state) => ({
+    ...closePages(state),
+    help: !state.help,
     message: "",
   }),
+  dismiss: (state) => ({
+    ...closePages(state),
+    message: "",
+    run: state.run?.phase === "failed" ? undefined : state.run,
+    pendingMove: undefined,
+  }),
 
-  // One overlay at a time: the brief replaces the help rather than stacking on
-  // it. A brief that is not ready says why in the status line instead of
-  // opening an empty pane.
+  // One page at a time: the brief replaces the help and the dry run rather than
+  // stacking on either. A brief that is not ready says why in the status line
+  // instead of opening an empty pane.
   toggleBrief: (state) => {
-    if (state.brief.open) {
-      return { ...state, brief: { ...state.brief, open: false, offset: 0 }, message: "" };
-    }
+    if (state.brief.open) return { ...closePages(state), message: "" };
     if (state.brief.status !== "ready") return { ...state, message: briefNotice(state.brief) };
-    return {
-      ...state,
-      help: false,
-      helpOffset: 0,
-      brief: { ...state.brief, open: true, offset: 0 },
-      message: "",
-    };
+    return { ...closePages(state), brief: { ...state.brief, open: true, offset: 0 }, message: "" };
   },
 
   scrollDown: (state, cache) => scrollAny(state, 1, cache),
@@ -368,6 +427,124 @@ export const ACTIONS: Readonly<Record<string, Action>> = {
       cache,
     ),
 };
+
+/*
+ * The verb transitions (AGT-1204).
+ *
+ * Each verb has a pure half here and, where it has to reach the disk, a
+ * provider or `$EDITOR`, an impure half in `view.ts` — the same split `reload`
+ * has had since AGT-1203. These are the pure halves: opening and closing a
+ * field, remembering a cut that is waiting for a boundary, and the four states
+ * a run passes through on the status line.
+ */
+
+/** AC1: the one-line intent field over the current selection. */
+export function openPrompt(state: ViewState, value = ""): ViewState {
+  return { ...closePages(state), field: openField("prompt", value), message: "", receipt: "" };
+}
+
+/** AC2: the multi-line field, pre-filled with the span it will replace. */
+export function openManual(state: ViewState): ViewState {
+  const value = selectionText(state.doc, state.selection.span);
+  return { ...closePages(state), field: openField("manual", value), message: "", receipt: "" };
+}
+
+export function withField(state: ViewState, field: Field): ViewState {
+  return { ...state, field };
+}
+
+export function closeField(state: ViewState, message = ""): ViewState {
+  return { ...state, field: undefined, message };
+}
+
+export function showOverlay(state: ViewState, overlay: Overlay): ViewState {
+  return { ...closePages(state), overlay, message: "" };
+}
+
+/**
+ * The granularities whose spans are whole blocks and land with a blank line on
+ * each side. Named rather than excluded, so a granularity added later is inline
+ * until someone decides otherwise instead of silently becoming a block.
+ */
+const BLOCK_GRANULARITIES: ReadonlySet<Granularity> = new Set<Granularity>([
+  "paragraph",
+  "scene",
+  "chapter",
+]);
+
+/**
+ * AC3, first half of `move`: remember the span and what it is, without writing.
+ * The file is never on disk in the half-moved state, because the cut and the
+ * insert are one write on the second press.
+ */
+export function beginMove(state: ViewState): ViewState {
+  const { span, granularity } = state.selection;
+  if (span.start === span.end) return { ...state, message: "nothing is selected to move" };
+  return {
+    ...state,
+    pendingMove: {
+      span,
+      text: selectionText(state.doc, span),
+      asBlock: BLOCK_GRANULARITIES.has(granularity),
+    },
+    message: "moving: put the cursor on a boundary and press m again (esc cancels)",
+    receipt: "",
+  };
+}
+
+export function clearMove(state: ViewState, message = ""): ViewState {
+  return { ...state, pendingMove: undefined, message };
+}
+
+/** AC6: the pack's size and estimated wait go up before the first byte does. */
+export function runStarted(
+  state: ViewState,
+  run: Pick<RunState, "instruction" | "providerId" | "summary" | "size">,
+): ViewState {
+  return {
+    ...state,
+    run: {
+      ...run,
+      phase: "sending",
+      elapsedMs: 0,
+      timeToFirstTokenMs: undefined,
+      tokensWritten: 0,
+      tokensPerSecond: undefined,
+      error: undefined,
+    },
+    message: "",
+    receipt: "",
+  };
+}
+
+export function runProgress(
+  state: ViewState,
+  progress: Pick<RunState, "elapsedMs" | "timeToFirstTokenMs" | "tokensWritten" | "tokensPerSecond">,
+): ViewState {
+  if (state.run === undefined) return state;
+  return { ...state, run: { ...state.run, ...progress, phase: "streaming" } };
+}
+
+/**
+ * The clock ticking while nothing has come back yet. Its own transition
+ * because it must not turn a `sending` run into a `streaming` one: no token has
+ * arrived, and claiming otherwise on screen is the lie AC6 exists to prevent.
+ */
+export function runWaiting(state: ViewState, elapsedMs: number): ViewState {
+  if (state.run === undefined || state.run.phase === "failed") return state;
+  return { ...state, run: { ...state.run, elapsedMs } };
+}
+
+/** AC5: a failure stays on screen, names its endpoint, and offers the retry key. */
+export function runFailed(state: ViewState, error: string): ViewState {
+  if (state.run === undefined) return state;
+  return { ...state, run: { ...state.run, phase: "failed", error } };
+}
+
+/** AC6: the run ends, and its receipt is what is left behind. */
+export function runFinished(state: ViewState, receipt: string): ViewState {
+  return { ...state, run: undefined, receipt, message: "" };
+}
 
 /** Dispatch an action id. Unknown ids are ignored, not thrown: the map is data. */
 export function applyAction(
@@ -414,6 +591,11 @@ export function initialState(manuscript: Manuscript, size: Size, brief: BriefPan
     helpOffset: 0,
     brief,
     message: "",
+    receipt: "",
+    field: undefined,
+    run: undefined,
+    overlay: undefined,
+    pendingMove: undefined,
     running: true,
   };
 }
@@ -432,7 +614,12 @@ export function resized(state: ViewState, size: Size): ViewState {
  * they actually make in `$EDITOR`, and a file that shrank out from under the
  * selection leaves it at the new end rather than out of bounds.
  */
-export function reloaded(state: ViewState, manuscript: Manuscript, cache?: LineCache): ViewState {
+export function reloaded(
+  state: ViewState,
+  manuscript: Manuscript,
+  cache?: LineCache,
+  message = "reloaded from disk",
+): ViewState {
   const length = manuscript.doc.text.length;
   const start = clamp(state.selection.span.start, 0, length);
   const end = clamp(state.selection.span.end, start, length);
@@ -450,7 +637,32 @@ export function reloaded(state: ViewState, manuscript: Manuscript, cache?: LineC
         Math.max(0, blockRowCount(manuscript.model, blockIndex, state.width, cache) - 1),
       ),
     },
-    message: "reloaded from disk",
+    message,
   };
   return follow(next, cache);
+}
+
+/**
+ * Adopt a write pablo just made, putting the selection on the text it produced
+ * rather than where the cursor happened to be. Every offset the caller held is
+ * dead by now — the write moved them — so the new span comes from the edit.
+ */
+export function applied(
+  state: ViewState,
+  manuscript: Manuscript,
+  span: Span,
+  message: string,
+  cache?: LineCache,
+): ViewState {
+  const reread = reloaded(state, manuscript, cache, message);
+  const length = manuscript.doc.text.length;
+  const start = clamp(span.start, 0, length);
+  return follow(
+    {
+      ...reread,
+      selection: { span: { start, end: clamp(span.end, start, length) }, granularity: state.selection.granularity },
+      pendingMove: undefined,
+    },
+    cache,
+  );
 }

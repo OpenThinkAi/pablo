@@ -7,6 +7,14 @@
  * later ticket adds a verb by adding a row and an action, and the help screen
  * grows on its own.
  *
+ * An action is served either by a pure entry in `ACTIONS` (`view-state.ts`) or,
+ * when it has to reach the disk, `$EDITOR` or a provider, by the view itself —
+ * see `VIEW_OWNED` at the bottom of this file.
+ *
+ * **Text entry is not in this map.** While a field is open the keys go into the
+ * field, not through `matchBinding`; a field is a mode with three keys (send,
+ * cancel, and in a multi-line field save), documented in the help footer.
+ *
  * **No function row and no number row.** Matt types on a Corne split (ZMK,
  * Colemak, five layers) that has neither, so every action is a letter, a
  * symbol, an arrow, or a control chord, and the letters are mnemonic rather
@@ -14,7 +22,7 @@
  * `q`uit) so they land in the same place on a Colemak layout as on QWERTY.
  */
 
-export type BindingGroup = "reading" | "selection" | "session";
+export type BindingGroup = "reading" | "selection" | "verbs" | "session";
 
 export interface Binding {
   /** The action id the view dispatches. */
@@ -60,6 +68,14 @@ export const BINDINGS: readonly Binding[] = [
   { action: "collapseStart", chords: ["i"], label: "collapse to a boundary before the selection", group: "selection" },
   { action: "collapseEnd", chords: ["a"], label: "collapse to a boundary after the selection", group: "selection" },
 
+  { action: "prompt", chords: [">"], label: "prompt the model on the selection", group: "verbs" },
+  { action: "manualEdit", chords: ["e"], label: "edit the selection by hand, no markup", group: "verbs" },
+  { action: "cut", chords: ["x"], label: "cut the selection", group: "verbs" },
+  { action: "move", chords: ["m"], label: "cut the selection, then m again at a boundary to drop it", group: "verbs" },
+  { action: "openEditor", chords: ["o"], label: "open the file in $EDITOR at the cursor line", group: "verbs" },
+  { action: "dryRun", chords: ["d"], label: "dry run: the pack that would be sent, slice by slice", group: "verbs" },
+  { action: "retry", chords: ["R"], label: "retry the last prompt", group: "verbs" },
+
   { action: "reload", chords: ["r"], label: "re-read the file from disk", group: "session" },
   { action: "toggleBrief", chords: [BRIEF_KEY], label: "show or hide the work brief", group: "session" },
   { action: "toggleHelp", chords: ["?"], label: "show or hide this help", group: "session" },
@@ -70,8 +86,30 @@ export const BINDINGS: readonly Binding[] = [
 export const GROUP_LABELS: Readonly<Record<BindingGroup, string>> = {
   reading: "Reading",
   selection: "Selection",
+  verbs: "Verbs on the selection",
   session: "Session",
 };
+
+/**
+ * The actions `view.ts` handles itself, because each one reaches outside the
+ * pure state machine: the disk (`reload`, `cut`, `move`, `manualEdit`), another
+ * process (`openEditor`), or a provider (`prompt`, `dryRun`, `retry`).
+ *
+ * They are bindings like any other and they appear in the help; they simply
+ * have no entry in `ACTIONS`. Keeping the list here rather than in the view is
+ * what lets the key-map test check that every action is served by exactly one
+ * of the two.
+ */
+export const VIEW_OWNED: ReadonlySet<string> = new Set([
+  "reload",
+  "prompt",
+  "manualEdit",
+  "cut",
+  "move",
+  "openEditor",
+  "dryRun",
+  "retry",
+]);
 
 /** C0 controls and DEL: a chord is a character you can see, never an escape byte. */
 const CONTROL = /[\u0000-\u001f\u007f]/;
