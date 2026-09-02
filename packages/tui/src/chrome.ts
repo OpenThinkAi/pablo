@@ -11,6 +11,8 @@ import { basename } from "node:path";
 import { fieldRows, type Field } from "./field";
 import type { DisplayLine, Segment } from "./layout";
 import { BINDINGS, BRIEF_KEY, GROUP_LABELS, type Binding, type BindingGroup } from "./keymap";
+import { KIND_LABELS, originalText, proposedText, reviewQueue } from "./review";
+import { NO_RECEIPT } from "./receipts";
 import { CARET_GLYPH } from "./theme";
 import { briefNotice, type BriefPane, type Overlay, type RunState, type ViewState } from "./view-state";
 
@@ -59,8 +61,13 @@ export function statusSegments(state: ViewState): Segment[] {
   // same on every frame, so it is what a narrow terminal can afford to lose.
   // Everything between the two is news, and news is never what gets dropped —
   // the position and the granularity are recoverable by looking at the screen,
-  // and "think brief failed" is not.
+  // and "think brief failed" is not. The queue position is a "where" too: the
+  // panel below already names the hunk, so this is the redundant copy.
+  const queue = state.review.open ? reviewQueue(state.model) : [];
   const tail: Segment[] = [
+    ...(state.review.open
+      ? [text(`proposal ${Math.min(state.review.index + 1, queue.length)} of ${queue.length}`, "statusAccent")]
+      : []),
     text(state.selection.granularity, "statusAccent"),
     start === end
       ? // AC3: a zero-width selection is a real gesture, so it is named in the
@@ -165,7 +172,7 @@ function chordList(binding: Binding): string {
 /** The help screen, generated from the key map. */
 export function helpLines(bindings: readonly Binding[] = BINDINGS): DisplayLine[] {
   const width = bindings.reduce((widest, binding) => Math.max(widest, chordList(binding).length), 0);
-  const groups: BindingGroup[] = ["reading", "selection", "verbs", "session"];
+  const groups: BindingGroup[] = ["reading", "selection", "verbs", "review", "session"];
   const lines: DisplayLine[] = [line([text("pablo — keys", "heading")]), line([])];
 
   for (const group of groups) {
@@ -187,8 +194,8 @@ export function helpLines(bindings: readonly Binding[] = BINDINGS): DisplayLine[
   // but it is three keys and the author has to know them.
   lines.push(line([text("In a field", "statusAccent")]));
   for (const [keys, what] of [
-    ["enter", "send the prompt (a new line in a manual edit)"],
-    ["ctrl+s", "save a manual edit"],
+    ["enter", "send the prompt (a new line in a manual or proposal edit)"],
+    ["ctrl+s", "save a manual edit, or accept an edited proposal"],
     ["esc", "cancel the field, change nothing"],
   ]) {
     lines.push(line([text(`  ${(keys ?? "").padEnd(width, " ")}  `, "helpKey"), text(what ?? "", "prose")]));
@@ -286,6 +293,79 @@ export function fieldLines(field: Field, width: number): DisplayLine[] {
   }
 
   lines.push(line([text(`  ${field.hint}`, "status")]));
+  return lines;
+}
+
+/** How many rows one side of a hunk gets before it is cut with an ellipsis. */
+const HUNK_ROWS = 3;
+
+/** One side of a hunk, wrapped and capped, with newlines shown as the spaces they read as. */
+function hunkRows(marker: string, value: string, style: Segment["style"], width: number): DisplayLine[] {
+  const flat = value.replace(/\s+/gu, " ").trim();
+  const rows = wrap(flat === "" ? "(nothing)" : flat, Math.max(20, width - 6));
+  const kept = rows.slice(0, HUNK_ROWS);
+  if (rows.length > HUNK_ROWS) kept[HUNK_ROWS - 1] = `${(kept[HUNK_ROWS - 1] ?? "").slice(0, -1)}…`;
+
+  return kept.map((row, index) =>
+    line([text(index === 0 ? `  ${marker} ` : "    ", "status"), text(row, style)]),
+  );
+}
+
+/**
+ * The review panel: the hunk under the cursor, old against new, with its
+ * receipt (AGT-1205 AC1, AC5).
+ *
+ * It sits at the bottom of the manuscript pane, exactly where the field does,
+ * because the point of review is to read the proposal **in context** — the
+ * manuscript above is still the manuscript, the mark is still rendered inline
+ * by `layout.ts` in its own colours, and the cursor is on it. This panel is the
+ * part the inline rendering cannot show: which hunk of how many, the two sides
+ * quoted plainly next to each other, and what the run cost.
+ */
+export function reviewLines(state: ViewState, width: number): DisplayLine[] {
+  const queue = reviewQueue(state.model);
+  const mark = queue[state.review.index];
+  if (mark === undefined) {
+    return [line([text("── review — no proposals left in this file", "statusAccent")])];
+  }
+
+  const source = state.model.text;
+  const original = originalText(source, mark);
+  const proposed = proposedText(source, mark);
+  const position = `${Math.min(state.review.index + 1, queue.length)} of ${queue.length}`;
+
+  const lines: DisplayLine[] = [
+    line([text(`── review — proposal ${position} · ${KIND_LABELS[mark.kind]}`, "statusAccent")]),
+  ];
+
+  switch (mark.kind) {
+    case "addition":
+      lines.push(...hunkRows("+", proposed ?? "", "addition", width));
+      break;
+    case "deletion":
+      lines.push(...hunkRows("−", original, "deletion", width));
+      break;
+    case "substitution":
+      lines.push(...hunkRows("−", original, "substitutionOld", width));
+      lines.push(...hunkRows("+", proposed ?? "", "substitutionNew", width));
+      break;
+    case "note":
+      lines.push(...hunkRows("»", original, "note", width));
+      break;
+    case "highlight":
+      lines.push(...hunkRows("=", original, "highlight", width));
+      break;
+  }
+
+  // AC5: what produced it. "no receipt" is a true statement about a file whose
+  // proposals predate the log, or were written by hand, and it is said rather
+  // than left blank so the row is never mistaken for a measurement of zero.
+  lines.push(line([text(`    ${state.review.receipt === "" ? NO_RECEIPT : state.review.receipt}`, "status")]));
+  lines.push(
+    line([
+      text("  y accept  ·  k reject  ·  c change  ·  n / p move  ·  Y / K all  ·  esc leaves", "status"),
+    ]),
+  );
   return lines;
 }
 

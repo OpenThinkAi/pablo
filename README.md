@@ -66,6 +66,11 @@ positional, so they sit in the same place on Colemak as on QWERTY.
 | `o` | **open `$EDITOR`** at the cursor line, and re-read on return |
 | `d` | **dry run**: the pack that would be sent, slice by slice, without sending it |
 | `R` | **retry** the last prompt |
+| `v` | **review** the pending proposals, one hunk at a time (`esc` leaves) |
+| `y` / `k` | **accept** this proposal / **reject** it, keeping the original |
+| `c` | **change** the proposed text in a field, then `ctrl+s` accepts what you typed |
+| `Y` / `K` | accept / reject **every** pending proposal, as one batch |
+| `u` | **undo** the last accepted proposal on this paragraph, from git |
 | `↓` / `↑`, `ctrl+e` / `ctrl+y` | scroll one line |
 | `space` / `b`, `PgDn` / `PgUp`, `ctrl+d` / `ctrl+u` | scroll a screen |
 | `g` / `G`, `Home` / `End` | start / end of the manuscript |
@@ -114,9 +119,83 @@ words it changed and pablo writes exactly that. A model that answers in plain
 prose anyway is wrapped in one substitution over the span, `{~~old~>new~~}`, or
 an addition at a zero-width selection, `{++new++}`; an answer the CriticMarkup
 parser rejects is refused and nothing is written. Either way it is **pablo** that
-writes, and nothing is applied — the mark waits for review. `x`, `m` and `e` are
-your own edits and apply directly, because git is where the author's edits are
-recorded.
+writes, and nothing is applied — the mark waits for review, which is `v` and the
+next section. `x`, `m` and `e` are your own edits and apply directly, because git
+is where the author's edits are recorded.
+
+## Reviewing proposals
+
+A proposal is a mark in the file, not a change to it. `v` opens the **review
+queue**: every pending mark in the open file, in document order, with the cursor
+on the one under review and a panel under the manuscript showing the two sides
+of it. `n` and `p` — the same keys that walk the manuscript — walk the queue
+while it is open; `esc` or a second `v` leaves, and hands your selection
+granularity back.
+
+| Key | Does |
+|---|---|
+| `y` | **accept**: the proposal becomes the text, and the file is committed |
+| `k` | **reject**: the original text is what stays |
+| `c` | **change**: the proposed text opens in a field; `ctrl+s` accepts what you typed |
+| `Y` / `K` | accept / reject **every** pending mark, in one write and one commit |
+| `u` | **revert** this paragraph to before the last accepted proposal on it |
+
+`c` is the one that matters most: revise the model's answer and take it, without
+a second round trip. What you type is accepted as plain prose — CriticMarkup in
+the field is refused, because a mark smuggled through the accept path would put
+an undecided proposal into the manuscript, which is the one thing this surface
+exists to prevent.
+
+All five write the file through pablo and re-render from disk before you get the
+keyboard back, and the panel shows the **receipt** of the run that produced the
+hunk — intent, provider, model, prompt hash, tokens, timings — read from
+`<vault>/.pablo/receipts.jsonl`. A hunk with no receipt in the log says "no
+receipt" rather than showing zeroes.
+
+### Commit on accept
+
+Every accept commits **that one file** to the vault's git repository, one commit
+per hunk (or one for a `Y` batch). The subject names the file and the intent; the
+body carries the provider, the model, the prompt hash, and the spans:
+
+```
+pablo: accept a proposal (tighten) in 26-the-cellar.md
+
+Accepted through pablo's review queue. The app applied it; the model never
+wrote to the file.
+
+pablo-accept: novels/valleys-shadow/chapters/26-the-cellar.md
+pablo-span-before: 68-86
+pablo-span-after: 68-72
+pablo-intent: tighten
+pablo-provider: local
+pablo-model: gemma-4-31b
+pablo-prompt-hash: 3f9a1c2ed4b5a6f70011223344556677
+pablo-hunks: 1
+```
+
+The commit carries that path as a pathspec, so an unrelated dirty file in the
+vault is never swept in — not even one you had already staged. Rejections are
+not committed: rejecting restores your own text, and the author's own edits are
+the author's to commit. If the vault is not a git repository, or `git` fails for
+any reason, **the write still happened** and the reason is one line in the
+status bar; nothing about git can block or undo an accept.
+
+### Span-level undo
+
+`u` restores the paragraph under the cursor to the text it had **before the most
+recent accepted proposal on it**, using the file's own git history. It walks the
+commits newest first, looking for one whose `pablo-accept:` trailer produced the
+paragraph you are looking at — matched by the text itself, since offsets shift
+with every commit — and takes that paragraph from the commit's parent. The
+revert is itself a commit and carries no accept trailer, so a second `u` walks
+back another accept.
+
+Because "before the accept" means exactly that, reverting an accept brings the
+**proposal** back: the mark reappears in the file, pending, and the queue has it
+again. `u` says why it cannot help rather than guessing — when nothing has been
+accepted in the file, when no accept produced this paragraph, or when the accept
+added or removed a whole paragraph and there is no single one to restore.
 
 ## The work brief
 

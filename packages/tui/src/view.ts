@@ -23,6 +23,7 @@
  * through opentui's headless test renderer instead of a TTY.
  */
 
+import { basename } from "node:path";
 import { TextRenderable, createCliRenderer, type CliRenderer, type KeyEvent } from "@opentui/core";
 import {
   createProviders,
@@ -30,12 +31,26 @@ import {
   ProviderConfigError,
   selectionText,
   thousands,
+  type Decision,
   type Providers,
   type Span,
 } from "@openthink/pablo-core";
 import { cutEdit, lineOf, manualEdit, moveEdit, proposalEdit, writeDocument, type Edit } from "./apply";
-import { detectWork, runBrief, type DirectoryProbe, type RunBriefOptions, type Work } from "./brief";
-import { briefLines, fieldLines, helpLines, overlayLines, statusSegments } from "./chrome";
+import { detectWork, findVaultRoot, runBrief, type DirectoryProbe, type RunBriefOptions, type Work } from "./brief";
+import { briefLines, fieldLines, helpLines, overlayLines, reviewLines, statusSegments } from "./chrome";
+import { commitFile, readerFor, repoFor } from "./git";
+import { openReceiptLog, type ReceiptLog } from "./receipts";
+import {
+  acceptCommitMessage,
+  acceptEdited,
+  acceptHunk,
+  planRevert,
+  rejectHunk,
+  resolveEveryMark,
+  reviewQueue,
+  revertCommitMessage,
+  UNKNOWN,
+} from "./review";
 import { openInEditor, type OpenInEditorOptions } from "./editor";
 import { backspace, deleteForward, insertInto, moveCaret, toLineEdge } from "./field";
 import { createLineCache, layoutWindow, type DisplayLine } from "./layout";
@@ -52,9 +67,12 @@ import {
   briefLoaded,
   clearMove,
   closeField,
+  hunkUnderReview,
   initialState,
   openManual,
   openPrompt,
+  openProposalEdit,
+  refocusReview,
   reloaded,
   resized,
   runFailed,
@@ -63,8 +81,10 @@ import {
   runStarted,
   runWaiting,
   showOverlay,
+  unitAt,
   viewportOf,
   withField,
+  withReceiptLine,
   type Action,
   type BriefPane,
   type ViewState,
@@ -202,10 +222,24 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
   renderer.root.add(body);
   renderer.root.add(status);
 
+  // AC5: the receipt log for the vault this file is in, read lazily and cached
+  // against the log's own mtime. A file outside a vault has none, and says so.
+  const receipts: ReceiptLog = openReceiptLog(findVaultRoot(path));
+
   const draw = (): void => {
     // A run outlives a `stop()` by the time it takes the request to unwind, and
     // drawing into a destroyed renderer throws from inside opentui.
     if (stopped) return;
+
+    // The hunk under review carries its receipt (AC5). Stamped on here rather
+    // than inside the action, because the actions are pure and this is a file
+    // read; it is cheap enough for a frame because the log is only re-parsed
+    // when it has actually changed.
+    if (state.review.open) {
+      const mark = hunkUnderReview(state);
+      const view = mark === undefined ? undefined : receipts.view(state.doc.path, mark.span);
+      state = withReceiptLine(state, view?.line ?? "");
+    }
 
     if (state.brief.open) {
       // The brief keeps its own offset because it outlives the pages that do
@@ -227,13 +261,18 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
       if (offset !== state.helpOffset) state = { ...state, helpOffset: offset };
       lines = page.slice(offset, offset + state.height);
     } else {
-      // The field takes the bottom of the manuscript pane, never more than half
-      // of it: a long manual edit scrolls inside its own box rather than hiding
-      // the passage it is replacing.
+      // The field and the review panel take the bottom of the manuscript pane,
+      // never more than half of it: a long manual edit, or a long hunk, scrolls
+      // inside its own box rather than hiding the passage it is about. A field
+      // opened from review replaces the panel — it *is* the review surface for
+      // as long as it is up.
+      const limit = Math.max(3, Math.floor(state.height / 2));
       const panel =
-        state.field === undefined
-          ? []
-          : trimPanel(fieldLines(state.field, state.width), Math.max(3, Math.floor(state.height / 2)));
+        state.field !== undefined
+          ? trimPanel(fieldLines(state.field, state.width), limit)
+          : state.review.open
+            ? trimPanel(reviewLines(state, state.width), limit)
+            : [];
       const prose = layoutWindow(state.model, viewportOf(state), cache).slice(0, state.height - panel.length);
       lines = [...prose, ...panel];
     }
@@ -252,28 +291,200 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
   };
 
   /**
-   * The app applying an edit: write, re-read, re-render, and put the selection
-   * on what was written. Every offset the caller held is invalid after this,
-   * which is why nothing is returned.
+   * The app applying an edit: write, then re-read and put the selection on what
+   * was written. **This is the one place in pablo that writes a manuscript** —
+   * `writeDocument` has exactly this call site, which is what
+   * `test/write-path.test.ts` asserts mechanically (AGT-1205 AC6).
+   *
+   * It does not draw, and it returns whether the write landed, because the
+   * review verbs have one more thing to do between the write and the frame: the
+   * git commit (AC3). Every offset the caller held is invalid on the way out.
    */
-  const apply = (edit: Edit, message: string): void => {
+  const applyEdit = (edit: Edit, message: string): boolean => {
     if (!edit.ok) {
       state = { ...state, message: edit.reason };
-      draw();
-      return;
+      return false;
     }
     try {
       writeDocument(edit.doc);
     } catch (error) {
       state = { ...state, message: `could not write the file: ${describe(error)}` };
-      draw();
-      return;
+      return false;
     }
     try {
       state = applied(state, loadManuscript(path), edit.span, message, cache);
     } catch (error) {
       state = { ...state, message: `could not re-read the file: ${describe(error)}` };
+      return false;
     }
+    return true;
+  };
+
+  /** `applyEdit` for the verbs that have nothing to do afterwards but redraw. */
+  const apply = (edit: Edit, message: string): void => {
+    applyEdit(edit, message);
+    draw();
+  };
+
+  // ------------------------------------------------------------------ review
+
+  /**
+   * Accepting is a write **and** a commit, in that order, and the order is the
+   * point: the manuscript is on disk and re-rendered before git is asked for
+   * anything, so a vault that is not a repository, a missing `git`, or a
+   * rejected hook costs the author a line in the status bar and nothing else
+   * (AC3). Nothing about the commit can undo, delay, or block the write.
+   *
+   * `before` is the mark's span in the file as it stood; `edit.span` is where
+   * the resolved text landed. Both go in the message, because `revert` reads
+   * them back to find which paragraph a commit produced (AC4).
+   */
+  const applyResolved = (
+    edit: Edit,
+    facts: { before: Span; intent: string; provider: string; model: string; promptHash: string | undefined },
+    options: { commit: boolean; hunks: number; edited: boolean; message: string },
+  ): void => {
+    const after = edit.ok ? edit.span : facts.before;
+    if (!applyEdit(edit, options.message)) {
+      draw();
+      return;
+    }
+
+    if (options.commit) {
+      const repo = repoFor(path);
+      const outcome = commitFile(
+        path,
+        acceptCommitMessage({
+          relPath: repo?.path ?? basename(path),
+          fileName: basename(path),
+          intent: facts.intent,
+          provider: facts.provider,
+          model: facts.model,
+          promptHash: facts.promptHash,
+          before: facts.before,
+          after,
+          hunks: options.hunks,
+          edited: options.edited,
+        }),
+      );
+      if (!outcome.committed) state = { ...state, message: outcome.notice };
+    }
+
+    state = refocusReview(state, cache);
+    draw();
+  };
+
+  /** What the receipt says about the run that produced a mark, or `unknown` (AC5). */
+  const factsFor = (before: Span): {
+    before: Span;
+    intent: string;
+    provider: string;
+    model: string;
+    promptHash: string | undefined;
+  } => {
+    // Read before the write: the receipt is matched by the span the mark has
+    // now, and the write is about to invalidate it.
+    const receipt = receipts.view(state.doc.path, before);
+    return {
+      before,
+      intent: receipt?.intent ?? UNKNOWN,
+      provider: receipt?.provider ?? UNKNOWN,
+      model: receipt?.model ?? UNKNOWN,
+      promptHash: receipt?.promptHash,
+    };
+  };
+
+  /** AC2: `y` and `k` on one hunk. Only an accept commits (AC3). */
+  const decideHunk = (decision: Decision): void => {
+    const mark = hunkUnderReview(state);
+    if (mark === undefined) {
+      state = { ...state, message: "review is not open — press v to review the pending proposals" };
+      draw();
+      return;
+    }
+    const facts = factsFor(mark.span);
+    applyResolved(
+      decision === "accept" ? acceptHunk(state.doc, mark) : rejectHunk(state.doc, mark),
+      facts,
+      {
+        commit: decision === "accept",
+        hunks: 1,
+        edited: false,
+        message: decision === "accept" ? "accepted" : "rejected — the original text stands",
+      },
+    );
+  };
+
+  /** AC2: `Y` and `K`. One write and, for an accept, one commit for the batch. */
+  const decideEvery = (decision: Decision): void => {
+    const count = reviewQueue(state.model).length;
+    if (count === 0) {
+      state = { ...state, message: "nothing to review: this file has no pending proposals" };
+      draw();
+      return;
+    }
+    const whole: Span = { start: 0, end: state.doc.text.length };
+    const facts = factsFor(state.selection.span);
+    applyResolved(
+      resolveEveryMark(state.doc, decision, state.selection.span.start),
+      { ...facts, before: whole },
+      {
+        commit: decision === "accept",
+        hunks: count,
+        edited: false,
+        message:
+          decision === "accept"
+            ? `accepted all ${count} proposals`
+            : `rejected all ${count} proposals — the original text stands`,
+      },
+    );
+  };
+
+  /** AC2: `ctrl+s` in the proposal field — the author's own version, accepted. */
+  const acceptEditedProposal = (pending: { span: Span; text: string }, value: string): void => {
+    const facts = factsFor(pending.span);
+    applyResolved(acceptEdited(state.doc, pending.span, value), facts, {
+      commit: true,
+      hunks: 1,
+      edited: true,
+      message: "accepted, as you edited it",
+    });
+  };
+
+  /**
+   * AC4: span-level undo over git history.
+   *
+   * The unit is the paragraph, whatever the selection happens to be — "revert
+   * this paragraph to before that intent ran" is the gesture in the design doc,
+   * and a character range has no earlier version to speak of. The revert is
+   * itself a commit, so the history stays a history and a second `u` walks back
+   * to the accept before this one.
+   */
+  const revertParagraph = (): void => {
+    const paragraph = unitAt(state.model, state.selection.span.start, "paragraph").span;
+    const plan = planRevert(state.doc, paragraph, readerFor(path));
+    if (!plan.ok) {
+      state = { ...state, message: plan.reason };
+      draw();
+      return;
+    }
+
+    if (!applyEdit({ ok: true, doc: plan.doc, span: plan.span }, `reverted to the text before ${plan.sha.slice(0, 8)}`)) {
+      draw();
+      return;
+    }
+
+    const outcome = commitFile(
+      path,
+      revertCommitMessage(
+        repoFor(path)?.path ?? basename(path),
+        basename(path),
+        plan.sha,
+        plan.span,
+      ),
+    );
+    if (!outcome.committed) state = { ...state, message: outcome.notice };
+    state = refocusReview(state, cache);
     draw();
   };
 
@@ -462,9 +673,26 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
       }
     } else if (key.ctrl === true && name === "s") {
       const value = field.value;
+      const pending = state.pendingProposal;
       state = closeField(state);
-      apply(manualEdit(state.doc, state.selection.span, value), "edited by hand");
-      return;
+
+      if (field.kind !== "proposal") {
+        apply(manualEdit(state.doc, state.selection.span, value), "edited by hand");
+        return;
+      }
+
+      // Two key presses, one gesture: the file can be rewritten between `c` and
+      // `ctrl+s` by `$EDITOR`, a git checkout, or the watch, and the offsets
+      // taken when the field opened would then address different text. Writing
+      // over them would replace a range the author never chose.
+      if (pending === undefined) {
+        state = { ...state, message: "there is no proposal open to accept" };
+      } else if (spanMoved(state, pending.span, pending.text)) {
+        state = { ...state, message: "the file changed while you were editing; nothing was written" };
+      } else {
+        acceptEditedProposal(pending, value);
+        return;
+      }
     } else if (name === "backspace") {
       state = withField(state, backspace(field));
     } else if (name === "delete") {
@@ -597,6 +825,35 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
         startRun(lastAsk.instruction, lastAsk.span);
         return;
       }
+
+      // AGT-1205. Each of these writes and then runs git, so none of them can
+      // be a pure action; see `VIEW_OWNED`.
+      case "accept":
+        decideHunk("accept");
+        return;
+      case "reject":
+        decideHunk("reject");
+        return;
+      case "acceptAll":
+        decideEvery("accept");
+        return;
+      case "rejectAll":
+        decideEvery("reject");
+        return;
+      case "changeProposal": {
+        const mark = hunkUnderReview(state);
+        if (mark === undefined) {
+          state = { ...state, message: "review is not open — press v to review the pending proposals" };
+        } else {
+          state = openProposalEdit(state, mark);
+        }
+        draw();
+        return;
+      }
+      case "revert":
+        revertParagraph();
+        return;
+
       default:
         return;
     }

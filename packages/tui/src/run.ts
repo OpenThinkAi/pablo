@@ -87,6 +87,11 @@ export interface SpanEditPlan {
   /** Sized from the pack, not from the adapter's cold 60s default. */
   readonly timeoutMs: number;
   readonly span: Span;
+  /**
+   * The file the span is in. Carried so the receipt can name the proposal it
+   * paid for — see the sink in `runSpanEdit` (AGT-1205 AC5).
+   */
+  readonly path: string;
   readonly instruction: string;
 }
 
@@ -144,6 +149,7 @@ export function planSpanEdit(options: PlanOptions): SpanEditPlan {
         ? packTimeoutMs(pack, rates)
         : packTimeoutMs(pack, rates, options.timeoutFloorMs),
     span: options.span,
+    path: options.doc.path,
     instruction: options.instruction,
   };
 }
@@ -162,7 +168,7 @@ export async function runSpanEdit(
   hooks: RunHooks = {},
 ): Promise<RunOutcome> {
   const now = hooks.now ?? (() => Date.now());
-  const sink = hooks.sink ?? (plan.vaultRoot === undefined ? noReceipts : fileReceiptSink(plan.vaultRoot));
+  const sink = named(hooks.sink ?? (plan.vaultRoot === undefined ? noReceipts : fileReceiptSink(plan.vaultRoot)), plan);
   const adapter = withReceipts(providers.adapter(plan.providerId), sink, {
     pack: plan.pack,
     intent: plan.intent.name,
@@ -243,6 +249,35 @@ export function failureMessage(error: unknown, providerId: string): string {
   if (error instanceof EndpointHung || error instanceof ProviderResponseError) return error.message;
   const detail = error instanceof Error ? error.message : String(error);
   return `${providerId}: ${detail}`;
+}
+
+/**
+ * Name the proposal on the receipt this run writes (AGT-1205 AC5).
+ *
+ * `withReceipts` fills `proposal` for `proposeEdit()`, whose return value says
+ * where the replacement goes — but this run drives `complete()` (see the header
+ * of this file), and a completion has no idea it is a proposal at all, so its
+ * receipt would go to the log with `proposal: null` and be unmatchable
+ * afterwards. AGT-1205's review queue matches a receipt to a mark by the
+ * proposal's path and span, so the span the run was *planned against* is
+ * stamped on here. That is the right span, not an approximation of one:
+ * `proposalEdit` writes the mark over exactly that range, so the mark that
+ * appears in the file starts where the plan said it would.
+ *
+ * A failed call keeps `proposal: null`. Nothing was written, so there is no
+ * proposal for a receipt to point at, and claiming one would put a cost against
+ * a mark that does not exist.
+ */
+function named(sink: ReceiptSink, plan: SpanEditPlan): ReceiptSink {
+  return (receipt) =>
+    sink(
+      receipt.proposal === null && receipt.error === null
+        ? {
+            ...receipt,
+            proposal: { path: plan.path, start: plan.span.start, end: plan.span.end, variants: 1 },
+          }
+        : receipt,
+    );
 }
 
 /** A crude count that only has to be stable enough to render a rate that moves. */

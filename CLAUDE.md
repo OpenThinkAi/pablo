@@ -62,6 +62,27 @@ needs the line added by hand:
 .pablo/
 ```
 
+## The write path
+
+**There is exactly one function that writes a manuscript** — `writeDocument` in
+`packages/tui/src/apply.ts` — and exactly one call site for it, in `view.ts`.
+`packages/tui/src/review.ts` is the only module that resolves a pending
+CriticMarkup mark into plain text, so a model's answer can reach the file only
+by way of the key the author pressed to accept it.
+
+`packages/tui/test/write-path.test.ts` enforces all of that mechanically, the
+same way `tty-free.test.ts` enforces the core/tui split: it greps both `src`
+trees for the writer, for every `fs` write API, and for `resolveMark` /
+`resolveAll`, and fails on a call site that is not on the allow-list. **If you
+need a new module on the write path, add it to that list in the same commit** —
+the rule should stay a decision someone made, not one that eroded.
+
+Accepting a proposal also **commits that one file** to the vault's git
+repository (`packages/tui/src/git.ts`). Two rules there: never `git add -A`, and
+git failing is a status-bar notice, never an exception — the manuscript is
+written before git is asked for anything, and nothing about a commit may block
+or undo a write that already landed.
+
 ## Build commands
 
 ```sh

@@ -497,6 +497,17 @@ test("the receipt is written to the vault's own log, not to this repo", async ()
   expect(receipt.measurement).toBe("stream");
   expect(receipt.tokens_read).toBe(40);
   expect(receipt.ttft_ms).not.toBeNull();
+
+  // AGT-1205 AC5: the receipt names the proposal it paid for, so the review
+  // queue can match it back to the mark that appeared in the file. A
+  // completion knows nothing about proposals, so the span the run was planned
+  // against is stamped on — and it is the right span, because `proposalEdit`
+  // writes the mark over exactly that range.
+  const mark = parse(space.text()).marks[0];
+  expect(mark).toBeDefined();
+  expect(receipt.proposal).not.toBeNull();
+  expect(receipt.proposal.path).toBe(handle.state().doc.path);
+  expect(receipt.proposal.start).toBe(mark?.span.start);
 });
 
 test("`d` shows the pack instead of sending it (AC6)", async () => {
