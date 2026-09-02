@@ -14,15 +14,16 @@
  * `extract_facts`) return text to the app; neither can touch a file, and the
  * system prompt says so.
  *
- * Two structured-output paths, as the design doc requires, chosen with the
- * `output` option:
+ * Both structured paths the design doc requires are here, and which one a
+ * request takes is `EditRequest.output`, defaulting to `PREFERRED_OUTPUT`
+ * below: a native tool call, or CriticMarkup in the body checked by
+ * `validateProposal`. Unlike the OpenAI-compatible adapter, the tool path here
+ * is **streamed** — Anthropic's `input_json_delta` framing is specified, where
+ * OpenAI-compatible tool-call deltas differ server to server — so a tool call
+ * shows progress and is measured like any other completion.
  *
- * - `tool-call` (default) — native tool use, normalized into `Proposal`.
- * - `criticmarkup` — the passage returned with CriticMarkup marks, put through
- *   `validateProposal` before it is parsed, then resolved to the replacement.
- *
- * Deliberate omissions, both to keep this adapter honest about what produced a
- * proposal and what a configured model will accept:
+ * Deliberate omissions, each of them a property of the current API rather than
+ * a preference:
  *
  * - **No server-side refusal `fallbacks`.** A rescue by a second model would
  *   make `Proposal.model` a lie about the text the author is looking at. A
@@ -30,16 +31,21 @@
  * - **No `thinking` parameter.** Omitting it runs adaptive thinking on the
  *   default model (Claude Opus 5, where thinking is on by default) and is
  *   valid on every older model too, so a configured model never 400s on it.
- * - **No `temperature` unless the caller asks for one.** Current models reject
- *   sampling parameters; passing one through only when it is requested keeps
- *   an older configured model usable without breaking the default.
+ * - **No sampling parameters.** `temperature`, `top_p` and `top_k` were removed
+ *   from every current Claude model and return a 400; adaptive thinking and
+ *   effort replaced them. `EditRequest.temperature` is therefore accepted by
+ *   the interface and ignored here rather than turned into a failed request —
+ *   worth knowing when comparing a bench run against a local endpoint, which
+ *   does honour it.
  */
 
 import { selectionText } from "../document";
 import { resolveAll } from "../markup/spans";
 import { validateProposal } from "../markup/validate";
+import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "../pack/closing";
 import type { ProviderConfig } from "./config";
 import { EndpointHung, ProviderConfigError, ProviderResponseError } from "./errors";
+import { readFacts } from "./facts";
 import { envVariableFor } from "./keys";
 import type { Gate } from "./queue";
 import type { RateMeter } from "./rates";
@@ -50,12 +56,11 @@ import type {
   CompletionRequest,
   CompletionStats,
   EditRequest,
+  ExtractedFact,
   ExtractRequest,
+  OutputMode,
   Proposal,
 } from "./types";
-
-/** Which structured-output path `proposeEdit` and `extractFacts` take. */
-export type AnthropicOutputPath = "tool-call" | "criticmarkup";
 
 export interface AnthropicAdapterOptions {
   readonly provider: ProviderConfig;
@@ -66,8 +71,6 @@ export interface AnthropicAdapterOptions {
   readonly key?: () => string | undefined;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
-  /** Defaults to the native tool call; the bake-off builds one of each. */
-  readonly output?: AnthropicOutputPath;
 }
 
 /** Pinned; the API is versioned by header, not by URL, and this is its current value. */
@@ -77,7 +80,9 @@ const ANTHROPIC_VERSION = "2023-06-01";
  * `max_tokens` is required by the Messages API. The SDK guidance defaults a
  * streaming request to ~64k, which is sized for a whole document; pablo's unit
  * of work is one span, so the ceiling here is 16k — far above any replacement
- * and a bound on a runaway generation. A request may raise it.
+ * and a bound on a runaway generation. A request may raise or lower it, and a
+ * caller that lowers it should leave room: adaptive thinking spends this same
+ * budget before a single word of the answer is written.
  */
 const DEFAULT_MAX_TOKENS = 16_000;
 
@@ -86,6 +91,28 @@ const CHARS_PER_TOKEN = 4;
 
 const PROPOSE_EDIT = "propose_edit";
 const EXTRACT_FACTS = "extract_facts";
+
+/**
+ * The default structured path, measured by `bun run bench/bakeoff.ts --adapter
+ * anthropic --max-tokens 8000` against Claude Opus 5 on 2026-09-02, over the
+ * ten bench spans and both paths.
+ *
+ * **Conformance did not decide it: speed did.** Both paths passed 10 of 10,
+ * including all three spans over 400 words, with no mangling class on either —
+ * unlike the local writer, which loses a CriticMarkup delimiter past about 400
+ * words. What separates them is that the tool call returns the replacement
+ * alone where the text path re-emits the whole passage around it: 6.0s median
+ * against 18.0s, 65s against 205s over the ten spans, and a 58.5s worst case on
+ * the longest span. Three times the wall clock and three times the output
+ * tokens for the same conformance is the whole argument.
+ *
+ * The text path is not deleted — it is the portable fallback, reachable with
+ * `output: "text"`, and it is the path to reach for when an instruction
+ * addresses only part of a span, because CriticMarkup makes the untouched text
+ * part of the answer. The numbers are in `bench/README.md` and the design doc
+ * under Proposal pipeline.
+ */
+export const PREFERRED_OUTPUT: OutputMode = "tool";
 
 /**
  * pablo's standing instruction to the model. The invariant is stated because a
@@ -100,44 +127,73 @@ const SYSTEM = [
 interface ToolDefinition {
   readonly name: string;
   readonly description: string;
-  readonly strict: true;
+  readonly strict?: true;
   readonly input_schema: Record<string, unknown>;
 }
 
-/** A list of strings, and nothing else, is the whole surface of both tools. */
-function listTool(name: string, description: string, field: string, item: string): ToolDefinition {
-  return {
-    name,
-    description,
-    strict: true,
-    input_schema: {
-      type: "object",
-      properties: { [field]: { type: "array", items: { type: "string", description: item } } },
-      required: [field],
-      additionalProperties: false,
+/**
+ * One replacement per call, the same argument name the OpenAI-compatible
+ * adapter uses, so the bench decodes both without knowing which it is talking
+ * to. `strict: true` is safe here because the schema is one required string:
+ * strict demands `additionalProperties: false` and every property required,
+ * which the facts schema below cannot satisfy without forcing the model to
+ * invent a story time it was never given.
+ */
+const PROPOSE_EDIT_TOOL: ToolDefinition = {
+  name: PROPOSE_EDIT,
+  description: "Propose a replacement for the selected passage. The app applies it; you never write to a file.",
+  strict: true,
+  input_schema: {
+    type: "object",
+    properties: {
+      replacement: {
+        type: "string",
+        description:
+          "The complete replacement text for the passage, verbatim, with no surrounding quotes and no commentary.",
+      },
     },
-  };
-}
+    required: ["replacement"],
+    additionalProperties: false,
+  },
+};
 
-const PROPOSE_EDIT_TOOL = listTool(
-  PROPOSE_EDIT,
-  "Propose replacement text for the selected passage. One entry per replacement asked for; each entry is the complete replacement passage, ready to stand in the manuscript.",
-  "variants",
-  "A complete replacement for the passage.",
-);
-
-const EXTRACT_FACTS_TOOL = listTool(
-  EXTRACT_FACTS,
-  "Report the facts the passage states, for the continuity ledger. One entry per fact, in the order they appear.",
-  "facts",
-  "One fact, as a short statement.",
-);
+/** The tool form of the writing-lab extraction prompt: one fact per item, each with its anchor. */
+const EXTRACT_FACTS_TOOL: ToolDefinition = {
+  name: EXTRACT_FACTS,
+  description: "Record every fact in the passage that a later chapter could contradict.",
+  input_schema: {
+    type: "object",
+    properties: {
+      facts: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            fact: { type: "string", description: "The fact, in one sentence." },
+            entities: { type: "array", items: { type: "string" }, description: "Names the fact is about." },
+            story_time: {
+              type: "string",
+              description:
+                "An absolute date if the passage states one, else a relative story time like 'day 1, dawn'.",
+            },
+            certainty: { type: "string", enum: ["stated", "implied"] },
+            anchor: {
+              type: "string",
+              description: "An exact substring of the passage, at most 12 words, that establishes the fact.",
+            },
+          },
+          required: ["fact", "anchor"],
+        },
+      },
+    },
+    required: ["facts"],
+  },
+};
 
 export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapter {
   const { provider, meter } = options;
   const doFetch = options.fetch ?? globalThis.fetch;
   const now = options.now ?? (() => Date.now());
-  const output = options.output ?? "tool-call";
   const url = `${provider.endpoint}/messages`;
 
   /**
@@ -294,19 +350,33 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
     }
   }
 
-  /** Drains a stream that was asked for one named tool call, and returns its arguments. */
-  async function callTool(request: WireRequest, name: string): Promise<unknown> {
+  /**
+   * Drains a stream that was asked for one named tool call, and returns its
+   * arguments. Forced `tool_choice` makes the call mandatory, but the answer is
+   * still model output: a wrong tool name, a non-object argument, and prose
+   * instead of a call are all named errors rather than an empty proposal.
+   */
+  async function callTool(request: WireRequest, name: string): Promise<Record<string, unknown>> {
     let input: unknown;
+    let called: string | undefined;
     let text = "";
     for await (const event of send(request)) {
-      if (event.type === "tool" && event.name === name && input === undefined) input = event.input;
-      else if (event.type === "text") text += event.text;
+      if (event.type === "tool" && input === undefined && called === undefined) {
+        called = event.name;
+        if (event.name === name) input = event.input;
+      } else if (event.type === "text") text += event.text;
+    }
+    if (called !== undefined && called !== name) {
+      throw new ProviderResponseError(provider.endpoint, `a call to ${truncate(called)} rather than ${name}`);
     }
     if (input === undefined) {
       throw new ProviderResponseError(
         provider.endpoint,
         `prose instead of a ${name} call${text.trim() === "" ? "" : `: ${truncate(text)}`}`,
       );
+    }
+    if (!isRecord(input)) {
+      throw new ProviderResponseError(provider.endpoint, `a ${name} call whose arguments are not an object`);
     }
     return input;
   }
@@ -319,12 +389,46 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
     return text.trim();
   }
 
+  /**
+   * The portable path: the passage comes back marked up, the conformance gate
+   * runs on the raw answer before anything parses it, and the replacement is
+   * the text with every mark accepted. `parse` is permissive and never throws,
+   * so without `validateProposal` first a mangled answer would land in the
+   * manuscript as prose.
+   */
+  function replacementFromMarkup(answer: string): string {
+    const result = validateProposal(answer);
+    if (!result.ok) {
+      const detail = result.violations
+        .slice(0, 3)
+        .map((violation) => `${violation.message} (at ${violation.position})`)
+        .join("; ");
+      throw new ProviderResponseError(provider.endpoint, `CriticMarkup that does not conform: ${detail}`);
+    }
+    return resolveAll({ path: provider.endpoint, text: answer }, "accept").text.trim();
+  }
+
+  async function extractWithAnchors(request: ExtractRequest): Promise<readonly ExtractedFact[]> {
+    const args = await callTool(
+      {
+        prompt: factsPrompt(request),
+        system: SYSTEM,
+        model: request.model,
+        maxTokens: request.maxTokens,
+        timeoutMs: request.timeoutMs,
+        signal: request.signal,
+        tools: [EXTRACT_FACTS_TOOL],
+        toolChoice: { type: "tool", name: EXTRACT_FACTS },
+      },
+      EXTRACT_FACTS,
+    );
+    return readFacts(provider.endpoint, args);
+  }
+
   return {
     id: provider.id,
     model: provider.model,
-    // Provisional until `bench/bakeoff.ts --adapter anthropic` records a
-    // measurement (AGT-1206 AC5); the e2e run used the tool path.
-    preferredOutput: "tool",
+    preferredOutput: PREFERRED_OUTPUT,
     complete,
 
     async proposeEdit(request: EditRequest): Promise<Proposal> {
@@ -335,37 +439,40 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
         throw new RangeError(`pablo: asked for ${request.variants} variants; ask for at least one`);
       }
 
+      const mode = request.output ?? PREFERRED_OUTPUT;
       const shared = {
+        prompt: mode === "tool" ? toolEditPrompt(passage, request) : criticMarkupPrompt(passage, request),
+        system: SYSTEM,
         model: request.model,
         maxTokens: request.maxTokens,
-        temperature: request.temperature,
         timeoutMs: request.timeoutMs,
         signal: request.signal,
-      } satisfies Partial<WireRequest>;
+      } satisfies WireRequest;
 
-      const variants =
-        output === "tool-call"
-          ? readStrings(
-              provider.endpoint,
-              await callTool(
-                {
-                  ...shared,
-                  prompt: editPrompt(passage, request, wanted),
-                  system: SYSTEM,
-                  tools: [PROPOSE_EDIT_TOOL],
-                  toolChoice: { type: "tool", name: PROPOSE_EDIT },
-                },
-                PROPOSE_EDIT,
-              ),
-              "variants",
-              PROPOSE_EDIT,
-              wanted,
-            )
-          : await markupVariants(passage, request, wanted, shared);
+      const oneVariant = async (): Promise<string> => {
+        const replacement =
+          mode === "tool"
+            ? readReplacement(
+                provider.endpoint,
+                await callTool(
+                  { ...shared, tools: [PROPOSE_EDIT_TOOL], toolChoice: { type: "tool", name: PROPOSE_EDIT } },
+                  PROPOSE_EDIT,
+                ),
+              )
+            : replacementFromMarkup(await collect(shared));
+        if (replacement === "") {
+          throw new ProviderResponseError(provider.endpoint, "an empty replacement for the selected passage");
+        }
+        return replacement;
+      };
+
+      const first = await oneVariant();
+      const rest: string[] = [];
+      for (let extra = 1; extra < wanted; extra += 1) rest.push(await oneVariant());
 
       return {
         span: request.span,
-        variants,
+        variants: [first, ...rest],
         intent: request.intent,
         providerId: provider.id,
         model: request.model ?? provider.model,
@@ -373,67 +480,25 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
     },
 
     async extractFacts(request: ExtractRequest): Promise<readonly string[]> {
-      const shared = {
+      if ((request.output ?? PREFERRED_OUTPUT) === "tool") {
+        return (await extractWithAnchors(request)).map((fact) => fact.fact);
+      }
+      const answer = await collect({
         prompt: extractPrompt(request),
         system: SYSTEM,
         model: request.model,
         maxTokens: request.maxTokens,
         timeoutMs: request.timeoutMs,
         signal: request.signal,
-      } satisfies Partial<WireRequest>;
-
-      if (output === "tool-call") {
-        const input = await callTool(
-          { ...shared, tools: [EXTRACT_FACTS_TOOL], toolChoice: { type: "tool", name: EXTRACT_FACTS } },
-          EXTRACT_FACTS,
-        );
-        return readStrings(provider.endpoint, input, "facts", EXTRACT_FACTS, 0);
-      }
-
-      const answer = await collect(shared);
+      });
       return answer
         .split("\n")
         .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
         .filter((line) => line !== "");
     },
+
+    extractFactsWithAnchors: extractWithAnchors,
   };
-
-  /**
-   * The portable path: the passage comes back marked up, the conformance gate
-   * runs on the raw answer before anything parses it, and the replacement is
-   * the text with every mark accepted.
-   */
-  async function markupVariants(
-    passage: string,
-    request: EditRequest,
-    wanted: number,
-    shared: Partial<WireRequest>,
-  ): Promise<[string, ...string[]]> {
-    const prompt = markupPrompt(passage, request);
-    const produced: string[] = [];
-
-    for (let index = 0; index < wanted; index += 1) {
-      const raw = await collect({ ...shared, prompt, system: SYSTEM });
-      const check = validateProposal(raw);
-      if (!check.ok) {
-        throw new ProviderResponseError(
-          provider.endpoint,
-          `CriticMarkup pablo cannot apply — ${check.violations
-            .map((violation) => `${violation.message} (at ${violation.position})`)
-            .join("; ")}`,
-        );
-      }
-      const replacement = resolveAll({ path: request.document.path, text: raw }, "accept").text.trim();
-      if (replacement === "") {
-        throw new ProviderResponseError(provider.endpoint, "an empty replacement for the selected passage");
-      }
-      produced.push(replacement);
-    }
-
-    const [first, ...rest] = produced;
-    if (first === undefined) throw new ProviderResponseError(provider.endpoint, "no replacement at all");
-    return [first, ...rest];
-  }
 }
 
 interface OpenBlock {
@@ -460,13 +525,13 @@ function body(provider: ProviderConfig, request: WireRequest): Record<string, un
     stream: true,
     messages: [{ role: "user", content: request.prompt }],
     ...(request.system === undefined ? {} : { system: request.system }),
-    ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     ...(request.tools === undefined ? {} : { tools: request.tools }),
     ...(request.toolChoice === undefined ? {} : { tool_choice: request.toolChoice }),
   };
 }
 
-function editPrompt(passage: string, request: EditRequest, wanted: number): string {
+/** The tool path's prompt. The closing line lives in the pack, which prices it. */
+function toolEditPrompt(passage: string, request: EditRequest): string {
   const context = request.context?.trim();
   return [
     ...(context ? [context] : []),
@@ -474,11 +539,12 @@ function editPrompt(passage: string, request: EditRequest, wanted: number): stri
     passage,
     "# What to do to it",
     request.instruction,
-    `Call ${PROPOSE_EDIT} with ${wanted === 1 ? "one replacement" : `${wanted} different replacements`} for the passage.`,
+    TOOL_EDIT_CLOSING,
   ].join("\n\n");
 }
 
-function markupPrompt(passage: string, request: EditRequest): string {
+/** The CriticMarkup path's prompt, closing with the same pack-owned block the OpenAI adapter sends. */
+function criticMarkupPrompt(passage: string, request: EditRequest): string {
   const context = request.context?.trim();
   return [
     ...(context ? [context] : []),
@@ -486,11 +552,23 @@ function markupPrompt(passage: string, request: EditRequest): string {
     passage,
     "# What to do to it",
     request.instruction,
-    [
-      "Return the passage with your changes marked in CriticMarkup, and nothing else:",
-      "{~~old text~>new text~~} to replace, {++added text++} to add, {--removed text--} to remove.",
-      "Leave every unchanged word exactly as it is, mark at least one change, and do not wrap the answer in a code fence.",
-    ].join("\n"),
+    CRITICMARKUP_EDIT_CLOSING,
+  ].join("\n\n");
+}
+
+/** The writing-lab extraction prompt, minus its "output ONLY JSON" half: the tool carries the schema. */
+function factsPrompt(request: ExtractRequest): string {
+  const context = request.context?.trim();
+  return [
+    ...(context ? [context] : []),
+    "You are extracting story facts from a passage of a novel for a continuity map.",
+    "# The passage",
+    request.text,
+    "# What to pull out of it",
+    request.instruction,
+    `Call ${EXTRACT_FACTS} once with every fact a later chapter could contradict: names, roles,` +
+      " relationships, objects, places, times, what characters know, and what was said aloud." +
+      " Each fact's anchor must be copied character for character from the passage above.",
   ].join("\n\n");
 }
 
@@ -502,38 +580,17 @@ function extractPrompt(request: ExtractRequest): string {
     request.text,
     "# What to pull out of it",
     request.instruction,
-    `Call ${EXTRACT_FACTS} with one entry per fact, in the order they appear.`,
+    "One per line, in the order they appear. No numbering, no bullets, no commentary.",
   ].join("\n\n");
 }
 
-/**
- * Normalizes a tool call's arguments into the internal shape. Model output is
- * untrusted input: the array, its elements, and the count are all checked.
- * `wanted` of 0 means "however many there are".
- */
-function readStrings(
-  endpoint: string,
-  input: unknown,
-  field: string,
-  tool: string,
-  wanted: number,
-): [string, ...string[]] {
-  const raw = isRecord(input) ? input[field] : undefined;
-  if (!Array.isArray(raw)) {
-    throw new ProviderResponseError(endpoint, `a ${tool} call with no "${field}" array`);
+/** Model output is untrusted input: the argument is checked before it is believed. */
+function readReplacement(endpoint: string, args: Record<string, unknown>): string {
+  const replacement = args["replacement"];
+  if (typeof replacement !== "string") {
+    throw new ProviderResponseError(endpoint, `a ${PROPOSE_EDIT} call with no replacement string`);
   }
-
-  const values = raw
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => value.trim())
-    .filter((value) => value !== "");
-
-  const [first, ...rest] = values;
-  if (first === undefined) throw new ProviderResponseError(endpoint, `a ${tool} call with nothing in "${field}"`);
-  if (wanted > 0 && values.length < wanted) {
-    throw new ProviderResponseError(endpoint, `${values.length} entries in "${field}" where ${wanted} were asked for`);
-  }
-  return wanted > 0 ? [first, ...rest.slice(0, wanted - 1)] : [first, ...rest];
+  return replacement.trim();
 }
 
 type ParsedEvent =

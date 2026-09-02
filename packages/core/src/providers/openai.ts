@@ -19,8 +19,10 @@ import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "../pack/closing";
 import { validateProposal } from "../markup/validate";
 import type { ProviderConfig } from "./config";
 import { EndpointHung, ProviderResponseError } from "./errors";
+import { readFacts } from "./facts";
 import type { Gate } from "./queue";
 import type { RateMeter } from "./rates";
+import { countOf, dataOf, frameSse, measure, truncate, waitFor } from "./stream";
 import type {
   Adapter,
   CompletionEvent,
@@ -44,7 +46,6 @@ export interface OpenAiAdapterOptions {
   readonly now?: () => number;
 }
 
-const TIMED_OUT = Symbol("timed out");
 /** Rough enough to size a timeout with; nothing downstream depends on it. */
 const CHARS_PER_TOKEN = 4;
 
@@ -176,10 +177,10 @@ export function createOpenAiAdapter(options: OpenAiAdapterOptions): Adapter {
           if (chunk.done) break;
 
           buffer += decoder.decode(chunk.value, { stream: true });
-          const events = buffer.split("\n\n");
-          buffer = events.pop() ?? "";
+          const framed = frameSse(buffer);
+          buffer = framed.rest;
 
-          for (const event of events) {
+          for (const event of framed.events) {
             const payload = dataOf(event);
             if (payload === undefined || payload === "[DONE]") continue;
             const parsed = parseChunk(provider.endpoint, payload);
@@ -512,33 +513,6 @@ function readReplacement(endpoint: string, args: Record<string, unknown>): strin
   return replacement.trim();
 }
 
-function readFacts(endpoint: string, args: Record<string, unknown>): readonly ExtractedFact[] {
-  const facts = args["facts"];
-  if (!Array.isArray(facts)) {
-    throw new ProviderResponseError(endpoint, "an extract_facts call whose facts are not an array");
-  }
-  return facts.flatMap((entry): ExtractedFact[] => {
-    if (typeof entry !== "object" || entry === null) return [];
-    const item = entry as Record<string, unknown>;
-    const fact = item["fact"];
-    if (typeof fact !== "string" || fact.trim() === "") return [];
-    const entities = item["entities"];
-    return [
-      {
-        fact: fact.trim(),
-        entities: Array.isArray(entities) ? entities.filter((name): name is string => typeof name === "string") : [],
-        storyTime: stringOrUndefined(item["story_time"]),
-        certainty: stringOrUndefined(item["certainty"]),
-        anchor: stringOrUndefined(item["anchor"]),
-      },
-    ];
-  });
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
 function extractPrompt(request: ExtractRequest): string {
   const context = request.context?.trim();
   return [
@@ -575,50 +549,4 @@ function parseChunk(endpoint: string, payload: string): ParsedChunk {
     promptTokens: countOf(chunk.usage?.prompt_tokens),
     completionTokens: countOf(chunk.usage?.completion_tokens),
   };
-}
-
-function countOf(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-}
-
-function dataOf(event: string): string | undefined {
-  const line = event.split("\n").find((candidate) => candidate.startsWith("data:"));
-  return line === undefined ? undefined : line.slice("data:".length).trim();
-}
-
-function measure(
-  started: number,
-  firstTokenAt: number,
-  ended: number,
-  tokensRead: number | undefined,
-  tokensWritten: number,
-): CompletionStats {
-  const generatingMs = Math.max(ended - firstTokenAt, 1);
-  return {
-    timeToFirstTokenMs: firstTokenAt - started,
-    elapsedMs: ended - started,
-    tokensRead,
-    tokensWritten,
-    tokensPerSecond: (tokensWritten * 1000) / generatingMs,
-  };
-}
-
-/** Resolves `work`, or runs `onTimeout` (which throws) after `ms` of silence. */
-async function waitFor<T>(work: Promise<T>, ms: number, onTimeout: () => never): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expiry = new Promise<typeof TIMED_OUT>((resolve) => {
-    timer = setTimeout(() => resolve(TIMED_OUT), ms);
-  });
-  try {
-    const result = await Promise.race([work, expiry]);
-    if (result === TIMED_OUT) onTimeout();
-    return result as T;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function truncate(text: string): string {
-  const cleaned = text.trim().replace(/\s+/g, " ");
-  return cleaned.length > 200 ? `${cleaned.slice(0, 200)}…` : cleaned;
 }

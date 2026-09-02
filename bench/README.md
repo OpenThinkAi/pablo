@@ -120,5 +120,55 @@ writer only.
   replacement on a busy endpoint — raise it per request rather than lowering the
   bar.
 
+## Results — Anthropic, 2026-09-02
+
+Claude Opus 5 (`claude-opus-5`) on the Messages API, 10 spans, `--max-tokens
+8000`. Run as `bun run bench/bakeoff.ts --adapter anthropic --max-tokens 8000`
+with the provider key in the Keychain.
+
+| path | pass rate | over 400w | median wall | total wall | mangling classes seen |
+|---|---|---|---|---|---|
+| tool | **10/10 (100%)** | **3/3 (100%)** | **6.0s** | 65.0s | none |
+| text | **10/10 (100%)** | **3/3 (100%)** | 18.0s | 204.5s | none |
+
+`extract_facts`: 10/10 spans returned a tool call, 192 facts, **183 anchors
+verbatim (95%)**, 192 once hard wraps are collapsed (100%), median 15.6s.
+
+Two flags differ from the local run, and both are properties of the API rather
+than choices:
+
+- **`--max-tokens 8000`, not the 2000 default.** Adaptive thinking spends the
+  same budget as the answer, so a 2000-token ceiling on a 440-word replacement
+  is a truncation waiting to happen.
+- **`--temperature` has no effect.** Sampling parameters were removed from every
+  current Claude model and return a 400, so the adapter does not send one; this
+  run is at the API's own default, where the local run was at 0.2.
+
+### What the numbers say
+
+- **Conformance did not decide it; speed did.** Both paths passed everything,
+  with no mangling class on either — the delimiter failure that costs the local
+  writer three of ten spans past 400 words simply does not happen here. What
+  separates them is that a tool call returns the replacement alone where the
+  text path re-emits the whole passage around it: three times the wall clock and
+  three times the output tokens for the same result, and a 58.5s worst case on
+  `07-courtroom`. `PREFERRED_OUTPUT` in
+  `packages/core/src/providers/anthropic.ts` is `"tool"`.
+- **The tool path's scope weakness is the local writer's, not the model's.** On
+  `10-harbour`, whose instruction targets only the last two sentences, Gemma 4
+  returned 21 words of a 110-word span; Opus 5 returned 104 words — the whole
+  span, edited. The finding stands as a *path* weakness worth a review surface
+  (AGT-1205), but it is not universal, and the text path remains the better
+  choice for a part-of-span instruction on any model.
+- **Anchors are near-perfect, and the remaining gap is still hard wraps.** 95%
+  verbatim against the local writer's 61%, and 100% once whitespace is
+  collapsed on both sides — the same nine misses are line wraps, not paraphrase.
+  This is more evidence for the whitespace-insensitive lookup, not less: the
+  strict check would still throw away nine true facts.
+- **The Anthropic tool path streams**, unlike the OpenAI-compatible one. The
+  `input_json_delta` framing is specified, so the argument arrives in fragments
+  that can be shown as progress and measured; there is no unstreamed
+  first-byte budget to blow through on a long replacement.
+
 Both paths stay. Which one an adapter takes is `Adapter.preferredOutput`, and
 any caller can override it per request with `EditRequest.output`.
