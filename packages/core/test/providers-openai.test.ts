@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { EndpointHung, ProviderResponseError, createProviders, parseConfig } from "../src/index";
+import { EndpointHung, PREFERRED_OUTPUT, ProviderResponseError, createProviders, parseConfig } from "../src/index";
 import type { CompletionStats, Document, Intent, Providers } from "../src/index";
 import { startFakeEndpoint } from "./fake-endpoint";
 import type { FakeEndpoint, FakeEndpointOptions } from "./fake-endpoint";
@@ -105,7 +105,7 @@ test("each endpoint keeps a rolling rate for the wait estimate", async () => {
 });
 
 test("an edit comes back as a proposal against the span it was asked about", async () => {
-  const fake = endpoint({ tokens: ["  The valley kept its own time.", "\n"], gapMs: 2 });
+  const fake = endpoint({ tool: { arguments: { replacement: "  The valley kept its own time.\n" } } });
   const document: Document = { path: "/tmp/chapter-01.md", text: "The valley kept time in its own way." };
   const proposal = await providersAt(fake.url)
     .adapter("local")
@@ -122,8 +122,103 @@ test("an edit comes back as a proposal against the span it was asked about", asy
   expect(prompt).toContain("tighten it");
 });
 
+test("the tool path forces propose_edit and does not stream", async () => {
+  const fake = endpoint({ tool: { arguments: { replacement: "A tighter line." } } });
+  const document: Document = { path: "/tmp/chapter-01.md", text: "A line that could be tighter." };
+
+  const proposal = await providersAt(fake.url)
+    .adapter("local")
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span: { start: 0, end: 29 }, output: "tool" });
+
+  expect(proposal.variants).toEqual(["A tighter line."]);
+  const body = fake.requests[0]?.body ?? {};
+  expect(body["stream"]).toBeUndefined();
+  expect(body["tool_choice"]).toEqual({ type: "function", function: { name: "propose_edit" } });
+  const tools = body["tools"] as { function: { name: string } }[];
+  expect(tools.map((tool) => tool.function.name)).toEqual(["propose_edit"]);
+});
+
+test("an adapter declares the structured path it takes by default", async () => {
+  const fake = endpoint({ tool: { arguments: { replacement: "either way" } } });
+  const adapter = providersAt(fake.url).adapter("local");
+  const document: Document = { path: "/tmp/chapter-01.md", text: "one two three" };
+
+  expect(adapter.preferredOutput).toBe(PREFERRED_OUTPUT);
+  await adapter.proposeEdit({ intent: revise, instruction: "anything", document, span: { start: 0, end: 3 } });
+
+  const usedTools = fake.requests[0]?.body["tools"] !== undefined;
+  expect(usedTools).toBe(PREFERRED_OUTPUT === "tool");
+});
+
+test("the text path takes CriticMarkup and applies it, so the proposal is the accepted text", async () => {
+  const fake = endpoint({ tokens: ["{~~The valley kept time in its own way.", "~>The valley kept its own time.~~}"], gapMs: 2 });
+  const document: Document = { path: "/tmp/chapter-01.md", text: "The valley kept time in its own way." };
+
+  const proposal = await providersAt(fake.url)
+    .adapter("local")
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span: { start: 0, end: 36 }, output: "text" });
+
+  expect(proposal.variants).toEqual(["The valley kept its own time."]);
+  const prompt = (fake.requests[0]?.body["messages"] as { content: string }[])[0]?.content ?? "";
+  expect(prompt).toContain("{~~old text~>new text~~}");
+  expect(fake.requests[0]?.body["tools"]).toBeUndefined();
+});
+
+test("the text path refuses an answer that carries no proposal", async () => {
+  const fake = endpoint({ tokens: ["Sure! Here is a tighter version of that line."], gapMs: 1 });
+  const document: Document = { path: "/tmp/chapter-01.md", text: "one two three" };
+
+  const failure = await providersAt(fake.url)
+    .adapter("local")
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span: { start: 0, end: 3 }, output: "text" })
+    .catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(ProviderResponseError);
+  expect((failure as Error).message).toContain("does not conform");
+  expect((failure as Error).message).toContain("proposes nothing");
+});
+
+test("the text path refuses a mangled substitution rather than writing it into the manuscript", async () => {
+  const fake = endpoint({ tokens: ["{~~one~>two~~} and a stray ~> arrow"], gapMs: 1 });
+  const document: Document = { path: "/tmp/chapter-01.md", text: "one two three" };
+
+  const failure = await providersAt(fake.url)
+    .adapter("local")
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span: { start: 0, end: 3 }, output: "text" })
+    .catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(ProviderResponseError);
+  expect((failure as Error).message).toContain("~> outside a substitution");
+});
+
+test("a tool request answered with prose is a named error, not a proposal", async () => {
+  const fake = endpoint({ toolRefusal: "I would rewrite it like this instead." });
+  const document: Document = { path: "/tmp/chapter-01.md", text: "one two three" };
+
+  const failure = await providersAt(fake.url)
+    .adapter("local")
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span: { start: 0, end: 3 }, output: "tool" })
+    .catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(ProviderResponseError);
+  expect((failure as Error).message).toContain("no propose_edit tool call");
+});
+
+test("a tool call whose arguments are not JSON is a named error", async () => {
+  const fake = endpoint({ tool: { arguments: '{"replacement": "unterminated' } });
+  const document: Document = { path: "/tmp/chapter-01.md", text: "one two three" };
+
+  const failure = await providersAt(fake.url)
+    .adapter("local")
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span: { start: 0, end: 3 }, output: "tool" })
+    .catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(ProviderResponseError);
+  expect((failure as Error).message).toContain("not valid JSON");
+});
+
 test("asking for variants sends one request per variant", async () => {
-  const fake = endpoint({ tokens: ["a line"], gapMs: 1 });
+  const fake = endpoint({ tool: { arguments: { replacement: "a line" } } });
   const document: Document = { path: "/tmp/chapter-01.md", text: "one two three" };
   const proposal = await providersAt(fake.url)
     .adapter("local")
@@ -149,9 +244,51 @@ test("extracted facts come back one per line, without the model's bullets", asyn
   const fake = endpoint({ tokens: ["- Ada owns the press\n", "* The vintage is 1919\n", "\n", "3. Bob limps"], gapMs: 1 });
   const facts = await providersAt(fake.url)
     .adapter("local")
-    .extractFacts({ text: "a paragraph", instruction: "people and dates stated as true" });
+    .extractFacts({ text: "a paragraph", instruction: "people and dates stated as true", output: "text" });
 
   expect(facts).toEqual(["Ada owns the press", "The vintage is 1919", "Bob limps"]);
+});
+
+test("the extract_facts tool call carries an anchor per fact, and drops items with no fact", async () => {
+  const fake = endpoint({
+    tool: {
+      name: "extract_facts",
+      arguments: {
+        facts: [
+          {
+            fact: "Ada owns the press",
+            entities: ["Ada", 7],
+            story_time: "day 1, dawn",
+            certainty: "stated",
+            anchor: "Ada owns the press",
+          },
+          { fact: "   ", anchor: "nothing" },
+          { fact: "Bob limps" },
+        ],
+      },
+    },
+  });
+
+  const adapter = providersAt(fake.url).adapter("local");
+  const facts = await adapter.extractFactsWithAnchors!({
+    text: "Ada owns the press. Bob limps.",
+    instruction: "everything a later chapter could contradict",
+  });
+
+  expect(facts).toEqual([
+    {
+      fact: "Ada owns the press",
+      entities: ["Ada"],
+      storyTime: "day 1, dawn",
+      certainty: "stated",
+      anchor: "Ada owns the press",
+    },
+    { fact: "Bob limps", entities: [], storyTime: undefined, certainty: undefined, anchor: undefined },
+  ]);
+  expect(await adapter.extractFacts({ text: "a paragraph", instruction: "facts", output: "tool" })).toEqual([
+    "Ada owns the press",
+    "Bob limps",
+  ]);
 });
 
 test("an endpoint that answers with an error says so, with its status", async () => {
