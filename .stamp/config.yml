@@ -1,0 +1,28 @@
+branches:
+  main:
+    required:
+      - security
+      - standards
+      - product
+    # required_checks run at `stamp merge` time against the merged tree (post-
+    # merge) and roll the merge back if any non-zero. The set covers:
+    #   typecheck — `tsc --noEmit` across the workspace (root tsconfig.json
+    #               references packages/core and packages/tui)
+    #   test      — `bun test` across all workspaces, including the guard in
+    #               packages/core that asserts core imports no terminal library
+    # There is deliberately no `build` check yet: nothing is bundled, and both
+    # packages ship TypeScript sources consumed by Bun. Add one here the moment
+    # a build script exists.
+    required_checks:
+      - name: typecheck
+        run: bun run typecheck
+      - name: test
+        run: bun test
+reviewers:
+  security:
+    prompt: .stamp/reviewers/security.md
+    enforce_reads_on_dotstamp: true
+  standards:
+    prompt: .stamp/reviewers/standards.md
+  product:
+    prompt: .stamp/reviewers/product.md
