@@ -1,8 +1,8 @@
-# draft
+# picaso
 
 AI-native terminal tool for writing and composition. Not a text editor.
 
-`draft` opens a manuscript from a plain markdown vault, lets you select a span and
+`picaso` opens a manuscript from a plain markdown vault, lets you select a span and
 tag it, prompt on it, or replace it by hand, and reviews the model's proposals as
 inline CriticMarkup you accept, reject, or edit in place. Context for a long
 manuscript is retrieved by walking a map of the book (structure, entities, facts
