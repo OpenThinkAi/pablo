@@ -1,0 +1,21 @@
+{
+  "name": "@openthink/pablo",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "An AI-native terminal tool for writing and composition. Not a text editor.",
+  "bin": {
+    "pablo": "./src/cli.ts"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": ["src"],
+  "dependencies": {
+    "@openthink/pablo-core": "workspace:*",
+    "@opentui/core": "^0.5.10"
+  }
+}

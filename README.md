@@ -16,7 +16,17 @@ a toggle away.
 Design doc (canonical, decisions table, build order):
 `saltline-digital-vault/projects/ai-terminal/README.md`.
 
-Status: design complete 2026-09-01, P0 in tickets. Nothing runs yet.
+Status: design complete 2026-09-01; P0 in tickets. The repo is a Bun workspace —
+`packages/core` (TTY-free document and span model) and `packages/tui` (the
+opentui renderer and the `pablo` bin) — and `pablo` currently prints its usage
+and exits. Nothing else runs yet.
+
+```sh
+bun install
+bun run typecheck
+bun test
+bun run pablo
+```
 
 ## License
 
