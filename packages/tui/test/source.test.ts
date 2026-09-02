@@ -20,20 +20,37 @@ function workspace(text: string): string {
   return path;
 }
 
-/** Wait for the watch to fire, without pinning the test to a fixed sleep. */
-async function nextChange(path: string): Promise<Manuscript> {
-  return await new Promise<Manuscript>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("the watch never fired")), 4000);
-    const stop = watchManuscript(
-      path,
-      (manuscript) => {
-        clearTimeout(timer);
-        resolve(manuscript);
-      },
-      { debounceMs: 5, initialText: loadManuscript(path).doc.text },
-    );
-    stops.push(stop);
-  });
+/**
+ * Arm the watch, run `write`, and wait for the change it causes.
+ *
+ * `write` is repeated every second until the watch fires. On macOS `fs.watch`
+ * arms its FSEvents stream asynchronously, so a write that lands between
+ * `watch()` returning and the stream actually listening is not seen late — it
+ * is **lost**, which is why raising the timeout never fixed this test and
+ * writing again does. A repeat is free: `watchManuscript` compares the text it
+ * last handed out, so a write of identical bytes costs one read and no
+ * callback.
+ */
+async function changeVia(path: string, write: () => void, ceilingMs = 10_000): Promise<Manuscript> {
+  let seen: Manuscript | undefined;
+  stops.push(
+    watchManuscript(path, (manuscript) => (seen ??= manuscript), {
+      debounceMs: 5,
+      initialText: loadManuscript(path).doc.text,
+    }),
+  );
+
+  const deadline = Date.now() + ceilingMs;
+  let nextWrite = Date.now();
+  while (seen === undefined) {
+    if (Date.now() > deadline) throw new Error("the watch never fired");
+    if (Date.now() >= nextWrite) {
+      write();
+      nextWrite = Date.now() + 1_000;
+    }
+    await Bun.sleep(10);
+  }
+  return seen;
 }
 
 test("loadManuscript reads and parses the file, and offsets index that exact text", () => {
@@ -48,26 +65,27 @@ test("loadManuscript reads and parses the file, and offsets index that exact tex
 
 test("an external write is picked up and re-parsed (AC4)", async () => {
   const path = workspace("# One\n\nThe cellar.\n");
-  const changed = nextChange(path);
 
-  writeFileSync(path, "# One\n\nThe {++very ++}cold cellar.\n", "utf8");
+  const manuscript = await changeVia(path, () =>
+    writeFileSync(path, "# One\n\nThe {++very ++}cold cellar.\n", "utf8"),
+  );
 
-  const manuscript = await changed;
   expect(manuscript.doc.text).toContain("cold cellar");
   expect(manuscript.model.marks.length).toBe(1);
 });
 
 test("an atomic save (write a temp file, rename it over the target) is seen too", async () => {
   const path = workspace("# One\n\nThe cellar.\n");
-  const changed = nextChange(path);
 
   // This is what vim, helix, and most editors actually do on :w — the inode
   // changes, which is why the watch is on the directory.
-  const temporary = `${path}.tmp`;
-  writeFileSync(temporary, "# One\n\nThe cellar, rewritten.\n", "utf8");
-  renameSync(temporary, path);
+  const manuscript = await changeVia(path, () => {
+    const temporary = `${path}.tmp`;
+    writeFileSync(temporary, "# One\n\nThe cellar, rewritten.\n", "utf8");
+    renameSync(temporary, path);
+  });
 
-  expect((await changed).doc.text).toContain("rewritten");
+  expect(manuscript.doc.text).toContain("rewritten");
 });
 
 test("stopping the watch stops the callbacks", async () => {

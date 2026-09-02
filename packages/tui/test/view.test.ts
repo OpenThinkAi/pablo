@@ -41,10 +41,27 @@ function workspace(text = CHAPTER): string {
 }
 
 /** Wait for a filesystem event to land. `fs.watch` latency is not frame-paced. */
-async function until(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
+interface UntilOptions {
+  /**
+   * Re-run every second until the predicate holds. On macOS `fs.watch` arms its
+   * FSEvents stream asynchronously, so a write that lands between `watch()`
+   * returning and the stream listening is not seen late — it is **lost**, and
+   * no timeout recovers it. Writing again is what does, and a repeat of the
+   * same bytes costs one read and no re-render.
+   */
+  readonly nudge?: () => void;
+  readonly timeoutMs?: number;
+}
+
+async function until(predicate: () => boolean, options: UntilOptions = {}): Promise<void> {
+  const deadline = Date.now() + (options.timeoutMs ?? 10_000);
+  let nextNudge = Date.now() + 1_000;
   while (!predicate()) {
     if (Date.now() > deadline) throw new Error("timed out waiting for the view to catch up");
+    if (options.nudge !== undefined && Date.now() >= nextNudge) {
+      options.nudge();
+      nextNudge = Date.now() + 1_000;
+    }
     await Bun.sleep(5);
   }
 }
@@ -135,8 +152,9 @@ test("an external write re-renders without losing the cursor position (AC4)", as
   const before = handle.state().selection.span;
   expect(handle.frame()).toContain("stayed");
 
-  writeFileSync(path, CHAPTER.replace("nineteen", "twenty-one"), "utf8");
-  await until(() => handle.state().doc.text.includes("twenty-one"));
+  const write = () => writeFileSync(path, CHAPTER.replace("nineteen", "twenty-one"), "utf8");
+  write();
+  await until(() => handle.state().doc.text.includes("twenty-one"), { nudge: write });
   await setup.renderOnce();
 
   expect(handle.state().selection.span).toEqual(before);
