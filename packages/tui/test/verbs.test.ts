@@ -35,8 +35,12 @@ const endpoints: FakeEndpoint[] = [];
 afterEach(async () => {
   // Stop the views before the renderers: a run still unwinding would otherwise
   // draw into a destroyed buffer.
-  while (open.length > 0) open.pop()?.stop();
-  await Bun.sleep(1);
+  const closing = open.map((handle) => {
+    handle.stop();
+    return handle.closed;
+  });
+  open.length = 0;
+  await Promise.all(closing);
   while (renderers.length > 0) renderers.pop()?.renderer.destroy();
   while (endpoints.length > 0) endpoints.pop()?.stop();
   while (directories.length > 0) rmSync(directories.pop() ?? "", { recursive: true, force: true });
@@ -731,4 +735,23 @@ test("a file that changed under a run is not written over", async () => {
 
   expect(space.text()).not.toContain("~>");
   expect(handle.state().message).toContain("the file changed while the model worked");
+});
+
+test("a second prompt while one is in flight says something esc can actually do", async () => {
+  const endpoint = startFakeEndpoint({ tokens: ["one ", "two ", "three"], gapMs: 20 });
+  endpoints.push(endpoint);
+  const [handle, setup] = await view(workspace(), endpoint);
+
+  await prompt(handle, setup, "tighten");
+  await prompt(handle, setup, "again");
+
+  // `esc` closes pages and clears a failed run; it does not abort a live one,
+  // so the message must not send the author there.
+  expect(handle.state().message).not.toContain("esc");
+  setup.mockInput.pressEscape();
+  await until(() => handle.state().message === "");
+  expect(handle.state().run?.phase).not.toBe("failed");
+
+  await handle.idle();
+  expect(endpoint.requests).toHaveLength(1);
 });

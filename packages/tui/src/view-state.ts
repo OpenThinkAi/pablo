@@ -462,6 +462,17 @@ export function showOverlay(state: ViewState, overlay: Overlay): ViewState {
 }
 
 /**
+ * The granularities whose spans are whole blocks and land with a blank line on
+ * each side. Named rather than excluded, so a granularity added later is inline
+ * until someone decides otherwise instead of silently becoming a block.
+ */
+const BLOCK_GRANULARITIES: ReadonlySet<Granularity> = new Set<Granularity>([
+  "paragraph",
+  "scene",
+  "chapter",
+]);
+
+/**
  * AC3, first half of `move`: remember the span and what it is, without writing.
  * The file is never on disk in the half-moved state, because the cut and the
  * insert are one write on the second press.
@@ -474,7 +485,7 @@ export function beginMove(state: ViewState): ViewState {
     pendingMove: {
       span,
       text: selectionText(state.doc, span),
-      asBlock: granularity !== "character" && granularity !== "sentence",
+      asBlock: BLOCK_GRANULARITIES.has(granularity),
     },
     message: "moving: put the cursor on a boundary and press m again (esc cancels)",
     receipt: "",

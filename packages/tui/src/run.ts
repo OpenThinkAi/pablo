@@ -210,6 +210,8 @@ export async function runSpanEdit(
   });
 
   return {
+    // `Proposal.variants` is a non-empty tuple (`[string, ...string[]]`), so
+    // the first one is a string and not a `string | undefined`.
     answer: proposal.variants[0],
     receipt: receiptLine(plan.pack, stats, now() - started),
   };
@@ -217,11 +219,16 @@ export async function runSpanEdit(
 
 /** The line AC6 leaves on screen after a run. */
 export function receiptLine(pack: Pack, stats: CompletionStats | undefined, wallMs: number): string {
-  const read = stats?.tokensRead ?? pack.totalTokens;
-  const readMs = stats?.timeToFirstTokenMs ?? wallMs;
-  const wroteMs = stats === undefined ? 0 : Math.max(0, stats.elapsedMs - stats.timeToFirstTokenMs);
-  const wrote = stats?.tokensWritten ?? 0;
-  return `read ${thousands(read)} tokens in ${duration(readMs)}, wrote ${thousands(wrote)} in ${duration(wroteMs)}`;
+  // A stream that ended without its `done` event measured nothing, and "wrote 0
+  // in 0ms" would read as a fact rather than as the absence of one.
+  if (stats === undefined) {
+    return `sent ${thousands(pack.totalTokens)} tokens, ${duration(wallMs)} — the endpoint reported no totals`;
+  }
+  const wroteMs = Math.max(0, stats.elapsedMs - stats.timeToFirstTokenMs);
+  return (
+    `read ${thousands(stats.tokensRead ?? pack.totalTokens)} tokens in ${duration(stats.timeToFirstTokenMs)}, ` +
+    `wrote ${thousands(stats.tokensWritten)} in ${duration(wroteMs)}`
+  );
 }
 
 /**

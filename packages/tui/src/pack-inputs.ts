@@ -29,7 +29,7 @@ import {
   type SpanEditInputs,
   type TextSource,
 } from "@openthink/pablo-core";
-import { detectWork, findVaultRoot, type DirectoryProbe } from "./brief";
+import { detectWork, findVaultRoot, workUnder, type DirectoryProbe } from "./brief";
 
 export interface SpanEditInputsOptions {
   readonly doc: Document;
@@ -85,10 +85,19 @@ export function buildSpanEditInputs(options: SpanEditInputsOptions): BuiltSpanEd
   const extra = options.extraContext?.trim() ?? "";
   if (extra !== "") style.push({ path: "the session brief", text: extra });
 
-  const work = vaultRoot === undefined ? undefined : detectWork(options.doc.path, options.isDirectory);
-  const workRoot = work === undefined ? undefined : join(work.vaultRoot, work.kind, work.slug);
-  const workRules =
-    workRoot === undefined || vaultRoot === undefined ? undefined : readWorkRules(vaultRoot, workRoot);
+  // A work lives inside a vault by definition, so the two lookups agree: an
+  // overridden vault root decides the work as well as the style files.
+  const work =
+    options.vaultRoot === undefined
+      ? detectWork(options.doc.path, options.isDirectory)
+      : workUnder(options.vaultRoot, options.doc.path);
+
+  let workRoot: string | undefined;
+  let workRules: TextSource | undefined;
+  if (work !== undefined) {
+    workRoot = join(work.vaultRoot, work.kind, work.slug);
+    workRules = readWorkRules(work.vaultRoot, workRoot);
+  }
 
   return {
     inputs: {

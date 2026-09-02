@@ -326,7 +326,9 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
    */
   const startRun = (instruction: string, span: Span): void => {
     if (inFlight !== undefined) {
-      state = { ...state, message: "a run is already in flight; wait for it or press esc" };
+      // `esc` dismisses pages and failed runs; it does not abort a live one,
+      // so it is not offered here.
+      state = { ...state, message: "a run is already in flight — wait for it to finish" };
       draw();
       return;
     }
