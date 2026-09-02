@@ -273,44 +273,80 @@ class Capture {
     this.#bodies = [];
   }
 
-  /** What the model said, decoded out of whichever wire shape the path used. */
+  /** What the model said, decoded out of whichever wire shape the adapter used. */
   async answer(path: OutputMode): Promise<string | undefined> {
     const bodies = await Promise.all(this.#bodies);
     const body = bodies[bodies.length - 1];
     if (body === undefined) return undefined;
-    return path === "tool" ? toolAnswer(body) : sseAnswer(body);
+    return decode(body, path);
   }
 }
 
-function sseAnswer(body: string): string {
+/**
+ * The raw answer, whichever adapter produced it.
+ *
+ * Three wire shapes reach here and the bench is not told which: an unstreamed
+ * OpenAI-compatible tool response (one JSON object), OpenAI-compatible SSE
+ * (`choices[].delta.content`), and Anthropic SSE (`text_delta` for prose,
+ * `input_json_delta` fragments for a tool argument). Sniffing the body is what
+ * keeps `--adapter anthropic` reporting real mangling classes instead of
+ * classifying an undecoded transcript.
+ */
+function decode(body: string, path: OutputMode): string {
+  // One JSON object rather than a stream: the unstreamed OpenAI-compatible tool
+  // response. Nothing answers the text path this way, so it is returned as-is.
+  const whole = jsonObject(body);
+  if (whole !== undefined) return path === "tool" ? toolAnswer(whole, body) : body;
+
   let text = "";
-  for (const event of body.split("\n\n")) {
-    const line = event.split("\n").find((candidate) => candidate.startsWith("data:"));
+  let toolJson = "";
+  for (const event of body.split(/\r?\n\r?\n/)) {
+    const line = event.split(/\r?\n/).find((candidate) => candidate.startsWith("data:"));
     const payload = line?.slice("data:".length).trim();
     if (payload === undefined || payload === "[DONE]") continue;
-    try {
-      const content = (JSON.parse(payload) as { choices?: { delta?: { content?: unknown } }[] }).choices?.[0]?.delta
-        ?.content;
-      if (typeof content === "string") text += content;
-    } catch {
-      // A chunk that is not JSON is itself the finding; the adapter reports it.
+    const frame = jsonObject(payload);
+    if (frame === undefined) continue; // A chunk that is not JSON is itself the finding; the adapter reports it.
+
+    const openai = (frame as { choices?: { delta?: { content?: unknown } }[] }).choices?.[0]?.delta?.content;
+    if (typeof openai === "string") text += openai;
+
+    const delta = frame["delta"];
+    if (typeof delta !== "object" || delta === null) continue;
+    const anthropic = delta as { type?: unknown; text?: unknown; partial_json?: unknown };
+    if (anthropic.type === "text_delta" && typeof anthropic.text === "string") text += anthropic.text;
+    if (anthropic.type === "input_json_delta" && typeof anthropic.partial_json === "string") {
+      toolJson += anthropic.partial_json;
     }
   }
-  return text;
+
+  if (path !== "tool") return text;
+  const args = jsonObject(toolJson);
+  if (args === undefined) return toolJson === "" ? text : toolJson;
+  return typeof args["replacement"] === "string" ? args["replacement"] : toolJson;
 }
 
-function toolAnswer(body: string): string {
+function jsonObject(text: string): Record<string, unknown> | undefined {
+  if (text.trim() === "") return undefined;
   try {
-    const args = (
-      JSON.parse(body) as { choices?: { message?: { content?: unknown; tool_calls?: { function?: { arguments?: unknown } }[] } }[] }
-    ).choices?.[0]?.message;
-    const raw = args?.tool_calls?.[0]?.function?.arguments;
-    if (typeof raw !== "string") return typeof args?.content === "string" ? args.content : body;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return typeof parsed["replacement"] === "string" ? parsed["replacement"] : raw;
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
   } catch {
-    return body;
+    return undefined;
   }
+}
+
+/** The OpenAI-compatible unstreamed tool response: the call's `replacement` argument. */
+function toolAnswer(whole: Record<string, unknown>, body: string): string {
+  const message = (
+    whole as { choices?: { message?: { content?: unknown; tool_calls?: { function?: { arguments?: unknown } }[] } }[] }
+  ).choices?.[0]?.message;
+  const raw = message?.tool_calls?.[0]?.function?.arguments;
+  if (typeof raw !== "string") return typeof message?.content === "string" ? message.content : body;
+  const args = jsonObject(raw);
+  if (args === undefined) return raw;
+  return typeof args["replacement"] === "string" ? args["replacement"] : raw;
 }
 
 function report(result: ProposalResult): string {

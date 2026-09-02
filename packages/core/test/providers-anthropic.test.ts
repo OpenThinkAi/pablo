@@ -6,6 +6,8 @@
 
 import { afterEach, expect, test } from "bun:test";
 import {
+  ANTHROPIC_PREFERRED_OUTPUT,
+  CRITICMARKUP_EDIT_CLOSING,
   DEFAULT_ANTHROPIC_ENDPOINT,
   DEFAULT_ANTHROPIC_MODEL,
   EndpointHung,
@@ -15,10 +17,10 @@ import {
   createAnthropicAdapter,
   createProviders,
   parseConfig,
+  TOOL_EDIT_CLOSING,
 } from "../src/index";
 import type {
   Adapter,
-  AnthropicOutputPath,
   CompletionEvent,
   CompletionStats,
   Document,
@@ -177,10 +179,10 @@ function adapterAt(url: string, extra: Record<string, unknown> = {}): Adapter {
   );
 }
 
-/** The registry has no `output` knob; the bake-off builds each path directly, as here. */
-function adapterWithOutput(url: string, output: AnthropicOutputPath): Adapter {
+/** Built outside the registry, the way the bake-off does when it measures one path. */
+function bareAdapter(url: string): Adapter {
   const provider = configFor(url).providers.get("anthropic") as ProviderConfig;
-  return createAnthropicAdapter({ provider, meter: new RateMeter(), key: () => KEY, output });
+  return createAnthropicAdapter({ provider, meter: new RateMeter(), key: () => KEY });
 }
 
 async function drain(events: AsyncIterable<CompletionEvent>): Promise<{ text: string; stats: CompletionStats }> {
@@ -241,14 +243,14 @@ test("a completion streams its text and reports what the Messages API measured",
   expect(sent?.body["max_tokens"]).toBe(16_000);
   expect(sent?.body["messages"]).toEqual([{ role: "user", content: "write a line" }]);
   expect(String(sent?.body["system"])).toContain("cannot write files");
-  // Sampling parameters are rejected by current models; none is sent unasked.
+  // Sampling parameters were removed from every current model and return a 400.
   expect(sent?.body).not.toHaveProperty("temperature");
 });
 
 test("a native tool call becomes a proposal against the span it was asked about", async () => {
   const fake = endpoint({
     thinking: "considering",
-    tool: { name: "propose_edit", input: { variants: ["The valley kept its own time."] }, pieces: 5 },
+    tool: { name: "propose_edit", input: { replacement: "The valley kept its own time." }, pieces: 5 },
     usage: { input_tokens: 120, output_tokens: 14 },
   });
 
@@ -271,12 +273,18 @@ test("a native tool call becomes a proposal against the span it was asked about"
   expect(tools[0]?.strict).toBe(true);
   expect(tools[0]?.input_schema["additionalProperties"]).toBe(false);
   expect(sent["tool_choice"]).toEqual({ type: "tool", name: "propose_edit" });
+  // The pack owns the closing line, so what it prices is what goes over the wire.
+  expect(String((sent["messages"] as { content: string }[])[0]?.content)).toContain(TOOL_EDIT_CLOSING);
 });
 
-test("several variants come back from one tool call", async () => {
-  const fake = endpoint({
-    tool: { name: "propose_edit", input: { variants: ["one", "two", "three", "four"] } },
-  });
+test("the adapter's preferred path is the measured one, and a request may override it", () => {
+  const fake = endpoint();
+  expect(adapterAt(fake.url).preferredOutput).toBe(ANTHROPIC_PREFERRED_OUTPUT);
+  expect(ANTHROPIC_PREFERRED_OUTPUT).toBe("tool");
+});
+
+test("asking for variants sends one tool call per variant", async () => {
+  const fake = endpoint({ tool: { name: "propose_edit", input: { replacement: "a line" } } });
 
   const proposal = await adapterAt(fake.url).proposeEdit({
     intent: revise,
@@ -286,22 +294,30 @@ test("several variants come back from one tool call", async () => {
     variants: 3,
   });
 
-  expect(proposal.variants).toEqual(["one", "two", "three"]);
-  expect(fake.requests).toHaveLength(1);
-  expect(String((fake.requests[0]?.body["messages"] as { content: string }[])[0]?.content)).toContain(
-    "3 different replacements",
-  );
+  expect(proposal.variants).toEqual(["a line", "a line", "a line"]);
+  expect(fake.requests).toHaveLength(3);
 });
 
-test("fewer replacements than were asked for is an error, not a short list", async () => {
-  const fake = endpoint({ tool: { name: "propose_edit", input: { variants: ["only one"] } } });
+test("a tool call with no replacement string is a named error", async () => {
+  const fake = endpoint({ tool: { name: "propose_edit", input: { notes: "I would rather explain" } } });
 
   const failed = await adapterAt(fake.url)
-    .proposeEdit({ intent: revise, instruction: "three ways", document, span, variants: 3 })
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span })
     .catch((error: unknown) => error);
 
   expect(failed).toBeInstanceOf(ProviderResponseError);
-  expect((failed as Error).message).toContain("where 3 were asked for");
+  expect((failed as Error).message).toContain("no replacement string");
+});
+
+test("a call to some other tool is refused rather than read", async () => {
+  const fake = endpoint({ tool: { name: "write_file", input: { path: "/etc/passwd" } } });
+
+  const failed = await adapterAt(fake.url)
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span })
+    .catch((error: unknown) => error);
+
+  expect(failed).toBeInstanceOf(ProviderResponseError);
+  expect((failed as Error).message).toContain("a call to write_file rather than propose_edit");
 });
 
 test("prose where a tool call was required is a named error", async () => {
@@ -315,10 +331,16 @@ test("prose where a tool call was required is a named error", async () => {
   expect((failed as Error).message).toContain("prose instead of a propose_edit call");
 });
 
+const FACTS = {
+  facts: [
+    { fact: "Ada owns the press", entities: ["Ada"], story_time: "day 1", certainty: "stated", anchor: "Ada owns" },
+    { fact: "  ", anchor: "nothing" },
+    { fact: "The vintage is 1919", anchor: "1919" },
+  ],
+};
+
 test("facts come back from the extract_facts tool", async () => {
-  const fake = endpoint({
-    tool: { name: "extract_facts", input: { facts: ["Ada owns the press", " ", "The vintage is 1919"] } },
-  });
+  const fake = endpoint({ tool: { name: "extract_facts", input: FACTS } });
 
   const facts = await adapterAt(fake.url).extractFacts({
     text: "a paragraph",
@@ -329,19 +351,35 @@ test("facts come back from the extract_facts tool", async () => {
   expect((fake.requests[0]?.body["tool_choice"] as Record<string, unknown>)["name"]).toBe("extract_facts");
 });
 
+test("extraction with anchors carries the provenance the map is built from", async () => {
+  const fake = endpoint({ tool: { name: "extract_facts", input: FACTS } });
+  const adapter = adapterAt(fake.url);
+
+  const facts = await adapter.extractFactsWithAnchors?.({
+    text: "a paragraph",
+    instruction: "people and dates stated as true",
+  });
+
+  expect(facts).toEqual([
+    { fact: "Ada owns the press", entities: ["Ada"], storyTime: "day 1", certainty: "stated", anchor: "Ada owns" },
+    { fact: "The vintage is 1919", entities: [], storyTime: undefined, certainty: undefined, anchor: "1919" },
+  ]);
+});
+
 test("the CriticMarkup path is validated before it is parsed, then resolved to the replacement", async () => {
   const fake = endpoint({ text: ["The valley kept {~~time in its own way~>its own time~~}."] });
 
-  const proposal = await adapterWithOutput(fake.url, "criticmarkup").proposeEdit({
+  const proposal = await bareAdapter(fake.url).proposeEdit({
     intent: revise,
     instruction: "tighten it",
     document,
     span,
+    output: "text",
   });
 
   expect(proposal.variants).toEqual(["The valley kept its own time."]);
   expect(String((fake.requests[0]?.body["messages"] as { content: string }[])[0]?.content)).toContain(
-    "CriticMarkup",
+    CRITICMARKUP_EDIT_CLOSING,
   );
   expect(fake.requests[0]?.body).not.toHaveProperty("tools");
 });
@@ -349,19 +387,20 @@ test("the CriticMarkup path is validated before it is parsed, then resolved to t
 test("CriticMarkup that proposes nothing is refused by the conformance gate", async () => {
   const fake = endpoint({ text: ["The valley kept its own time."] });
 
-  const failed = await adapterWithOutput(fake.url, "criticmarkup")
-    .proposeEdit({ intent: revise, instruction: "tighten it", document, span })
+  const failed = await bareAdapter(fake.url)
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span, output: "text" })
     .catch((error: unknown) => error);
 
   expect(failed).toBeInstanceOf(ProviderResponseError);
+  expect((failed as Error).message).toContain("does not conform");
   expect((failed as Error).message).toContain("no CriticMarkup marks");
 });
 
 test("a mangled substitution is refused by the conformance gate", async () => {
   const fake = endpoint({ text: ["The valley kept {++its own time++}, not time ~> its own way."] });
 
-  const failed = await adapterWithOutput(fake.url, "criticmarkup")
-    .proposeEdit({ intent: revise, instruction: "tighten it", document, span })
+  const failed = await bareAdapter(fake.url)
+    .proposeEdit({ intent: revise, instruction: "tighten it", document, span, output: "text" })
     .catch((error: unknown) => error);
 
   expect(failed).toBeInstanceOf(ProviderResponseError);

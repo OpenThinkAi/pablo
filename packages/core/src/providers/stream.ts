@@ -4,10 +4,10 @@
  * wait, Server-Sent Event framing, and the measurement a finished stream
  * reports.
  *
- * `openai.ts` (AGT-1201) still carries its own copies of `waitFor`, `measure`
- * and `truncate`. It is deliberately not edited here — AGT-1202 and AGT-1206
- * are in flight against the same package — so folding it onto this module is a
- * follow-up with no behaviour change in it.
+ * Both adapters use it. It began as the Anthropic adapter's half of what
+ * `openai.ts` (AGT-1201) already had; `openai.ts` now imports it too, which is
+ * how the SSE framing here — tolerant of `\r\n` line endings and of an event
+ * that carries several `data:` lines — became the framing both of them use.
  */
 
 import type { CompletionStats } from "./types";
