@@ -13,10 +13,15 @@ In the view — no action needs a function key or a number key:
   i / a        collapse to the boundary before / after the selection
   space / b    page down / up          g / G   start / end of the manuscript
   r            re-read from disk       ?       all keys
-  q            quit
+  B            the work brief          q       quit
 
 The file is re-read whenever it changes on disk, so editing it elsewhere is a
 supported way to work.
+
+Opening a file under <vault>/<kind>/<slug>/ runs \`think brief --cortex writing
+--context <slug>\` once, in the background, and keeps the result in memory for
+the session. \`B\` shows it. If \`think\` is not on PATH the view opens anyway and
+says so in the status line.
 
 pablo proposes; it never writes on its own. The model has no write tool —
 every accepted proposal is applied by the app and re-read from disk.

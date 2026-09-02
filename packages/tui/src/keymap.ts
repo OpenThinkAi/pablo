@@ -10,8 +10,8 @@
  * **No function row and no number row.** Matt types on a Corne split (ZMK,
  * Colemak, five layers) that has neither, so every action is a letter, a
  * symbol, an arrow, or a control chord, and the letters are mnemonic rather
- * than positional (`n`ext, `p`revious, `i`nsert, `a`fter, `r`eload, `q`uit) so
- * they land in the same place on a Colemak layout as on QWERTY.
+ * than positional (`n`ext, `p`revious, `i`nsert, `a`fter, `r`eload, `B`rief,
+ * `q`uit) so they land in the same place on a Colemak layout as on QWERTY.
  */
 
 export type BindingGroup = "reading" | "selection" | "session";
@@ -34,6 +34,13 @@ export interface KeyLike {
   readonly meta?: boolean;
 }
 
+/**
+ * The brief's key. Shifted `B` because `b` is already a page up, and because
+ * shift is how this map already reaches a second verb on a letter (`g` / `G`)
+ * without asking a Corne for a row it does not have.
+ */
+export const BRIEF_KEY = "B";
+
 export const BINDINGS: readonly Binding[] = [
   { action: "scrollDown", chords: ["down", "ctrl+e"], label: "scroll down one line", group: "reading" },
   { action: "scrollUp", chords: ["up", "ctrl+y"], label: "scroll up one line", group: "reading" },
@@ -54,8 +61,9 @@ export const BINDINGS: readonly Binding[] = [
   { action: "collapseEnd", chords: ["a"], label: "collapse to a boundary after the selection", group: "selection" },
 
   { action: "reload", chords: ["r"], label: "re-read the file from disk", group: "session" },
+  { action: "toggleBrief", chords: [BRIEF_KEY], label: "show or hide the work brief", group: "session" },
   { action: "toggleHelp", chords: ["?"], label: "show or hide this help", group: "session" },
-  { action: "dismiss", chords: ["escape"], label: "close the help, clear the message", group: "session" },
+  { action: "dismiss", chords: ["escape"], label: "close the brief or the help, clear the message", group: "session" },
   { action: "quit", chords: ["q", "ctrl+c"], label: "quit", group: "session" },
 ];
 

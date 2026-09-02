@@ -1,4 +1,22 @@
-export { helpLines, statusSegments } from "./chrome";
+export {
+  BRIEF_TIMEOUT_MS,
+  briefCommand,
+  detectWork,
+  directoryExists,
+  findVaultRoot,
+  resolveThink,
+  runBrief,
+  workUnder,
+  type BriefOutcome,
+  type BriefStatus,
+  type DirectoryProbe,
+  type RunBriefOptions,
+  type SpawnOptions,
+  type SpawnResult,
+  type Spawner,
+  type Work,
+} from "./brief";
+export { briefLines, helpLines, statusSegments } from "./chrome";
 export {
   blockIndexAt,
   blockRowCount,
@@ -17,6 +35,7 @@ export {
 } from "./layout";
 export {
   BINDINGS,
+  BRIEF_KEY,
   GROUP_LABELS,
   chordsFor,
   matchBinding,
@@ -28,10 +47,20 @@ export { frameText, styledLines, styledSegment, styledSegments, styledSelection 
 export { loadManuscript, watchManuscript, type Manuscript, type WatchOptions } from "./source";
 export { CARET_GLYPH, THEME, type Style, type StyleName } from "./theme";
 export { USAGE } from "./usage";
-export { openView, runView, type OpenViewOptions, type ViewHandle } from "./view";
+export {
+  openView,
+  runView,
+  type OpenViewOptions,
+  type ViewBriefOptions,
+  type ViewHandle,
+} from "./view";
 export {
   ACTIONS,
+  IDLE_BRIEF,
   applyAction,
+  briefLoaded,
+  briefNotice,
+  briefStarted,
   follow,
   initialState,
   reloaded,
@@ -40,6 +69,7 @@ export {
   unitAt,
   viewportOf,
   type Action,
+  type BriefPane,
   type Size,
   type ViewState,
 } from "./view-state";

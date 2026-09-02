@@ -12,21 +12,39 @@
  */
 
 import { TextRenderable, createCliRenderer, type CliRenderer, type KeyEvent } from "@opentui/core";
-import { helpLines, statusSegments } from "./chrome";
+import { briefLines, helpLines, statusSegments } from "./chrome";
+import { detectWork, runBrief, type DirectoryProbe, type RunBriefOptions, type Work } from "./brief";
 import { createLineCache, layoutWindow, type DisplayLine } from "./layout";
 import { BINDINGS, matchBinding, type Binding, type KeyLike } from "./keymap";
 import { frameText, styledLines, styledSegments } from "./render";
 import { loadManuscript, watchManuscript } from "./source";
 import {
   ACTIONS,
+  IDLE_BRIEF,
   applyAction,
+  briefLoaded,
   initialState,
   reloaded,
   resized,
   viewportOf,
   type Action,
+  type BriefPane,
   type ViewState,
 } from "./view-state";
+
+/**
+ * How the session fetches the work brief (AC1). `false` on `OpenViewOptions`
+ * turns it off entirely, which is what a test that is not about the brief wants.
+ *
+ * There is no `signal` here on purpose: the view owns the cancellation, because
+ * the one thing that must always abort the fetch is the view tearing down.
+ */
+export interface ViewBriefOptions extends Omit<RunBriefOptions, "signal"> {
+  /** Skip detection and brief this slug. */
+  readonly slug?: string | undefined;
+  /** The directory probe detection uses; injected in tests. */
+  readonly isDirectory?: DirectoryProbe | undefined;
+}
 
 export interface OpenViewOptions {
   /** An existing renderer to draw into. When absent the view creates and owns one. */
@@ -36,6 +54,8 @@ export interface OpenViewOptions {
   readonly bindings?: readonly Binding[];
   readonly actions?: Readonly<Record<string, Action>>;
   readonly debounceMs?: number;
+  /** The work brief, on by default. `false` skips the fetch. */
+  readonly brief?: ViewBriefOptions | false;
 }
 
 export interface ViewHandle {
@@ -49,6 +69,21 @@ export interface ViewHandle {
   press(key: KeyLike): void;
   /** Re-read the file now. */
   reload(): void;
+  /** The work the file belongs to, if it is in a writing vault. */
+  work(): Work | undefined;
+  /**
+   * The cached brief, or `undefined` while it is loading, missing, or failed.
+   *
+   * **This is the seam the `prompt` verb reads.** The context pack puts the
+   * brief in after the style rules and before the work's own facts, so a verb
+   * that assembles a pack calls this and passes the string through as one more
+   * context slice — it is prose about the work, exactly like the other slices,
+   * and it is never sent as an instruction. Nothing here mutates the pack or
+   * the manuscript; the brief is read-only for the whole session.
+   */
+  briefText(): string | undefined;
+  /** Resolves once the brief attempt has settled, however it settled. For tests. */
+  readonly briefSettled: Promise<void>;
   stop(): void;
   /** Resolves once the view has torn everything down. */
   readonly closed: Promise<void>;
@@ -70,7 +105,21 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
 
   const manuscript = loadManuscript(path);
   const cache = createLineCache();
-  let state = initialState(manuscript, { width: renderer.width, height: Math.max(1, renderer.height - 1) });
+
+  // Detection is a path question and costs one `stat` per ancestor, so it
+  // happens before the first frame; *fetching* the brief does not, and is
+  // started after the view is already on screen.
+  const briefOptions = options.brief === false ? undefined : (options.brief ?? {});
+  const work = briefOptions === undefined ? undefined : detectWork(path, briefOptions.isDirectory);
+  const slug = briefOptions === undefined ? undefined : (briefOptions.slug ?? work?.slug);
+  const openingBrief: BriefPane =
+    slug === undefined ? IDLE_BRIEF : { ...IDLE_BRIEF, status: "loading", slug };
+
+  let state = initialState(
+    manuscript,
+    { width: renderer.width, height: Math.max(1, renderer.height - 1) },
+    openingBrief,
+  );
   let lines: DisplayLine[] = [];
 
   const body = new TextRenderable(renderer, {
@@ -83,7 +132,12 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
   renderer.root.add(status);
 
   const draw = (): void => {
-    if (state.help) {
+    if (state.brief.open) {
+      const rows = briefLines(state.brief, state.width);
+      const offset = Math.min(state.brief.offset, Math.max(0, rows.length - state.height));
+      if (offset !== state.brief.offset) state = { ...state, brief: { ...state.brief, offset } };
+      lines = rows.slice(offset, offset + state.height);
+    } else if (state.help) {
       const help = helpLines(bindings);
       const offset = Math.min(state.helpOffset, Math.max(0, help.length - state.height));
       if (offset !== state.helpOffset) state = { ...state, helpOffset: offset };
@@ -111,12 +165,21 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
     settle = resolve;
   });
 
+  // The brief runs in a child process, so quitting has to kill it: a `think`
+  // still talking to its daemon after the view is gone is a leaked process.
+  const briefAbort = new AbortController();
+  let settleBrief: () => void = () => {};
+  const briefSettled = new Promise<void>((resolve) => {
+    settleBrief = resolve;
+  });
+
   const stop = (): void => {
     if (stopped) return;
     stopped = true;
     renderer.keyInput.off("keypress", onKey);
     renderer.off("resize", onResize);
     unwatch?.();
+    briefAbort.abort();
     if (ownsRenderer) renderer.destroy();
     settle();
   };
@@ -179,12 +242,44 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
 
   draw();
 
+  // AC1/AC3: one fetch per session, started after the first frame, never
+  // awaited. The view is already usable; the brief lands in a later frame or
+  // it does not land at all, and either way nothing blocks on it.
+  if (slug === undefined || briefOptions === undefined) {
+    settleBrief();
+  } else {
+    void runBrief(slug, {
+      signal: briefAbort.signal,
+      timeoutMs: briefOptions.timeoutMs,
+      path: briefOptions.path,
+      spawn: briefOptions.spawn,
+      resolve: briefOptions.resolve,
+    })
+      .then((outcome) => {
+        if (stopped) return;
+        state = briefLoaded(state, outcome);
+        draw();
+      })
+      .catch(() => {
+        // `runBrief` reports failure in its outcome rather than by throwing;
+        // this is only here so an unexpected throw cannot become an unhandled
+        // rejection that takes the session down.
+        if (stopped) return;
+        state = briefLoaded(state, { status: "unavailable" });
+        draw();
+      })
+      .finally(settleBrief);
+  }
+
   return {
     state: () => state,
     lines: () => lines,
     frame: () => frameText(lines),
     press,
     reload,
+    work: () => work,
+    briefText: () => (state.brief.status === "ready" ? state.brief.text : undefined),
+    briefSettled,
     stop,
     closed,
   };

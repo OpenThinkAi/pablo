@@ -43,6 +43,10 @@ test("a shifted symbol binds as itself, not as its unshifted key", () => {
   expect(matchBinding({ name: "g", sequence: "G" })?.action).toBe("bottom");
   expect(matchBinding({ name: "g", sequence: "g" })?.action).toBe("top");
   expect(matchBinding({ name: "]", sequence: "}" })?.action).toBe("endForward");
+
+  // The brief takes the shifted `B`; unshifted `b` is still a page up.
+  expect(matchBinding({ name: "b", sequence: "B" })?.action).toBe("toggleBrief");
+  expect(matchBinding({ name: "b", sequence: "b" })?.action).toBe("pageUp");
 });
 
 test("letters, arrows and control chords all resolve", () => {

@@ -63,6 +63,7 @@ positional, so they sit in the same place on Colemak as on QWERTY.
 | `space` / `b`, `PgDn` / `PgUp`, `ctrl+d` / `ctrl+u` | scroll a screen |
 | `g` / `G`, `Home` / `End` | start / end of the manuscript |
 | `r` | re-read the file from disk now |
+| `B` | show the work brief (`↓` / `↑` scroll it, `esc` closes) |
 | `?` | show the key map (`↓` / `↑` scroll it, `esc` closes) |
 | `q`, `ctrl+c` | quit |
 
@@ -73,6 +74,32 @@ as `‸` and named in the status line.
 
 The map lives in `packages/tui/src/keymap.ts` as data, and the in-app `?` screen
 is generated from it, so a new verb documents itself.
+
+## The work brief
+
+Opening a file inside a writing vault runs the work's brief **as an app event**,
+because the model will not run a session preamble on its own. The vault root is
+the nearest ancestor holding `style/`, and the work is the directory directly
+under `<vault>/<kind>/`, so `~/writing/novels/valleys-shadow/chapters/01.md`
+briefs the slug `valleys-shadow`:
+
+```sh
+think brief --cortex writing --context valleys-shadow
+```
+
+It runs **once per session**, off the render loop, with a 20-second timeout, and
+the result is cached in memory for as long as the view is open. `B` shows it;
+`↓` / `↑` scroll it and `esc` or `B` closes it.
+
+`think` is resolved from `PATH` when the view opens and is never a hardcoded
+path. If it is missing, exits non-zero, or times out, the view opens exactly as
+it would otherwise and the reason appears as one line in the status bar —
+nothing in the session waits on the brief.
+
+The brief is **context, not content**. It is read-only for the whole session and
+is never written into the manuscript; `ViewHandle.briefText()` is how a verb
+that assembles a context pack reads it, and the pack puts it in after the style
+rules.
 
 ## License
 
