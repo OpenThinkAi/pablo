@@ -133,10 +133,13 @@ test("`?` shows the key map, and scrolls it so the whole map is reachable", asyn
   expect(setup.captureCharFrame()).toContain("pablo — keys");
 
   // The map is taller than a short terminal, so the scroll keys scroll it
-  // rather than the manuscript underneath.
-  await setup.mockInput.pressKey(" ");
-  await setup.mockInput.pressKey(" ");
-  await setup.renderOnce();
+  // rather than the manuscript underneath. Paged until the last row shows
+  // rather than a fixed number of times: every ticket that adds a verb adds a
+  // row, and a hard-coded page count would have to be bumped by each of them.
+  for (let page = 0; page < 20 && !handle.frame().includes("quit"); page += 1) {
+    await setup.mockInput.pressKey(" ");
+    await setup.renderOnce();
+  }
   expect(handle.frame()).toContain("quit");
   expect(handle.state().anchor).toEqual({ blockIndex: 0, line: 0 });
 

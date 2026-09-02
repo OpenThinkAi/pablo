@@ -22,6 +22,12 @@ Verbs on the selection:
   o            open $EDITOR here       d       dry run: show the pack, send nothing
   R            retry the last prompt
 
+Reviewing the proposals the model made — n / p walk the queue:
+
+  v            open or leave review    c       change the proposal, then accept it
+  y            accept it (and commit)  k       reject it, keeping the original
+  Y / K        accept / reject all     u       undo the last accept on this paragraph
+
 The file is re-read whenever it changes on disk, so editing it elsewhere is a
 supported way to work.
 

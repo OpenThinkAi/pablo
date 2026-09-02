@@ -11,7 +11,14 @@
  * (AC4). Everything here is pure, so the field is tested without a terminal.
  */
 
-export type FieldKind = "prompt" | "manual";
+/**
+ * `prompt` is one line of instruction for the model; `manual` is the author's
+ * own replacement for a span; `proposal` is the model's proposed text opened
+ * for adjustment before it is accepted (AGT-1205 AC2). The last two are the
+ * same box with different consequences, which is why the title and the hint
+ * say which one you are in.
+ */
+export type FieldKind = "prompt" | "manual" | "proposal";
 
 export interface Field {
   readonly kind: FieldKind;
@@ -26,24 +33,27 @@ export interface Field {
   readonly multiline: boolean;
 }
 
+const TITLES: Readonly<Record<FieldKind, string>> = {
+  prompt: "prompt the model on the selection",
+  manual: "manual edit — your text replaces the selection, with no markup",
+  proposal: "edit the proposal — ctrl+s accepts what you have typed, not what the model wrote",
+};
+
+const HINTS: Readonly<Record<FieldKind, string>> = {
+  prompt: "enter sends  ·  esc cancels",
+  manual: "ctrl+s saves  ·  enter is a new line  ·  esc cancels",
+  proposal: "ctrl+s accepts  ·  enter is a new line  ·  esc cancels, leaving the proposal pending",
+};
+
 export function openField(kind: FieldKind, value: string): Field {
-  return kind === "prompt"
-    ? {
-        kind,
-        title: "prompt the model on the selection",
-        hint: "enter sends  ·  esc cancels",
-        value,
-        cursor: value.length,
-        multiline: false,
-      }
-    : {
-        kind,
-        title: "manual edit — your text replaces the selection, with no markup",
-        hint: "ctrl+s saves  ·  enter is a new line  ·  esc cancels",
-        value,
-        cursor: value.length,
-        multiline: true,
-      };
+  return {
+    kind,
+    title: TITLES[kind],
+    hint: HINTS[kind],
+    value,
+    cursor: value.length,
+    multiline: kind !== "prompt",
+  };
 }
 
 export function insertInto(field: Field, text: string): Field {

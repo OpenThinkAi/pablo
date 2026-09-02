@@ -22,7 +22,7 @@
  * `q`uit) so they land in the same place on a Colemak layout as on QWERTY.
  */
 
-export type BindingGroup = "reading" | "selection" | "verbs" | "session";
+export type BindingGroup = "reading" | "selection" | "verbs" | "review" | "session";
 
 export interface Binding {
   /** The action id the view dispatches. */
@@ -57,8 +57,8 @@ export const BINDINGS: readonly Binding[] = [
   { action: "top", chords: ["g", "home"], label: "go to the start of the manuscript", group: "reading" },
   { action: "bottom", chords: ["G", "end"], label: "go to the end of the manuscript", group: "reading" },
 
-  { action: "next", chords: ["n", "right"], label: "select the next unit", group: "selection" },
-  { action: "previous", chords: ["p", "left"], label: "select the previous unit", group: "selection" },
+  { action: "next", chords: ["n", "right"], label: "select the next unit — the next proposal, in review", group: "selection" },
+  { action: "previous", chords: ["p", "left"], label: "select the previous unit — the previous proposal, in review", group: "selection" },
   { action: "expand", chords: ["+", "="], label: "expand one level, up to the whole chapter", group: "selection" },
   { action: "shrink", chords: ["-", "_"], label: "shrink one level, down to characters", group: "selection" },
   { action: "startBack", chords: ["["], label: "move the selection start one character left", group: "selection" },
@@ -76,6 +76,19 @@ export const BINDINGS: readonly Binding[] = [
   { action: "dryRun", chords: ["d"], label: "dry run: the pack that would be sent, slice by slice", group: "verbs" },
   { action: "retry", chords: ["R"], label: "retry the last prompt", group: "verbs" },
 
+  // AGT-1205. Every one of these is bound globally rather than only inside
+  // review, because `matchBinding` is one flat table and a second, modal table
+  // would be a second thing to keep honest — and because a key that silently
+  // does nothing in one mode is worse than one that says why. Outside review
+  // they answer with the line that tells you `v` opens it.
+  { action: "review", chords: ["v"], label: "review the pending proposals, one hunk at a time", group: "review" },
+  { action: "accept", chords: ["y"], label: "accept this proposal: its text replaces the original, and commits", group: "review" },
+  { action: "reject", chords: ["k"], label: "reject this proposal: keep the original text", group: "review" },
+  { action: "changeProposal", chords: ["c"], label: "change the proposed text in a field, then accept what you typed", group: "review" },
+  { action: "acceptAll", chords: ["Y"], label: "accept every pending proposal, as one commit", group: "review" },
+  { action: "rejectAll", chords: ["K"], label: "reject every pending proposal", group: "review" },
+  { action: "revert", chords: ["u"], label: "undo the last accepted proposal on this paragraph, from git", group: "review" },
+
   { action: "reload", chords: ["r"], label: "re-read the file from disk", group: "session" },
   { action: "toggleBrief", chords: [BRIEF_KEY], label: "show or hide the work brief", group: "session" },
   { action: "toggleHelp", chords: ["?"], label: "show or hide this help", group: "session" },
@@ -87,13 +100,19 @@ export const GROUP_LABELS: Readonly<Record<BindingGroup, string>> = {
   reading: "Reading",
   selection: "Selection",
   verbs: "Verbs on the selection",
+  review: "Reviewing proposals",
   session: "Session",
 };
 
 /**
  * The actions `view.ts` handles itself, because each one reaches outside the
- * pure state machine: the disk (`reload`, `cut`, `move`, `manualEdit`), another
- * process (`openEditor`), or a provider (`prompt`, `dryRun`, `retry`).
+ * pure state machine: the disk (`reload`, `cut`, `move`, `manualEdit`, and the
+ * review verbs, which write and then run `git`), another process
+ * (`openEditor`), or a provider (`prompt`, `dryRun`, `retry`).
+ *
+ * `review` itself is **not** here: opening the queue is a state transition, and
+ * the one thing about it that touches disk — the hunk's receipt — is stamped on
+ * afterwards by the view rather than fetched by the action.
  *
  * They are bindings like any other and they appear in the help; they simply
  * have no entry in `ACTIONS`. Keeping the list here rather than in the view is
@@ -109,6 +128,12 @@ export const VIEW_OWNED: ReadonlySet<string> = new Set([
   "openEditor",
   "dryRun",
   "retry",
+  "accept",
+  "reject",
+  "changeProposal",
+  "acceptAll",
+  "rejectAll",
+  "revert",
 ]);
 
 /** C0 controls and DEL: a chord is a character you can see, never an escape byte. */

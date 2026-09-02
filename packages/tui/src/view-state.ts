@@ -21,11 +21,13 @@ import {
   shrink as shrinkSelection,
   type Document,
   type Granularity,
+  type Mark,
   type MarkupDocument,
   type Selection,
   type Span,
 } from "@openthink/pablo-core";
 import { openField, type Field } from "./field";
+import { proposedText, reviewQueue } from "./review";
 import {
   blockIndexAt,
   blockRowCount,
@@ -61,6 +63,48 @@ export const IDLE_BRIEF: BriefPane = { open: false, offset: 0, status: "none" };
 export interface Overlay {
   readonly title: string;
   readonly lines: readonly string[];
+}
+
+/**
+ * Review mode: the proposal queue, as the view holds it (AGT-1205 AC1).
+ *
+ * The queue itself is **not** in here. It is `reviewQueue(state.model)`, derived
+ * from the current parse every time it is asked for, because a `Mark` addresses
+ * the exact text it came from and every accept rewrites the file. A cached queue
+ * would be a list of dead offsets one keypress after it was built. What is held
+ * is the *position* in that queue, which survives a re-parse.
+ */
+export interface ReviewPane {
+  readonly open: boolean;
+  /** Index into `reviewQueue(model)`, clamped to it on every move. */
+  readonly index: number;
+  /**
+   * The granularity the selection had on the way in, handed back on the way
+   * out. A mark is an exact range, so review selects at `character` — and an
+   * author who left review to keep reading would otherwise find `n` crawling
+   * one character at a time through the manuscript, having never asked it to.
+   */
+  readonly granularity: Granularity;
+  /**
+   * The receipt line for the hunk under review (AC5), stamped by the view
+   * because reading `.pablo/receipts.jsonl` is disk and this module is pure.
+   */
+  readonly receipt: string;
+}
+
+export const IDLE_REVIEW: ReviewPane = { open: false, index: 0, granularity: "paragraph", receipt: "" };
+
+/**
+ * A proposal opened in the field and not yet accepted (AC2).
+ *
+ * The gesture spans two key presses — `c` opens the field, `ctrl+s` writes —
+ * and the file can be rewritten between them by `$EDITOR`, a git checkout, or
+ * the watch. `text` is the mark exactly as it was when the field opened, so the
+ * write can check that it is still there before replacing that range.
+ */
+export interface PendingProposal {
+  readonly span: Span;
+  readonly text: string;
 }
 
 /** A span cut by `move` and waiting for the boundary it lands on (AC3). */
@@ -104,6 +148,8 @@ export interface ViewState {
   readonly helpOffset: number;
   /** The work brief (AC1, AC2). Present whether or not it has anything in it. */
   readonly brief: BriefPane;
+  /** The proposal queue (AGT-1205). Closed unless the author opened it. */
+  readonly review: ReviewPane;
   /** A transient line for the status bar: a reload notice, a read error. */
   readonly message: string;
   /**
@@ -117,6 +163,7 @@ export interface ViewState {
   readonly run: RunState | undefined;
   readonly overlay: Overlay | undefined;
   readonly pendingMove: PendingMove | undefined;
+  readonly pendingProposal: PendingProposal | undefined;
   /** False once the author has quit; the view tears down on the next tick. */
   readonly running: boolean;
 }
@@ -347,11 +394,15 @@ export function briefNotice(brief: BriefPane): string {
 }
 
 /**
- * Close every full-screen page: the help, the brief, and the dry-run preview.
+ * Close every page over the manuscript: the help, the brief, the dry-run
+ * preview, and the review queue.
  *
- * There are three of them now and only one screen, so every action that opens
+ * There are four of them now and only one screen, so every action that opens
  * one starts by closing the others. Doing it in one place is what stops the
- * fourth page from being the one that forgets.
+ * fifth page from being the one that forgets. The single exception is
+ * `openProposalEdit`, which opens a field *inside* review and puts the pane
+ * back afterwards — the field is the review surface at that moment, not a page
+ * that replaced it.
  */
 function closePages(state: ViewState): ViewState {
   return {
@@ -360,7 +411,72 @@ function closePages(state: ViewState): ViewState {
     helpOffset: 0,
     overlay: undefined,
     brief: { ...state.brief, open: false, offset: 0 },
+    review: IDLE_REVIEW,
+    selection: leftReview(state),
   };
+}
+
+/** The selection as it should be once review is closed: its granularity back. */
+function leftReview(state: ViewState): Selection {
+  return state.review.open
+    ? { span: state.selection.span, granularity: state.review.granularity }
+    : state.selection;
+}
+
+/**
+ * Put the cursor on hunk `index` (AC1).
+ *
+ * The queue is re-derived here rather than passed in, so this is correct after
+ * a write as well as after a keypress. An empty queue closes review outright:
+ * there is nothing to be positioned on, and an open pane over no proposals is
+ * a lie about the file.
+ */
+function toHunk(state: ViewState, index: number, cache?: LineCache): ViewState {
+  const queue = reviewQueue(state.model);
+  if (queue.length === 0) {
+    return {
+      ...state,
+      review: IDLE_REVIEW,
+      selection: leftReview(state),
+      message: "no proposals left in this file",
+      receipt: "",
+    };
+  }
+
+  const at = clamp(index, 0, queue.length - 1);
+  const mark = queue[at];
+  if (mark === undefined) return state;
+
+  // Character granularity because a mark is an exact range and calling it a
+  // paragraph would make `+` and `-` lie about what is selected.
+  const next = select(state, { span: mark.span, granularity: "character" }, cache);
+  return { ...next, review: { ...next.review, open: true, index: at, receipt: "" } };
+}
+
+/** The mark under review, or `undefined` when review is closed or the queue is empty. */
+export function hunkUnderReview(state: ViewState): Mark | undefined {
+  return state.review.open ? reviewQueue(state.model)[state.review.index] : undefined;
+}
+
+/**
+ * Put review back on a hunk after a write (AC2).
+ *
+ * The accepted hunk is gone from the queue, so the same index is now the next
+ * proposal — the queue advances by standing still. The message survives,
+ * because it is what the write just said and the author has not done anything
+ * else yet.
+ */
+export function refocusReview(state: ViewState, cache?: LineCache): ViewState {
+  if (!state.review.open) return state;
+  const { message } = state;
+  const next = toHunk(state, state.review.index, cache);
+  return next.review.open ? { ...next, message } : next;
+}
+
+/** The receipt line for the hunk under review, stamped by the view (AC5). */
+export function withReceiptLine(state: ViewState, line: string): ViewState {
+  if (!state.review.open || state.review.receipt === line) return state;
+  return { ...state, review: { ...state.review, receipt: line } };
 }
 
 export const ACTIONS: Readonly<Record<string, Action>> = {
@@ -375,7 +491,31 @@ export const ACTIONS: Readonly<Record<string, Action>> = {
     message: "",
     run: state.run?.phase === "failed" ? undefined : state.run,
     pendingMove: undefined,
+    pendingProposal: undefined,
   }),
+
+  /**
+   * AGT-1205 AC1: open the proposal queue on its first hunk, or leave it.
+   *
+   * Pure, even though the pane shows a receipt read off disk: the receipt is
+   * stamped on afterwards by the view (`withReceiptLine`), so entering review
+   * stays a state transition and the disk stays in `view.ts` where the rest of
+   * pablo's I/O is.
+   */
+  review: (state, cache) => {
+    if (state.review.open) return { ...closePages(state), message: "" };
+    if (reviewQueue(state.model).length === 0) {
+      return { ...state, message: "nothing to review: this file has no pending proposals" };
+    }
+    return toHunk(
+      {
+        ...closePages(state),
+        review: { ...IDLE_REVIEW, open: true, granularity: state.selection.granularity },
+      },
+      0,
+      cache,
+    );
+  },
 
   // One page at a time: the brief replaces the help and the dry run rather than
   // stacking on either. A brief that is not ready says why in the status line
@@ -404,8 +544,17 @@ export const ACTIONS: Readonly<Record<string, Action>> = {
       cache,
     ),
 
-  next: (state, cache) => select(state, stepUnit(state.model, state.selection, 1), cache),
-  previous: (state, cache) => select(state, stepUnit(state.model, state.selection, -1), cache),
+  // In review these step through the proposal queue instead of the structural
+  // ladder (AC1). Same gesture, same direction, one noun narrower — which is
+  // cheaper to learn than a second pair of keys that only work in one mode.
+  next: (state, cache) =>
+    state.review.open
+      ? toHunk(state, state.review.index + 1, cache)
+      : select(state, stepUnit(state.model, state.selection, 1), cache),
+  previous: (state, cache) =>
+    state.review.open
+      ? toHunk(state, state.review.index - 1, cache)
+      : select(state, stepUnit(state.model, state.selection, -1), cache),
   expand: (state, cache) => select(state, expandSelection(state.model, state.selection), cache),
   shrink: (state, cache) => select(state, shrinkSelection(state.model, state.selection), cache),
 
@@ -449,12 +598,36 @@ export function openManual(state: ViewState): ViewState {
   return { ...closePages(state), field: openField("manual", value), message: "", receipt: "" };
 }
 
+/**
+ * AGT-1205 AC2: the proposed text, opened in the field for adjustment.
+ *
+ * Review stays open behind it — the field *is* the review surface for as long
+ * as it is up, and `ctrl+s` accepts what is in it rather than saving an edit.
+ * `pendingProposal` remembers the mark as it stands right now so the write can
+ * check nothing moved underneath it.
+ */
+export function openProposalEdit(state: ViewState, mark: Mark): ViewState {
+  const value = proposedText(state.model.text, mark);
+  if (value === undefined) {
+    return { ...state, message: "this hunk proposes no text to edit — accept or reject it instead" };
+  }
+  return {
+    ...closePages(state),
+    review: state.review,
+    selection: state.selection,
+    field: openField("proposal", value),
+    pendingProposal: { span: mark.span, text: state.doc.text.slice(mark.span.start, mark.span.end) },
+    message: "",
+    receipt: "",
+  };
+}
+
 export function withField(state: ViewState, field: Field): ViewState {
   return { ...state, field };
 }
 
 export function closeField(state: ViewState, message = ""): ViewState {
-  return { ...state, field: undefined, message };
+  return { ...state, field: undefined, pendingProposal: undefined, message };
 }
 
 export function showOverlay(state: ViewState, overlay: Overlay): ViewState {
@@ -590,12 +763,14 @@ export function initialState(manuscript: Manuscript, size: Size, brief: BriefPan
     help: false,
     helpOffset: 0,
     brief,
+    review: IDLE_REVIEW,
     message: "",
     receipt: "",
     field: undefined,
     run: undefined,
     overlay: undefined,
     pendingMove: undefined,
+    pendingProposal: undefined,
     running: true,
   };
 }
@@ -662,6 +837,7 @@ export function applied(
       ...reread,
       selection: { span: { start, end: clamp(span.end, start, length) }, granularity: state.selection.granularity },
       pendingMove: undefined,
+      pendingProposal: undefined,
     },
     cache,
   );
