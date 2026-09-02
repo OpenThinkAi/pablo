@@ -8,6 +8,7 @@
  * provider-neutral.
  */
 
+import { createAnthropicAdapter } from "./anthropic";
 import type { AdapterKind, PabloConfig, ProviderConfig } from "./config";
 import { ProviderConfigError } from "./errors";
 import type { KeyLookup } from "./keys";
@@ -19,8 +20,12 @@ import type { EndpointRates } from "./rates";
 import { RateMeter } from "./rates";
 import type { Adapter, Intent } from "./types";
 
-const ADAPTERS: Record<AdapterKind, (options: OpenAiAdapterOptions) => Adapter> = {
+/** Every adapter factory takes the same options; the registry only needs that shape. */
+type AdapterFactory = (options: OpenAiAdapterOptions) => Adapter;
+
+const ADAPTERS: Record<AdapterKind, AdapterFactory> = {
   "openai-compatible": createOpenAiAdapter,
+  anthropic: createAnthropicAdapter,
 };
 
 export interface Providers {
