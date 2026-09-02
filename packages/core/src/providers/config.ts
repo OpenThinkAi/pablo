@@ -14,8 +14,7 @@
  *   "default": "local",
  *   "providers": {
  *     "local":     { "endpoint": "http://127.0.0.1:8002/v1", "model": "mlx-community/gemma-4-31b-it-4bit", "local": true },
- *     "anthropic": { "endpoint": "https://api.anthropic.com/v1", "model": "claude-opus-4-1", "kind": "openai-compatible",
- *                    "key": "keychain:ANTHROPIC_API_KEY_PERSONAL/mattpardini" }
+ *     "anthropic": { "kind": "anthropic", "key": "keychain:ANTHROPIC_API_KEY_PERSONAL/mattpardini" }
  *   },
  *   "intents": { "research": "anthropic" }
  * }
@@ -29,10 +28,10 @@ import { ProviderConfigError } from "./errors";
 import { keySourceFor } from "./keys";
 import type { KeySource } from "./keys";
 
-/** Which adapter drives a provider. `anthropic` (AGT-1206) registers here next. */
-export type AdapterKind = "openai-compatible";
+/** Which adapter drives a provider: an OpenAI-compatible endpoint, or Anthropic's Messages API. */
+export type AdapterKind = "openai-compatible" | "anthropic";
 
-const ADAPTER_KINDS: readonly AdapterKind[] = ["openai-compatible"];
+const ADAPTER_KINDS: readonly AdapterKind[] = ["openai-compatible", "anthropic"];
 
 export interface ProviderConfig {
   readonly id: string;
@@ -58,6 +57,23 @@ export interface PabloConfig {
 export const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:8002/v1";
 export const DEFAULT_LOCAL_MODEL = "mlx-community/gemma-4-31b-it-4bit";
 export const DEFAULT_TIMEOUT_MS = 60_000;
+
+export const DEFAULT_ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1";
+/**
+ * The latest generally available model at build time (2026-09-02), read from
+ * the current model list rather than recalled. A config entry may name another.
+ */
+export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
+
+/**
+ * What `kind` implies when an entry does not say. Anthropic has one endpoint
+ * and a known current model, so `{ "kind": "anthropic", "key": "keychain:..." }`
+ * is a complete provider — a key and a toggle, which is the requirement.
+ */
+const KIND_DEFAULTS: Record<AdapterKind, { endpoint?: string; model?: string }> = {
+  "openai-compatible": {},
+  anthropic: { endpoint: DEFAULT_ANTHROPIC_ENDPOINT, model: DEFAULT_ANTHROPIC_MODEL },
+};
 
 /** Where `loadConfig` looks when it is not told otherwise. */
 export function configPath(env: Record<string, string | undefined> = process.env): string {
@@ -141,12 +157,14 @@ function readProvider(
   const where = `${source}: provider "${id}"`;
   if (!isRecord(entry)) throw new ProviderConfigError(`pablo: ${where} must be an object`);
 
-  const endpoint = readEndpoint(entry["endpoint"] ?? existing?.endpoint, where);
-  const model = readString(entry["model"] ?? existing?.model, `${where}: "model"`);
   const kind = entry["kind"] ?? existing?.kind ?? "openai-compatible";
   if (!ADAPTER_KINDS.includes(kind as AdapterKind)) {
     throw new ProviderConfigError(`pablo: ${where}: unknown "kind" — known kinds are ${ADAPTER_KINDS.join(", ")}`);
   }
+  const defaults = KIND_DEFAULTS[kind as AdapterKind];
+
+  const endpoint = readEndpoint(entry["endpoint"] ?? existing?.endpoint ?? defaults.endpoint, where);
+  const model = readString(entry["model"] ?? existing?.model ?? defaults.model, `${where}: "model"`);
   const local = entry["local"] ?? existing?.local ?? false;
   if (typeof local !== "boolean") throw new ProviderConfigError(`pablo: ${where}: "local" must be true or false`);
 

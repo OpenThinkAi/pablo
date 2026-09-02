@@ -14,6 +14,8 @@ export type { AdapterKind, LoadConfigOptions, PabloConfig, ProviderConfig } from
 export {
   configPath,
   defaultConfig,
+  DEFAULT_ANTHROPIC_ENDPOINT,
+  DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_LOCAL_ENDPOINT,
   DEFAULT_LOCAL_MODEL,
   DEFAULT_TIMEOUT_MS,
@@ -25,6 +27,8 @@ export { envVariableFor, keySourceFor, readKeychain, resolveKey } from "./keys";
 export { Gate } from "./queue";
 export type { EndpointRates } from "./rates";
 export { RateMeter } from "./rates";
+export type { AnthropicAdapterOptions, AnthropicOutputPath } from "./anthropic";
+export { createAnthropicAdapter } from "./anthropic";
 export type { OpenAiAdapterOptions } from "./openai";
 export { createOpenAiAdapter } from "./openai";
 export type { Providers, ProvidersOptions } from "./registry";
