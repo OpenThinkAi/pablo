@@ -39,6 +39,29 @@ it walks `packages/core/src` and fails on any import matching
 `opentui|node:tty|ink|blessed`, and on any dependency in core's manifest. If that
 test fails, the code belongs in `packages/tui`.
 
+## The context pack
+
+`packages/core/src/pack` assembles every prompt pablo sends. Two rules that are
+easy to break by accident:
+
+- **Assembly is pure.** `assemblePack(kind, inputs)` reads no files, calls no
+  model and asks no clock, so the same inputs give the same bytes and the same
+  `sha256` hash. Disk lives in `pack/vault.ts`, which turns a vault into inputs;
+  anything that needs I/O during assembly belongs there instead.
+- **Nothing shrinks silently.** Over budget, the pack reports every truncation
+  and every drop as a `SliceAdjustment` and marks the seam in the prompt.
+
+**Receipts are written to `<vault>/.pablo/receipts.jsonl`** — the *writing*
+vault's root, not this repo. That path must be in the vault's own `.gitignore`:
+it is machine state, it grows without bound, and it is not part of the
+manuscript. pablo never edits the vault's `.gitignore` itself, so a new vault
+needs the line added by hand:
+
+```
+# in ~/writing/.gitignore
+.pablo/
+```
+
 ## Build commands
 
 ```sh
