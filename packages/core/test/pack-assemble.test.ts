@@ -159,25 +159,40 @@ test("pack.context is what the adapter is given, and pack.prompt is what goes ov
   const adapter = createProviders(config, { keys: { env: {} } }).adapter("local");
   const intent: Intent = { name: "tighten", kind: "revising" };
 
-  await adapter.proposeEdit({ intent, instruction: "cut this by a third", context: pack.context, document: doc, span });
+  const edit = { intent, instruction: "cut this by a third", context: pack.context, document: doc, span };
+  await adapter.proposeEdit({ ...edit, output: "text" });
+  await adapter.proposeEdit(edit);
 
-  const sent = String(
-    ((fake.requests[0]?.body["messages"] as { content?: unknown }[] | undefined)?.[0]?.content) ?? "",
-  );
+  const sentAs = (index: number) =>
+    String(
+      ((fake.requests[index]?.body["messages"] as { content?: unknown }[] | undefined)?.[0]?.content) ?? "",
+    );
+  const sentText = sentAs(0);
+  const sentDefault = sentAs(1);
 
-  // The pack owns the prompt. What the adapter composed begins with the pack's
-  // context verbatim, and the tail it adds for itself (the passage, the
-  // instruction, the closing line) is the tail the pack already priced — so the
-  // pack's total is what the endpoint was asked to read, not an approximation
-  // of it. Asserted by shape rather than by byte equality so that a change to
-  // the adapter's own wording is not a failure here.
-  expect(sent.startsWith(pack.context)).toBe(true);
+  // The pack owns the prompt. On the CriticMarkup-as-text path what the adapter
+  // composed begins with the pack's context verbatim, and the tail it adds for
+  // itself (the passage, the instruction, the closing line) is the tail the
+  // pack already priced — so the pack's total is what the endpoint was asked to
+  // read, not an approximation of it. Asserted by shape rather than by byte
+  // equality so that a change to the adapter's own wording is not a failure.
+  expect(sentText.startsWith(pack.context)).toBe(true);
   expect(pack.prompt.startsWith(pack.context)).toBe(true);
   for (const name of ["passage", "instruction", "closing"]) {
     const text = pack.slices.find((candidate) => candidate.name === name)?.text ?? "";
     expect(text).not.toBe("");
-    expect(sent).toContain(text);
+    expect(sentText).toContain(text);
     expect(pack.prompt).toContain(text);
   }
   expect(pack.context).not.toContain("cut this by a third");
+
+  // The adapter's preferred path (the tool call, from the AGT-1202 bake-off)
+  // reads the same context, passage and instruction; only its closing line
+  // differs, because it asks for a call rather than for markup. The priced
+  // slices are the ones that dominate the size either way.
+  expect(sentDefault.startsWith(pack.context)).toBe(true);
+  for (const name of ["passage", "instruction"]) {
+    const text = pack.slices.find((candidate) => candidate.name === name)?.text ?? "";
+    expect(sentDefault).toContain(text);
+  }
 });

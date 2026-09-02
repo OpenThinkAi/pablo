@@ -140,6 +140,7 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
   return {
     id: adapter.id,
     model: adapter.model,
+    preferredOutput: adapter.preferredOutput,
 
     async *complete(request: CompletionRequest): AsyncIterable<CompletionEvent> {
       const started = now();
