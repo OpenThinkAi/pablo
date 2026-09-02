@@ -82,7 +82,7 @@ export function findVaultRoot(path: string, isDirectory: DirectoryProbe = direct
 export function workUnder(vaultRoot: string, path: string): Work | undefined {
   const root = resolve(vaultRoot);
   const inside = relative(root, resolve(path));
-  if (inside.length === 0 || inside.startsWith("..") || inside.startsWith(sep)) return undefined;
+  if (inside.length === 0 || inside.startsWith("..")) return undefined;
 
   const segments = inside.split(sep).filter((segment) => segment.length > 0);
   if (segments.length < 3) return undefined;

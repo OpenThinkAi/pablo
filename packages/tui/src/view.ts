@@ -35,8 +35,11 @@ import {
 /**
  * How the session fetches the work brief (AC1). `false` on `OpenViewOptions`
  * turns it off entirely, which is what a test that is not about the brief wants.
+ *
+ * There is no `signal` here on purpose: the view owns the cancellation, because
+ * the one thing that must always abort the fetch is the view tearing down.
  */
-export interface ViewBriefOptions extends RunBriefOptions {
+export interface ViewBriefOptions extends Omit<RunBriefOptions, "signal"> {
   /** Skip detection and brief this slug. */
   readonly slug?: string | undefined;
   /** The directory probe detection uses; injected in tests. */
