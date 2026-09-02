@@ -6,7 +6,16 @@ import { createLineCache, layoutWindow } from "../src/layout";
 import { frameText } from "../src/render";
 import { CARET_GLYPH } from "../src/theme";
 import type { Manuscript } from "../src/source";
-import { applyAction, initialState, reloaded, stepUnit, unitAt, viewportOf } from "../src/view-state";
+import {
+  applyAction,
+  briefLoaded,
+  briefStarted,
+  initialState,
+  reloaded,
+  stepUnit,
+  unitAt,
+  viewportOf,
+} from "../src/view-state";
 
 const FIXTURES = fileURLToPath(new URL("../../core/test/fixtures/criticmarkup/", import.meta.url));
 
@@ -190,4 +199,67 @@ test("unitAt lands on the unit around an offset, and stepUnit walks them in orde
 
   const back = stepUnit(source.model, next, -1);
   expect(back.span).toEqual(paragraph.span);
+});
+
+test("the brief is a state machine, and a failure is a notice not a throw (AC3)", () => {
+  const { state } = open();
+  expect(state.brief).toEqual({ open: false, offset: 0, status: "none" });
+
+  const loading = briefStarted(state, "ice-house");
+  expect(loading.brief.status).toBe("loading");
+  expect(loading.brief.slug).toBe("ice-house");
+
+  const ready = briefLoaded(loading, { status: "ready", text: "the brief" });
+  expect(ready.brief.status).toBe("ready");
+  expect(ready.brief.text).toBe("the brief");
+
+  const failed = briefLoaded(loading, { status: "unavailable", notice: "think is not on PATH" });
+  expect(failed.brief.status).toBe("unavailable");
+  expect(failed.brief.text).toBeUndefined();
+  expect(failed.message).toBe("think is not on PATH");
+  expect(failed.running).toBe(true);
+});
+
+test("`toggleBrief` opens only a brief there is, and says why when there is not", () => {
+  const { state } = open();
+
+  // Nothing to show: the message says so and the pane stays shut.
+  const none = applyAction(state, "toggleBrief");
+  expect(none.brief.open).toBe(false);
+  expect(none.message).toContain("not under");
+
+  const stillLoading = applyAction(briefStarted(state, "ice-house"), "toggleBrief");
+  expect(stillLoading.brief.open).toBe(false);
+  expect(stillLoading.message).toContain("loading");
+
+  const ready = briefLoaded(briefStarted(state, "ice-house"), { status: "ready", text: "the brief" });
+  const shown = applyAction(ready, "toggleBrief");
+  expect(shown.brief.open).toBe(true);
+  expect(applyAction(shown, "toggleBrief").brief.open).toBe(false);
+  expect(applyAction(shown, "dismiss").brief.open).toBe(false);
+  // One overlay at a time.
+  expect(applyAction(shown, "toggleHelp").brief.open).toBe(false);
+});
+
+test("the scroll keys scroll the brief while it is open, not the manuscript", () => {
+  const { state, cache } = open();
+  const ready = briefLoaded(briefStarted(state, "ice-house"), { status: "ready", text: "the brief" });
+  const shown = applyAction(ready, "toggleBrief");
+
+  const down = applyAction(applyAction(shown, "scrollDown", cache), "scrollDown", cache);
+  expect(down.brief.offset).toBe(2);
+  expect(down.anchor).toEqual(shown.anchor);
+
+  // And it never scrolls above the first row.
+  const up = applyAction(applyAction(applyAction(down, "scrollUp", cache), "scrollUp", cache), "scrollUp", cache);
+  expect(up.brief.offset).toBe(0);
+});
+
+test("a reload keeps the brief: it is session state, not file state (AC4)", () => {
+  const { state, cache } = open();
+  const ready = briefLoaded(briefStarted(state, "ice-house"), { status: "ready", text: "the brief" });
+  const after = reloaded(ready, manuscript("# One\n\nRewritten.\n"), cache);
+
+  expect(after.brief.text).toBe("the brief");
+  expect(after.doc.text).not.toContain("the brief");
 });

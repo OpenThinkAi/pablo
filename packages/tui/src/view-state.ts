@@ -33,7 +33,28 @@ import {
   type LineCache,
   type Viewport,
 } from "./layout";
+import type { BriefOutcome, BriefStatus } from "./brief";
 import type { Manuscript } from "./source";
+
+/**
+ * The work brief as the view holds it: one fetch per session, cached in memory,
+ * shown in an overlay. `status` is the whole state machine — `none` for a file
+ * that is not in a writing vault, `loading` while `think` runs off the render
+ * loop, then `ready` or `unavailable`.
+ */
+export interface BriefPane {
+  readonly open: boolean;
+  /** First row shown; the brief scrolls with the same keys as the help. */
+  readonly offset: number;
+  readonly status: BriefStatus;
+  readonly slug?: string | undefined;
+  /** The brief's text, on `ready`. Read-only context: it never reaches the file. */
+  readonly text?: string | undefined;
+  /** Why there is no brief, on `unavailable`. One line, for the status bar (AC3). */
+  readonly notice?: string | undefined;
+}
+
+export const IDLE_BRIEF: BriefPane = { open: false, offset: 0, status: "none" };
 
 export interface ViewState {
   readonly doc: Document;
@@ -46,6 +67,8 @@ export interface ViewState {
   readonly help: boolean;
   /** First row of the help screen on show; the help scrolls with the same keys. */
   readonly helpOffset: number;
+  /** The work brief (AC1, AC2). Present whether or not it has anything in it. */
+  readonly brief: BriefPane;
   /** A transient line for the status bar: a reload notice, a read error. */
   readonly message: string;
   /** False once the author has quit; the view tears down on the next tick. */
@@ -247,15 +270,62 @@ export type Action = (state: ViewState, cache?: LineCache) => ViewState;
  * the rendered help, so it is clamped where that is known — in the view's draw.
  */
 function scrollAny(state: ViewState, rows: number, cache?: LineCache): ViewState {
+  if (state.brief.open) {
+    const offset = Math.max(0, state.brief.offset + rows);
+    return offset === state.brief.offset ? state : { ...state, brief: { ...state.brief, offset } };
+  }
   if (!state.help) return scrolled(state, rows, cache);
   const helpOffset = Math.max(0, state.helpOffset + rows);
   return helpOffset === state.helpOffset ? state : { ...state, helpOffset };
 }
 
+/** Why the brief is not on screen, said in one line. */
+export function briefNotice(brief: BriefPane): string {
+  switch (brief.status) {
+    case "loading":
+      return "the work brief is still loading";
+    case "unavailable":
+      return brief.notice ?? "the work brief is not available";
+    case "ready":
+      return "";
+    default:
+      return "no work brief: this file is not under <vault>/<kind>/<slug>/";
+  }
+}
+
 export const ACTIONS: Readonly<Record<string, Action>> = {
   quit: (state) => ({ ...state, running: false }),
-  toggleHelp: (state) => ({ ...state, help: !state.help, helpOffset: 0, message: "" }),
-  dismiss: (state) => ({ ...state, help: false, helpOffset: 0, message: "" }),
+  toggleHelp: (state) => ({
+    ...state,
+    help: !state.help,
+    helpOffset: 0,
+    brief: { ...state.brief, open: false, offset: 0 },
+    message: "",
+  }),
+  dismiss: (state) => ({
+    ...state,
+    help: false,
+    helpOffset: 0,
+    brief: { ...state.brief, open: false, offset: 0 },
+    message: "",
+  }),
+
+  // One overlay at a time: the brief replaces the help rather than stacking on
+  // it. A brief that is not ready says why in the status line instead of
+  // opening an empty pane.
+  toggleBrief: (state) => {
+    if (state.brief.open) {
+      return { ...state, brief: { ...state.brief, open: false, offset: 0 }, message: "" };
+    }
+    if (state.brief.status !== "ready") return { ...state, message: briefNotice(state.brief) };
+    return {
+      ...state,
+      help: false,
+      helpOffset: 0,
+      brief: { ...state.brief, open: true, offset: 0 },
+      message: "",
+    };
+  },
 
   scrollDown: (state, cache) => scrollAny(state, 1, cache),
   scrollUp: (state, cache) => scrollAny(state, -1, cache),
@@ -310,7 +380,28 @@ export function applyAction(
   return run === undefined ? state : run(state, cache);
 }
 
-export function initialState(manuscript: Manuscript, size: Size): ViewState {
+/** The session has started fetching the brief for `slug` (AC1). */
+export function briefStarted(state: ViewState, slug: string): ViewState {
+  return { ...state, brief: { ...state.brief, status: "loading", slug } };
+}
+
+/**
+ * The fetch came back. A failure is a one-line notice in the status bar and
+ * nothing else: the view was already open and stays open (AC3).
+ */
+export function briefLoaded(state: ViewState, outcome: BriefOutcome): ViewState {
+  if (outcome.status === "ready") {
+    return { ...state, brief: { ...state.brief, status: "ready", text: outcome.text, notice: undefined } };
+  }
+  const notice = outcome.notice ?? "the work brief is not available";
+  return {
+    ...state,
+    brief: { ...state.brief, open: false, offset: 0, status: "unavailable", text: undefined, notice },
+    message: notice,
+  };
+}
+
+export function initialState(manuscript: Manuscript, size: Size, brief: BriefPane = IDLE_BRIEF): ViewState {
   const model = manuscript.model;
   return {
     doc: manuscript.doc,
@@ -321,6 +412,7 @@ export function initialState(manuscript: Manuscript, size: Size): ViewState {
     height: Math.max(1, size.height),
     help: false,
     helpOffset: 0,
+    brief,
     message: "",
     running: true,
   };
