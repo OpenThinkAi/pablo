@@ -57,3 +57,4 @@ export {
   readWorkRules,
   section,
 } from "./vault";
+export { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "./closing";

@@ -8,6 +8,7 @@
  */
 
 import type { Document, Span } from "../document";
+import type { OutputMode } from "../providers/types";
 import type { TokenEstimator } from "./estimate";
 
 /** The two shapes of prompt pablo assembles today. */
@@ -78,6 +79,12 @@ export interface SpanEditInputs {
   readonly style: readonly TextSource[];
   /** The work's own rules file (`QWEN.md`) when it has one. */
   readonly workRules?: TextSource | undefined;
+  /**
+   * Which structured path the adapter will take, so the closing line priced
+   * here is the one that goes over the wire. Defaults to the tool call, the
+   * OpenAI-compatible adapter's measured preference (AGT-1202).
+   */
+  readonly output?: OutputMode | undefined;
   /** Paragraphs of the manuscript to keep on each side of the span. Default 2. */
   readonly neighborhoodParagraphs?: number | undefined;
 }

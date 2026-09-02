@@ -149,35 +149,58 @@ test("the token estimator is one swappable function", () => {
 });
 
 test("pack.context is what the adapter is given, and pack.prompt is what goes over the wire", async () => {
-  const fake = startFakeEndpoint({ tokens: ["a tighter paragraph"] });
-  running.push(fake);
+  // One endpoint answers the CriticMarkup-as-text path in markup; the other
+  // answers the tool path with a propose_edit call. Each path is validated on
+  // the way back, so a fake that answers in the wrong form is a named error.
+  const textFake = startFakeEndpoint({ tokens: ["{~~", TEXT.slice(span.start, span.end), "~>a tighter paragraph~~}"] });
+  const toolFake = startFakeEndpoint({ tool: { arguments: { replacement: "a tighter paragraph" } } });
+  running.push(textFake, toolFake);
 
-  const pack = assemblePack("spanEdit", inputs());
-  const config = parseConfig(
-    JSON.stringify({ providers: { local: { endpoint: fake.url, model: "fake-writer" } } }),
-  );
-  const adapter = createProviders(config, { keys: { env: {} } }).adapter("local");
+  const adapterAt = (url: string) =>
+    createProviders(
+      parseConfig(JSON.stringify({ providers: { local: { endpoint: url, model: "fake-writer" } } })),
+      { keys: { env: {} } },
+    ).adapter("local");
   const intent: Intent = { name: "tighten", kind: "revising" };
-
-  await adapter.proposeEdit({ intent, instruction: "cut this by a third", context: pack.context, document: doc, span });
-
-  const sent = String(
-    ((fake.requests[0]?.body["messages"] as { content?: unknown }[] | undefined)?.[0]?.content) ?? "",
-  );
+  const sentTo = (fake: FakeEndpoint) =>
+    String(
+      ((fake.requests[0]?.body["messages"] as { content?: unknown }[] | undefined)?.[0]?.content) ?? "",
+    );
 
   // The pack owns the prompt. What the adapter composed begins with the pack's
   // context verbatim, and the tail it adds for itself (the passage, the
-  // instruction, the closing line) is the tail the pack already priced — so the
-  // pack's total is what the endpoint was asked to read, not an approximation
-  // of it. Asserted by shape rather than by byte equality so that a change to
-  // the adapter's own wording is not a failure here.
-  expect(sent.startsWith(pack.context)).toBe(true);
-  expect(pack.prompt.startsWith(pack.context)).toBe(true);
-  for (const name of ["passage", "instruction", "closing"]) {
-    const text = pack.slices.find((candidate) => candidate.name === name)?.text ?? "";
-    expect(text).not.toBe("");
-    expect(sent).toContain(text);
-    expect(pack.prompt).toContain(text);
+  // instruction, the closing line) is the tail the pack already priced for that
+  // path — so the pack's total is what the endpoint was asked to read, not an
+  // approximation of it. Asserted by shape rather than by byte equality so that
+  // a change to the adapter's own wording is not a failure here.
+  const cases = [
+    { output: "tool" as const, fake: toolFake },
+    { output: "text" as const, fake: textFake },
+  ];
+  for (const { output, fake } of cases) {
+    const pack = assemblePack("spanEdit", inputs({ output }));
+    await adapterAt(fake.url).proposeEdit({
+      intent,
+      instruction: "cut this by a third",
+      context: pack.context,
+      document: doc,
+      span,
+      output,
+    });
+    const sent = sentTo(fake);
+    expect(sent.startsWith(pack.context)).toBe(true);
+    expect(pack.prompt.startsWith(pack.context)).toBe(true);
+    for (const name of ["passage", "instruction", "closing"]) {
+      const text = pack.slices.find((candidate) => candidate.name === name)?.text ?? "";
+      expect(text).not.toBe("");
+      expect(sent).toContain(text);
+      expect(pack.prompt).toContain(text);
+    }
+    expect(pack.context).not.toContain("cut this by a third");
   }
-  expect(pack.context).not.toContain("cut this by a third");
+
+  // The default is the tool path, the adapter's measured preference.
+  expect(assemblePack("spanEdit", inputs()).prompt).toBe(assemblePack("spanEdit", inputs({ output: "tool" })).prompt);
+  expect(assemblePack("spanEdit", inputs({ output: "text" })).prompt).not.toBe(assemblePack("spanEdit", inputs()).prompt);
 });
+

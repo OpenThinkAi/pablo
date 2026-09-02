@@ -322,6 +322,9 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
   return {
     id: provider.id,
     model: provider.model,
+    // Provisional until `bench/bakeoff.ts --adapter anthropic` records a
+    // measurement (AGT-1206 AC5); the e2e run used the tool path.
+    preferredOutput: "tool",
     complete,
 
     async proposeEdit(request: EditRequest): Promise<Proposal> {

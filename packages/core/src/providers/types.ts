@@ -24,6 +24,35 @@ export interface Intent {
 }
 
 /**
+ * Which of the two structured paths an adapter uses to bring a proposal back.
+ *
+ * `tool` is a native tool call (`propose_edit`, `extract_facts`) whose argument
+ * is a JSON string; `text` is CriticMarkup in the completion body, checked by
+ * `validateProposal` before anything reads it. Both are required to pass the
+ * parser, and which one a given adapter prefers is a measurement, not a guess —
+ * see `bench/README.md` and the design doc under Proposal pipeline.
+ */
+export type OutputMode = "tool" | "text";
+
+/**
+ * One extracted fact with its provenance, the shape the P2 map is built from.
+ *
+ * The anchor is the design doc's second rule for the map: a fact without a
+ * verbatim anchor into the passage that established it is a hallucination
+ * waiting to be trusted. The caller checks it — `anchor` is whatever the model
+ * said, not something the adapter has verified.
+ */
+export interface ExtractedFact {
+  readonly fact: string;
+  readonly entities: readonly string[];
+  /** An absolute date if the passage stated one, else a relative story time ("day 1, dawn"). */
+  readonly storyTime: string | undefined;
+  readonly certainty: string | undefined;
+  /** The substring of the passage the model says establishes this fact. */
+  readonly anchor: string | undefined;
+}
+
+/**
  * A model's answer to an intent, before the author has accepted anything.
  *
  * One or more replacements for one span: a single variant is the common case,
@@ -77,6 +106,8 @@ export interface EditRequest {
   readonly span: Span;
   /** How many replacements to ask for; defaults to one. */
   readonly variants?: number;
+  /** Which structured path to use; defaults to the adapter's `preferredOutput`. */
+  readonly output?: OutputMode;
   readonly model?: string;
   readonly maxTokens?: number;
   readonly temperature?: number;
@@ -90,6 +121,8 @@ export interface ExtractRequest {
   /** What kind of fact to look for ("people, places and dates stated as true"). */
   readonly instruction: string;
   readonly context?: string;
+  /** Which structured path to use; defaults to the adapter's `preferredOutput`. */
+  readonly output?: OutputMode;
   readonly model?: string;
   readonly maxTokens?: number;
   readonly timeoutMs?: number;
@@ -102,6 +135,13 @@ export interface Adapter {
   /** The model used when a request does not override it. */
   readonly model: string;
   /**
+   * The structured path this adapter uses when a request does not name one,
+   * chosen from measurement (AGT-1202) and not from taste. The other path stays
+   * available through `EditRequest.output` — neither is ever removed, because
+   * which one survives is a property of the model behind the endpoint.
+   */
+  readonly preferredOutput: OutputMode;
+  /**
    * Streams a completion. Throws `EndpointHung` when the endpoint sends no
    * bytes for the idle timeout, so a wait is always either visible progress or
    * a named error.
@@ -109,4 +149,15 @@ export interface Adapter {
   complete(request: CompletionRequest): AsyncIterable<CompletionEvent>;
   proposeEdit(request: EditRequest): Promise<Proposal>;
   extractFacts(request: ExtractRequest): Promise<readonly string[]>;
+  /**
+   * Extraction with provenance: the `extract_facts` tool-call form, which is
+   * the only path that reliably returns a structured anchor per fact (asking
+   * for free JSON in the completion body needed fence stripping in the
+   * writing-lab bench, so it is not a path).
+   *
+   * Optional because it is the tool form only: an adapter pointed at an
+   * endpoint with no tool support omits it, and callers fall back to
+   * `extractFacts`, whose lines carry no anchor.
+   */
+  extractFactsWithAnchors?(request: ExtractRequest): Promise<readonly ExtractedFact[]>;
 }
