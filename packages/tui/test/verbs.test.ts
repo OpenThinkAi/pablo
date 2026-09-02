@@ -604,6 +604,24 @@ test("`m` then `m` at a boundary moves the paragraph in one write (AC3)", async 
   expect(handle.state().doc.text).toBe(moved);
 });
 
+test("a move whose file changed under it is abandoned, not applied (AC3)", async () => {
+  const space = workspace();
+  const [handle, setup] = await view(space);
+
+  setup.mockInput.pressKey("m");
+  expect(handle.state().pendingMove).toBeDefined();
+
+  // The two presses of `m` are two moments, and the file belongs to the vault
+  // in between them.
+  writeFileSync(space.path, `A new first line.\n\n${CHAPTER}`, "utf8");
+  handle.reload();
+  setup.mockInput.pressKey("m");
+
+  expect(space.text()).toBe(`A new first line.\n\n${CHAPTER}`);
+  expect(handle.state().message).toContain("the file changed since the cut");
+  expect(handle.state().pendingMove).toBeUndefined();
+});
+
 test("esc abandons a pending move without touching the file (AC3)", async () => {
   const space = workspace();
   const [handle, setup] = await view(space);

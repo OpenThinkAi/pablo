@@ -396,7 +396,10 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
 
   /** AC6: the same plan, shown instead of sent. */
   const dryRun = (): void => {
-    const instruction = state.run?.instruction ?? lastAsk?.instruction ?? "(no instruction yet)";
+    // Pressed before anything has been asked, the preview still has to show the
+    // shape of the prompt, so the instruction slice is shown as the blank it is
+    // rather than as a sentence the author did not write.
+    const instruction = state.run?.instruction ?? lastAsk?.instruction ?? "<your instruction>";
     try {
       const prepared = plan(instruction, state.selection.span);
       state = showOverlay(state, {
@@ -565,6 +568,15 @@ export async function openView(path: string, options: OpenViewOptions = {}): Pro
           return;
         }
         state = clearMove(state);
+        // The gesture spans two key presses, and the file can be rewritten
+        // between them: `$EDITOR`, a git checkout, the watch firing. The offsets
+        // taken on the first press would then address different text, and the
+        // second press would cut a range the author never selected.
+        if (spanMoved(state, pending.span, pending.text)) {
+          state = { ...state, message: "the file changed since the cut; the move was abandoned" };
+          draw();
+          return;
+        }
         apply(moveEdit(state.doc, pending.span, state.selection.span.start, pending.asBlock), "moved");
         return;
       }
