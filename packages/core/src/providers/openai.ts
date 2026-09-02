@@ -391,6 +391,29 @@ function body(provider: ProviderConfig, request: CompletionRequest): Record<stri
 }
 
 /**
+ * The closing lines of the two edit prompts, exported so the context pack can
+ * price the exact text that goes over the wire for whichever path is in use.
+ */
+export const TOOL_EDIT_CLOSING =
+  "Call propose_edit once, with the complete replacement passage as the replacement argument." +
+  " Do not write the passage in your reply, and do not explain what you changed.";
+
+export const CRITICMARKUP_EDIT_CLOSING = [
+  "Answer with CriticMarkup and nothing else: no preamble, no explanation, no code fence.",
+  "Mark every change against the passage above and leave anything you are not changing exactly as it is:",
+  "",
+  "{~~old text~>new text~~}   replace",
+  "{++added text++}           insert",
+  "{--removed text--}         delete",
+  "",
+  "To rewrite the whole passage, wrap the whole of it in one substitution:",
+  "{~~<the passage above, unchanged>~><your replacement>~~}",
+  "",
+  "Never nest a substitution inside a substitution, and never write ~> anywhere",
+  "except between the two halves of one substitution.",
+].join("\n");
+
+/**
  * The tool path's prompt. It has to ask for the call rather than for the prose:
  * a prompt that says "write the replacement and nothing else" gets prose even
  * with `tool_choice` forced, because mlx_lm's forced choice templates the tools
@@ -405,8 +428,7 @@ function toolEditPrompt(passage: string, request: EditRequest): string {
     passage,
     "# What to do to it",
     request.instruction,
-    "Call propose_edit once, with the complete replacement passage as the replacement argument." +
-      " Do not write the passage in your reply, and do not explain what you changed.",
+    TOOL_EDIT_CLOSING,
   ].join("\n\n");
 }
 
@@ -423,20 +445,7 @@ function criticMarkupPrompt(passage: string, request: EditRequest): string {
     passage,
     "# What to do to it",
     request.instruction,
-    [
-      "Answer with CriticMarkup and nothing else: no preamble, no explanation, no code fence.",
-      "Mark every change against the passage above and leave anything you are not changing exactly as it is:",
-      "",
-      "{~~old text~>new text~~}   replace",
-      "{++added text++}           insert",
-      "{--removed text--}         delete",
-      "",
-      "To rewrite the whole passage, wrap the whole of it in one substitution:",
-      "{~~<the passage above, unchanged>~><your replacement>~~}",
-      "",
-      "Never nest a substitution inside a substitution, and never write ~> anywhere",
-      "except between the two halves of one substitution.",
-    ].join("\n"),
+    CRITICMARKUP_EDIT_CLOSING,
   ].join("\n\n");
 }
 

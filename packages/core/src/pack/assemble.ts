@@ -15,6 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { selectionText } from "../document";
+import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "../providers/openai";
 import type { SliceSpec } from "./budget";
 import { fitToBudget, PACK_BUDGETS, renderSlice } from "./budget";
 import { estimateTokens } from "./estimate";
@@ -118,9 +119,10 @@ interface BuiltSpecs {
  * Span edit: the rules, the work's own rules, the manuscript either side of the
  * selection, then the selection and the ask.
  *
- * The headings and the closing line match the ones `createOpenAiAdapter`
- * composes around `EditRequest.context`, so `pack.prompt` is the text that
- * actually goes over the wire and `pack.hash` identifies it.
+ * The headings and the closing line are the ones `createOpenAiAdapter`
+ * composes around `EditRequest.context` for the chosen output path, so
+ * `pack.prompt` is the text that actually goes over the wire and `pack.hash`
+ * identifies it. The two paths share everything but the closing line.
  */
 function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
   const passage = selectionText(inputs.document, inputs.span);
@@ -198,9 +200,7 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
     {
       name: "closing",
       heading: "",
-      text:
-        "Write the replacement passage and nothing else: no preamble, no explanation, " +
-        "no quotation marks around it.",
+      text: inputs.output === "text" ? CRITICMARKUP_EDIT_CLOSING : TOOL_EDIT_CLOSING,
       source: undefined,
       required: true,
       keep: "head",
