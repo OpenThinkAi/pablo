@@ -15,6 +15,7 @@
 
 import { selectionText } from "../document";
 import { resolveAll } from "../markup/spans";
+import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "../pack/closing";
 import { validateProposal } from "../markup/validate";
 import type { ProviderConfig } from "./config";
 import { EndpointHung, ProviderResponseError } from "./errors";
@@ -389,29 +390,6 @@ function body(provider: ProviderConfig, request: CompletionRequest): Record<stri
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
   };
 }
-
-/**
- * The closing lines of the two edit prompts, exported so the context pack can
- * price the exact text that goes over the wire for whichever path is in use.
- */
-export const TOOL_EDIT_CLOSING =
-  "Call propose_edit once, with the complete replacement passage as the replacement argument." +
-  " Do not write the passage in your reply, and do not explain what you changed.";
-
-export const CRITICMARKUP_EDIT_CLOSING = [
-  "Answer with CriticMarkup and nothing else: no preamble, no explanation, no code fence.",
-  "Mark every change against the passage above and leave anything you are not changing exactly as it is:",
-  "",
-  "{~~old text~>new text~~}   replace",
-  "{++added text++}           insert",
-  "{--removed text--}         delete",
-  "",
-  "To rewrite the whole passage, wrap the whole of it in one substitution:",
-  "{~~<the passage above, unchanged>~><your replacement>~~}",
-  "",
-  "Never nest a substitution inside a substitution, and never write ~> anywhere",
-  "except between the two halves of one substitution.",
-].join("\n");
 
 /**
  * The tool path's prompt. It has to ask for the call rather than for the prose:

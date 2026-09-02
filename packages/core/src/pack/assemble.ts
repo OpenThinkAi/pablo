@@ -15,7 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { selectionText } from "../document";
-import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "../providers/openai";
+import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "./closing";
 import type { SliceSpec } from "./budget";
 import { fitToBudget, PACK_BUDGETS, renderSlice } from "./budget";
 import { estimateTokens } from "./estimate";
