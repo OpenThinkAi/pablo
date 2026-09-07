@@ -25,6 +25,8 @@ import type { NovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
+import { runRevise } from "./revise";
+import type { ReviseCoreContext } from "./revise";
 import { runResumeVerb } from "./resume";
 import { runReview } from "./review-verbs";
 import { runSave } from "./save";
@@ -34,10 +36,23 @@ import type { Voice } from "./voice";
 import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
-const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp", "voice", "prose", "review"] as const;
+const P0_VERBS = [
+  "init",
+  "resume",
+  "status",
+  "write",
+  "save",
+  "check",
+  "dry-run",
+  "mcp",
+  "voice",
+  "prose",
+  "review",
+  "revise",
+] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
-const LATER_VERBS = ["revise", "edit", "share", "notes", "publish"] as const;
+const LATER_VERBS = ["edit", "share", "notes", "publish"] as const;
 
 const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
@@ -95,6 +110,12 @@ function helpText(): string {
     "                                            exit 0 approved, 2 rejected, 1 timeout, 2 unknown",
     "                                            (rejected and unknown share exit 2 — use --json's",
     "                                            \"status\" to tell them apart in a script)",
+    "  pablo revise --project <slug> --file F",
+    '              (--passage "<quoted text>" | --start N --end N)',
+    '              --instruction "<text>" [--json] [--dry-run]',
+    "                                            send one located passage to the local model;",
+    "                                            returns {candidate, span, receipt} and writes",
+    "                                            nothing — the file is never touched",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -145,7 +166,7 @@ interface ParsedArgs {
   readonly out: string | undefined;
   /** `prose --draft <file>` (AGT-1244): the previous piece to revise. Requires `instruction`. */
   readonly draft: string | undefined;
-  /** `prose --instruction "<text>"` (AGT-1244): what to change about `--draft`. Requires `draft`. */
+  /** `prose --instruction "<text>"` / `revise --instruction "<text>"`: what to change. */
   readonly instruction: string | undefined;
   /** `review list --all` (AGT-1261): include decided pieces, with their decision. */
   readonly all: boolean;
@@ -155,6 +176,12 @@ interface ParsedArgs {
   readonly reason: string | undefined;
   /** `review wait --timeout <seconds>` (AGT-1261); `runReview` defaults this to 3600 when absent. */
   readonly timeout: string | undefined;
+  /** `revise --passage "<quoted text>"` (AGT-1264): located with `locatePassage`. Alternative to `--start`/`--end`. */
+  readonly passage: string | undefined;
+  /** `revise --start <n>` (AGT-1264): a UTF-16 offset into the frontmatter-stripped body. Requires `--end`. */
+  readonly start: string | undefined;
+  /** `revise --end <n>` (AGT-1264): a UTF-16 offset into the frontmatter-stripped body. Requires `--start`. */
+  readonly end: string | undefined;
 }
 
 /**
@@ -207,6 +234,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     unread: values["unread"] === true,
     reason: typeof values["reason"] === "string" ? values["reason"] : undefined,
     timeout: typeof values["timeout"] === "string" ? values["timeout"] : undefined,
+    passage: typeof values["passage"] === "string" ? values["passage"] : undefined,
+    start: typeof values["start"] === "string" ? values["start"] : undefined,
+    end: typeof values["end"] === "string" ? values["end"] : undefined,
   };
 }
 
@@ -666,6 +696,32 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   if (args.verb === "voice") {
     return runVoice(args, cwd);
+  }
+
+  if (args.verb === "revise") {
+    if (projectPath === undefined) {
+      const message = "pablo: revise requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const vaultResult = findVault(cwd);
+    if (!vaultResult.ok) {
+      emit(refusalResult(vaultResult), args.json);
+      return vaultResult.code;
+    }
+    const reviseCtx: ReviseCoreContext = { vaultRoot: vaultResult.path, projectPath, env: process.env };
+    return await runRevise(
+      {
+        file: args.file,
+        passage: args.passage,
+        start: args.start,
+        end: args.end,
+        instruction: args.instruction,
+        dryRun: args.dryRun,
+        json: args.json,
+      },
+      reviseCtx,
+    );
   }
 
   const message = `pablo: "${args.verb}" not implemented yet`;

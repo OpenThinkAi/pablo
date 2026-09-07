@@ -66,6 +66,8 @@ import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
+import { reviseCore } from "./revise";
+import type { ReviseCoreArgs } from "./revise";
 import { buildResume } from "./resume";
 import { reviewCore } from "./review-verbs";
 import { saveCore } from "./save";
@@ -926,6 +928,77 @@ const REVIEW_MCP_TOOLS: readonly McpToolSpec[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// revise (AGT-1264) — sends ONE located passage to the local model and
+// returns a candidate. Writes nothing: no `--out`, no `--force`, no file
+// mutation of any kind. See `revise.ts`'s header comment for the pure/CLI
+// split this verb's `run` calls into (`reviseCore`, mirroring `proseCore`).
+// ---------------------------------------------------------------------------
+
+const REVISE_ARGS = z.object({
+  project: projectField,
+  file: z.string().describe("Chapter file to read the passage from (work-relative or absolute); must resolve inside the project."),
+  passage: z
+    .string()
+    .optional()
+    .describe(
+      "The passage to rewrite, quoted verbatim (whitespace-run tolerant). Exactly one of passage or start+end is required.",
+    ),
+  start: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("UTF-16 offset into the frontmatter-stripped body where the passage begins (half-open, with end). Alternative to passage."),
+  end: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("UTF-16 offset into the frontmatter-stripped body where the passage ends (half-open, with start)."),
+  instruction: z.string().describe("What to change about the passage, in the author's own words."),
+  "dry-run": z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Assemble and render the pack (slice by slice, with its prompt hash); send nothing to the model."),
+});
+
+/**
+ * `file` is model-controlled over MCP, exactly like `check`'s/`save`'s own
+ * `file` field: bound to the vault before it is ever read (defense in depth —
+ * `reviseCore`'s own resolution additionally requires it to resolve INSIDE
+ * the project, a stricter bound than the vault-wide one applied here).
+ */
+async function runReviseVerb(args: z.infer<typeof REVISE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+
+  const bound = boundedPath(
+    resolved.projectPath,
+    resolved.vaultRoot,
+    args.file,
+    (abs) => `pablo: revise file must be inside the vault (${abs})`,
+  );
+  if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
+
+  const reviseArgs: ReviseCoreArgs = {
+    file: args.file,
+    passage: args.passage,
+    start: args.start,
+    end: args.end,
+    instruction: args.instruction,
+    dryRun: args["dry-run"],
+  };
+
+  const outcome = await reviseCore(
+    reviseArgs,
+    { vaultRoot: resolved.vaultRoot, projectPath: resolved.projectPath, env: ctx.env },
+    { stderr: ctx.stderr },
+  );
+  return { body: outcome.body, exitCode: outcome.exitCode };
+}
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -993,6 +1066,13 @@ export const VERBS: readonly Verb[] = [
     // approve/reject are CLI-only (see the section comment above REVIEW_ARGS
     // and REVIEW_MCP_TOOLS's own comment).
     mcpTools: REVIEW_MCP_TOOLS,
+  },
+  {
+    name: "revise",
+    description:
+      "Send one located passage of a manuscript to the local model and return a candidate: locate it (by quoted text or a start/end offset pair), assemble the pack with the project's own style and work rules, send once, and return {candidate, span, receipt} — never writes the file.",
+    args: REVISE_ARGS,
+    run: runReviseVerb,
   },
 ];
 
