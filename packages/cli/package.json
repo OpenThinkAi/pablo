@@ -1,0 +1,14 @@
+{
+  "name": "@openthink/pablo",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "pablo — the CLI that writes: the manager for writing projects, driven by whatever agent you like.",
+  "bin": {
+    "pablo": "./src/cli.ts"
+  },
+  "files": ["src"],
+  "dependencies": {
+    "@openthink/pablo-core": "workspace:*"
+  }
+}
