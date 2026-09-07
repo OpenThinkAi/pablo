@@ -1,11 +1,11 @@
 /**
- * `verbs.ts` (AGT-1235; `voice` added AGT-1240) — the single source of truth
- * for pablo's MCP-exposed verbs (resume, status, write, save, check, voice):
- * one zod schema and one `run` per verb, used by BOTH `cli.ts` (which derives
- * its `parseArgs` option table from these shapes, so the CLI's argv and the
- * MCP tool schemas cannot drift) and `mcp.ts` (which registers one MCP tool
- * per verb straight off the same shape and calls the same `run`). See the
- * design doc's "Commands" section
+ * `verbs.ts` (AGT-1235; `voice` added AGT-1240; `prose` AGT-1241) — the
+ * single source of truth for pablo's MCP-exposed verbs (resume, status,
+ * write, save, check, voice, prose): one zod schema and one `run` per verb,
+ * used by BOTH `cli.ts` (which derives its `parseArgs` option table from
+ * these shapes, so the CLI's argv and the MCP tool schemas cannot drift) and
+ * `mcp.ts` (which registers one MCP tool per verb straight off the same
+ * shape and calls the same `run`). See the design doc's "Commands" section
  * (`~/saltline-digital-vault/projects/ai-terminal/README.md`): "`pablo mcp`
  * serves the same verbs as MCP tools with the same schemas, so Claude Code,
  * Codex and pi see one contract."
@@ -33,6 +33,28 @@
  * itself through `withWriteLock` (a simple promise-chain mutex, scoped to
  * this module) rather than fixing that inside `write.ts`, which the
  * AGT-1231 constraint above rules out.
+ *
+ * AGT-1245 — `voice` over MCP splits into four tools: the ticket that wrote
+ * `voice` as a single verb with a `sub` positional (`new|list|show|flag|
+ * exemplar`) also asked for `voice_list`/`voice_show`/`voice_flag`/
+ * `voice_exemplar` as four SEPARATE MCP tools, each with a narrow schema
+ * carrying only its own arguments — a model choosing a tool is better served
+ * by four honest schemas than by one tool with a `sub` discriminator and a
+ * union of half-applicable fields. The CLI keeps its `pablo voice <sub>`
+ * form unchanged (this file's `voice` verb, `VOICE_ARGS`, `runVoiceVerb`, and
+ * `deriveCliOptions`'s flag table are none of them touched by the split); only
+ * the MCP registration surface narrows. That is expressed with one new,
+ * optional `Verb.mcpTools` field: a verb with no override registers itself as
+ * one MCP tool exactly as before (six of the seven still do); `voice`'s VERBS
+ * entry sets `mcpTools` to the four narrow tools below, and `mcp.ts`'s
+ * registration loop uses `verb.mcpTools ?? [verb]` — so `verbs.ts` stays the
+ * single place both the CLI's argv and every MCP tool's schema come from,
+ * with no second hand-written copy of the same fields (the four narrow
+ * schemas are built from the same shared zod field definitions `VOICE_ARGS`
+ * itself uses, just re-wrapped with each tool's own requiredness). `voice_new`
+ * is deliberately NOT among them (AC1 doesn't ask for it, and scaffolding a
+ * new voice by name has no obvious use for a model mid-conversation the way
+ * reading/growing an existing one does) — it stays CLI-only.
  */
 
 import { z } from "zod";
@@ -47,6 +69,7 @@ import { proseCore } from "./prose";
 import { buildResume } from "./resume";
 import { saveCore } from "./save";
 import { addExemplar, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
+import type { VoiceLocation } from "./voice";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
 
@@ -68,15 +91,59 @@ export interface VerbResult {
   readonly exitCode: number;
 }
 
-export interface Verb<Args extends z.ZodRawShape = z.ZodRawShape> {
+/** One MCP tool: a name, description, zod input shape, and `run` — exactly `Verb`'s own shape, minus `mcpTools` (a tool has no further tools of its own). `Verb` and `McpToolSpec` are kept as separate names even though they're structurally identical, so a reader sees which role a given value is playing (a CLI-and-MCP verb vs. one of a verb's MCP-only expansions). */
+export interface McpToolSpec<Args extends z.ZodRawShape = z.ZodRawShape> {
   readonly name: string;
   readonly description: string;
   readonly args: z.ZodObject<Args>;
   run(args: z.infer<z.ZodObject<Args>>, ctx: VerbContext): Promise<VerbResult>;
 }
 
+export interface Verb<Args extends z.ZodRawShape = z.ZodRawShape> {
+  readonly name: string;
+  readonly description: string;
+  readonly args: z.ZodObject<Args>;
+  run(args: z.infer<z.ZodObject<Args>>, ctx: VerbContext): Promise<VerbResult>;
+  /**
+   * AGT-1245: the MCP tool(s) this verb exposes, when they differ from the
+   * verb's own name/schema/run (today, only `voice` sets this — see the file
+   * header comment). `mcp.ts`'s registration loop reads `verb.mcpTools ??
+   * [verb]`, so a verb with no override (still six of the seven) registers
+   * itself as one MCP tool exactly as it always did; `cli.ts`'s argv and
+   * `deriveCliOptions` never look at this field at all — the CLI dispatches
+   * on the verb's own name/args/run, unaffected by how MCP exposes it.
+   */
+  readonly mcpTools?: readonly McpToolSpec[];
+}
+
 function refusalBody(r: Refusal): { ok: false; code: number; message: string; tried: readonly string[] } {
   return { ok: false, code: r.code, message: r.message, tried: r.tried };
+}
+
+/**
+ * The one place `resolve()` + `startsWith(root + sep)` is written (AGT-1245's
+ * extraction, per the ticket) — every model-controlled path bound on this
+ * surface (`save`'s/`check`'s `file`, `voice`'s path-shaped `name` and
+ * `exemplar`'s `file`, `prose`'s five path arguments) calls this rather than
+ * repeating the check. `resolveFrom` is where a relative `value` is joined
+ * from — usually the same directory the result must stay inside, but
+ * `check`'s `file` joins from `projectPath` while it must still land inside
+ * `vaultRoot`, so the two are kept as separate parameters rather than one.
+ * `boundary` is what the resolved path must equal or sit strictly under.
+ * Returns the resolved absolute path on success, or a refusal built from
+ * `message`.
+ */
+function boundedPath(
+  resolveFrom: string,
+  boundary: string,
+  value: string,
+  message: (abs: string) => string,
+): { readonly ok: true; readonly path: string } | Refusal {
+  const abs = resolve(resolveFrom, value);
+  if (abs !== boundary && !abs.startsWith(boundary + sep)) {
+    return { ok: false, code: 2, message: message(abs), tried: [] };
+  }
+  return { ok: true, path: abs };
 }
 
 type ResolvedProject = { readonly ok: true; readonly vaultRoot: string; readonly projectPath: string };
@@ -283,12 +350,15 @@ async function runSaveVerb(args: z.infer<typeof SAVE_ARGS>, ctx: VerbContext): P
   // the CLI path this bounds it to the vault before ever reading it — an
   // unbounded read here would let a compromised/prompt-injected caller pull
   // an arbitrary file (e.g. an SSH key) into a committed vault document.
-  const absFile = resolve(resolved.vaultRoot, args.file);
-  if (absFile !== resolved.vaultRoot && !absFile.startsWith(resolved.vaultRoot + sep)) {
-    return { body: { ok: false, code: 2, message: `pablo: save file must be inside the vault (${absFile})` }, exitCode: 2 };
-  }
+  const bound = boundedPath(
+    resolved.vaultRoot,
+    resolved.vaultRoot,
+    args.file,
+    (abs) => `pablo: save file must be inside the vault (${abs})`,
+  );
+  if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
 
-  const { body, exitCode } = saveCore({ stage: args.stage, file: absFile }, resolved.projectPath);
+  const { body, exitCode } = saveCore({ stage: args.stage, file: bound.path }, resolved.projectPath);
   return { body, exitCode };
 }
 
@@ -310,10 +380,13 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
   // defence in depth at the same layer as save's guard: no path outside the vault
   // is ever handed down, whatever the lower layer does.
   if (args.file !== undefined) {
-    const absFile = resolve(resolved.projectPath, args.file);
-    if (absFile !== resolved.vaultRoot && !absFile.startsWith(resolved.vaultRoot + sep)) {
-      return { body: { ok: false, code: 2, message: `pablo: check file must be inside the vault (${absFile})` }, exitCode: 2 };
-    }
+    const bound = boundedPath(
+      resolved.projectPath,
+      resolved.vaultRoot,
+      args.file,
+      (abs) => `pablo: check file must be inside the vault (${abs})`,
+    );
+    if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
   }
 
   const outcome = checkWork(resolved.vaultRoot, resolved.projectPath, args.file);
@@ -324,48 +397,84 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
 }
 
 // ---------------------------------------------------------------------------
-// voice (AGT-1240)
+// voice (AGT-1240; MCP split into four tools AGT-1245)
 // ---------------------------------------------------------------------------
+
+// Shared field definitions: `VOICE_ARGS` (the CLI's `sub`-discriminated
+// shape, unchanged by this ticket) and the four narrow `voice_*` MCP schemas
+// below both build from these rather than each hand-writing its own copy of
+// "a voice name" / "a rejected line" / etc. Each caller re-wraps a base with
+// its OWN requiredness: `VOICE_ARGS.name` is optional (only `list` can do
+// without it, checked at runtime by `runVoiceVerb`), while `voice_show`'s
+// `name` is required in the schema itself, structurally — a model calling
+// `voice_show` with no `name` gets rejected before `run` is ever invoked.
+const voiceNameField = z
+  .string()
+  .describe('Voice name, or a path (containing "/" or ending ".md") for a one-off voice.');
+const voiceLineField = z.string().describe('The rejected line, verbatim — written as `Flagged: "<line>"`.');
+const voiceSectionField = z.string().describe('The `## ` section heading to append under (default "Flagged").');
+const voiceFileField = z.string().describe("The piece to keep, copied verbatim.");
+const voiceTitleField = z.string().describe("The title to file it under (else its first `# ` heading, else its filename).");
 
 const VOICE_ARGS = z.object({
   sub: z
     .enum(["new", "list", "show", "flag", "exemplar"])
     .describe("Which voice action: new (scaffold), list, show, flag (record a rejected line), or exemplar (keep a piece)."),
-  name: z
-    .string()
-    .optional()
-    .describe(
-      'Voice name, or a path (containing "/" or ending ".md") for a one-off voice. Required for new/show/flag/exemplar; ignored for list.',
-    ),
+  name: voiceNameField.optional().describe(
+    'Voice name, or a path (containing "/" or ending ".md") for a one-off voice. Required for new/show/flag/exemplar; ignored for list.',
+  ),
   global: z
     .boolean()
     .optional()
     .default(false)
     .describe("voice new: scaffold under the global ~/.config/pablo/voices/ directory instead of the vault."),
-  line: z.string().optional().describe('voice flag: the rejected line, verbatim — written as `Flagged: "<line>"`.'),
-  section: z
-    .string()
-    .optional()
-    .describe('voice flag: the `## ` section heading to append under (default "Flagged").'),
-  file: z.string().optional().describe("voice exemplar: the piece to keep, copied verbatim."),
-  title: z
-    .string()
-    .optional()
-    .describe("voice exemplar: the title to file it under (else its first `# ` heading, else its filename)."),
+  line: voiceLineField.optional().describe('voice flag: the rejected line, verbatim — written as `Flagged: "<line>"`.'),
+  section: voiceSectionField.optional().describe('voice flag: the `## ` section heading to append under (default "Flagged").'),
+  file: voiceFileField.optional().describe("voice exemplar: the piece to keep, copied verbatim."),
+  title: voiceTitleField.optional().describe("voice exemplar: the title to file it under (else its first `# ` heading, else its filename)."),
 });
 
+type VoiceLocationLookup =
+  | { readonly ok: true; readonly location: VoiceLocation }
+  | { readonly ok: false; readonly result: VerbResult };
+
 /**
- * `name` is model-controlled over MCP, exactly like `save`'s and `check`'s
- * `file` (AGT-1235's convention): a path-shaped value (contains "/" or ends
- * in ".md") is bound to the vault before it is ever resolved, so a
- * compromised/prompt-injected caller cannot use `voice show` to pull an
- * arbitrary file (e.g. an SSH key) off disk into a pack the model reads. A
- * plain voice *name* has no such risk — `resolveVoice` only ever joins it
- * under a vault's `voices/` directory or the global voices directory, never
- * as a free-form path.
+ * Resolves `name` to a voice location, bounding a path-shaped `name` to the
+ * vault first (AGT-1235's convention, extracted so the CLI-facing
+ * `runVoiceVerb` and all four narrow `voice_*` tools below share exactly one
+ * implementation — the ticket's ask for a single audit point applies here
+ * just as much as it does to `boundedPath`). Uses `voice.ts`'s own exported
+ * `isVoicePathArgument` (the same predicate `resolveVoice` itself branches
+ * on) rather than a second, hand-rolled copy of "contains / or ends .md" —
+ * that duplicate (`looksLikeVoicePath`) is exactly the drift `voice.ts`'s
+ * docstring on `isVoicePathArgument` warns a bound can suffer from.
  */
-function looksLikeVoicePath(value: string): boolean {
-  return value.includes("/") || value.endsWith(".md");
+function resolveVoiceLocationOrRefusal(ctx: VerbContext, name: string): VoiceLocationLookup {
+  if (isVoicePathArgument(name)) {
+    const message = (abs: string) => `pablo: voice path must be inside the vault (${abs})`;
+    const vault = findVault(ctx.cwd, ctx.env);
+    if (!vault.ok) {
+      return { ok: false, result: { body: { ok: false, code: 2, message: message(resolve(ctx.cwd, name)) }, exitCode: 2 } };
+    }
+    const bound = boundedPath(ctx.cwd, vault.path, name, message);
+    if (!bound.ok) return { ok: false, result: { body: refusalBody(bound), exitCode: bound.code } };
+  }
+
+  const resolution = resolveVoice(name, { cwd: ctx.cwd, env: ctx.env });
+  if (!resolution.ok) return { ok: false, result: { body: refusalBody(resolution), exitCode: resolution.code } };
+  return { ok: true, location: resolution };
+}
+
+/**
+ * Bounds `voice exemplar`'s `file` to the vault (AGT-1235's convention, same
+ * shape as `resolveVoiceLocationOrRefusal`'s path bound) — shared between
+ * `runVoiceVerb`'s `exemplar` branch and `voice_exemplar`'s narrow `run`.
+ */
+function boundVoiceExemplarFile(ctx: VerbContext, file: string): { readonly ok: true; readonly path: string } | Refusal {
+  const message = (abs: string) => `pablo: voice exemplar file must be inside the vault (${abs})`;
+  const vault = findVault(ctx.cwd, ctx.env);
+  if (!vault.ok) return { ok: false, code: 2, message: message(resolve(ctx.cwd, file)), tried: [] };
+  return boundedPath(ctx.cwd, vault.path, file, message);
 }
 
 async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
@@ -393,19 +502,9 @@ async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext):
   }
 
   // sub is show, flag, or exemplar — all three resolve `name` to a voice location first.
-  if (looksLikeVoicePath(args.name)) {
-    const vault = findVault(ctx.cwd, ctx.env);
-    const resolved = resolve(ctx.cwd, args.name);
-    if (!vault.ok || (resolved !== vault.path && !resolved.startsWith(vault.path + sep))) {
-      return {
-        body: { ok: false, code: 2, message: `pablo: voice path must be inside the vault (${resolved})` },
-        exitCode: 2,
-      };
-    }
-  }
-
-  const resolution = resolveVoice(args.name, { cwd: ctx.cwd, env: ctx.env });
-  if (!resolution.ok) return { body: refusalBody(resolution), exitCode: resolution.code };
+  const located = resolveVoiceLocationOrRefusal(ctx, args.name);
+  if (!located.ok) return located.result;
+  const resolution = located.location;
 
   if (args.sub === "flag") {
     if (args.line === undefined) {
@@ -423,19 +522,9 @@ async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext):
     if (args.file === undefined) {
       return { body: { ok: false, code: 2, message: "pablo: voice exemplar requires file" }, exitCode: 2 };
     }
-    // `file` is model-controlled over MCP, exactly like `save`'s and `check`'s
-    // (AGT-1235's convention): bound it to the vault before it is ever read,
-    // so a compromised/prompt-injected caller cannot commit an arbitrary file
-    // (e.g. an SSH key) into the vault's voice exemplars.
-    const vault = findVault(ctx.cwd, ctx.env);
-    const absFile = resolve(ctx.cwd, args.file);
-    if (!vault.ok || (absFile !== vault.path && !absFile.startsWith(vault.path + sep))) {
-      return {
-        body: { ok: false, code: 2, message: `pablo: voice exemplar file must be inside the vault (${absFile})` },
-        exitCode: 2,
-      };
-    }
-    const result = addExemplar(resolution, absFile, { title: args.title });
+    const bound = boundVoiceExemplarFile(ctx, args.file);
+    if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
+    const result = addExemplar(resolution, bound.path, { title: args.title });
     if (!result.ok) return { body: refusalBody(result), exitCode: result.code };
     return {
       body: { ok: true, path: result.path, committed: result.committed, ...(result.notice ? { notice: result.notice } : {}) },
@@ -447,6 +536,97 @@ async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext):
   const voice = readVoice(resolution.path);
   return { body: { ok: true, ...voice }, exitCode: 0 };
 }
+
+// ---------------------------------------------------------------------------
+// voice_list / voice_show / voice_flag / voice_exemplar (AGT-1245) — the four
+// narrow MCP tools `voice`'s VERBS entry exposes instead of registering
+// itself directly (see the file header comment and `Verb.mcpTools`). Each
+// `run` below reuses `runVoiceVerb`'s own helpers (`resolveVoiceLocationOrRefusal`,
+// `boundVoiceExemplarFile`) rather than re-deriving the bound/resolve logic,
+// so there is exactly one implementation of each behind both surfaces.
+// ---------------------------------------------------------------------------
+
+const VOICE_LIST_MCP_ARGS = z.object({});
+
+const VOICE_SHOW_MCP_ARGS = z.object({
+  name: voiceNameField,
+});
+
+const VOICE_FLAG_MCP_ARGS = z.object({
+  name: voiceNameField,
+  line: voiceLineField,
+  section: voiceSectionField.optional(),
+});
+
+const VOICE_EXEMPLAR_MCP_ARGS = z.object({
+  name: voiceNameField,
+  file: voiceFileField.describe(
+    "The piece to keep, copied verbatim — resolved and bounded to the vault (or the server's cwd when there is none).",
+  ),
+  title: voiceTitleField.optional(),
+});
+
+async function runVoiceListMcp(_args: z.infer<typeof VOICE_LIST_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  return { body: { ok: true, voices: listVoices({ cwd: ctx.cwd, env: ctx.env }) }, exitCode: 0 };
+}
+
+async function runVoiceShowMcp(args: z.infer<typeof VOICE_SHOW_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const located = resolveVoiceLocationOrRefusal(ctx, args.name);
+  if (!located.ok) return located.result;
+  const voice = readVoice(located.location.path);
+  return { body: { ok: true, ...voice }, exitCode: 0 };
+}
+
+async function runVoiceFlagMcp(args: z.infer<typeof VOICE_FLAG_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const located = resolveVoiceLocationOrRefusal(ctx, args.name);
+  if (!located.ok) return located.result;
+  const result = flagLine(located.location, args.line, { section: args.section });
+  if (!result.ok) return { body: refusalBody(result), exitCode: result.code };
+  return {
+    body: { ok: true, path: result.path, committed: result.committed, ...(result.notice ? { notice: result.notice } : {}) },
+    exitCode: 0,
+  };
+}
+
+async function runVoiceExemplarMcp(args: z.infer<typeof VOICE_EXEMPLAR_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const located = resolveVoiceLocationOrRefusal(ctx, args.name);
+  if (!located.ok) return located.result;
+  const bound = boundVoiceExemplarFile(ctx, args.file);
+  if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
+  const result = addExemplar(located.location, bound.path, { title: args.title });
+  if (!result.ok) return { body: refusalBody(result), exitCode: result.code };
+  return {
+    body: { ok: true, path: result.path, committed: result.committed, ...(result.notice ? { notice: result.notice } : {}) },
+    exitCode: 0,
+  };
+}
+
+const VOICE_MCP_TOOLS: readonly McpToolSpec[] = [
+  {
+    name: "voice_list",
+    description: "Every voice pablo can find: the fiction alias (if the vault has a style/ directory), every vault voice, and every global voice.",
+    args: VOICE_LIST_MCP_ARGS,
+    run: runVoiceListMcp,
+  },
+  {
+    name: "voice_show",
+    description: "Read one voice as a model would see it: its rules, exemplars, an optional never list, and its routed model.",
+    args: VOICE_SHOW_MCP_ARGS,
+    run: runVoiceShowMcp,
+  },
+  {
+    name: "voice_flag",
+    description: 'Record a rejected line under a voice\'s "## Flagged" section (or another heading) so future packs avoid it.',
+    args: VOICE_FLAG_MCP_ARGS,
+    run: runVoiceFlagMcp,
+  },
+  {
+    name: "voice_exemplar",
+    description: "Keep a piece as-is under a voice's exemplars/ directory, newest first into every future pack.",
+    args: VOICE_EXEMPLAR_MCP_ARGS,
+    run: runVoiceExemplarMcp,
+  },
+];
 
 // ---------------------------------------------------------------------------
 // prose (AGT-1241)
@@ -518,11 +698,8 @@ function bindProsePath(ctx: VerbContext, label: string, value: string): Refusal 
 
   const vault = findVault(ctx.cwd, ctx.env);
   const boundary = vault.ok ? vault.path : resolve(ctx.cwd);
-  const abs = resolve(boundary, value);
-  if (abs !== boundary && !abs.startsWith(boundary + sep)) {
-    return { ok: false, code: 2, message: `pablo: prose ${label} must be inside ${boundary} (${abs})`, tried: [] };
-  }
-  return undefined;
+  const bound = boundedPath(boundary, boundary, value, (abs) => `pablo: prose ${label} must be inside ${boundary} (${abs})`);
+  return bound.ok ? undefined : bound;
 }
 
 async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
@@ -649,6 +826,14 @@ export const VERBS: readonly Verb[] = [
       "Find, scaffold, grow, or inspect a named voice directory: `new` scaffolds one, `list` finds every one, `show` reads one as a model would see it, `flag` records a rejected line, `exemplar` keeps a piece as-is.",
     args: VOICE_ARGS,
     run: runVoiceVerb,
+    // AGT-1245: over MCP this verb registers as four narrow tools
+    // (voice_list/voice_show/voice_flag/voice_exemplar) instead of itself —
+    // see the file header comment and `Verb.mcpTools`. The CLI's own
+    // `pablo voice <sub>` dispatch (cli.ts's `runVoice`) never reads this
+    // verb's `run` at all (it calls `voice.ts`'s functions directly), and
+    // `deriveCliOptions` reads only `args`/`name` above, so this field has no
+    // effect on the CLI whatsoever.
+    mcpTools: VOICE_MCP_TOOLS,
   },
   {
     name: "prose",
