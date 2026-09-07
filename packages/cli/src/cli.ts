@@ -91,6 +91,8 @@ interface ParsedArgs {
   readonly scenes: string | undefined;
   /** `write --dry-run`: assemble and render the pack, send nothing. */
   readonly dryRun: boolean;
+  /** `write --force`: overwrite an existing chapter file. */
+  readonly force: boolean;
 }
 
 export function parseCliArgs(argv: readonly string[]): ParsedArgs {
@@ -110,6 +112,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       words: { type: "string" },
       scenes: { type: "string" },
       "dry-run": { type: "boolean", default: false },
+      force: { type: "boolean", default: false },
     },
   });
 
@@ -127,6 +130,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     words: typeof values["words"] === "string" ? values["words"] : undefined,
     scenes: typeof values["scenes"] === "string" ? values["scenes"] : undefined,
     dryRun: values["dry-run"] === true,
+    force: values["force"] === true,
   };
 }
 
@@ -386,7 +390,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit(refusalResult(vaultResult), args.json);
       return vaultResult.code;
     }
-    return runWrite(args, vaultResult.path, projectPath);
+    return await runWrite(args, vaultResult.path, projectPath);
   }
 
   if (args.verb === "check") {
