@@ -26,6 +26,12 @@
 - **Ezra Sprague** (born 1880). Buys for the sardine cannery. Halves the order in
   1929 and is polite about it.
 
+## The route (Act I, one stop per named town customer)
+
+| Person | Stop | Role |
+|---|---|---|
+| Mrs. Frayne [pick] | last on the domestic route | What she says about the pond house is the chapter's turn; her own name is not decided. |
+
 ## Decisions for the author
 
 - Whether Celine appears on the page in Act I or only in the ledgers.
