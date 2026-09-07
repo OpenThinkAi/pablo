@@ -6,8 +6,9 @@
  * (`~/saltline-digital-vault/projects/ai-terminal/prose.md`).
  *
  * This ticket wires assembly and `--dry-run` only. Without `--dry-run`,
- * `proseCore` refuses with exit 1 "not wired to the model yet" — the send
- * path (routing, the model call, the receipt, `--out`) lands in AGT-1242.
+ * `proseCore` refuses with exit 1, naming `--dry-run` as the way to preview
+ * the pack today — the send path (routing, the model call, the receipt,
+ * `--out`) lands in AGT-1242.
  *
  * `proseCore` is the pure-over-I/O core `saveCore`/`checkWork` already use
  * for this file's siblings: it resolves the voice, reads the brief and
@@ -247,7 +248,14 @@ export function proseCore(args: ProseCoreArgs, ctx: ProseCoreContext): ProseOutc
   if (!built.ok) return { body: built, exitCode: built.code };
 
   if (!args.dryRun) {
-    return { body: { ok: false, code: 1, message: "pablo: prose: not wired to the model yet (next ticket)" }, exitCode: 1 };
+    return {
+      body: {
+        ok: false,
+        code: 1,
+        message: "pablo: prose: sending to the model isn't available yet — add --dry-run to preview the pack",
+      },
+      exitCode: 1,
+    };
   }
 
   return { body: dryRunBody(built.pack), exitCode: 0, pack: built.pack };

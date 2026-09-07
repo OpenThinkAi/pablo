@@ -38,6 +38,7 @@
 import { z } from "zod";
 import { resolve, sep } from "node:path";
 import { checkWork } from "./check";
+import { KNOWN_FORMATS } from "./formats";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { findVault, resolveProject } from "./project";
@@ -462,9 +463,15 @@ const PROSE_ARGS = z.object({
     .optional()
     .default([])
     .describe("File paths sent verbatim, in order. Repeatable."),
-  format: z.string().optional().describe(`One of: ${["email", "post", "page", "reply", "note"].join(", ")}.`),
+  format: z.string().optional().describe(`One of: ${KNOWN_FORMATS.join(", ")}.`),
   words: z.number().int().positive().optional().describe("Target word count (defaults to 300)."),
-  "dry-run": z.boolean().optional().default(false).describe("Assemble and render the pack; send nothing to the model. Required in this build — prose has no send path yet."),
+  "dry-run": z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Preview the assembled pack without sending to the model. Omitting this flag returns an error until the send path (AGT-1242) is available.",
+    ),
 });
 
 /**
