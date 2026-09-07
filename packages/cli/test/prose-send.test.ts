@@ -321,6 +321,36 @@ test("an unwritable state directory: queueing fails but the send itself still su
   }
 });
 
+test("an unwritable state directory with NO --out: the drafts-file write is also inside the failure boundary (AC2, AC3, AC5)", async () => {
+  const { vault, env, stateHome, brief } = tempVaultEnv();
+  // Unlike the --out test above, `stateHome/pablo` itself is what an
+  // out-less call needs to write into (both `drafts/<id>.md`, AC3, and
+  // `review.jsonl`) — locking it here exercises exactly the gap the
+  // fix-round found: `mkdirSync`/`writeFileSync` for the drafts file used to
+  // run OUTSIDE `queuePiece`'s try/catch, so this case used to throw
+  // uncaught instead of returning `queue: "failed: ..."`.
+  const pabloDir = join(stateHome, "pablo");
+  mkdirSync(pabloDir, { recursive: true });
+  chmodSync(pabloDir, 0o500); // read+execute only: mkdirSync("drafts") and appendFileSync("review.jsonl") both fail
+
+  try {
+    const outcome = await proseCore(sendArgs({ brief }), { cwd: vault, env }, { adapter: fakeAdapter() });
+
+    expect(outcome.exitCode).toBe(0);
+    const body = outcome.body as ProseSendBody;
+    expect(body.ok).toBe(true);
+    expect(body.text).toBe(normalizeOutput(RAW_TEXT)); // the deliverable is unaffected
+    expect(body.path).toBeUndefined();
+    expect(typeof body.piece).toBe("string"); // still present even though queueing failed
+    expect(body.queue).toMatch(/^failed: /);
+
+    // The drafts file was never created (its own directory couldn't be made).
+    expect(existsSync(join(pabloDir, "drafts", `${body.piece}.md`))).toBe(false);
+  } finally {
+    chmodSync(pabloDir, 0o700);
+  }
+});
+
 test("the fiction voice's check rules come from style/prose.md (AC4)", async () => {
   const { vault, env, brief } = tempVaultEnv();
   const flagged = readFileSync(join(vault, "style", "prose.md"), "utf8")

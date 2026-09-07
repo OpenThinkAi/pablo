@@ -569,6 +569,19 @@ interface QueuePieceInput {
   readonly cwd: string;
   readonly words: number;
   readonly promptHash: string;
+  /**
+   * Fix-round (stamp review, standards, BLOCKING): the out-less branch's
+   * drafts-file write (AC3) has to land INSIDE the same try/catch as the
+   * queue append, not before it — an EACCES writing
+   * `stateDraftsDir()/<id>.md` is exactly as much "queueing failed" as an
+   * EACCES appending to `review.jsonl` (there is no other way for the
+   * caller to learn `path` doesn't exist), and leaving it outside the
+   * boundary let a filesystem error escape `sendProse` uncaught. The `--out`
+   * branch passes no `beforeAppend`: writing `--out` already succeeded
+   * (and is reported on its own, via `ProseSendBody.path`/`committed`)
+   * before `queuePiece` is ever called there.
+   */
+  readonly beforeAppend?: () => void;
 }
 
 /**
@@ -578,28 +591,35 @@ interface QueuePieceInput {
  * included when `findVault` resolves one from `cwd`, omitted otherwise (a
  * `prose` call has no `--project` and often no vault at all).
  *
- * Never throws: an append failure (an unwritable state directory) is caught
- * and returned as `"failed: <detail>"` for the caller to surface as
- * `ProseSendBody.queue`, exactly as `write.ts`'s `queue` ritual reports a
- * `"failed"` status — a review-queue write is never allowed to fail the
- * prose call that already produced its text.
+ * Never throws: `beforeAppend` (when given), `findVault`, and the append
+ * itself all run inside one try/catch, so any failure among them — an
+ * unwritable state directory chief among them — is caught and returned as
+ * `"failed: <detail>"` for the caller to surface as `ProseSendBody.queue`,
+ * exactly as `write.ts`'s `queue` ritual reports a `"failed"` status — a
+ * review-queue write is never allowed to fail the prose call that already
+ * produced its text.
  */
 function queuePiece(input: QueuePieceInput): string | undefined {
-  const vault = findVault(input.cwd, input.env);
-
-  const event: QueuedEvent = {
-    type: "queued",
-    id: input.id,
-    at: input.at,
-    kind: "prose",
-    title: input.title,
-    path: input.path,
-    ...(vault.ok ? { vault: vault.path } : {}),
-    words: input.words,
-    prompt_hash: input.promptHash,
-  };
-
   try {
+    input.beforeAppend?.();
+
+    // `findVault` is a filesystem walk (`existsSync` up from `cwd`) — it
+    // shouldn't throw, but it is not this function's contract to know that
+    // for certain, and the whole point of `queuePiece` is that nothing here
+    // escapes uncaught, so it stays inside the same try as the append.
+    const vault = findVault(input.cwd, input.env);
+    const event: QueuedEvent = {
+      type: "queued",
+      id: input.id,
+      at: input.at,
+      kind: "prose",
+      title: input.title,
+      path: input.path,
+      ...(vault.ok ? { vault: vault.path } : {}),
+      words: input.words,
+      prompt_hash: input.promptHash,
+    };
+
     appendEvent(stateReviewPath(input.env), event);
     return undefined;
   } catch (err) {
@@ -720,6 +740,9 @@ async function sendProse(
     // does that with `body.text`), but also lands on disk — the same
     // frontmatter `--out` would write — at `stateDraftsDir()/<id>.md`, so
     // the review queue's `path` names a file the editor can actually open.
+    // The write happens inside `queuePiece`'s `beforeAppend` (fix-round: it
+    // must share the queue append's try/catch — see `QueuePieceInput`'s doc
+    // comment), not out here unguarded.
     const draftPath = join(stateDraftsDir(ctx.env), `${pieceId}.md`);
     const draftFrontmatter = proseFrontmatter({
       voice: voice.name,
@@ -729,8 +752,6 @@ async function sendProse(
       revisedFrom,
       words,
     });
-    mkdirSync(dirname(draftPath), { recursive: true });
-    writeFileSync(draftPath, `${draftFrontmatter}\n\n${normalized}\n`, "utf8");
 
     const queueFailure = queuePiece({
       env: ctx.env,
@@ -741,6 +762,10 @@ async function sendProse(
       cwd: ctx.cwd,
       words,
       promptHash: pack.hash,
+      beforeAppend: () => {
+        mkdirSync(dirname(draftPath), { recursive: true });
+        writeFileSync(draftPath, `${draftFrontmatter}\n\n${normalized}\n`, "utf8");
+      },
     });
 
     return {

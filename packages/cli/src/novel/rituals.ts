@@ -365,8 +365,19 @@ async function runThink(
  * itself). `appendEvent` throws on a write failure (an unwritable state
  * directory); `attempt()` in `runRituals` turns that into a `"failed"`
  * ritual, never an exception out of this function.
+ *
+ * `env` is `runRituals`'s already-defaulted `opts.env ?? process.env` (the
+ * same resolved value `runThink` takes below), not `opts.env` itself — a
+ * second `opts.env ?? process.env` here would be a second place to keep in
+ * sync with `runRituals`'s own defaulting.
  */
-function runQueue(env: Record<string, string | undefined>, chapterPath: string, chapter: number, opts: RitualOptions, now: () => Date): Ritual {
+function runQueue(
+  env: Record<string, string | undefined>,
+  chapterPath: string,
+  chapter: number,
+  opts: RitualOptions,
+  now: () => Date,
+): Ritual {
   const event: QueuedEvent = {
     type: "queued",
     id: opts.queue.id,
