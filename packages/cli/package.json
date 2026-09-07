@@ -11,6 +11,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "@openthink/pablo-core": "workspace:*",
+    "@openthink/ui-leaf": "^1.6.0",
     "zod": "4.5.4"
   }
 }

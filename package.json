@@ -14,5 +14,9 @@
     "@types/bun": "^1.3.0",
     "@types/node": "^25.6.0",
     "typescript": "^6.0.0"
-  }
+  },
+  "//trustedDependencies": "@openthink/ui-leaf's postinstall downloads and sha256-verifies the platform ui-leaf-bin. Bun blocks postinstalls by default, and without this the binary pablo edit's window needs is simply absent.",
+  "trustedDependencies": [
+    "@openthink/ui-leaf"
+  ]
 }

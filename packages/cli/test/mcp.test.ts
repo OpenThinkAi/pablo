@@ -60,14 +60,16 @@ function parseTextBody(result: unknown): unknown {
 // four narrow ones instead (see `verbs.ts`'s file header). `prose` was
 // already an MCP tool before this ticket (AGT-1241); AC1's "five existing
 // tools" are resume/status/write/save/check. AGT-1264 adds `revise`, also
-// project-scoped.
+// project-scoped. AGT-1258's `edit` is NOT in this set — its `project` field
+// is optional (`--piece <id>` needs no vault at all).
 const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "write", "save", "check", "revise"]);
 
-test("listTools returns the six project-scoped verbs, prose, review, and the four narrow voice_* tools", async () => {
+test("listTools returns the six project-scoped verbs, prose, review, edit, and the four narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
 
   expect(tools.map((t) => t.name).sort()).toEqual([
     "check",
+    "edit",
     "prose",
     "resume",
     "review",

@@ -16,6 +16,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runCheck } from "./check";
+import { runEdit } from "./edit";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
@@ -64,10 +65,11 @@ const P0_VERBS = [
   "review",
   "revise",
   "tray",
+  "edit",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
-const LATER_VERBS = ["edit", "share", "notes", "publish"] as const;
+const LATER_VERBS = ["share", "notes", "publish"] as const;
 
 const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
@@ -137,6 +139,11 @@ function helpText(): string {
     "                                            where it is built",
     "  pablo tray install|uninstall              install/remove the launchd agent that keeps",
     "                                            the tray running after login",
+    "  pablo edit --piece <id>",
+    "  pablo edit --project <slug> --file F      mount the ui-leaf editor window on a queued",
+    "                                            piece or a project file; prints the URL",
+    "                                            (--json: {url}) and holds the process open",
+    "                                            until the window closes",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -203,6 +210,8 @@ interface ParsedArgs {
   readonly start: string | undefined;
   /** `revise --end <n>` (AGT-1264): a UTF-16 offset into the frontmatter-stripped body. Requires `--start`. */
   readonly end: string | undefined;
+  /** `edit --piece <id>` (AGT-1258): a queued piece id — alternative to `--project`/`--file`. */
+  readonly piece: string | undefined;
 }
 
 /**
@@ -258,6 +267,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     passage: typeof values["passage"] === "string" ? values["passage"] : undefined,
     start: typeof values["start"] === "string" ? values["start"] : undefined,
     end: typeof values["end"] === "string" ? values["end"] : undefined,
+    piece: typeof values["piece"] === "string" ? values["piece"] : undefined,
   };
 }
 
@@ -731,6 +741,16 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // resolution block ever runs.
   if (args.verb === "tray") {
     return await runTray(args);
+  }
+
+  // `edit` (AGT-1258) may run as `--piece <id>` with no vault at all, or as
+  // `--project <slug> --file F` — its own resolution (`edit.ts`'s
+  // `resolveEditTarget`) handles both and does its own marker check, so like
+  // `prose`/`review`/`tray` it is dispatched here, before the shared
+  // `--project`/marker resolution block below (which requires `--project`
+  // unconditionally).
+  if (args.verb === "edit") {
+    return await runEdit({ project: args.project, file: args.file, piece: args.piece, json: args.json }, cwd, process.env);
   }
 
   let projectPath: string | undefined;
