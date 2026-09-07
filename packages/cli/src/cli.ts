@@ -4,15 +4,20 @@
  * whatever agent you like (Claude Code, Codex, pi). See
  * `~/saltline-digital-vault/projects/ai-terminal/README.md` for the design.
  *
- * This is the P0 skeleton: argument parsing, `--help`, and `--project`
- * resolution are real; every verb body is a stub. Exit codes are the
- * contract every later ticket builds on: 0 ok, 2 refused (a framework
- * precondition — an unresolvable `--project`, or later an unmet stage
- * precondition), 1 error (including "not implemented yet").
+ * This is the P0 skeleton: argument parsing, `--help`, `--project`
+ * resolution, and `init` (which writes the `pablo.json` marker every other
+ * verb requires) are real; every other verb body is a stub. Exit codes are
+ * the contract every later ticket builds on: 0 ok, 2 refused (a framework
+ * precondition — an unresolvable `--project`, a missing/invalid marker, or
+ * later an unmet stage precondition), 1 error (including "not implemented
+ * yet").
  */
 
 import { parseArgs } from "node:util";
-import { resolveProjectFromCwd } from "./project";
+import { initAdopt, initNovel } from "./init";
+import type { InitResult } from "./init";
+import { readMarker } from "./marker";
+import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
@@ -44,15 +49,24 @@ function helpText(): string {
     "The vault is $PABLO_VAULT if set, else the nearest ancestor of the current",
     "directory holding a style/ directory.",
     "",
+    "  pablo init <format> <slug> \"<Title>\"    scaffold a new work and write its marker",
+    "  pablo init --adopt --project <slug>      write only the marker into an existing work",
+    "",
+    "Every verb but init refuses (exit 2) when the resolved project has no",
+    "pablo.json marker.",
+    "",
     "Exit codes: 0 ok, 2 refused (a framework precondition), 1 error.",
   ].join("\n");
 }
 
 interface ParsedArgs {
   readonly verb: string | undefined;
+  /** Positionals after the verb — e.g. `<format> <slug> "<Title>"` for `init`. */
+  readonly rest: readonly string[];
   readonly project: string | undefined;
   readonly json: boolean;
   readonly help: boolean;
+  readonly adopt: boolean;
 }
 
 export function parseCliArgs(argv: readonly string[]): ParsedArgs {
@@ -64,14 +78,17 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       project: { type: "string" },
       json: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
+      adopt: { type: "boolean", default: false },
     },
   });
 
   return {
     verb: positionals[0],
+    rest: positionals.slice(1),
     project: typeof values["project"] === "string" ? values["project"] : undefined,
     json: values["json"] === true,
     help: values["help"] === true,
+    adopt: values["adopt"] === true,
   };
 }
 
@@ -97,6 +114,83 @@ function refusalResult(refusal: Refusal): Result {
   return { ok: false, code: refusal.code, message: refusal.message, tried: refusal.tried };
 }
 
+/**
+ * The AC4 gate: every verb but `init` refuses (exit 2) when the resolved
+ * project has no valid `pablo.json`. Delegates to `readMarker`, whose
+ * refusal already names the missing/invalid key or points at
+ * `pablo init --adopt`.
+ */
+function requireMarker(projectPath: string): Refusal | undefined {
+  const marker = readMarker(projectPath);
+  return marker.ok ? undefined : marker;
+}
+
+function emitInitResult(result: InitResult, json: boolean): number {
+  if (!result.ok) {
+    emit(refusalResult(result), json);
+    return result.code;
+  }
+
+  if (json) {
+    const body: Record<string, unknown> = {
+      ok: true,
+      path: result.path,
+      format: result.format,
+      slug: result.slug,
+      title: result.title,
+      committed: result.committed,
+    };
+    if (result.notice) body["notice"] = result.notice;
+    console.log(JSON.stringify(body));
+  } else {
+    const committedNote = result.committed ? " (committed)" : "";
+    console.log(`pablo: created ${result.path}${committedNote}`);
+    if (result.notice) console.log(result.notice);
+  }
+
+  return EXIT_OK;
+}
+
+function runInit(args: ParsedArgs, cwd: string): number {
+  const vaultResult = findVault(cwd);
+  if (!vaultResult.ok) {
+    emit(refusalResult(vaultResult), args.json);
+    return vaultResult.code;
+  }
+  const vault = vaultResult.path;
+
+  if (args.adopt) {
+    if (args.project === undefined) {
+      const message = "pablo: init --adopt requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+
+    const resolved = resolveProjectFromCwd(cwd, args.project);
+    if (!resolved.ok) {
+      emit(refusalResult(resolved), args.json);
+      return resolved.code;
+    }
+
+    return emitInitResult(initAdopt(vault, resolved.path, args.project), args.json);
+  }
+
+  const [format, slug, title] = args.rest;
+  if (format === undefined || slug === undefined || title === undefined) {
+    const message = 'pablo: usage: pablo init <format> <slug> "<Title>"';
+    emit({ ok: false, code: EXIT_ERROR, message }, args.json);
+    return EXIT_ERROR;
+  }
+
+  if (format !== "novel") {
+    const message = `pablo: init: only "novel" is implemented (got "${format}")`;
+    emit({ ok: false, code: EXIT_ERROR, message }, args.json);
+    return EXIT_ERROR;
+  }
+
+  return emitInitResult(initNovel(vault, slug, title), args.json);
+}
+
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
 export function main(argv: readonly string[], cwd: string = process.cwd()): number {
   const args = parseCliArgs(argv);
@@ -112,11 +206,21 @@ export function main(argv: readonly string[], cwd: string = process.cwd()): numb
     return EXIT_ERROR;
   }
 
+  if (args.verb === "init") {
+    return runInit(args, cwd);
+  }
+
   if (args.project !== undefined) {
     const resolved = resolveProjectFromCwd(cwd, args.project);
     if (!resolved.ok) {
       emit(refusalResult(resolved), args.json);
       return resolved.code;
+    }
+
+    const markerRefusal = requireMarker(resolved.path);
+    if (markerRefusal) {
+      emit(refusalResult(markerRefusal), args.json);
+      return markerRefusal.code;
     }
   }
 
