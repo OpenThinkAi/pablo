@@ -262,13 +262,45 @@ export interface AssembleReviseOptions {
   readonly file: string;
   /** The already-located span, in the frontmatter-stripped body's own UTF-16 offsets. */
   readonly span: Span;
-  /** What to change about the passage — already sanitized by the caller (see `sanitizeInstruction`). */
+  /** What to change about the passage, in the caller's own words — raw, untrimmed text is fine; see `buildRevisePack`. */
   readonly instruction: string;
 }
 
 export type AssembleReviseResult =
   | { readonly ok: true; readonly pack: Pack; readonly body: string; readonly filePath: string }
   | { readonly ok: false; readonly code: 2; readonly message: string };
+
+/**
+ * Builds the `revise` pack from an already-read `body` and an already-valid
+ * `span` — the one place `style`/`workRules`/`before`/`passage`/`after` are
+ * turned into a `Pack`, shared by `assembleRevise` (which reads the file
+ * itself) and `reviseCore` (which already has `body` in hand from resolving
+ * `--passage`/`--start`/`--end` and must not read the file a second time —
+ * `standards` review on this ticket's first pass caught exactly that TOCTOU
+ * double-read).
+ *
+ * `instruction` is sanitized HERE, not by each caller: `security` review on
+ * this ticket's first pass flagged that a future caller of `assembleRevise`
+ * (AGT-1269's editor host) could skip a caller-side `sanitizeInstruction`
+ * step and silently reopen the heading-injection risk AGT-1243/AGT-1244
+ * already found on `prose`'s sibling field. Sanitizing inside the one
+ * function every caller (CLI, MCP, and the future editor host) funnels
+ * through makes it impossible to skip; calling it twice (as `reviseCore`
+ * does, on top of `runRevise`'s CLI path) is harmless — flatten-and-trim is
+ * idempotent.
+ */
+function buildRevisePack(vaultRoot: string, projectPath: string, body: string, span: Span, instruction: string): Pack {
+  const passage = body.slice(span.start, span.end);
+  const { before, after } = neighbourParagraphs(body, span);
+  return assemblePack("revise", {
+    style: readStyle(vaultRoot),
+    workRules: readWorkRules(vaultRoot, projectPath),
+    before,
+    passage,
+    after,
+    instruction: sanitizeInstruction(instruction),
+  });
+}
 
 /**
  * The pure "read file, locate, build inputs" half AGT-1269's editor host
@@ -288,18 +320,7 @@ export function assembleRevise(vaultRoot: string, projectPath: string, options: 
     };
   }
 
-  const passage = body.slice(options.span.start, options.span.end);
-  const { before, after } = neighbourParagraphs(body, options.span);
-
-  const pack = assemblePack("revise", {
-    style: readStyle(vaultRoot),
-    workRules: readWorkRules(vaultRoot, projectPath),
-    before,
-    passage,
-    after,
-    instruction: options.instruction,
-  });
-
+  const pack = buildRevisePack(vaultRoot, projectPath, body, options.span, options.instruction);
   return { ok: true, pack, body, filePath: resolved };
 }
 
@@ -491,9 +512,10 @@ async function sendRevise(pack: Pack, span: Span, ctx: ReviseCoreContext, deps: 
 
 /**
  * The core: read the file, resolve the span (from `--passage` or
- * `--start`/`--end`), sanitize `--instruction`, assemble the pack, then
- * either return the dry-run body or send the pack once. Every failure is
- * returned data, never a thrown exception, exactly like `proseCore`.
+ * `--start`/`--end`), assemble the pack (`buildRevisePack` sanitizes
+ * `--instruction`), then either return the dry-run body or send the pack
+ * once. Every failure is returned data, never a thrown exception, exactly
+ * like `proseCore`.
  */
 export async function reviseCore(args: ReviseCoreArgs, ctx: ReviseCoreContext, deps: ReviseDeps = {}): Promise<ReviseOutcome> {
   if (args.instruction === undefined || args.instruction.trim() === "") {
@@ -507,15 +529,15 @@ export async function reviseCore(args: ReviseCoreArgs, ctx: ReviseCoreContext, d
   const spanResult = resolveSpan(args, body, resolved);
   if (!spanResult.ok) return spanResult.outcome;
 
-  const instruction = sanitizeInstruction(args.instruction);
-  const assembled = assembleRevise(ctx.vaultRoot, ctx.projectPath, { file: args.file, span: spanResult.span, instruction });
-  if (!assembled.ok) return refuse(assembled.code, assembled.message);
+  // `buildRevisePack` sanitizes `instruction` itself (see its own doc
+  // comment) — passed through here unsanitized rather than sanitized twice.
+  const pack = buildRevisePack(ctx.vaultRoot, ctx.projectPath, body, spanResult.span, args.instruction);
 
   if (args.dryRun) {
-    return { body: dryRunBody(assembled.pack), exitCode: 0, pack: assembled.pack };
+    return { body: dryRunBody(pack), exitCode: 0, pack };
   }
 
-  return await sendRevise(assembled.pack, spanResult.span, ctx, deps);
+  return await sendRevise(pack, spanResult.span, ctx, deps);
 }
 
 /** The CLI's own argv shape — `start`/`end` still raw strings (`node:util`'s `parseArgs` only knows string/boolean). */
@@ -583,8 +605,20 @@ export async function runRevise(args: ReviseCliArgs, ctx: ReviseCoreContext, dep
     return outcome.exitCode;
   }
 
-  const providers = createProviders(loadConfig({ env: ctx.env }));
-  const providerId = providers.route(REVISE_INTENT);
-  console.log(renderPack(outcome.pack as Pack, providers.rates(providerId)).text);
-  return outcome.exitCode;
+  // Non-JSON --dry-run rendering: `createProviders`/`rates` can throw
+  // `ProviderConfigError` on a malformed config, exactly the failure
+  // `routeRevise` already guards on the send path — guarded the same way here
+  // rather than letting it propagate as an uncaught exception.
+  try {
+    const providers = createProviders(loadConfig({ env: ctx.env }));
+    const providerId = providers.route(REVISE_INTENT);
+    console.log(renderPack(outcome.pack as Pack, providers.rates(providerId)).text);
+    return outcome.exitCode;
+  } catch (error) {
+    if (error instanceof ProviderConfigError) {
+      console.error(error.message);
+      return 2;
+    }
+    throw error;
+  }
 }
