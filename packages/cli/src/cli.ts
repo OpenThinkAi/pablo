@@ -29,7 +29,11 @@ import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
 import { runResumeVerb } from "./resume";
 import { runReview } from "./review-verbs";
+import { decide } from "./review";
 import { runSave } from "./save";
+import { materializeTrayBundle } from "./tray/bundle";
+import { spawnTrayHelper, superviseHelper } from "./tray/supervise";
+import { runTrayDaemon } from "./tray/daemon";
 import { deriveCliOptions, parseForChapter } from "./verbs";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
@@ -49,6 +53,7 @@ const P0_VERBS = [
   "prose",
   "review",
   "revise",
+  "tray",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -116,6 +121,11 @@ function helpText(): string {
     "                                            send one located passage to the local model;",
     "                                            returns {candidate, span, receipt} and writes",
     "                                            nothing — the file is never touched",
+    "  pablo tray                               run the menu-bar daemon in the foreground",
+    "                                            (SIGTERM/SIGINT to stop); PABLO_TRAY=0 skips",
+    "                                            the helper, PABLO_APP_SUPPORT_DIR overrides",
+    "                                            where it is built",
+    "  pablo tray install|uninstall             not built yet",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -555,6 +565,55 @@ function runVoice(args: ParsedArgs, cwd: string): number {
   return EXIT_ERROR;
 }
 
+/**
+ * `pablo tray [install|uninstall]`. Bare `tray` runs the daemon
+ * (`tray/daemon.ts`) in the foreground until SIGTERM/SIGINT, wiring the real
+ * `materializeTrayBundle`/`superviseHelper`/`spawnTrayHelper`/`decide` and a
+ * real clock/sleep. `install`/`uninstall` are reserved for the launchd agent
+ * ticket and refuse (exit 1) until then. `tray` is CLI-only — it is never an
+ * MCP tool and has no `--project`, so it is dispatched here, before the
+ * shared `--project`/marker resolution block.
+ */
+async function runTray(args: ParsedArgs): Promise<number> {
+  const [sub] = args.rest;
+  if (sub === "install" || sub === "uninstall") {
+    console.error(`pablo: tray ${sub}: not built yet`);
+    return EXIT_ERROR;
+  }
+  if (sub !== undefined) {
+    console.error(`pablo: tray: unknown subcommand "${sub}" (expected install or uninstall)`);
+    return EXIT_ERROR;
+  }
+
+  const controller = new AbortController();
+  const onSignal = (): void => controller.abort();
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
+
+  try {
+    await runTrayDaemon(
+      {
+        env: process.env,
+        log: (line) => {
+          process.stderr.write(`${line}\n`);
+        },
+        now: () => new Date(),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        materialize: materializeTrayBundle,
+        supervise: superviseHelper,
+        spawnHelper: spawnTrayHelper,
+        decide,
+      },
+      controller.signal,
+    );
+  } finally {
+    process.off("SIGTERM", onSignal);
+    process.off("SIGINT", onSignal);
+  }
+
+  return EXIT_OK;
+}
+
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
 export async function main(argv: readonly string[], cwd: string = process.cwd()): Promise<number> {
   const args = parseCliArgs(argv);
@@ -622,6 +681,13 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       },
       process.env,
     );
+  }
+
+  // `tray` (AGT-1267), like `prose` and `review`, has no `--project` and is
+  // never an MCP tool — dispatched here, before the shared `--project`/marker
+  // resolution block ever runs.
+  if (args.verb === "tray") {
+    return await runTray(args);
   }
 
   let projectPath: string | undefined;
