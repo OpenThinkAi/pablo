@@ -61,10 +61,21 @@ including an unresolvable project), `1` error.
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
 | `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--variants V]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, refuses (exit 1) pointing at AGT-1237, which wires the send | `{path, receipt, rituals[]}` / `{refused, missing[]}`, or the dry-run body below |
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
-| `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{tells[], unprovenanced[]}` |
+| `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
 | `pablo dry-run ...` | (planned; today this is `write`'s own `--dry-run`) any write or revise, assembled and priced, nothing sent | the pack, slice by slice |
 | `pablo mcp` | serve all of the above as MCP tools, same schemas | |
 | *later* `revise`, `voice`, `edit`, `share`, `notes`, `publish` | P1/P2 — the voice loop, local editing, sharing, publishing | |
+
+`check` scans `chapters/*.md` (or one `--file`, work-relative or absolute inside the
+work — outside it is a refusal, exit `2`) for two things: chapters whose frontmatter
+lacks `model` or `prompt_hash` (`unprovenanced[]`), and lines that trip a mechanical
+rule — em-dashes, curly quotes, dash year ranges, foreshadowing phrases, the banned
+stock names from `style/prose.md` and `anti-tells.md`, and every `Flagged:` line from
+`style/prose.md` found verbatim (`hits[]`, each `{path, line, rule, excerpt}`). A hit
+is data, not a failure: exit is `0` whether or not there are hits, since AC3's
+"runs after a write" wiring is `write`'s job (`check.ts` exports `checkFile` and
+`checkWork` for it to call). Voice-pattern scoring beyond verbatim flagged lines is
+P1, out of scope.
 
 Everything past the skeleton (parsing, `--help`, `--project` resolution, `init`) is a
 stub today: each other verb prints "not implemented yet" and exits 1. See the design
