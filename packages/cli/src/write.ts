@@ -29,6 +29,8 @@ import type { Hit } from "./check";
 import { readMarker } from "./marker";
 import { buildChapterPack, DEFAULT_WORD_TARGET } from "./novel/pack";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
+import { runRituals } from "./novel/rituals";
+import type { Ritual } from "./novel/rituals";
 
 /**
  * Exit codes: the contract every ticket builds on, defined once in `cli.ts`
@@ -54,14 +56,18 @@ export interface ProgressSink {
   write(text: string): void;
 }
 
-/** Dependencies a caller can inject; production code omits all three. */
+/** Dependencies a caller can inject; production code omits all of them. */
 export interface RunWriteDeps {
   /** Overrides the provider registry's adapter entirely — the only way tests avoid the network. */
   readonly adapter?: Adapter | undefined;
-  /** Overrides the clock used for the frontmatter's `generated` timestamp. */
+  /** Overrides the clock used for the frontmatter's `generated` timestamp and the rituals' "today" (AGT-1231). */
   readonly now?: (() => Date) | undefined;
   /** Overrides where streaming progress is written. Defaults to `process.stderr`. */
   readonly stderr?: ProgressSink | undefined;
+  /** Overrides `process.env` for the after-write git/think rituals (AGT-1231) — tests set PATH here to keep `think` off it. */
+  readonly env?: Record<string, string | undefined> | undefined;
+  /** Overrides the after-write `think sync` ritual's timeout (default 20s). */
+  readonly thinkTimeoutMs?: number | undefined;
 }
 
 /** The intent a drafting pack routes under — see `providers/registry.ts`'s `route`. */
@@ -164,9 +170,15 @@ export interface WriteReceiptSummary {
   readonly words: number;
 }
 
-function emitWriteSuccess(json: boolean, path: string, receipt: WriteReceiptSummary, hits: readonly Hit[]): void {
+function emitWriteSuccess(
+  json: boolean,
+  path: string,
+  receipt: WriteReceiptSummary,
+  hits: readonly Hit[],
+  rituals: readonly Ritual[],
+): void {
   if (json) {
-    console.log(JSON.stringify({ ok: true, path, receipt, check: hits }));
+    console.log(JSON.stringify({ ok: true, path, receipt, check: hits, rituals }));
     return;
   }
   console.log(`wrote ${path} (${receipt.words} words)`);
@@ -176,6 +188,7 @@ function emitWriteSuccess(json: boolean, path: string, receipt: WriteReceiptSumm
       `wrote ${receipt.tokensWritten} in ${seconds(writeMs)}s`,
   );
   for (const hit of hits) console.log(formatHitLine(hit));
+  for (const ritual of rituals) console.log(`ritual ${ritual.name}: ${ritual.status} — ${ritual.detail}`);
 }
 
 /**
@@ -365,6 +378,21 @@ export async function runWrite(
     words: wordCount,
   };
 
-  emitWriteSuccess(args.json, workRelativePath, receipt, hits);
+  // AGT-1231: outline tick, dated note, README update, git commit, think
+  // sync — the same clock as the frontmatter's `generated` timestamp, so
+  // "today" agrees with what was just written.
+  const writeMs = receipt.wallMs - receipt.timeToFirstTokenMs;
+  const receiptLine = `read ${receipt.tokensRead} tokens in ${seconds(receipt.timeToFirstTokenMs)}s, wrote ${receipt.tokensWritten} in ${seconds(writeMs)}s`;
+  const rituals = await runRituals(projectPath, chapter, filePath, {
+    slug: markerResult.marker.slug,
+    words: wordCount,
+    model: draftAdapter.model,
+    receiptLine,
+    now,
+    env: deps.env,
+    thinkTimeoutMs: deps.thinkTimeoutMs,
+  });
+
+  emitWriteSuccess(args.json, workRelativePath, receipt, hits, rituals);
   return 0;
 }
