@@ -99,7 +99,7 @@ test("proseCore dry-run on the fixture's plain voice returns AC2's exact shape",
   const briefPath = writeBrief(vault);
 
   const outcome = await proseCore(
-    { voice: "plain", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
+    { voice: "plain", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -133,7 +133,7 @@ test("proseCore without --dry-run, on a voice whose model: names an unconfigured
   const briefPath = writeBrief(vault);
 
   const outcome = await proseCore(
-    { voice: "plain", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: undefined, force: false },
+    { voice: "plain", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: vault, env: { PABLO_VAULT: vault, XDG_CONFIG_HOME: configHome } },
   );
 
@@ -151,7 +151,7 @@ test("proseCore with two context files in argument order shows both in the slice
   writeFileSync(bPath, "The second context file.\n", "utf8");
 
   const outcome = await proseCore(
-    { voice: "plain", brief: briefPath, context: [aPath, bPath], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
+    { voice: "plain", brief: briefPath, context: [aPath, bPath], format: undefined, words: undefined, dryRun: true, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -167,7 +167,18 @@ test("proseCore: the same voice, brief, context and options produce the same pro
   const contextPath = join(vault, "c.md");
   writeFileSync(contextPath, "Some context.\n", "utf8");
 
-  const args = { voice: "plain", brief: briefPath, context: [contextPath], format: "email", words: 200, dryRun: true, out: undefined, force: false } as const;
+  const args = {
+    voice: "plain",
+    brief: briefPath,
+    context: [contextPath],
+    format: "email",
+    words: 200,
+    dryRun: true,
+    out: undefined,
+    force: false,
+    draft: undefined,
+    instruction: undefined,
+  } as const;
   const ctx = { cwd: vault, env: { PABLO_VAULT: vault } };
 
   const first = await proseCore(args, ctx);
@@ -182,7 +193,7 @@ test("proseCore without --voice refuses (exit 2)", async () => {
   const briefPath = writeBrief(vault);
 
   const outcome = await proseCore(
-    { voice: undefined, brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
+    { voice: undefined, brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -196,7 +207,7 @@ test("proseCore with an unresolvable voice refuses (exit 2), naming what it trie
   const briefPath = writeBrief(vault);
 
   const outcome = await proseCore(
-    { voice: "nosuchvoice", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
+    { voice: "nosuchvoice", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -209,7 +220,7 @@ test("proseCore without --brief refuses (exit 2)", async () => {
   const vault = tempVault();
 
   const outcome = await proseCore(
-    { voice: "plain", brief: undefined, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
+    { voice: "plain", brief: undefined, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -222,7 +233,7 @@ test("proseCore with an unreadable --brief file refuses", async () => {
   const vault = tempVault();
 
   const outcome = await proseCore(
-    { voice: "plain", brief: join(vault, "does-not-exist.md"), context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
+    { voice: "plain", brief: join(vault, "does-not-exist.md"), context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -244,6 +255,8 @@ test("proseCore with an unreadable --context file refuses", async () => {
       dryRun: true,
       out: undefined,
       force: false,
+      draft: undefined,
+      instruction: undefined,
     },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
@@ -257,7 +270,7 @@ test("proseCore with an unknown --format refuses (exit 2), naming the known form
   const briefPath = writeBrief(vault);
 
   const outcome = await proseCore(
-    { voice: "plain", brief: briefPath, context: [], format: "bogus", words: undefined, dryRun: true, out: undefined, force: false },
+    { voice: "plain", brief: briefPath, context: [], format: "bogus", words: undefined, dryRun: true, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -277,7 +290,7 @@ test("proseCore with no vault at all resolves a global voice under XDG_CONFIG_HO
   const briefPath = writeBrief(noVaultCwd);
 
   const outcome = await proseCore(
-    { voice: "memo", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
+    { voice: "memo", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false, draft: undefined, instruction: undefined },
     { cwd: noVaultCwd, env: { XDG_CONFIG_HOME: configHome } },
   );
 
