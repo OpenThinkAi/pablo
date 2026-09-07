@@ -7,6 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
+    "test:tray": "bun test packages/cli/test/tray-helper.test.ts",
     "pablo": "bun run packages/cli/src/cli.ts"
   },
   "devDependencies": {
