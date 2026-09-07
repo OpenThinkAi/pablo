@@ -1,0 +1,9 @@
+{
+  "format": "novel",
+  "title": "The Ice House",
+  "slug": "ice-house",
+  "author": "matt",
+  "voice": ["../../style", "QWEN.md"],
+  "neverSend": ["research/", "notes/"],
+  "publish": {}
+}

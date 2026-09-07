@@ -25,3 +25,9 @@ novels/<slug>/notes/, research/
 The style guide here quotes the **rules** of the real `style/prose.md` (they are
 rules, and pablo's craft slice is built from them); the flagged examples under
 each rule are invented to match this fixture's story.
+
+## Works
+
+| Work | Kind | Started | Status |
+|------|------|---------|--------|
+| [The Ice House](novels/ice-house/) | novel | 2026-01-01 | Act I outlined, chapter 1 drafted |

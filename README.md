@@ -24,9 +24,10 @@ binding decisions): `~/saltline-digital-vault/projects/ai-terminal/README.md`
 
 ## Status
 
-P0 in progress: the repo reshape and CLI skeleton landed 2026-09-06. `packages/tui`
-(the earlier terminal-renderer design) is retired; see `CLAUDE.md`'s `Layout` section
-and the design doc's `History` for what carried over.
+P0 in progress: the repo reshape and CLI skeleton landed 2026-09-06; `init` and the
+`pablo.json` marker landed 2026-09-06. `packages/tui` (the earlier terminal-renderer
+design) is retired; see `CLAUDE.md`'s `Layout` section and the design doc's `History`
+for what carried over.
 
 ## Install / run
 
@@ -53,7 +54,8 @@ including an unresolvable project), `1` error.
 
 | Command | Does | Returns |
 |---|---|---|
-| `pablo init <format> <slug> "<Title>"` | scaffold from the format's template, write the marker, commit | the project summary |
+| `pablo init <format> <slug> "<Title>"` | scaffold from `<vault>/templates/<format>`, write the marker, commit | `{ok, path, format, slug, title, committed, notice?}` |
+| `pablo init --adopt --project <slug>` | write only the marker into a work that already exists, touching nothing else; never commits | same shape, `committed: false` |
 | `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, stages, last, open, next}` |
 | `pablo status --project <slug> [--for chapter 3]` | the same, or the preconditions for one target and which are unmet | `{ready, missing[]}` |
 | `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--variants V]` | the prose call: check, pack, send, write, rituals | `{path, receipt, rituals[]}` or `{refused, missing[]}` |
@@ -63,10 +65,33 @@ including an unresolvable project), `1` error.
 | `pablo mcp` | serve all of the above as MCP tools, same schemas | |
 | *later* `revise`, `voice`, `edit`, `share`, `notes`, `publish` | P1/P2 — the voice loop, local editing, sharing, publishing | |
 
-Everything past the skeleton (parsing, `--help`, `--project` resolution) is a stub
-today: each verb prints "not implemented yet" and exits 1. See the design doc's
-`Commands` table for the full return shapes and the `Build order` section for what
-ships next.
+Everything past the skeleton (parsing, `--help`, `--project` resolution, `init`) is a
+stub today: each other verb prints "not implemented yet" and exits 1. See the design
+doc's `Commands` table for the full return shapes and the `Build order` section for
+what ships next.
+
+`init` is the one verb that runs without a marker — its job is to write one. Every
+other verb refuses (exit 2) when the resolved project has no valid `pablo.json`,
+naming the missing file or key and pointing at `pablo init --adopt --project <slug>`.
+
+Only `novel` is implemented as an `init` format today; `story`/`essay` scaffolds land
+when their format machines do.
+
+`pablo init novel <slug> "<Title>"` copies `<vault>/templates/novel` to
+`<vault>/novels/<slug>`, fills `{{TITLE}}`/`{{DATE}}`/`{{SLUG}}` in every `.md` file,
+writes `.brief.md`, adds the work's row to `<vault>/README.md`'s works table, writes
+`pablo.json`, adds `.pablo/` to `<vault>/.gitignore` if it's not already there, and
+commits everything it just created or changed by pathspec (never `git add -A`). A
+destination that already exists, or a missing template directory, is a refusal
+naming the path. A git failure (the vault isn't a repo, say) never aborts the
+scaffold — the files are already on disk; the result just carries a `notice` instead
+of `committed: true`.
+
+`pablo init --adopt --project <slug>` is for a work that already exists without a
+marker: it writes only `pablo.json` (title taken from the work's `README.md` first
+`# ` heading, minus a trailing "(working title)") and, if absent, the `.gitignore`
+line — nothing else in the work changes, and it never commits. Refuses (exit 2) if
+the work already has a `pablo.json`.
 
 ## Project layout
 
@@ -82,10 +107,39 @@ A project is a vault directory:
   essays/<slug>/
 ```
 
-Full layout and the `pablo.json` shape are in the design doc's `The project`
-section. pablo state that is not a document (receipts, share links) lives in
-`<work>/.pablo/`, gitignored — everything an author would want to read is
-markdown in the vault, tracked by git.
+Full layout is in the design doc's `The project` section. pablo state that is not a
+document (receipts, share links) lives in `<work>/.pablo/`, gitignored — everything
+an author would want to read is markdown in the vault, tracked by git.
+
+### `pablo.json`
+
+The marker that makes a directory a pablo project. `packages/cli/src/marker.ts` is
+the loader; it rejects an unknown `format` or a missing required key, naming it.
+
+```json
+{
+  "format": "novel",
+  "title": "The Valley's Shadow",
+  "slug": "valleys-shadow",
+  "author": "matt",
+  "voice": ["../../style", "QWEN.md"],
+  "neverSend": ["research/", "notes/"],
+  "publish": { "review": "artifact", "final": null }
+}
+```
+
+| key | required | default |
+|---|---|---|
+| `format` | yes | — (`"novel"` for P0; any other value is refused, naming it) |
+| `title` | yes | — |
+| `slug` | yes | — |
+| `author` | no | `"matt"` |
+| `voice` | no | `["../../style", "QWEN.md"]` |
+| `neverSend` | no | `["research/", "notes/"]` |
+| `publish` | no | `{}` |
+
+A directory with no `pablo.json` at all is a refusal naming
+`pablo init --adopt --project <slug>` as the fix.
 
 ## Contributing
 
