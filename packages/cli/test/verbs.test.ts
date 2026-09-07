@@ -28,6 +28,14 @@ function verb(name: string) {
   return found;
 }
 
+/** One of `voice`'s AGT-1245 `mcpTools` (voice_list/voice_show/voice_flag/voice_exemplar) — `verbs.test.ts`'s own in-process complement to `mcp.test.ts`'s full stdio round trip. */
+function voiceMcpTool(name: string) {
+  const tools = verb("voice").mcpTools ?? [];
+  const found = tools.find((t) => t.name === name);
+  if (found === undefined) throw new Error(`no such voice mcpTool: ${name}`);
+  return found;
+}
+
 test("VERBS exposes exactly the seven MCP verbs, each project-scoped verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual(["check", "prose", "resume", "save", "status", "voice", "write"]);
   for (const v of VERBS) {
@@ -652,5 +660,146 @@ test("prose.run with no vault resolves a global voice and a brief under ctx.cwd"
   expect(outcome.body).toMatchObject({ ok: true, dryRun: true });
 
   rmSync(noVaultCwd, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// voice's mcpTools (AGT-1245) — `voice_list`/`voice_show`/`voice_flag`/
+// `voice_exemplar`, the four narrow MCP tools `voice`'s VERBS entry exposes
+// instead of registering itself directly (see verbs.ts's file header and
+// `mcp.test.ts`'s full stdio round trip for the same tools driven end to end).
+// ---------------------------------------------------------------------------
+
+test("voice exposes exactly four mcpTools, each with a disjoint schema and no sub field", () => {
+  const tools = verb("voice").mcpTools;
+  expect(tools).toBeDefined();
+  expect(tools!.map((t) => t.name).sort()).toEqual(["voice_exemplar", "voice_flag", "voice_list", "voice_show"]);
+
+  const shapeKeys = (name: string) => Object.keys(voiceMcpTool(name).args.shape).sort();
+  expect(shapeKeys("voice_list")).toEqual([]);
+  expect(shapeKeys("voice_show")).toEqual(["name"]);
+  expect(shapeKeys("voice_flag")).toEqual(["line", "name", "section"]);
+  expect(shapeKeys("voice_exemplar")).toEqual(["file", "name", "title"]);
+  for (const name of ["voice_list", "voice_show", "voice_flag", "voice_exemplar"]) {
+    expect("sub" in voiceMcpTool(name).args.shape).toBe(false);
+  }
+});
+
+// AC1: a narrow schema enforces requiredness structurally — `name` (and
+// `voice_flag`'s `line`, `voice_exemplar`'s `file`) are not `.optional()`,
+// unlike `VOICE_ARGS`'s own `name` (which must stay optional for `list`).
+test("voice_show/voice_flag/voice_exemplar require name (and their own field) in the schema itself, not just at runtime", () => {
+  expect(voiceMcpTool("voice_show").args.safeParse({}).success).toBe(false);
+  expect(voiceMcpTool("voice_show").args.safeParse({ name: "plain" }).success).toBe(true);
+
+  expect(voiceMcpTool("voice_flag").args.safeParse({ name: "plain" }).success).toBe(false);
+  expect(voiceMcpTool("voice_flag").args.safeParse({ name: "plain", line: "x" }).success).toBe(true);
+
+  expect(voiceMcpTool("voice_exemplar").args.safeParse({ name: "plain" }).success).toBe(false);
+  expect(voiceMcpTool("voice_exemplar").args.safeParse({ name: "plain", file: "x.md" }).success).toBe(true);
+});
+
+test("voice_list mcpTool returns the same body voice.run sub:list does", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-mcp-config-"));
+  const ctx = voiceCtxFor(vault, configHome);
+
+  const viaVerb = await verb("voice").run({ sub: "list" }, ctx);
+  const viaTool = await voiceMcpTool("voice_list").run({}, ctx);
+
+  expect(viaTool).toEqual(viaVerb);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice_show mcpTool on the fixture's plain voice returns the readVoice shape", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-mcp-config-"));
+
+  const outcome = await voiceMcpTool("voice_show").run({ name: "plain" }, voiceCtxFor(vault, configHome));
+
+  expect(outcome.exitCode).toBe(0);
+  expect(outcome.body).toMatchObject({ ok: true, name: "plain", model: "anthropic" });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice_show mcpTool with a path-shaped name outside the vault refuses (exit 2), naming the vault boundary", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-mcp-config-"));
+
+  const outcome = await voiceMcpTool("voice_show").run({ name: "/etc/hosts" }, voiceCtxFor(vault, configHome));
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("inside the vault");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+// AGT-1243 gate finding, re-verified over the narrow tool (mirrors
+// mcp.test.ts's full round trip): `line` and `section` are both flattened
+// before writing, so neither can forge a `## ` heading.
+test("voice_flag mcpTool flattens an embedded newline in both line and section, forging no heading", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-mcp-config-"));
+
+  const outcome = await voiceMcpTool("voice_flag").run(
+    { name: "plain", line: "Say what changed.\n## Injected", section: "Flagged\n## AlsoInjected" },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(0);
+  const body = outcome.body as { ok: boolean; path: string };
+  expect(body.ok).toBe(true);
+  const contents = readFileSync(body.path, "utf8");
+  expect(contents).toContain('Flagged: "Say what changed. ## Injected"');
+  expect(contents).not.toMatch(/^## Injected$/m);
+  expect(contents).not.toMatch(/^## AlsoInjected$/m);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice_exemplar mcpTool with a file outside the vault refuses (exit 2), never reads it", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-mcp-config-"));
+
+  const outcome = await voiceMcpTool("voice_exemplar").run(
+    { name: "plain", file: "/etc/hosts" },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("inside the vault");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice_exemplar mcpTool on a fresh voice keeps a piece verbatim", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-mcp-config-"));
+  const piece = join(vault, "piece.md");
+  writeFileSync(piece, "# A Kept Piece\n\nExactly as written.\n", "utf8");
+
+  const created = await verb("voice").run({ sub: "new", name: "memo" }, voiceCtxFor(vault, configHome));
+  expect(created.exitCode).toBe(0);
+
+  const outcome = await voiceMcpTool("voice_exemplar").run(
+    { name: "memo", file: piece, title: "A Kept Piece" },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(0);
+  const body = outcome.body as { ok: boolean; path: string };
+  expect(body.ok).toBe(true);
+  expect(readFileSync(body.path, "utf8")).toBe("# A Kept Piece\n\nExactly as written.\n");
+
+  rmSync(vault, { recursive: true, force: true });
   rmSync(configHome, { recursive: true, force: true });
 });
