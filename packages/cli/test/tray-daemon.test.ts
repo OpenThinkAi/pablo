@@ -156,7 +156,7 @@ describe("runTrayDaemon", () => {
     await waitFor(() => readState(fixture.statePath).pending.length === 1);
 
     const request: TrayRequest = { action: "approve", id: "20260907-chapter-one-aaaa" };
-    Bun.write(fixture.parcelPath, JSON.stringify(request));
+    await Bun.write(fixture.parcelPath, JSON.stringify(request));
     // Bun.write is async; give the parcel a moment to land before the signal fires.
     await waitFor(() => {
       readFileSync(fixture.parcelPath, "utf8");
