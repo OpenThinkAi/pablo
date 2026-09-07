@@ -32,6 +32,16 @@ import { runReview } from "./review-verbs";
 import { decide } from "./review";
 import { runSave } from "./save";
 import { materializeTrayBundle } from "./tray/bundle";
+import {
+  defaultCliPath,
+  defaultEnvPath,
+  defaultLogDir,
+  defaultPlistPath,
+  installTray,
+  launchdPlist,
+  TRAY_LABEL,
+  uninstallTray,
+} from "./tray/launchd";
 import { spawnTrayHelper, superviseHelper } from "./tray/supervise";
 import { runTrayDaemon } from "./tray/daemon";
 import { deriveCliOptions, parseForChapter } from "./verbs";
@@ -125,7 +135,8 @@ function helpText(): string {
     "                                            (SIGTERM/SIGINT to stop); PABLO_TRAY=0 skips",
     "                                            the helper, PABLO_APP_SUPPORT_DIR overrides",
     "                                            where it is built",
-    "  pablo tray install|uninstall             not built yet",
+    "  pablo tray install|uninstall              install/remove the launchd agent that keeps",
+    "                                            the tray running after login",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -566,19 +577,51 @@ function runVoice(args: ParsedArgs, cwd: string): number {
 }
 
 /**
+ * The real `Exec` for `installTray`/`uninstallTray`: shells out to
+ * `launchctl` with `Bun.spawn`. Never used by a test — `tray-launchd.test.ts`
+ * injects a fake `Exec` so no suite touches the real launchd.
+ */
+async function launchctlExec(cmd: string[]): Promise<{ code: number; stderr: string }> {
+  const proc = Bun.spawn(cmd, { stdout: "ignore", stderr: "pipe" });
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  return { code, stderr };
+}
+
+/**
  * `pablo tray [install|uninstall]`. Bare `tray` runs the daemon
  * (`tray/daemon.ts`) in the foreground until SIGTERM/SIGINT, wiring the real
  * `materializeTrayBundle`/`superviseHelper`/`spawnTrayHelper`/`decide` and a
- * real clock/sleep. `install`/`uninstall` are reserved for the launchd agent
- * ticket and refuse (exit 1) until then. `tray` is CLI-only — it is never an
- * MCP tool and has no `--project`, so it is dispatched here, before the
- * shared `--project`/marker resolution block.
+ * real clock/sleep. `install`/`uninstall` (AGT-1268) write and load, or
+ * unload and remove, `~/Library/LaunchAgents/ai.openthink.pablo.tray.plist`
+ * through `tray/launchd.ts`, with a real `exec` built on `Bun.spawn` above.
+ * `tray` is CLI-only — it is never an MCP tool and has no `--project`, so it
+ * is dispatched here, before the shared `--project`/marker resolution block.
  */
 async function runTray(args: ParsedArgs): Promise<number> {
   const [sub] = args.rest;
-  if (sub === "install" || sub === "uninstall") {
-    console.error(`pablo: tray ${sub}: not built yet`);
-    return EXIT_ERROR;
+  if (sub === "install") {
+    const plistPath = defaultPlistPath();
+    const logDir = defaultLogDir();
+    const plist = launchdPlist({
+      label: TRAY_LABEL,
+      bun: process.execPath,
+      cli: defaultCliPath(),
+      logDir,
+      path: defaultEnvPath(),
+    });
+    const result = await installTray({ plistPath, plist, logDir, exec: launchctlExec });
+    if (!result.ok) {
+      console.error(result.stderr ?? "pablo: tray install: launchctl bootstrap failed");
+      return EXIT_ERROR;
+    }
+    console.log(`installed ${plistPath}`);
+    return EXIT_OK;
+  }
+  if (sub === "uninstall") {
+    const plistPath = defaultPlistPath();
+    const result = await uninstallTray({ plistPath, exec: launchctlExec });
+    console.log(result.removed ? "uninstalled" : "nothing installed");
+    return EXIT_OK;
   }
   if (sub !== undefined) {
     console.error(`pablo: tray: unknown subcommand "${sub}" (expected install or uninstall)`);
