@@ -23,6 +23,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter, ExtractedFact, Receipt } from "@openthink/pablo-core";
 import { estimateTokens, fileReceiptSink, hashPrompt } from "@openthink/pablo-core";
+import { insertUnderHeading } from "../markdown";
 import type { Ritual } from "./rituals";
 
 export interface ApplyFactsResult {
@@ -108,45 +109,6 @@ function headingFor(fact: ExtractedFact): string {
   if (WHO_KNOWS_PATTERN.test(fact.fact)) return WHO_KNOWS_HEADING;
 
   return OBJECTS_PLACES_HEADING;
-}
-
-/**
- * Finds `heading`'s section in `lines` (its line to the next `## ` heading or
- * EOF) and inserts `bulletLine` as the section's last line, preserving
- * everything else byte-for-byte. A missing heading is appended at EOF as
- * `heading`, a blank line, then `bulletLine` — matching the fixture's own
- * "heading, blank line, first bullet" shape.
- */
-function insertUnderHeading(lines: readonly string[], heading: string, bulletLine: string): string[] {
-  const headingIndex = lines.findIndex((line) => line.trim() === heading);
-
-  if (headingIndex === -1) {
-    const result = [...lines];
-    while (result.length > 0 && (result[result.length - 1] ?? "") === "") result.pop();
-    if (result.length > 0) result.push("");
-    result.push(heading, "", bulletLine);
-    return result;
-  }
-
-  let sectionEnd = lines.length;
-  for (let i = headingIndex + 1; i < lines.length; i++) {
-    if (/^##\s/.test(lines[i] ?? "")) {
-      sectionEnd = i;
-      break;
-    }
-  }
-
-  let insertAt = sectionEnd;
-  for (let i = sectionEnd - 1; i > headingIndex; i--) {
-    if ((lines[i] ?? "").trim() !== "") {
-      insertAt = i + 1;
-      break;
-    }
-  }
-
-  const result = [...lines];
-  result.splice(insertAt, 0, bulletLine);
-  return result;
 }
 
 /**

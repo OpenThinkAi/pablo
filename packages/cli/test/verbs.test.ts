@@ -63,6 +63,9 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     sub: { type: "string" },
     name: { type: "string" },
     global: { type: "boolean", default: false },
+    line: { type: "string" },
+    section: { type: "string" },
+    title: { type: "string" },
   });
 });
 
