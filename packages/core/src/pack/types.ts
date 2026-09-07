@@ -12,7 +12,7 @@ import type { OutputMode } from "../providers/types";
 import type { TokenEstimator } from "./estimate";
 
 /** The shapes of prompt pablo assembles today. */
-export type PackKind = "spanEdit" | "drafting" | "prose";
+export type PackKind = "spanEdit" | "drafting" | "prose" | "revise";
 
 /** One named, sourced section of the prompt. */
 export interface Slice {
@@ -188,4 +188,26 @@ export interface ProseInputs {
   readonly draft?: TextSource | undefined;
   /** What to change about `draft`, in the author's own words. See `draft`. */
   readonly instruction?: string | undefined;
+}
+
+/**
+ * `pablo revise` (AGT-1257): rewrite one located passage of a manuscript in
+ * place. This is the pure-core half — `locatePassage` (`document.ts`) turns
+ * the author's quoted text into the `before`/`passage`/`after` split this
+ * type carries; the `pablo revise` verb that reads a document and calls
+ * `locatePassage` for the caller is AGT-1264.
+ */
+export interface ReviseInputs {
+  /** `<vault>/style/*.md`, in the order they should appear. */
+  readonly style: readonly TextSource[];
+  /** The work's own rules file (`QWEN.md`) when it has one. */
+  readonly workRules?: TextSource | undefined;
+  /** The manuscript immediately before the passage, for continuity. */
+  readonly before: string;
+  /** The passage to rewrite, verbatim from the manuscript. */
+  readonly passage: string;
+  /** The manuscript immediately after the passage, for continuity. */
+  readonly after: string;
+  /** What to change about the passage, in the author's own words. */
+  readonly instruction: string;
 }

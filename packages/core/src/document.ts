@@ -45,3 +45,48 @@ export function selectionText(doc: Document, span: Span): string {
   }
   return doc.text.slice(span.start, span.end);
 }
+
+/**
+ * Finds `quoted` in `body`, ignoring differences in whitespace runs: any run
+ * of spaces, tabs and newlines on one side matches any run of them on the
+ * other, so a passage the author pasted back with a reflowed hard wrap still
+ * finds its home. Everything else must match exactly.
+ *
+ * `ok: true` only when there is exactly one match, and the returned `span` is
+ * in `body`'s own UTF-16 offsets (the original text, not the whitespace the
+ * caller quoted) — so `selectionText({path, text: body}, span)` reproduces
+ * the exact substring `locatePassage` found. Zero or more than one match
+ * returns the count instead, for the caller to explain to the author. An
+ * empty or whitespace-only `quoted` is never a location — it would match
+ * everywhere — so it always reports `matches: 0`.
+ */
+export function locatePassage(body: string, quoted: string): { ok: true; span: Span } | { ok: false; matches: number } {
+  if (quoted.trim() === "") {
+    return { ok: false, matches: 0 };
+  }
+
+  const pattern = new RegExp(toWhitespaceInsensitivePattern(quoted), "g");
+  const matches = [...body.matchAll(pattern)];
+
+  if (matches.length !== 1) {
+    return { ok: false, matches: matches.length };
+  }
+
+  const match = matches[0];
+  if (match === undefined || match.index === undefined) {
+    return { ok: false, matches: matches.length };
+  }
+  return { ok: true, span: { start: match.index, end: match.index + match[0].length } };
+}
+
+/** Escapes every regex metacharacter and turns each whitespace run into `\s+`. */
+function toWhitespaceInsensitivePattern(text: string): string {
+  return text
+    .split(/(\s+)/)
+    .map((chunk) => (chunk !== "" && /^\s+$/.test(chunk) ? "\\s+" : escapeRegExp(chunk)))
+    .join("");
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

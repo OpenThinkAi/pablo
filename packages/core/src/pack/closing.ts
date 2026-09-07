@@ -43,3 +43,13 @@ export const PROSE_REVISE_CLOSING =
   "Write the complete rewritten piece now, in the voice above, applying the instruction" +
   " to the previous text. The whole piece, not a diff and not only the changed part" +
   " — no preamble, no markup, no commentary.";
+
+/**
+ * `revise`'s closing directive (AGT-1257): the whole pack is sent through
+ * `complete()`, the same as `prose` and `drafting`. Asks for the rewritten
+ * passage only — not the surrounding manuscript context that `before`/`after`
+ * carry for continuity, and not a diff.
+ */
+export const REVISE_CLOSING =
+  "Write the rewritten passage now, and nothing else: no preamble, no quotes around it," +
+  " and no commentary. Keep the same tense and person as the passage above.";

@@ -15,7 +15,13 @@
 
 import { createHash } from "node:crypto";
 import { selectionText } from "../document";
-import { CRITICMARKUP_EDIT_CLOSING, PROSE_CLOSING, PROSE_REVISE_CLOSING, TOOL_EDIT_CLOSING } from "./closing";
+import {
+  CRITICMARKUP_EDIT_CLOSING,
+  PROSE_CLOSING,
+  PROSE_REVISE_CLOSING,
+  REVISE_CLOSING,
+  TOOL_EDIT_CLOSING,
+} from "./closing";
 import type { SliceSpec } from "./budget";
 import { fitToBudget, PACK_BUDGETS, renderSlice } from "./budget";
 import { estimateTokens } from "./estimate";
@@ -25,6 +31,7 @@ import type {
   Pack,
   PackKind,
   ProseInputs,
+  ReviseInputs,
   Slice,
   SpanEditInputs,
   TextSource,
@@ -79,9 +86,10 @@ const MIN_EXPECTED_OUTPUT_TOKENS = 256;
 export function assemblePack(kind: "spanEdit", inputs: SpanEditInputs, options?: AssembleOptions): Pack;
 export function assemblePack(kind: "drafting", inputs: DraftingInputs, options?: AssembleOptions): Pack;
 export function assemblePack(kind: "prose", inputs: ProseInputs, options?: AssembleOptions): Pack;
+export function assemblePack(kind: "revise", inputs: ReviseInputs, options?: AssembleOptions): Pack;
 export function assemblePack(
   kind: PackKind,
-  inputs: SpanEditInputs | DraftingInputs | ProseInputs,
+  inputs: SpanEditInputs | DraftingInputs | ProseInputs | ReviseInputs,
   options: AssembleOptions = {},
 ): Pack {
   const estimate = options.estimate ?? estimateTokens;
@@ -91,7 +99,9 @@ export function assemblePack(
       ? spanEditSpecs(inputs as SpanEditInputs)
       : kind === "drafting"
         ? draftingSpecs(inputs as DraftingInputs)
-        : proseSpecs(inputs as ProseInputs);
+        : kind === "prose"
+          ? proseSpecs(inputs as ProseInputs)
+          : reviseSpecs(inputs as ReviseInputs);
 
   const fitted = fitToBudget(built.specs, budgetTokens, estimate);
   const prompt = joinSlices(fitted.slices);
@@ -549,6 +559,102 @@ function proseSpecs(inputs: ProseInputs): BuiltSpecs {
     specs,
     tail: new Set<string>(),
     expectedOutputTokens: Math.ceil((inputs.wordTarget ?? DEFAULT_PROSE_WORDS) * OUTPUT_TOKENS_PER_WORD),
+  };
+}
+
+/**
+ * Revise: rewrite one located passage in place (AGT-1257). The pack carries
+ * the passage's own manuscript neighbourhood (`before`/`after`, already cut
+ * to whatever window the caller wants — `locatePassage` in `document.ts`
+ * finds the span, the caller slices the text either side of it) rather than
+ * paragraph counts the way `spanEdit` does, because this kind has no
+ * document/span pair of its own to walk.
+ *
+ * Slice order: `rules` (style + this work's own rules, one combined slice —
+ * unlike `spanEdit`, which keeps them separate), `before`, `passage`,
+ * `after`, `instruction`, `closing`. Budget pressure falls on `before` first,
+ * `after` second, and `rules` last (protected by the same 400-token floor
+ * `spanEdit` and `prose` give their rules slice); `passage`, `instruction`
+ * and `closing` are never cut — a squeezed revise pack still asks a coherent
+ * question about the whole passage.
+ */
+function reviseSpecs(inputs: ReviseInputs): BuiltSpecs {
+  const ruleSources = inputs.workRules === undefined ? inputs.style : [...inputs.style, inputs.workRules];
+
+  const specs: SliceSpec[] = [
+    {
+      name: "rules",
+      heading: "# Prose rules (binding)",
+      text: concatSources(ruleSources),
+      source: sourceLabel(ruleSources),
+      required: true,
+      keep: "head",
+      minTokens: 400,
+      reducible: true,
+      cutOrder: 1,
+    },
+    {
+      name: "before",
+      heading: "# The manuscript just before the passage",
+      text: inputs.before.trim(),
+      source: undefined,
+      required: false,
+      keep: "tail",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 3,
+    },
+    {
+      name: "passage",
+      heading: "# The passage to rewrite",
+      text: inputs.passage,
+      source: undefined,
+      required: true,
+      keep: "head",
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    },
+    {
+      name: "after",
+      heading: "# The manuscript just after the passage",
+      text: inputs.after.trim(),
+      source: undefined,
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 2,
+    },
+    {
+      name: "instruction",
+      heading: "# What to change",
+      text: inputs.instruction.trim(),
+      source: "the author's instruction",
+      required: true,
+      keep: "head",
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    },
+    {
+      name: "closing",
+      heading: "",
+      text: REVISE_CLOSING,
+      source: undefined,
+      required: true,
+      keep: "head",
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    },
+  ];
+
+  return {
+    specs,
+    // Sent whole through `complete()`, like `prose` and `drafting`: no adapter-composed tail.
+    tail: new Set<string>(),
+    expectedOutputTokens: Math.max(MIN_EXPECTED_OUTPUT_TOKENS, estimateTokens(inputs.passage) * 2),
   };
 }
 
