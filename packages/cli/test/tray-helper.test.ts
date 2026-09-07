@@ -15,6 +15,14 @@ import { fileURLToPath } from "node:url";
 const SOURCE = fileURLToPath(new URL("../tray/PabloTray.swift", import.meta.url));
 const SWIFTC = Bun.which("swiftc");
 
+// The ticket's AC 6 pins `arm64-apple-macos13.0` — right for the fleet this
+// ships to (both of Matt's Macs are Apple Silicon), but a hardcoded arm64
+// target cross-compiles silently on an Intel host and then fails at *exec*
+// time with a confusing "Exec format error" instead of a clean pass or skip.
+// Deriving the arch keeps the exact pinned target on arm64 hosts and stays
+// runnable on x86_64 ones.
+const TARGET = `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos13.0`;
+
 function writeState(dir: string, name: string, body: unknown): string {
   const path = join(dir, name);
   writeFileSync(path, JSON.stringify(body), "utf8");
@@ -46,7 +54,7 @@ if (!SWIFTC) {
           "-O",
           "-parse-as-library",
           "-target",
-          "arm64-apple-macos13.0",
+          TARGET,
           "-framework",
           "AppKit",
           SOURCE,
