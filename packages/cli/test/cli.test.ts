@@ -226,3 +226,22 @@ test("init --adopt --project no-marker writes only the marker and does not commi
 
   rmSync(vault, { recursive: true, force: true });
 });
+
+// `write`'s own scenarios (AC1-AC5, chapter parsing, the neverSend refusal,
+// dry-run's two output shapes) are in write.test.ts and pack.test.ts; this
+// confirms only that cli.ts's dispatch actually reaches runWrite end to end.
+test("write --project ice-house --chapter 2 --dry-run --json is wired through cli.ts's dispatch (AGT-1230)", () => {
+  const vault = tempVault();
+
+  const { stdout, exitCode } = runCli(
+    ["write", "--project", "ice-house", "--chapter", "2", "--dry-run", "--json"],
+    { PABLO_VAULT: vault },
+  );
+
+  expect(exitCode).toBe(0);
+  const body = JSON.parse(stdout);
+  expect(body).toMatchObject({ ok: true, dryRun: true });
+  expect(typeof body.prompt_hash).toBe("string");
+
+  rmSync(vault, { recursive: true, force: true });
+});
