@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -110,4 +110,30 @@ test('callTool("resume", {project: "ice-house"}) returns the resume summary shap
   expect(result.isError).not.toBe(true);
   const body = parseTextBody(result);
   expect(body).toMatchObject({ format: "novel", title: "The Ice House" });
+});
+
+test('callTool("save", {project: "ice-house", stage: "premise", file: <a path inside the vault>}) saves it', async () => {
+  const inputPath = join(vault, "premise-input.md");
+  writeFileSync(inputPath, "# Logline\n\nA new logline from the MCP save round trip.\n", "utf8");
+
+  const result = await client.callTool({
+    name: "save",
+    arguments: { project: "ice-house", stage: "premise", file: inputPath },
+  });
+
+  expect(result.isError).not.toBe(true);
+  const body = parseTextBody(result);
+  expect(body).toMatchObject({ ok: true, stage: "premise", path: "bible/overview.md" });
+});
+
+test('callTool("save", {project: "ice-house", stage: "premise", file: <a path outside the vault>}) refuses (exit 2), never reads it', async () => {
+  const result = await client.callTool({
+    name: "save",
+    arguments: { project: "ice-house", stage: "premise", file: "/etc/hosts" },
+  });
+
+  expect(result.isError).not.toBe(true);
+  const body = parseTextBody(result);
+  expect(body).toMatchObject({ ok: false, code: 2 });
+  expect((body as { message: string }).message).toContain("inside the vault");
 });

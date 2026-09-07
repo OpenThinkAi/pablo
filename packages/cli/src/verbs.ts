@@ -25,10 +25,17 @@
  * `runWrite` still only knows how to print its JSON body via `console.log`;
  * `run` captures that one call (redirecting `console.log` for the duration)
  * rather than duplicating any of `runWrite`'s logic, which keeps the two
- * verbs (CLI `write`, MCP `write`) impossible to drift apart.
+ * verbs (CLI `write`, MCP `write`) impossible to drift apart. Because that
+ * capture works by swapping the process-global `console.log`, two `write`
+ * tool calls in flight at once could interleave their captures (the MCP SDK
+ * does not serialize concurrent tool calls) — `runWriteVerb` serializes
+ * itself through `withWriteLock` (a simple promise-chain mutex, scoped to
+ * this module) rather than fixing that inside `write.ts`, which the
+ * AGT-1231 constraint above rules out.
  */
 
 import { z } from "zod";
+import { resolve, sep } from "node:path";
 import { checkWork } from "./check";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
@@ -189,6 +196,34 @@ async function captureConsoleLog(fn: () => Promise<number>): Promise<{ readonly 
   }
 }
 
+/**
+ * A promise-chain mutex serializing every `write` tool call process-wide.
+ * `captureConsoleLog` swaps the process-global `console.log`, which is only
+ * safe with at most one call in flight at a time — the MCP SDK dispatches
+ * concurrent tool calls without waiting for one to finish, so without this,
+ * two simultaneous `write` calls could interleave each other's captured
+ * output (or hand one call the other's JSON body). `write` is already a
+ * single-flight operation per project by design (see `write.ts`'s own note
+ * on `createProviders`' per-endpoint `Gate`), so serializing it here costs
+ * nothing real — a second `write` call was always going to queue behind the
+ * first at the provider layer anyway.
+ */
+let writeLock: Promise<void> = Promise.resolve();
+
+async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = writeLock;
+  let release!: () => void;
+  writeLock = new Promise((resolveLock) => {
+    release = resolveLock;
+  });
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
@@ -203,7 +238,9 @@ async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext):
   };
   const deps: RunWriteDeps = { stderr: ctx.stderr };
 
-  const { exitCode, text } = await captureConsoleLog(() => runWrite(writeArgs, resolved.vaultRoot, resolved.projectPath, deps));
+  const { exitCode, text } = await withWriteLock(() =>
+    captureConsoleLog(() => runWrite(writeArgs, resolved.vaultRoot, resolved.projectPath, deps)),
+  );
 
   const body: unknown = text === "" ? { ok: exitCode === 0 } : JSON.parse(text);
   return { body, exitCode };
@@ -237,7 +274,17 @@ async function runSaveVerb(args: z.infer<typeof SAVE_ARGS>, ctx: VerbContext): P
     };
   }
 
-  const { body, exitCode } = saveCore({ stage: args.stage, file: args.file }, resolved.projectPath);
+  // `file` is model-controlled over MCP (the CLI's `--file` is typed by the
+  // user; a tool argument is typed by whatever called the tool), so unlike
+  // the CLI path this bounds it to the vault before ever reading it — an
+  // unbounded read here would let a compromised/prompt-injected caller pull
+  // an arbitrary file (e.g. an SSH key) into a committed vault document.
+  const absFile = resolve(resolved.vaultRoot, args.file);
+  if (absFile !== resolved.vaultRoot && !absFile.startsWith(resolved.vaultRoot + sep)) {
+    return { body: { ok: false, code: 2, message: `pablo: save file must be inside the vault (${absFile})` }, exitCode: 2 };
+  }
+
+  const { body, exitCode } = saveCore({ stage: args.stage, file: absFile }, resolved.projectPath);
   return { body, exitCode };
 }
 
@@ -316,7 +363,13 @@ function unwrapToBase(schema: z.ZodTypeAny): { readonly base: z.ZodTypeAny; read
       continue;
     }
     if (current instanceof z.ZodDefault) {
-      const inner = (current as unknown as { _def: { defaultValue: unknown } })._def.defaultValue;
+      // zod's public `.default()` accepts either a plain value or a thunk
+      // (`.default(false)` or `.default(() => false)`) — `_def.defaultValue`
+      // holds whichever form was passed (verified at runtime against
+      // zod@4.5.4: a plain `.default(false)` stores the boolean directly,
+      // not a thunk), so both are unwrapped here rather than assuming one.
+      const raw = (current as unknown as { _def: { defaultValue: unknown } })._def.defaultValue;
+      const inner = typeof raw === "function" ? (raw as () => unknown)() : raw;
       if (typeof inner === "boolean") defaultValue = inner;
       current = current.unwrap() as z.ZodTypeAny;
       continue;

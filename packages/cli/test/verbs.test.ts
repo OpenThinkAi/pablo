@@ -174,3 +174,51 @@ test("save.run without file refuses (no stdin to read in an MCP tool call)", asy
 
   rmSync(vault, { recursive: true, force: true });
 });
+
+// AGT-1235 review finding: `file` is model-controlled over MCP, so a path
+// outside the vault must be refused before ever being read, never a silent
+// exfiltration path (e.g. a compromised/prompt-injected caller reading an
+// SSH key into a committed vault document).
+test("save.run with a file outside the vault refuses (exit 2), naming the vault boundary", async () => {
+  const vault = tempVault();
+
+  const outcome = await verb("save").run({ project: "ice-house", stage: "premise", file: "/etc/hosts" }, ctxFor(vault));
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("inside the vault");
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test("save.run with a relative file that escapes the vault via .. also refuses", async () => {
+  const vault = tempVault();
+
+  const outcome = await verb("save").run(
+    { project: "ice-house", stage: "premise", file: "../../../../../../etc/hosts" },
+    ctxFor(vault),
+  );
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("inside the vault");
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test("two concurrent write.run dry-run calls each get their own correct body (no console.log interleaving)", async () => {
+  const vault = tempVault();
+
+  const [a, b] = await Promise.all([
+    verb("write").run({ project: "ice-house", chapter: 2, "dry-run": true }, ctxFor(vault)),
+    verb("write").run({ project: "ice-house", chapter: 2, "dry-run": true }, ctxFor(vault)),
+  ]);
+
+  for (const outcome of [a, b]) {
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.body).toMatchObject({ ok: true, dryRun: true });
+    expect(typeof (outcome.body as { prompt_hash: string }).prompt_hash).toBe("string");
+  }
+
+  rmSync(vault, { recursive: true, force: true });
+});
