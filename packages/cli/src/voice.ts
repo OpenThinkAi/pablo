@@ -30,9 +30,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { configDir, readStyle, readTextSource } from "@openthink/pablo-core";
 import type { TextSource } from "@openthink/pablo-core";
 import { gitCommit, SLUG_PATTERN } from "./init";
+import { insertUnderHeading } from "./markdown";
 import { parseFrontmatter } from "./novel/machine";
 import { findVault } from "./project";
 import type { Refusal } from "./project";
+import { slugify } from "./write";
 
 function refuse(message: string, tried: readonly string[]): Refusal {
   return { ok: false, code: 2, message, tried };
@@ -332,4 +334,189 @@ export function listVoices(opts: {
   listings.push(...listNamedVoices(globalVoicesDir(env), "global"));
 
   return listings;
+}
+
+// ---------------------------------------------------------------------------
+// voice flag / voice exemplar (AGT-1243) — a voice grows from rejections and
+// kept pieces without hand-editing voice.md/style/prose.md or exemplars/.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_FLAG_HEADING = "## Flagged";
+
+/**
+ * Which file `voice flag` writes into for a resolved voice: `style/prose.md`
+ * for the `fiction` alias (the fixed name AC1 specifies — `style/` has no
+ * `voice.md`), `voice.md` inside an ordinary voice directory, or the
+ * resolved path itself for a one-off `--voice ./x.md` file (there is no
+ * separate "voice.md" to look for inside a single file).
+ */
+function flagTargetPath(location: VoiceLocation): string {
+  if (location.scope === "fiction") return join(location.path, "prose.md");
+  if (existsSync(location.path) && statSync(location.path).isDirectory()) return join(location.path, "voice.md");
+  return location.path;
+}
+
+/** `git -C <dir containing targetPath> add/commit -- targetPath` — works from any directory inside a git working tree, so this never needs to know the true repo root, only a directory the target file lives under. */
+function commitTouchedFile(targetPath: string, message: string): { readonly committed: boolean; readonly notice?: string } {
+  return gitCommit(dirname(targetPath), message, [targetPath]);
+}
+
+export interface FlagOk {
+  readonly ok: true;
+  readonly path: string;
+  readonly committed: boolean;
+  readonly notice?: string;
+}
+
+export type FlagResult = FlagOk | Refusal;
+
+/**
+ * `pablo voice flag <name> "<line>" [--section <heading>]` (AC1): appends
+ * `Flagged: "<line>"` as the last line of `section` (default `## Flagged`,
+ * created at EOF — heading, blank line, the new line — if absent) in the
+ * voice's flag target (`flagTargetPath`). Reuses `insertUnderHeading`
+ * (extracted from `continuity.ts` into `markdown.ts`) so the section-editing
+ * behaviour — and its byte-for-byte-elsewhere guarantee — is identical to the
+ * continuity ritual's.
+ *
+ * `line` is untrusted text handed straight into a markdown file: a CR/LF
+ * inside it would become one or more real line breaks, letting it forge a new
+ * `## ` heading (or otherwise restructure the file) the moment it lands.
+ * Flattened to a single line first, the same way `continuity.ts`'s
+ * `applyFacts` treats model-supplied fact text before writing it.
+ *
+ * A `Flagged: "..."` line already present verbatim anywhere in the file is
+ * not duplicated (AC1): the file is left untouched, `committed` is `false`,
+ * and a notice names the situation — this is not a refusal (exit 0).
+ */
+export function flagLine(
+  location: VoiceLocation,
+  line: string,
+  opts: { readonly section?: string } = {},
+): FlagResult {
+  const safeLine = line.replace(/[\r\n]+/g, " ").trim();
+  if (safeLine === "") {
+    return refuse("pablo: voice flag: line must not be empty", []);
+  }
+
+  const rawSection = (opts.section ?? DEFAULT_FLAG_HEADING).trim();
+  const heading = rawSection.startsWith("#") ? rawSection : `## ${rawSection}`;
+
+  const targetPath = flagTargetPath(location);
+  const existing = existsSync(targetPath) ? readFileSync(targetPath, "utf8") : "";
+  const lines = existing.split("\n");
+  const bulletLine = `Flagged: "${safeLine}"`;
+
+  if (lines.includes(bulletLine)) {
+    return {
+      ok: true,
+      path: targetPath,
+      committed: false,
+      notice: `pablo: voice flag: already flagged in ${targetPath}`,
+    };
+  }
+
+  const updated = insertUnderHeading(lines, heading, bulletLine);
+  writeFileSync(targetPath, updated.join("\n"), "utf8");
+
+  const { committed, notice } = commitTouchedFile(targetPath, `voice: flag a line in ${basename(targetPath)}`);
+  return { ok: true, path: targetPath, committed, ...(notice ? { notice } : {}) };
+}
+
+export interface ExemplarOk {
+  readonly ok: true;
+  readonly path: string;
+  readonly committed: boolean;
+  readonly notice?: string;
+}
+
+export type ExemplarResult = ExemplarOk | Refusal;
+
+/** The title an exemplar file is named from: `--title`, else its first `# ` heading, else its own filename. */
+function exemplarTitle(sourceFile: string, sourceText: string, titleOpt: string | undefined): string {
+  const trimmedTitle = titleOpt?.trim();
+  if (trimmedTitle) return trimmedTitle;
+
+  const headingMatch = /^#\s+(.+)$/m.exec(sourceText);
+  const heading = headingMatch?.[1]?.trim();
+  if (heading) return heading;
+
+  return basename(sourceFile).replace(/\.md$/i, "");
+}
+
+/** The first exemplar file (if any) under `exemplarsDir` whose bytes exactly match `content`. */
+function findByteIdenticalExemplar(exemplarsDir: string, content: Buffer): string | undefined {
+  if (!existsSync(exemplarsDir)) return undefined;
+  for (const entry of readdirSync(exemplarsDir)) {
+    if (!entry.endsWith(".md")) continue;
+    const candidate = join(exemplarsDir, entry);
+    if (!statSync(candidate).isFile()) continue;
+    if (readFileSync(candidate).equals(content)) return candidate;
+  }
+  return undefined;
+}
+
+/** `<YYYY-MM-DD>-<slug>.md`, disambiguated with a `-2`, `-3`, ... suffix if that name is already taken by different content. */
+function nextExemplarPath(exemplarsDir: string, date: string, slug: string): string {
+  const base = `${date}-${slug}`;
+  let candidate = join(exemplarsDir, `${base}.md`);
+  let n = 2;
+  while (existsSync(candidate)) {
+    candidate = join(exemplarsDir, `${base}-${n}.md`);
+    n += 1;
+  }
+  return candidate;
+}
+
+/**
+ * `pablo voice exemplar <name> <file> [--title "<t>"]` (AC2): copies `file`
+ * verbatim (as raw bytes — an exemplar is the piece as kept, never
+ * re-encoded or reformatted) into `<voiceDir>/exemplars/<YYYY-MM-DD>-<slug>.md`,
+ * named from `--title`, else the source's first `# ` heading, else the
+ * source's own filename, slugified with the same `slugify` `write.ts` uses
+ * for chapter filenames — keeping the `<date>-<slug>.md` shape `readVoice`'s
+ * newest-first-by-filename ordering (AC4) depends on. `now` is injectable for
+ * deterministic tests.
+ *
+ * A byte-identical exemplar already present anywhere under `exemplars/`
+ * refuses (exit 2), naming the existing file — copying it again would be a
+ * silent no-op duplicate, and "verbatim" for a rejected/kept line (AC1's
+ * duplicate rule) applies here too. A same-named-but-different exemplar
+ * (same date and title, different content) is not a duplicate: it lands
+ * alongside under a `-2`, `-3`, ... suffix rather than overwriting.
+ */
+export function addExemplar(
+  location: VoiceLocation,
+  sourceFile: string,
+  opts: { readonly title?: string; readonly now?: () => Date } = {},
+): ExemplarResult {
+  if (location.scope === "fiction") {
+    return refuse('pablo: voice exemplar: "fiction" (style/) has no exemplars directory', []);
+  }
+  if (!existsSync(location.path) || !statSync(location.path).isDirectory()) {
+    return refuse(`pablo: voice exemplar: ${location.path} is not a voice directory`, [location.path]);
+  }
+  if (!existsSync(sourceFile) || !statSync(sourceFile).isFile()) {
+    return refuse(`pablo: voice exemplar: no file at ${sourceFile}`, [sourceFile]);
+  }
+
+  const content = readFileSync(sourceFile);
+  const exemplarsDir = join(location.path, "exemplars");
+
+  const duplicate = findByteIdenticalExemplar(exemplarsDir, content);
+  if (duplicate !== undefined) {
+    return refuse(`pablo: voice exemplar: ${duplicate} is already this exemplar (byte-identical)`, [duplicate]);
+  }
+
+  const now = opts.now ?? (() => new Date());
+  const date = now().toISOString().slice(0, 10);
+  const title = exemplarTitle(sourceFile, content.toString("utf8"), opts.title);
+  const slug = slugify(title) || "exemplar";
+
+  mkdirSync(exemplarsDir, { recursive: true });
+  const destPath = nextExemplarPath(exemplarsDir, date, slug);
+  writeFileSync(destPath, content);
+
+  const { committed, notice } = commitTouchedFile(destPath, `voice: add exemplar ${basename(destPath)}`);
+  return { ok: true, path: destPath, committed, ...(notice ? { notice } : {}) };
 }

@@ -44,7 +44,7 @@ import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { buildResume } from "./resume";
 import { saveCore } from "./save";
-import { listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
+import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
 
@@ -326,18 +326,30 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
 // ---------------------------------------------------------------------------
 
 const VOICE_ARGS = z.object({
-  sub: z.enum(["new", "list", "show"]).describe("Which voice action: new (scaffold), list, or show."),
+  sub: z
+    .enum(["new", "list", "show", "flag", "exemplar"])
+    .describe("Which voice action: new (scaffold), list, show, flag (record a rejected line), or exemplar (keep a piece)."),
   name: z
     .string()
     .optional()
     .describe(
-      'Voice name, or a path (containing "/" or ending ".md") for a one-off voice. Required for new/show; ignored for list.',
+      'Voice name, or a path (containing "/" or ending ".md") for a one-off voice. Required for new/show/flag/exemplar; ignored for list.',
     ),
   global: z
     .boolean()
     .optional()
     .default(false)
     .describe("voice new: scaffold under the global ~/.config/pablo/voices/ directory instead of the vault."),
+  line: z.string().optional().describe('voice flag: the rejected line, verbatim — written as `Flagged: "<line>"`.'),
+  section: z
+    .string()
+    .optional()
+    .describe('voice flag: the `## ` section heading to append under (default "Flagged").'),
+  file: z.string().optional().describe("voice exemplar: the piece to keep, copied verbatim."),
+  title: z
+    .string()
+    .optional()
+    .describe("voice exemplar: the title to file it under (else its first `# ` heading, else its filename)."),
 });
 
 /**
@@ -378,7 +390,7 @@ async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext):
     };
   }
 
-  // sub === "show"
+  // sub is show, flag, or exemplar — all three resolve `name` to a voice location first.
   if (looksLikeVoicePath(args.name)) {
     const vault = findVault(ctx.cwd, ctx.env);
     const resolved = resolve(ctx.cwd, args.name);
@@ -393,6 +405,43 @@ async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext):
   const resolution = resolveVoice(args.name, { cwd: ctx.cwd, env: ctx.env });
   if (!resolution.ok) return { body: refusalBody(resolution), exitCode: resolution.code };
 
+  if (args.sub === "flag") {
+    if (args.line === undefined) {
+      return { body: { ok: false, code: 2, message: "pablo: voice flag requires line" }, exitCode: 2 };
+    }
+    const result = flagLine(resolution, args.line, { section: args.section });
+    if (!result.ok) return { body: refusalBody(result), exitCode: result.code };
+    return {
+      body: { ok: true, path: result.path, committed: result.committed, ...(result.notice ? { notice: result.notice } : {}) },
+      exitCode: 0,
+    };
+  }
+
+  if (args.sub === "exemplar") {
+    if (args.file === undefined) {
+      return { body: { ok: false, code: 2, message: "pablo: voice exemplar requires file" }, exitCode: 2 };
+    }
+    // `file` is model-controlled over MCP, exactly like `save`'s and `check`'s
+    // (AGT-1235's convention): bound it to the vault before it is ever read,
+    // so a compromised/prompt-injected caller cannot commit an arbitrary file
+    // (e.g. an SSH key) into the vault's voice exemplars.
+    const vault = findVault(ctx.cwd, ctx.env);
+    const absFile = resolve(ctx.cwd, args.file);
+    if (!vault.ok || (absFile !== vault.path && !absFile.startsWith(vault.path + sep))) {
+      return {
+        body: { ok: false, code: 2, message: `pablo: voice exemplar file must be inside the vault (${absFile})` },
+        exitCode: 2,
+      };
+    }
+    const result = addExemplar(resolution, absFile, { title: args.title });
+    if (!result.ok) return { body: refusalBody(result), exitCode: result.code };
+    return {
+      body: { ok: true, path: result.path, committed: result.committed, ...(result.notice ? { notice: result.notice } : {}) },
+      exitCode: 0,
+    };
+  }
+
+  // sub === "show"
   const voice = readVoice(resolution.path);
   return { body: { ok: true, ...voice }, exitCode: 0 };
 }
@@ -434,7 +483,8 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "voice",
-    description: "Find, scaffold, or inspect a named voice directory: `new` scaffolds one, `list` finds every one, `show` reads one as a model would see it.",
+    description:
+      "Find, scaffold, grow, or inspect a named voice directory: `new` scaffolds one, `list` finds every one, `show` reads one as a model would see it, `flag` records a rejected line, `exemplar` keeps a piece as-is.",
     args: VOICE_ARGS,
     run: runVoiceVerb,
   },

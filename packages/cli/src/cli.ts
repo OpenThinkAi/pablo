@@ -13,6 +13,7 @@
  * yet").
  */
 
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runCheck } from "./check";
 import { initAdopt, initNovel } from "./init";
@@ -26,7 +27,7 @@ import type { Refusal } from "./project";
 import { runResumeVerb } from "./resume";
 import { runSave } from "./save";
 import { deriveCliOptions, parseForChapter } from "./verbs";
-import { listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
+import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
 import { runWrite } from "./write";
 
@@ -68,6 +69,11 @@ function helpText(): string {
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list                         every voice in the vault and the global dir",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
+    '  pablo voice flag <name> "<line>" [--section <heading>]',
+    "                                            record a rejected line under a voice.md/",
+    "                                            style/prose.md section (default \"Flagged\")",
+    '  pablo voice exemplar <name> <file> [--title "<t>"]',
+    "                                            keep a piece as-is under the voice's exemplars/",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -102,6 +108,10 @@ interface ParsedArgs {
   readonly force: boolean;
   /** `voice new --global`: scaffold under the global voices directory instead of the vault. */
   readonly global: boolean;
+  /** `voice flag --section <heading>`: which `## ` section to append the flagged line under (default "Flagged"). */
+  readonly section: string | undefined;
+  /** `voice exemplar --title "<t>"`: the title to file the exemplar under. */
+  readonly title: string | undefined;
 }
 
 /**
@@ -141,6 +151,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     dryRun: values["dry-run"] === true,
     force: values["force"] === true,
     global: values["global"] === true,
+    section: typeof values["section"] === "string" ? values["section"] : undefined,
+    title: typeof values["title"] === "string" ? values["title"] : undefined,
   };
 }
 
@@ -325,14 +337,15 @@ function formatVoice(voice: Voice): string {
 }
 
 /**
- * `pablo voice new|list|show` (AGT-1240). `sub`/`name` are positionals
- * (`args.rest`), not named flags — `--global` and `--json` are the only
- * flags this verb takes. There is no `--project`: a voice resolves from
- * `cwd`/`PABLO_VAULT` (vault) plus the global voices directory, never a
- * `<vault>/<kind>/<slug>` project.
+ * `pablo voice new|list|show|flag|exemplar` (AGT-1240, `flag`/`exemplar`
+ * AGT-1243). `sub`/`name` are positionals (`args.rest`), as is `flag`'s
+ * `<line>` and `exemplar`'s `<file>` (`args.rest[2]`) — `--global`,
+ * `--section`, `--title`, and `--json` are the only flags this verb takes.
+ * There is no `--project`: a voice resolves from `cwd`/`PABLO_VAULT` (vault)
+ * plus the global voices directory, never a `<vault>/<kind>/<slug>` project.
  */
 function runVoice(args: ParsedArgs, cwd: string): number {
-  const [sub, name] = args.rest;
+  const [sub, name, extra] = args.rest;
   const env = process.env;
 
   if (sub === "list") {
@@ -394,7 +407,65 @@ function runVoice(args: ParsedArgs, cwd: string): number {
     return EXIT_OK;
   }
 
-  const message = `pablo: voice: unknown subcommand "${sub ?? ""}" (expected new, list, or show)`;
+  if (sub === "flag") {
+    if (name === undefined || extra === undefined) {
+      const message = 'pablo: usage: pablo voice flag <name> "<line>" [--section <heading>]';
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const resolution = resolveVoice(name, { cwd, env });
+    if (!resolution.ok) {
+      emit(refusalResult(resolution), args.json);
+      return resolution.code;
+    }
+    const result = flagLine(resolution, extra, { section: args.section });
+    if (!result.ok) {
+      emit(refusalResult(result), args.json);
+      return result.code;
+    }
+    if (args.json) {
+      const body: Record<string, unknown> = { ok: true, path: result.path, committed: result.committed };
+      if (result.notice) body["notice"] = result.notice;
+      console.log(JSON.stringify(body));
+    } else {
+      console.log(`pablo: flagged in ${result.path}${result.committed ? " (committed)" : ""}`);
+      if (result.notice) console.log(result.notice);
+    }
+    return EXIT_OK;
+  }
+
+  if (sub === "exemplar") {
+    if (name === undefined || extra === undefined) {
+      const message = 'pablo: usage: pablo voice exemplar <name> <file> [--title "<t>"]';
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const resolution = resolveVoice(name, { cwd, env });
+    if (!resolution.ok) {
+      emit(refusalResult(resolution), args.json);
+      return resolution.code;
+    }
+    // The CLI's <file> is author-typed, exactly like `save`'s `--file` on
+    // the CLI path — resolved against cwd, not bounded to the vault (that
+    // bound applies over MCP, where the value is model-controlled instead).
+    const sourceFile = resolve(cwd, extra);
+    const result = addExemplar(resolution, sourceFile, { title: args.title });
+    if (!result.ok) {
+      emit(refusalResult(result), args.json);
+      return result.code;
+    }
+    if (args.json) {
+      const body: Record<string, unknown> = { ok: true, path: result.path, committed: result.committed };
+      if (result.notice) body["notice"] = result.notice;
+      console.log(JSON.stringify(body));
+    } else {
+      console.log(`pablo: kept ${result.path}${result.committed ? " (committed)" : ""}`);
+      if (result.notice) console.log(result.notice);
+    }
+    return EXIT_OK;
+  }
+
+  const message = `pablo: voice: unknown subcommand "${sub ?? ""}" (expected new, list, show, flag, or exemplar)`;
   emit({ ok: false, code: EXIT_ERROR, message }, args.json);
   return EXIT_ERROR;
 }
