@@ -16,7 +16,7 @@
 
 import { mkdirSync, watch } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve as resolvePath, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { configDir } from "@openthink/pablo-core";
 import type { MaterializeTrayBundleOptions, MaterializeTrayBundleResult } from "./bundle";
 import type { SupervisedProcess, SuperviseHelperOptions } from "./supervise";
@@ -41,22 +41,6 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Joins `filename` onto `dir` and asserts the result cannot have escaped it —
- * a defensive resolve-and-confine check applied before a path is handed to a
- * spawned process as an argument, even though `filename` here is always one
- * of our own literals, never anything read from the request parcel or the
- * helper.
- */
-function ownedPath(dir: string, filename: string): string {
-  const base = resolvePath(dir);
-  const abs = resolvePath(base, filename);
-  if (abs !== base && !abs.startsWith(base + sep)) {
-    throw new Error(`refusing an out-of-bounds path under ${base}: ${abs}`);
-  }
-  return abs;
-}
-
 /** Resolves once per `wake()`, so a request or a queue change can cut a sleep short. */
 function createWaker(): { wait: () => Promise<void>; wake: () => void } {
   let resolve: (() => void) | undefined;
@@ -72,14 +56,6 @@ function createWaker(): { wait: () => Promise<void>; wake: () => void } {
       });
     },
   };
-}
-
-/** Resolves once `signal` aborts (or immediately if it already has). */
-function whenAborted(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
 }
 
 /** Every side effect `runTrayDaemon` needs, injectable so a test never touches a real Mac. */
@@ -113,8 +89,8 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
   const env = deps.env;
   const cfgDir = configDir(env);
   const appSupportDir = env["PABLO_APP_SUPPORT_DIR"] ?? join(homedir(), "Library", "Application Support", "pablo");
-  const statePath = ownedPath(cfgDir, "tray-state.json");
-  const parcelPath = ownedPath(cfgDir, "tray-request.json");
+  const statePath = join(cfgDir, "tray-state.json");
+  const parcelPath = join(cfgDir, "tray-request.json");
   const queuePath = stateReviewPath(env);
   const sourcePath = join(import.meta.dir, "..", "..", "tray", "PabloTray.swift");
   const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
@@ -226,7 +202,11 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
       }
 
       if (signal.aborted) break;
-      await Promise.race([deps.sleep(pollMs), waker.wait(), whenAborted(signal)]);
+      await Promise.race([
+        deps.sleep(pollMs),
+        waker.wait(),
+        new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })),
+      ]);
     }
   } finally {
     stopListening();

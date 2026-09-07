@@ -91,7 +91,7 @@ async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
 
 /** A `materialize` fake that never builds anything — the default for tests that don't care about the helper. */
 async function noHelper(): Promise<MaterializeTrayBundleResult> {
-  return { bundlePath: "", helperPath: "", built: false };
+  return { bundlePath: "", helperPath: "", built: false, reason: "no helper in test" };
 }
 
 /** A `supervise` fake that resolves the moment `signal` aborts, exactly like the real one, without ever spawning anything. */
