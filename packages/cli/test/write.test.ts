@@ -113,23 +113,12 @@ test("write --chapter 2 --dry-run (prose) exits 0 and prints the slice table and
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("write --chapter 2 (no --dry-run) exits 1 with the AGT-1237 message and sends nothing", () => {
-  const vault = tempVault();
-
-  const { stdout, exitCode } = runCli(
-    ["write", "--project", "ice-house", "--chapter", "2", "--json"],
-    { PABLO_VAULT: vault },
-  );
-
-  expect(exitCode).toBe(1);
-  const body = JSON.parse(stdout);
-  expect(body.ok).toBe(false);
-  expect(body.code).toBe(1);
-  expect(body.message).toContain("AGT-1237");
-  expect(body.message).toContain("--dry-run");
-
-  rmSync(vault, { recursive: true, force: true });
-});
+// The AGT-1230 placeholder "write is not wired to the model yet" test lived
+// here. AGT-1237 wires the send, so that behavior no longer exists — its
+// successor (a real send against a fake adapter, since the send can't be
+// exercised by spawning the CLI without hitting a real endpoint) is
+// `write-send.test.ts`'s "runWrite sends, normalizes, and writes the chapter
+// file with a fake adapter" test.
 
 test("write --project no-marker refuses (exit 2) before ever looking at --chapter", () => {
   const vault = tempVault();

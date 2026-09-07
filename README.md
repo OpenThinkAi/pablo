@@ -59,7 +59,7 @@ including an unresolvable project), `1` error.
 | `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, title, stages, last, open, next, brief?, notices?}` |
 | `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object; exit 0 |
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
-| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--variants V]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, refuses (exit 1) pointing at AGT-1237, which wires the send | `{path, receipt, rituals[]}` / `{refused, missing[]}`, or the dry-run body below |
+| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, and runs the post-write check (AGT-1237) | `{ok, path, receipt, check[]}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
 | `pablo dry-run ...` | (planned; today this is `write`'s own `--dry-run`) any write or revise, assembled and priced, nothing sent | the pack, slice by slice |
@@ -72,10 +72,11 @@ lacks `model` or `prompt_hash` (`unprovenanced[]`), and lines that trip a mechan
 rule — em-dashes, curly quotes, dash year ranges, foreshadowing phrases, the banned
 stock names from `style/prose.md` and `anti-tells.md`, and every `Flagged:` line from
 `style/prose.md` found verbatim (`hits[]`, each `{path, line, rule, excerpt}`). A hit
-is data, not a failure: exit is `0` whether or not there are hits, since AC3's
-"runs after a write" wiring is `write`'s job (`check.ts` exports `checkFile` and
-`checkWork` for it to call). Voice-pattern scoring beyond verbatim flagged lines is
-P1, out of scope.
+is data, not a failure: exit is `0` whether or not there are hits. `check.ts` exports
+`checkFile` and `checkWork` standalone, and `write` (AGT-1237) calls `checkFile`
+directly on the normalized body right after writing, putting the hits in its own
+`check[]` rather than re-reading the file through `checkWork`. Voice-pattern scoring
+beyond verbatim flagged lines is P1, out of scope.
 
 Everything past the skeleton (parsing, `--help`, `--project` resolution, `init`) is a
 stub today: each other verb prints "not implemented yet" and exits 1. See the design
@@ -160,9 +161,29 @@ refusal naming the slice and the prefix, not a silent drop. `--dry-run` renders 
 pack (a slice table with token counts, and an estimated wait when the target endpoint
 has been measured) and sends nothing, exit 0; `--json --dry-run` returns
 `{ok, dryRun: true, slices[], totalTokens, expectedOutputTokens, prompt_hash,
-adjustments}` — the same inputs produce the same `prompt_hash` on two runs. Without
-`--dry-run`, this ticket stops after the pack: exit 1, pointing at AGT-1237, which
-wires the actual send.
+adjustments}` — the same inputs produce the same `prompt_hash` on two runs.
+
+Without `--dry-run` (AGT-1237), the filename is fixed first (`NN-<slug>.md`, slug
+from the beat's title) so an existing file is a refusal, exit 2, before anything is
+sent — pass `--force` to overwrite it. The pack is then sent once to the intent's
+routed provider (local by default; `createProviders`' per-endpoint `Gate` already
+serializes concurrent calls to the same local endpoint, so `write` adds no
+serialization of its own). A hung endpoint, a bad response, or a config error is a
+refusal, exit 2, naming the endpoint where relevant — nothing is written on any
+error, including an empty or whitespace-only answer. While the model streams,
+progress goes to stderr (`waiting for first token…`, `first token after Xs`, then
+`N tokens, R tok/s` every ~2s) so a human sees the wait; `--json` output on stdout
+is unaffected. The answer is normalized (em-dashes to commas, en-dashes to "to",
+curly quotes to straight — `@openthink/pablo-core`'s `normalizeOutput`) and written
+with frontmatter in this exact key order: `chapter`, `title`, `pov`, `story_date`,
+`status: draft`, `words`, `model`, `generated` (ISO 8601), `prompt_hash`. A receipt
+(prompt hash, model, tokens read/written, time to first token, wall) is appended to
+`<work>/.pablo/receipts.jsonl` (`withReceipts` + `fileReceiptSink`, rooted at the
+work directory, not the vault) and returned as `{path, receipt}`; the prose form
+adds one line, `read N tokens in Xs, wrote M in Ys`. The post-write mechanical-tells
+check (`check.ts`'s `checkFile`) runs over the normalized body and its hits are
+returned as `check[]` — a hit never changes the exit code, which is `0` throughout
+this whole path once the file is written.
 
 ## Project layout
 
