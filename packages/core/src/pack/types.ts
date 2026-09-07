@@ -11,8 +11,8 @@ import type { Document, Span } from "../document";
 import type { OutputMode } from "../providers/types";
 import type { TokenEstimator } from "./estimate";
 
-/** The two shapes of prompt pablo assembles today. */
-export type PackKind = "spanEdit" | "drafting";
+/** The shapes of prompt pablo assembles today. */
+export type PackKind = "spanEdit" | "drafting" | "prose";
 
 /** One named, sourced section of the prompt. */
 export interface Slice {
@@ -143,4 +143,39 @@ export interface AssembleOptions {
   readonly estimate?: TokenEstimator | undefined;
   /** Overrides the kind's default budget from `PACK_BUDGETS`. */
   readonly budgetTokens?: number | undefined;
+}
+
+/**
+ * A named voice's own material, in the shape a prose pack draws from —
+ * `readVoice` (`packages/cli/src/voice.ts`) returns exactly this shape, so a
+ * caller passes it straight through without remapping.
+ */
+export interface VoiceInputs {
+  /** `voice.md`'s body (frontmatter stripped); one source, or none for a bare directory. */
+  readonly rules: readonly TextSource[];
+  /** `exemplars/*.md`, newest first — the order the pack keeps them in. */
+  readonly exemplars: readonly TextSource[];
+  /** `never.md`, when the voice has one. */
+  readonly never?: TextSource | undefined;
+}
+
+/**
+ * `pablo prose --voice <name> --brief <file|-> [--context <file>]...` (AGT-1241):
+ * a voice plus a brief, no stage machine. See the design doc's extension
+ * (`~/saltline-digital-vault/projects/ai-terminal/prose.md`).
+ */
+export interface ProseInputs {
+  readonly voice: VoiceInputs;
+  /**
+   * The format stanza's already-rendered text (email/post/page/reply/note
+   * live in `packages/cli/src/formats.ts`, a CLI concern — core only knows
+   * it as one more slice of text). Omitted when no `--format` was given.
+   */
+  readonly format?: string | undefined;
+  /** `--context` files, sent verbatim, in the order they were given. */
+  readonly context: readonly TextSource[];
+  /** The ask, as markdown (a file, stdin, or MCP text — resolved by the caller). */
+  readonly brief: TextSource;
+  /** Target word count; defaults to 300 (drafting's own default is a chapter, prose's is a short piece). */
+  readonly wordTarget?: number | undefined;
 }

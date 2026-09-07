@@ -1,7 +1,8 @@
 /**
- * The closing lines of the two span-edit prompts. The pack owns them so that
- * `pack.prompt` prices the exact text that goes over the wire; every adapter
- * that composes a span-edit prompt imports the line for its path from here.
+ * The closing lines of the prompts the pack module composes. The pack owns
+ * them so that `pack.prompt` prices the exact text that goes over the wire;
+ * every adapter (or, for `prose`, the caller sending `pack.prompt` whole)
+ * imports the line for its path from here.
  */
 export const TOOL_EDIT_CLOSING =
   "Call propose_edit once, with the complete replacement passage as the replacement argument." +
@@ -21,3 +22,12 @@ export const CRITICMARKUP_EDIT_CLOSING = [
   "Never nest a substitution inside a substitution, and never write ~> anywhere",
   "except between the two halves of one substitution.",
 ].join("\n");
+
+/**
+ * `prose`'s closing directive (AGT-1241): the whole pack is sent through
+ * `complete()`, the same as drafting, so this is the last thing in the
+ * prompt rather than a line an adapter appends.
+ */
+export const PROSE_CLOSING =
+  "Write the piece now, in the voice above. No preamble, no markup, no commentary" +
+  " — the finished text, and nothing else.";

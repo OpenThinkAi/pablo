@@ -64,6 +64,18 @@ export function globalVoicesDir(env: Record<string, string | undefined> = proces
  * already exist. An unresolvable name is a refusal (exit 2) naming every
  * path tried.
  */
+/**
+ * Whether a voice argument names a path (a one-off voice file or directory)
+ * rather than a voice by name — `resolveVoice`'s own branch condition, shared
+ * so a caller that must BOUND such a path (the MCP surface in `verbs.ts`)
+ * tests for exactly the same shape this resolves. Duplicating the predicate is
+ * how the two drift apart and a bound stops covering what it was written for.
+ */
+export function isVoicePathArgument(name: string): boolean {
+  const trimmed = name.trim();
+  return trimmed.includes("/") || trimmed.endsWith(".md");
+}
+
 export function resolveVoice(
   name: string,
   opts: { readonly cwd: string; readonly env?: Record<string, string | undefined> },
@@ -75,7 +87,7 @@ export function resolveVoice(
     return refuse("pablo: voice name must not be empty", []);
   }
 
-  if (trimmed.includes("/") || trimmed.endsWith(".md")) {
+  if (isVoicePathArgument(trimmed)) {
     const resolved = resolve(opts.cwd, trimmed);
     if (!existsSync(resolved)) return refuse(`pablo: no voice at ${resolved}`, [resolved]);
     return { ok: true, path: resolved, scope: "path" };

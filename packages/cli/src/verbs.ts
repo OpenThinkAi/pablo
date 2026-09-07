@@ -38,13 +38,15 @@
 import { z } from "zod";
 import { resolve, sep } from "node:path";
 import { checkWork } from "./check";
+import { KNOWN_FORMATS } from "./formats";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
+import { proseCore } from "./prose";
 import { buildResume } from "./resume";
 import { saveCore } from "./save";
-import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
+import { addExemplar, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
 
@@ -447,6 +449,94 @@ async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext):
 }
 
 // ---------------------------------------------------------------------------
+// prose (AGT-1241)
+// ---------------------------------------------------------------------------
+
+const PROSE_ARGS = z.object({
+  voice: z.string().optional().describe("Voice name to write in (see `voice list`/`voice show`). Required."),
+  brief: z
+    .string()
+    .optional()
+    .describe('The ask, as a file path (CLI: "-" also reads stdin; not available over MCP). Required.'),
+  context: z
+    .array(z.string())
+    .optional()
+    .default([])
+    .describe("File paths sent verbatim, in order. Repeatable."),
+  format: z.string().optional().describe(`One of: ${KNOWN_FORMATS.join(", ")}.`),
+  words: z.number().int().positive().optional().describe("Target word count (defaults to 300)."),
+  "dry-run": z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Preview the assembled pack without sending to the model. Omitting this flag returns an error until the send path (AGT-1242) is available.",
+    ),
+});
+
+/**
+ * `--brief`/each `--context` are model-controlled over MCP (AGT-1235's
+ * convention, same as `save`'s/`check`'s `file`): bound to a boundary before
+ * they are ever read. Unlike `save`/`check`, `prose` has no `--project` at
+ * all — AC4 requires it to work with no vault (a global voice, a brief
+ * anywhere), so there is no `vaultRoot` guaranteed to exist to bind against.
+ * The CLI's own no-vault freedom and the MCP bound are deliberately NOT the
+ * same constraint: a human typing `--brief ../notes/x.md` at a shell has
+ * already chosen that path; a value arriving as a tool-call argument may
+ * have been chosen by a compromised/prompt-injected caller instead, so it
+ * always gets bounded, whether or not the run happens to have a vault. When
+ * `findVault` finds one, the bound is the vault root (matching `save`); when
+ * it doesn't, the bound falls back to `ctx.cwd` — a narrower boundary, but
+ * still a boundary, so a "no vault" prose call can never read an arbitrary
+ * path (e.g. an SSH key) merely because this particular call has no vault
+ * to bind against. `"-"` (stdin) is refused outright: an MCP tool call has
+ * no stdin of its own to read, exactly like `save`'s rule.
+ */
+function bindProsePath(ctx: VerbContext, label: string, value: string): Refusal | undefined {
+  if (value === "-") {
+    return { ok: false, code: 2, message: `pablo: prose ${label} "-" (stdin) is not available over MCP; pass a file path instead`, tried: [] };
+  }
+
+  const vault = findVault(ctx.cwd, ctx.env);
+  const boundary = vault.ok ? vault.path : resolve(ctx.cwd);
+  const abs = resolve(boundary, value);
+  if (abs !== boundary && !abs.startsWith(boundary + sep)) {
+    return { ok: false, code: 2, message: `pablo: prose ${label} must be inside ${boundary} (${abs})`, tried: [] };
+  }
+  return undefined;
+}
+
+async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  // `voice` is model-controlled here, and AGT-1240 deliberately accepts a
+  // path-shaped voice argument as a one-off voice file. A plain NAME cannot
+  // traverse — AGT-1240 slug-validates it before any join — but a path-shaped
+  // one is unbounded unless it is bounded here, exactly as --brief and
+  // --context are. Without this an MCP caller could name any readable
+  // directory as its voice: today that returns the file's token count and
+  // path, and once the send path lands (AGT-1242) the text itself would reach
+  // the external model. The CLI keeps the unbounded form (author-typed, like
+  // `save`'s --file); only the MCP surface is narrowed.
+  if (args.voice !== undefined && isVoicePathArgument(args.voice)) {
+    const problem = bindProsePath(ctx, "--voice", args.voice);
+    if (problem) return { body: refusalBody(problem), exitCode: problem.code };
+  }
+  if (args.brief !== undefined) {
+    const problem = bindProsePath(ctx, "--brief", args.brief);
+    if (problem) return { body: refusalBody(problem), exitCode: problem.code };
+  }
+  for (const path of args.context) {
+    const problem = bindProsePath(ctx, "--context", path);
+    if (problem) return { body: refusalBody(problem), exitCode: problem.code };
+  }
+
+  const outcome = proseCore(
+    { voice: args.voice, brief: args.brief, context: args.context, format: args.format, words: args.words, dryRun: args["dry-run"] },
+    { cwd: ctx.cwd, env: ctx.env },
+  );
+  return { body: outcome.body, exitCode: outcome.exitCode };
+}
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -488,6 +578,12 @@ export const VERBS: readonly Verb[] = [
     args: VOICE_ARGS,
     run: runVoiceVerb,
   },
+  {
+    name: "prose",
+    description: "Assemble a voice-plus-brief prose pack and (with `dry-run`) render it; no `--project`, no vault required.",
+    args: PROSE_ARGS,
+    run: runProseVerb,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -495,7 +591,9 @@ export const VERBS: readonly Verb[] = [
 // same zod shapes above so it cannot drift from what the verbs actually take.
 // ---------------------------------------------------------------------------
 
-export type CliOptionConfig = { readonly type: "string" } | { readonly type: "boolean"; readonly default: boolean };
+export type CliOptionConfig =
+  | { readonly type: "string"; readonly multiple?: boolean }
+  | { readonly type: "boolean"; readonly default: boolean };
 
 /** Unwraps `.optional()`/`.default()` wrappers, returning the base schema and any boolean default found along the way. */
 function unwrapToBase(schema: z.ZodTypeAny): { readonly base: z.ZodTypeAny; readonly defaultValue: boolean | undefined } {
@@ -525,11 +623,24 @@ function unwrapToBase(schema: z.ZodTypeAny): { readonly base: z.ZodTypeAny; read
   return { base: current, defaultValue };
 }
 
-/** `ZodBoolean` -> `{type:"boolean", default}`; every other zod primitive (`ZodString`, `ZodNumber`, ...) -> `{type:"string"}` — `node:util`'s `parseArgs` only knows string/boolean, so a numeric CLI flag stays text until the verb itself coerces it (as every verb already did before this ticket). */
+/**
+ * `ZodBoolean` -> `{type:"boolean", default}`; `z.array(z.string())` (AGT-1241's
+ * `context`) -> `{type:"string", multiple:true}` — `node:util`'s `parseArgs`
+ * collects a repeatable string flag into an array, in the order given, which
+ * is exactly what "`--context` files, in argument order" needs (AC1) and
+ * what `node:util` gives back as `undefined`, not `[]`, when the flag is
+ * never passed — `cli.ts` defaults that to `[]` itself. Every other zod
+ * primitive (`ZodString`, `ZodNumber`, ...) -> `{type:"string"}` — `parseArgs`
+ * only knows string/boolean, so a numeric CLI flag stays text until the verb
+ * itself coerces it (as every verb already did before this ticket).
+ */
 function cliOptionFor(schema: z.ZodTypeAny): CliOptionConfig {
   const { base, defaultValue } = unwrapToBase(schema);
   if (base instanceof z.ZodBoolean) {
     return { type: "boolean", default: defaultValue ?? false };
+  }
+  if (base instanceof z.ZodArray && base.element instanceof z.ZodString) {
+    return { type: "string", multiple: true };
   }
   return { type: "string" };
 }

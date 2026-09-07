@@ -55,12 +55,12 @@ function parseTextBody(result: unknown): unknown {
   return JSON.parse(first.text);
 }
 
-test("listTools returns exactly the six verbs, each project-scoped verb with a project input", async () => {
+test("listTools returns exactly the seven verbs, each project-scoped verb with a project input", async () => {
   const { tools } = await client.listTools();
 
-  expect(tools.map((t) => t.name).sort()).toEqual(["check", "resume", "save", "status", "voice", "write"]);
+  expect(tools.map((t) => t.name).sort()).toEqual(["check", "prose", "resume", "save", "status", "voice", "write"]);
   for (const tool of tools) {
-    if (tool.name === "voice") continue; // voice resolves via cwd/vault, not a --project slug
+    if (tool.name === "voice" || tool.name === "prose") continue; // neither resolves via a --project slug
     const properties = (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
     expect("project" in properties).toBe(true);
   }
@@ -137,4 +137,31 @@ test('callTool("save", {project: "ice-house", stage: "premise", file: <a path ou
   const body = parseTextBody(result);
   expect(body).toMatchObject({ ok: false, code: 2 });
   expect((body as { message: string }).message).toContain("inside the vault");
+});
+
+test('callTool("prose", {voice: "plain", brief: <a path inside the vault>, "dry-run": true}) returns a prompt_hash', async () => {
+  const briefPath = join(vault, "prose-brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+
+  const result = await client.callTool({
+    name: "prose",
+    arguments: { voice: "plain", brief: briefPath, "dry-run": true },
+  });
+
+  expect(result.isError).not.toBe(true);
+  const body = parseTextBody(result) as { ok: boolean; dryRun: boolean; prompt_hash: string };
+  expect(body).toMatchObject({ ok: true, dryRun: true });
+  expect(typeof body.prompt_hash).toBe("string");
+});
+
+test('callTool("prose", {voice: "plain", brief: <a path outside the vault>, "dry-run": true}) refuses (exit 2), never reads it', async () => {
+  const result = await client.callTool({
+    name: "prose",
+    arguments: { voice: "plain", brief: "/etc/hosts", "dry-run": true },
+  });
+
+  expect(result.isError).not.toBe(true);
+  const body = parseTextBody(result);
+  expect(body).toMatchObject({ ok: false, code: 2 });
+  expect((body as { message: string }).message).toContain("inside");
 });

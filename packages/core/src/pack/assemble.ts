@@ -15,7 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { selectionText } from "../document";
-import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "./closing";
+import { CRITICMARKUP_EDIT_CLOSING, PROSE_CLOSING, TOOL_EDIT_CLOSING } from "./closing";
 import type { SliceSpec } from "./budget";
 import { fitToBudget, PACK_BUDGETS, renderSlice } from "./budget";
 import { estimateTokens } from "./estimate";
@@ -24,6 +24,7 @@ import type {
   DraftingInputs,
   Pack,
   PackKind,
+  ProseInputs,
   Slice,
   SpanEditInputs,
   TextSource,
@@ -61,17 +62,26 @@ export const DEFAULT_NEIGHBORHOOD_PARAGRAPHS = 2;
 /** Scenes a drafting pack asks for when the caller does not say. */
 export const DEFAULT_MIN_SCENES = 3;
 
-/** Output tokens a drafting run is allowed per requested word (`draft-chapter`'s 2.2). */
+/**
+ * Output tokens a drafting run is allowed per requested word (`draft-chapter`'s
+ * 2.2). `prose` (AGT-1241) reuses the same ratio — there is no separate
+ * measurement for freeform copy yet, and a chapter's words-to-tokens shape is
+ * the only one this codebase has actually measured.
+ */
 const OUTPUT_TOKENS_PER_WORD = 2.2;
+
+/** `prose`'s word target when the caller doesn't say — a short piece, not a chapter. */
+const DEFAULT_PROSE_WORDS = 300;
 
 /** Floor on the expected answer length for a span edit, so a one-line span still budgets a wait. */
 const MIN_EXPECTED_OUTPUT_TOKENS = 256;
 
 export function assemblePack(kind: "spanEdit", inputs: SpanEditInputs, options?: AssembleOptions): Pack;
 export function assemblePack(kind: "drafting", inputs: DraftingInputs, options?: AssembleOptions): Pack;
+export function assemblePack(kind: "prose", inputs: ProseInputs, options?: AssembleOptions): Pack;
 export function assemblePack(
   kind: PackKind,
-  inputs: SpanEditInputs | DraftingInputs,
+  inputs: SpanEditInputs | DraftingInputs | ProseInputs,
   options: AssembleOptions = {},
 ): Pack {
   const estimate = options.estimate ?? estimateTokens;
@@ -79,7 +89,9 @@ export function assemblePack(
   const built =
     kind === "spanEdit"
       ? spanEditSpecs(inputs as SpanEditInputs)
-      : draftingSpecs(inputs as DraftingInputs);
+      : kind === "drafting"
+        ? draftingSpecs(inputs as DraftingInputs)
+        : proseSpecs(inputs as ProseInputs);
 
   const fitted = fitToBudget(built.specs, budgetTokens, estimate);
   const prompt = joinSlices(fitted.slices);
@@ -400,6 +412,108 @@ function renderTimeline(inputs: DraftingInputs): string {
     );
   }
   return blocks.join("\n\n");
+}
+
+/**
+ * Prose: a named voice plus a brief, no stage machine (AGT-1241). Order is
+ * the design doc's own ("Voices" / "The pack" in
+ * `~/saltline-digital-vault/projects/ai-terminal/prose.md`): the voice's
+ * rules, its exemplars (newest first — `readVoice` already sorts them that
+ * way, and `keep: "head"` here means a budget squeeze drops the *oldest*
+ * ones off the tail of the concatenated text, never the newest), what the
+ * voice never does, the format stanza, the `--context` files in argument
+ * order, the brief, and the closing directive. The whole pack is sent
+ * through `complete()` (like drafting, unlike a span edit's adapter-composed
+ * tail), so there is nothing in `tail`.
+ */
+function proseSpecs(inputs: ProseInputs): BuiltSpecs {
+  const contextSpecs: SliceSpec[] = inputs.context.map((source, index) => ({
+    name: `context-${index}`,
+    heading: `# Context: ${sourceLabel([source]) ?? "untitled"}`,
+    text: source.text.trim(),
+    source: source.path,
+    required: false,
+    keep: "head",
+    minTokens: 0,
+    reducible: true,
+    cutOrder: 4,
+  }));
+
+  const specs: SliceSpec[] = [
+    {
+      name: "rules",
+      heading: "# Voice rules (binding)",
+      text: concatSources(inputs.voice.rules),
+      source: sourceLabel(inputs.voice.rules),
+      required: true,
+      keep: "head",
+      minTokens: 400,
+      reducible: true,
+      cutOrder: 1,
+    },
+    {
+      name: "exemplars",
+      heading: "# Exemplars (newest first)",
+      text: concatSources(inputs.voice.exemplars),
+      source: sourceLabel(inputs.voice.exemplars),
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 2,
+    },
+    {
+      name: "never",
+      heading: "# This voice never does this",
+      text: inputs.voice.never?.text.trim() ?? "",
+      source: inputs.voice.never?.path,
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 3,
+    },
+    {
+      name: "format",
+      heading: "# Format",
+      text: inputs.format?.trim() ?? "",
+      source: undefined,
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    },
+    ...contextSpecs,
+    {
+      name: "brief",
+      heading: "# The brief",
+      text: inputs.brief.text.trim(),
+      source: inputs.brief.path,
+      required: true,
+      keep: "head",
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    },
+    {
+      name: "closing",
+      heading: "",
+      text: PROSE_CLOSING,
+      source: undefined,
+      required: true,
+      keep: "head",
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    },
+  ];
+
+  return {
+    specs,
+    tail: new Set<string>(),
+    expectedOutputTokens: Math.ceil((inputs.wordTarget ?? DEFAULT_PROSE_WORDS) * OUTPUT_TOKENS_PER_WORD),
+  };
 }
 
 function joinSlices(slices: readonly Slice[]): string {

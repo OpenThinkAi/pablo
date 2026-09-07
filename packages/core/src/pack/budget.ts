@@ -20,10 +20,17 @@ import type { PackKind, Slice, SliceAdjustment } from "./types";
  * worked was 4,888 tokens, and 16k is about a minute of prefill at the local
  * writer's measured ~260 tokens/second — comfortably above a real pack and
  * comfortably below the 37k one that made the wait invisible.
+ *
+ * `prose` (AGT-1241) sits between the two: a voice's rules plus a handful of
+ * exemplars plus a brief is smaller than a chapter's fact sheets, but a
+ * `--context` thread (the email being replied to, a product page) can run
+ * long, so 12k leaves real headroom over `spanEdit`'s 10k without reaching
+ * for `drafting`'s chapter-sized ceiling.
  */
 export const PACK_BUDGETS: Readonly<Record<PackKind, number>> = {
   spanEdit: 10_000,
   drafting: 16_000,
+  prose: 12_000,
 };
 
 /** Marker left in the prompt where the budget cut, so the model sees the seam too. */
