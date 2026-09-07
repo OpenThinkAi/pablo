@@ -504,6 +504,50 @@ test("prose.run with a brief outside the vault refuses (exit 2), naming the vaul
   rmSync(configHome, { recursive: true, force: true });
 });
 
+// A path-shaped `voice` is model-controlled over MCP and AGT-1240 resolves it
+// as a one-off voice file, so it needs the same bound `--brief`/`--context`
+// get. A plain name is slug-validated by `resolveVoice` and cannot traverse.
+test("prose.run with a path-shaped voice outside the vault refuses (exit 2), naming the vault boundary", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+  const briefPath = join(vault, "brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+
+  for (const voice of ["/etc/hosts", "../../../etc/passwd", "../../etc/hosts.md"]) {
+    const outcome = await verb("prose").run(
+      { voice, brief: briefPath, context: [], "dry-run": true },
+      voiceCtxFor(vault, configHome),
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+    expect((outcome.body as { message: string }).message).toContain("inside");
+  }
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("prose.run with a path-shaped voice INSIDE the vault is still allowed (AGT-1240's one-off voice file)", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+  const briefPath = join(vault, "brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+  const oneOff = join(vault, "one-off-voice.md");
+  writeFileSync(oneOff, "# Voice\n\nPlain sentences. No throat-clearing.\n", "utf8");
+
+  const outcome = await verb("prose").run(
+    { voice: oneOff, brief: briefPath, context: [], "dry-run": true },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(0);
+  expect(outcome.body).toMatchObject({ ok: true, dryRun: true });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
 test("prose.run with a context file outside the vault refuses (exit 2), naming the vault boundary", async () => {
   const vault = tempVault();
   const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));

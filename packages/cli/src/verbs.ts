@@ -46,7 +46,7 @@ import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { buildResume } from "./resume";
 import { saveCore } from "./save";
-import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
+import { addExemplar, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
 
@@ -507,6 +507,19 @@ function bindProsePath(ctx: VerbContext, label: string, value: string): Refusal 
 }
 
 async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  // `voice` is model-controlled here, and AGT-1240 deliberately accepts a
+  // path-shaped voice argument as a one-off voice file. A plain NAME cannot
+  // traverse — AGT-1240 slug-validates it before any join — but a path-shaped
+  // one is unbounded unless it is bounded here, exactly as --brief and
+  // --context are. Without this an MCP caller could name any readable
+  // directory as its voice: today that returns the file's token count and
+  // path, and once the send path lands (AGT-1242) the text itself would reach
+  // the external model. The CLI keeps the unbounded form (author-typed, like
+  // `save`'s --file); only the MCP surface is narrowed.
+  if (args.voice !== undefined && isVoicePathArgument(args.voice)) {
+    const problem = bindProsePath(ctx, "--voice", args.voice);
+    if (problem) return { body: refusalBody(problem), exitCode: problem.code };
+  }
   if (args.brief !== undefined) {
     const problem = bindProsePath(ctx, "--brief", args.brief);
     if (problem) return { body: refusalBody(problem), exitCode: problem.code };
