@@ -4,8 +4,8 @@ import {
   countWords,
   groupHitsByParagraph,
   joinParagraphs,
+  nextSavedText,
   paragraphIndexForLine,
-  PARAGRAPH_SEPARATOR,
   selectionToBodyOffsets,
   splitParagraphs,
 } from "../views/editor-logic";
@@ -141,8 +141,22 @@ describe("groupHitsByParagraph", () => {
   });
 });
 
-describe("PARAGRAPH_SEPARATOR", () => {
-  test("is a single blank line", () => {
-    expect(PARAGRAPH_SEPARATOR).toBe("\n\n");
+describe("nextSavedText", () => {
+  test("a successful save marks the attempted text as the new saved baseline", () => {
+    expect(nextSavedText("old body", "new body", true)).toBe("new body");
+  });
+
+  test("a failed save leaves the previous saved baseline untouched", () => {
+    expect(nextSavedText("old body", "new body", false)).toBe("old body");
+  });
+
+  test("regression (AGT-1270 review): a Take that resets local state before its follow-up save must not be mistaken for a confirmed save if that save then fails — the baseline stays the pre-Take text so `dirty` stays true and Save stays enabled for a retry", () => {
+    const beforeTake = "The pond rang under the horse.";
+    const afterTakeLocally = "The pond rang first under the horse, then under the saws.";
+    // The view resets its local body to `afterTakeLocally` immediately (Take
+    // is instant), but only calls this with the save's real outcome.
+    const savedTextAfterFailedFollowUpSave = nextSavedText(beforeTake, afterTakeLocally, false);
+    expect(savedTextAfterFailedFollowUpSave).toBe(beforeTake);
+    expect(savedTextAfterFailedFollowUpSave).not.toBe(afterTakeLocally);
   });
 });

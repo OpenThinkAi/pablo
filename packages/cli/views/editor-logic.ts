@@ -110,6 +110,20 @@ export function paragraphIndexForLine(paragraphs: readonly string[], line: numbe
   return paragraphs.length - 1;
 }
 
+/**
+ * What `savedText` (the dirty-flag baseline) should become after one save
+ * attempt: `attempted` on success, unchanged `previous` on failure. Only a
+ * *confirmed* save may mark the view clean — a caller that sets `savedText`
+ * before the host answers (e.g. resetting local state right before an
+ * async `save`) leaves `dirty` false during the request, so a failure has
+ * no way back to a retryable state (`Save` reads `!dirty` and stays
+ * disabled with the edit still on screen). Route every `savedText` update
+ * through this function instead of setting it ad hoc.
+ */
+export function nextSavedText(previous: string, attempted: string, ok: boolean): string {
+  return ok ? attempted : previous;
+}
+
 /** Groups hit indices by the paragraph they fall in, per `paragraphIndexForLine`. */
 export function groupHitsByParagraph<H extends { readonly line: number }>(
   paragraphs: readonly string[],

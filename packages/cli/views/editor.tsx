@@ -11,6 +11,7 @@ import {
   countWords,
   groupHitsByParagraph,
   joinParagraphs,
+  nextSavedText,
   selectionToBodyOffsets,
   splitParagraphs,
 } from "./editor-logic";
@@ -21,8 +22,11 @@ import {
  * editor": one white sheet, serif, generous margins, edit in place, a
  * `Revise…` control raised by a selection, `Approve`/`Reject`/`Save` at the
  * foot. The view never touches files or the model — every mutation it calls
- * (`save`, `revise`, `approve`, `reject`, `refresh`) is answered by the host
- * (`edit-host.ts`); this file only displays and asks.
+ * (`save`, `revise`, `approve`, `reject`) is answered by the host
+ * (`edit-host.ts`); this file only displays and asks. The host also answers
+ * a `refresh` mutation (re-reads the file), but no AC asks for a UI control
+ * to trigger it, so none is wired here — `edit-mount.test.ts` still exercises
+ * it directly over `/mutate`.
  *
  * **contentEditable, not a textarea** (AC2's either/or): paragraphs are
  * rendered as separate blocks in natural document flow so the `check` hits
@@ -65,7 +69,9 @@ interface EditorData {
 interface SaveResult {
   readonly ok: true;
   readonly unchanged?: true;
-  readonly words: number;
+  // The host's real SaveResult also carries `words`, but the view computes
+  // the live word count from the DOM itself (`countWords(body)`) and never
+  // reads the host's copy — omitted here rather than declared and unused.
   readonly check: readonly EditorHit[];
   readonly git: { ok: boolean; detail?: string };
 }
@@ -170,6 +176,11 @@ function ParagraphBlock({ index, initialText, onChange }: ParagraphBlockProps) {
     if (ref.current !== null) onChange(index, ref.current.textContent ?? "");
   }
 
+  // `execCommand("insertText", ...)` is deprecated by spec, but is kept
+  // deliberately: it inserts through the browser's own edit pipeline, so the
+  // native undo stack (cmd/ctrl-Z) keeps working. Swapping this for a manual
+  // `textContent`/Range splice would insert the text fine but silently break
+  // undo — do not "modernize" this without checking that first.
   function handleKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -189,6 +200,11 @@ function ParagraphBlock({ index, initialText, onChange }: ParagraphBlockProps) {
       suppressContentEditableWarning
       spellCheck={false}
       data-paragraph-index={index}
+      // A selection crossing into another paragraph doesn't raise Revise…
+      // (see `handleSelectionChange`'s cross-paragraph guard) — this native
+      // tooltip is the only surfaced explanation, since there's no other
+      // idle UI real estate to spend on it.
+      title="Select a passage within this paragraph to revise it"
       onInput={handleInput}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
@@ -294,12 +310,21 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
     setSaveStatus({ kind: "idle" });
   }
 
+  /**
+   * Replaces the live body/paragraphs wholesale (a `Take`, an eventual
+   * `refresh`) and remounts every paragraph block fresh (bumps `revision`).
+   * Deliberately does NOT touch `savedText` — only a *successful* `save`
+   * response is allowed to mark the view clean (`handleSave`'s own
+   * `setSavedText`). `takeCandidate` resets to the post-candidate text and
+   * then awaits `handleSave`; if that save fails, `dirty` must still read
+   * true (against the old `savedText`) so `Save` stays enabled for a retry
+   * instead of getting stuck disabled with unsaved text on screen.
+   */
   function resetTo(text: string, nextCheck?: readonly EditorHit[]) {
     const next = splitParagraphs(text);
     setParagraphs(next);
     setLoadedParagraphs(next);
     setRevision((r) => r + 1);
-    setSavedText(text);
     if (nextCheck !== undefined) setCheck(nextCheck);
     setSelection(null);
     setReviseOpen(false);
@@ -316,7 +341,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
     setSaveStatus({ kind: "idle" });
     try {
       const result = await mutate<SaveResult>("save", { text });
-      setSavedText(text);
+      setSavedText((prev) => nextSavedText(prev, text, true));
       setCheck(result.check);
       if (result.unchanged === true) {
         setSaveStatus({ kind: "saved" });
@@ -324,6 +349,11 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
         setSaveStatus({ kind: "saved", detail: result.git.ok ? undefined : result.git.detail });
       }
     } catch (e) {
+      // `nextSavedText(prev, text, false)` is a no-op (returns `prev`
+      // unchanged) — spelled out anyway so every `savedText` write goes
+      // through the same function and a failed save can never be mistaken
+      // for a confirmed one. `dirty` stays true, so `Save` stays enabled.
+      setSavedText((prev) => nextSavedText(prev, text, false));
       setSaveStatus({ kind: "error", message: errorMessage(e) });
     } finally {
       setSaving(false);
@@ -457,6 +487,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                 <div style={paragraphLineStyle}>
                   <ParagraphBlock index={i} initialText={loadedParagraphs[i] ?? ""} onChange={handleParagraphChange} />
                   <div style={marginStyle}>
+                    {/* index-as-key is fine here: `hits` is derived fresh from `check` + `paragraphs` each render, never reordered or spliced in place. */}
                     {hits.map((hit, hitIndex) => (
                       <span
                         key={hitIndex}
@@ -707,7 +738,18 @@ const paragraphLineStyle: CSSProperties = {
 const paragraphStyle: CSSProperties = {
   flex: "1 1 auto",
   minWidth: 0,
-  whiteSpace: "pre-wrap",
+  // `normal`, not `pre-wrap`: a source paragraph is often hard-wrapped at a
+  // column width from a plain-text editor (see the fixture chapters). Those
+  // are markdown SOFT wraps — a single "\n" inside a paragraph means a
+  // space, not a forced line break; only a blank line (a paragraph boundary,
+  // already a separate block here) is meaningful. `white-space: normal`
+  // collapses that whitespace for DISPLAY only — it changes how the browser
+  // lays the text out, not the text node's own content, so the exact "\n"
+  // bytes are still there in `textContent`/`onChange` and still round-trip
+  // through `splitParagraphs`/`joinParagraphs` and into `save` untouched;
+  // this paragraph reflows to the sheet's own measure instead of the
+  // source file's line breaks.
+  whiteSpace: "normal",
   wordWrap: "break-word",
   fontSize: "1.05rem",
   lineHeight: 1.7,
@@ -806,7 +848,10 @@ const compareTextStyle: CSSProperties = {
   fontSize: "0.95rem",
   lineHeight: 1.55,
   margin: 0,
-  whiteSpace: "pre-wrap",
+  // Same reasoning as `paragraphStyle`: `original`/`candidate` text can carry
+  // the source's own soft-wrap newlines (a selection made inside a
+  // hard-wrapped paragraph) — collapse them for display, same as the sheet.
+  whiteSpace: "normal",
 };
 
 const compareActionsStyle: CSSProperties = {
