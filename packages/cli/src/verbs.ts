@@ -60,6 +60,7 @@
 import { z } from "zod";
 import { resolve, sep } from "node:path";
 import { checkWork } from "./check";
+import { EditError, openEditor, resolveEditTarget } from "./edit";
 import { KNOWN_FORMATS } from "./formats";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
@@ -999,6 +1000,47 @@ async function runReviseVerb(args: z.infer<typeof REVISE_ARGS>, ctx: VerbContext
 }
 
 // ---------------------------------------------------------------------------
+// edit (AGT-1258) — mounts the ui-leaf editor window (`edit.ts`'s
+// `openEditor`) on a queued piece (`piece`) or a project file (`project` +
+// `file`). Unlike every other project-scoped verb here, `project` is
+// OPTIONAL: `--piece <id>` needs no vault at all (`edit.ts`'s
+// `resolveEditTarget` handles both addressing modes, and `openEditor` derives
+// its own vault/project context from the resolved file's path — see that
+// file's `deriveEditContext`). Over MCP this returns `{url}` immediately —
+// deliberately not awaiting the window's `closed` promise the way the CLI's
+// own `runEdit` does — because the review queue's decision the window can
+// produce (`approve`/`reject`) is a human checkpoint pablo's own model must
+// never clear itself (the same reasoning `REVIEW_MCP_TOOLS` narrows `review`
+// for): a tool call that blocked until a human closed the window would be
+// asking the model to wait on — and implicitly gate its own turn behind — a
+// decision that is not its to make.
+// ---------------------------------------------------------------------------
+
+const EDIT_ARGS = z.object({
+  project: projectField.optional().describe("Required together with file; omit when piece is given."),
+  file: z
+    .string()
+    .optional()
+    .describe("Project file to open (work-relative or absolute); must resolve inside the project. Requires project."),
+  piece: z.string().optional().describe("A queued piece id (see the review tool's list action) — alternative to project + file."),
+});
+
+async function runEditVerb(args: z.infer<typeof EDIT_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const target = resolveEditTarget({ project: args.project, file: args.file, piece: args.piece }, { cwd: ctx.cwd, env: ctx.env });
+  if (!target.ok) return { body: refusalBody(target), exitCode: target.code };
+
+  try {
+    const opened = await openEditor({ path: target.path, piece: target.piece, deps: { env: ctx.env } });
+    return { body: { url: opened.url }, exitCode: 0 };
+  } catch (error) {
+    if (error instanceof EditError) {
+      return { body: { ok: false, code: error.code, message: error.message }, exitCode: error.code };
+    }
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -1073,6 +1115,13 @@ export const VERBS: readonly Verb[] = [
       "Send one located passage of a manuscript to the local model and return a candidate: locate it (by quoted text or a start/end offset pair), assemble the pack with the project's own style and work rules, send once, and return {candidate, span, receipt} — never writes the file.",
     args: REVISE_ARGS,
     run: runReviseVerb,
+  },
+  {
+    name: "edit",
+    description:
+      "Open the ui-leaf editor window on a queued piece (piece) or a project file (project + file) for a human to read, revise, approve, reject, or save. Returns {url} immediately — a model never blocks on the window closing, and can never approve/reject through it (that stays CLI/tray/editor-only, exactly like the review tool).",
+    args: EDIT_ARGS,
+    run: runEditVerb,
   },
 ];
 

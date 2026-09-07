@@ -36,9 +36,10 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the nine MCP verbs, each project-scoped verb requiring project", () => {
+test("VERBS exposes exactly the ten MCP verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "check",
+    "edit",
     "prose",
     "resume",
     "review",
@@ -50,6 +51,7 @@ test("VERBS exposes exactly the nine MCP verbs, each project-scoped verb requiri
   ]);
   for (const v of VERBS) {
     if (v.name === "voice" || v.name === "prose" || v.name === "review") continue; // none resolves via a --project slug (AGT-1240, AGT-1241, AGT-1261 — the review queue is global)
+    if (v.name === "edit") continue; // AGT-1258: project is optional — --piece <id> needs no vault at all
     const parsed = v.args.safeParse({});
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
@@ -142,6 +144,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     passage: { type: "string" }, // AGT-1264: revise --passage
     start: { type: "string" }, // AGT-1264: revise --start (revise reuses `file`, already pinned above)
     end: { type: "string" }, // AGT-1264: revise --end
+    piece: { type: "string" }, // AGT-1258: edit --piece (edit reuses `project`/`file`, already pinned above)
   });
 });
 

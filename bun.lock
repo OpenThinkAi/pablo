@@ -19,6 +19,7 @@
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.30.0",
         "@openthink/pablo-core": "workspace:*",
+        "@openthink/ui-leaf": "^1.6.0",
         "zod": "4.5.4",
       },
     },
@@ -27,6 +28,9 @@
       "version": "0.0.0",
     },
   },
+  "trustedDependencies": [
+    "@openthink/ui-leaf",
+  ],
   "packages": {
     "@hono/node-server": ["@hono/node-server@2.1.1", "", { "peerDependencies": { "hono": "^4" } }, "sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg=="],
 
@@ -35,6 +39,8 @@
     "@openthink/pablo": ["@openthink/pablo@workspace:packages/cli"],
 
     "@openthink/pablo-core": ["@openthink/pablo-core@workspace:packages/core"],
+
+    "@openthink/ui-leaf": ["@openthink/ui-leaf@1.6.0", "", { "bin": { "ui-leaf": "bin/ui-leaf" } }, "sha512-IZgSRKumxZ7BGLMvFwtr+va2ZTjw2m8B9ja3P/PYM2V01ZezjpmJ38mbpzrpsLLj3X1kYO9NgXvXsYQg5IpT0w=="],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
