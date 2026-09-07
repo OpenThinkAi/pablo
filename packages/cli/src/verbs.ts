@@ -1,13 +1,14 @@
 /**
- * `verbs.ts` (AGT-1235) — the single source of truth for pablo's five
- * MCP-exposed verbs (resume, status, write, save, check): one zod schema and
- * one `run` per verb, used by BOTH `cli.ts` (which derives its `parseArgs`
- * option table from these shapes, so the CLI's argv and the MCP tool schemas
- * cannot drift) and `mcp.ts` (which registers one MCP tool per verb straight
- * off the same shape and calls the same `run`). See the design doc's
- * "Commands" section (`~/saltline-digital-vault/projects/ai-terminal/README.md`):
- * "`pablo mcp` serves the same verbs as MCP tools with the same schemas, so
- * Claude Code, Codex and pi see one contract."
+ * `verbs.ts` (AGT-1235; `voice` added AGT-1240) — the single source of truth
+ * for pablo's MCP-exposed verbs (resume, status, write, save, check, voice):
+ * one zod schema and one `run` per verb, used by BOTH `cli.ts` (which derives
+ * its `parseArgs` option table from these shapes, so the CLI's argv and the
+ * MCP tool schemas cannot drift) and `mcp.ts` (which registers one MCP tool
+ * per verb straight off the same shape and calls the same `run`). See the
+ * design doc's "Commands" section
+ * (`~/saltline-digital-vault/projects/ai-terminal/README.md`): "`pablo mcp`
+ * serves the same verbs as MCP tools with the same schemas, so Claude Code,
+ * Codex and pi see one contract."
  *
  * `run(args, ctx)` returns `{body, exitCode}` — `body` is the EXACT object
  * the CLI's `--json` flag prints for that verb, success or refusal
@@ -43,6 +44,7 @@ import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { buildResume } from "./resume";
 import { saveCore } from "./save";
+import { listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
 
@@ -320,6 +322,82 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
 }
 
 // ---------------------------------------------------------------------------
+// voice (AGT-1240)
+// ---------------------------------------------------------------------------
+
+const VOICE_ARGS = z.object({
+  sub: z.enum(["new", "list", "show"]).describe("Which voice action: new (scaffold), list, or show."),
+  name: z
+    .string()
+    .optional()
+    .describe(
+      'Voice name, or a path (containing "/" or ending ".md") for a one-off voice. Required for new/show; ignored for list.',
+    ),
+  global: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("voice new: scaffold under the global ~/.config/pablo/voices/ directory instead of the vault."),
+});
+
+/**
+ * `name` is model-controlled over MCP, exactly like `save`'s and `check`'s
+ * `file` (AGT-1235's convention): a path-shaped value (contains "/" or ends
+ * in ".md") is bound to the vault before it is ever resolved, so a
+ * compromised/prompt-injected caller cannot use `voice show` to pull an
+ * arbitrary file (e.g. an SSH key) off disk into a pack the model reads. A
+ * plain voice *name* has no such risk — `resolveVoice` only ever joins it
+ * under a vault's `voices/` directory or the global voices directory, never
+ * as a free-form path.
+ */
+function looksLikeVoicePath(value: string): boolean {
+  return value.includes("/") || value.endsWith(".md");
+}
+
+async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  if (args.sub === "list") {
+    return { body: { ok: true, voices: listVoices({ cwd: ctx.cwd, env: ctx.env }) }, exitCode: 0 };
+  }
+
+  if (args.name === undefined) {
+    return { body: { ok: false, code: 2, message: `pablo: voice ${args.sub} requires name` }, exitCode: 2 };
+  }
+
+  if (args.sub === "new") {
+    const result = scaffoldVoice(args.name, { cwd: ctx.cwd, env: ctx.env, global: args.global });
+    if (!result.ok) return { body: refusalBody(result), exitCode: result.code };
+    return {
+      body: {
+        ok: true,
+        path: result.path,
+        scope: result.scope,
+        committed: result.committed,
+        ...(result.notice ? { notice: result.notice } : {}),
+      },
+      exitCode: 0,
+    };
+  }
+
+  // sub === "show"
+  if (looksLikeVoicePath(args.name)) {
+    const vault = findVault(ctx.cwd, ctx.env);
+    const resolved = resolve(ctx.cwd, args.name);
+    if (!vault.ok || (resolved !== vault.path && !resolved.startsWith(vault.path + sep))) {
+      return {
+        body: { ok: false, code: 2, message: `pablo: voice path must be inside the vault (${resolved})` },
+        exitCode: 2,
+      };
+    }
+  }
+
+  const resolution = resolveVoice(args.name, { cwd: ctx.cwd, env: ctx.env });
+  if (!resolution.ok) return { body: refusalBody(resolution), exitCode: resolution.code };
+
+  const voice = readVoice(resolution.path);
+  return { body: { ok: true, ...voice }, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -353,6 +431,12 @@ export const VERBS: readonly Verb[] = [
     description: "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps.",
     args: CHECK_ARGS,
     run: runCheckVerb,
+  },
+  {
+    name: "voice",
+    description: "Find, scaffold, or inspect a named voice directory: `new` scaffolds one, `list` finds every one, `show` reads one as a model would see it.",
+    args: VOICE_ARGS,
+    run: runVoiceVerb,
   },
 ];
 

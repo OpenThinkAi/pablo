@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -244,4 +244,135 @@ test("write --project ice-house --chapter 2 --dry-run --json is wired through cl
   expect(typeof body.prompt_hash).toBe("string");
 
   rmSync(vault, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// voice (AGT-1240) — every case sets its own throwaway XDG_CONFIG_HOME so the
+// global-voices fallback never touches the real ~/.config/pablo.
+// ---------------------------------------------------------------------------
+
+function tempConfigHome(): string {
+  return mkdtempSync(join(tmpdir(), "pablo-cli-voice-config-"));
+}
+
+test("voice list prints fiction and every fixture voice with its scope", () => {
+  const vault = tempVault();
+  const configHome = tempConfigHome();
+
+  const { stdout, exitCode } = runCli(["voice", "list"], { PABLO_VAULT: vault, XDG_CONFIG_HOME: configHome });
+
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("fiction\tfiction\t");
+  expect(stdout).toContain("plain\tvault\t");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice list --json returns {ok:true, voices[]}", () => {
+  const vault = tempVault();
+  const configHome = tempConfigHome();
+
+  const { stdout, exitCode } = runCli(["voice", "list", "--json"], {
+    PABLO_VAULT: vault,
+    XDG_CONFIG_HOME: configHome,
+  });
+
+  expect(exitCode).toBe(0);
+  const body = JSON.parse(stdout);
+  expect(body.ok).toBe(true);
+  expect(body.voices.some((v: { name: string }) => v.name === "plain")).toBe(true);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice new memo scaffolds a voice under the vault and exits 0", () => {
+  const vault = tempVault();
+  const configHome = tempConfigHome();
+
+  const { stdout, exitCode } = runCli(["voice", "new", "memo", "--json"], {
+    PABLO_VAULT: vault,
+    XDG_CONFIG_HOME: configHome,
+  });
+
+  expect(exitCode).toBe(0);
+  const body = JSON.parse(stdout);
+  expect(body).toMatchObject({ ok: true, scope: "vault" });
+  expect(existsSync(join(vault, "voices", "memo", "voice.md"))).toBe(true);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice new onto an existing voice exits 2", () => {
+  const vault = tempVault();
+  const configHome = tempConfigHome();
+
+  const { stdout, exitCode } = runCli(["voice", "new", "plain", "--json"], {
+    PABLO_VAULT: vault,
+    XDG_CONFIG_HOME: configHome,
+  });
+
+  expect(exitCode).toBe(2);
+  const body = JSON.parse(stdout);
+  expect(body).toMatchObject({ ok: false, code: 2 });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice show plain --json returns the readVoice shape", () => {
+  const vault = tempVault();
+  const configHome = tempConfigHome();
+
+  const { stdout, exitCode } = runCli(["voice", "show", "plain", "--json"], {
+    PABLO_VAULT: vault,
+    XDG_CONFIG_HOME: configHome,
+  });
+
+  expect(exitCode).toBe(0);
+  const body = JSON.parse(stdout);
+  expect(body).toMatchObject({ ok: true, name: "plain", model: "anthropic" });
+  expect(body.rules).toHaveLength(1);
+  expect(body.exemplars).toHaveLength(2);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice show fiction (no --json) prints the style guide's prose", () => {
+  const vault = tempVault();
+  const configHome = tempConfigHome();
+
+  const { stdout, exitCode } = runCli(["voice", "show", "fiction"], {
+    PABLO_VAULT: vault,
+    XDG_CONFIG_HOME: configHome,
+  });
+
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("Flagged:");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice show nosuchvoice --json exits 2 listing both paths tried", () => {
+  const vault = tempVault();
+  const configHome = tempConfigHome();
+
+  const { stdout, exitCode } = runCli(["voice", "show", "nosuchvoice", "--json"], {
+    PABLO_VAULT: vault,
+    XDG_CONFIG_HOME: configHome,
+  });
+
+  expect(exitCode).toBe(2);
+  const body = JSON.parse(stdout);
+  expect(body).toMatchObject({ ok: false, code: 2 });
+  expect(body.tried).toHaveLength(2);
+  expect(body.message).toContain(join(vault, "voices", "nosuchvoice"));
+  expect(body.message).toContain(join(configHome, "pablo", "voices", "nosuchvoice"));
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
 });

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findVault, resolveProject, resolveProjectFromCwd } from "../src/project";
@@ -25,14 +27,15 @@ test("PABLO_VAULT overrides the walk-up search", () => {
   if (result.ok) expect(result.path).toBe(VAULT);
 });
 
-test("PABLO_VAULT pointing at a directory with no style/ is a refusal naming the path it checked", () => {
+test("PABLO_VAULT pointing at a directory with neither style/ nor voices/ is a refusal naming both paths it checked", () => {
   const result = findVault("/tmp/somewhere/unrelated", { PABLO_VAULT: "/tmp/not-a-vault" });
 
   expect(result.ok).toBe(false);
   if (!result.ok) {
     expect(result.code).toBe(2);
-    expect(result.tried).toEqual(["/tmp/not-a-vault/style"]);
+    expect(result.tried).toEqual(["/tmp/not-a-vault/style", "/tmp/not-a-vault/voices"]);
     expect(result.message).toContain("/tmp/not-a-vault/style");
+    expect(result.message).toContain("/tmp/not-a-vault/voices");
   }
 });
 
@@ -44,7 +47,32 @@ test("findVault with no marker anywhere above cwd is a refusal listing every pat
     expect(result.code).toBe(2);
     expect(result.tried.length).toBeGreaterThan(0);
     expect(result.tried).toContain("/style");
+    expect(result.tried).toContain("/voices");
   }
+});
+
+test("findVault treats a directory holding only voices/ (no style/) as a vault (AGT-1240)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pablo-project-test-"));
+  mkdirSync(join(dir, "voices"));
+
+  const result = findVault(dir, {});
+
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.path).toBe(dir);
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("PABLO_VAULT holding only voices/ (no style/) resolves too (AGT-1240)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pablo-project-test-"));
+  mkdirSync(join(dir, "voices"));
+
+  const result = findVault("/tmp/somewhere/unrelated", { PABLO_VAULT: dir });
+
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.path).toBe(dir);
+
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("resolveProject finds an existing project under novels/", () => {

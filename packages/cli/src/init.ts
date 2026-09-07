@@ -27,8 +27,10 @@ import type { Refusal } from "./project";
  * and is joined into a vault path with `node:path.join` — which silently
  * resolves `..` segments. Validating against this pattern before any join
  * is what keeps a slug like `../../tmp/evil` from writing outside the vault.
+ * Exported (AGT-1240) so `voice.ts` validates voice names the same way,
+ * rather than redeclaring the pattern.
  */
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 export interface InitOk {
   readonly ok: true;

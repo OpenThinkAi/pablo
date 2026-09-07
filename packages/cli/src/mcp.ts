@@ -1,6 +1,7 @@
 /**
- * `pablo mcp` (AGT-1235) — a stdio MCP server exposing `resume`, `status`,
- * `write`, `save` and `check` as MCP tools, one per `verbs.ts`'s `VERBS`
+ * `pablo mcp` (AGT-1235; `voice` added AGT-1240) — a stdio MCP server
+ * exposing `resume`, `status`, `write`, `save`, `check` and `voice` as MCP
+ * tools, one per `verbs.ts`'s `VERBS`
  * entry, with input schemas generated straight from the same zod shapes
  * `cli.ts` derives its `parseArgs` option table from — see `verbs.ts`'s
  * header for the single-source-of-truth design this implements (AC1).

@@ -49,35 +49,39 @@ function refuse(message: string, tried: readonly string[]): Refusal {
 
 /**
  * Finds the writing vault. `PABLO_VAULT` in `env`, when set, is authoritative
- * and is checked (not assumed) to contain `style/`; otherwise this walks up
- * from `cwd` for the nearest ancestor directory containing a `style/`
- * directory, which is the vault's own marker.
+ * and is checked (not assumed) to contain `style/` or `voices/`; otherwise
+ * this walks up from `cwd` for the nearest ancestor directory containing
+ * either — a work's own prose voice and its named voices are equally "the
+ * vault's own marker" (AGT-1240: a vault holding only `voices/`, with no
+ * fiction `style/` at all, is still a vault).
  */
 export function findVault(cwd: string, env: Record<string, string | undefined> = process.env): VaultResult {
   const override = env["PABLO_VAULT"];
   if (override !== undefined && override !== "") {
     const vaultPath = resolve(override);
-    const marker = join(vaultPath, "style");
-    if (existsSync(marker)) return { ok: true, path: vaultPath };
+    const styleMarker = join(vaultPath, "style");
+    const voicesMarker = join(vaultPath, "voices");
+    if (existsSync(styleMarker) || existsSync(voicesMarker)) return { ok: true, path: vaultPath };
     return refuse(
-      `pablo: PABLO_VAULT is set to ${vaultPath}, but ${marker} does not exist`,
-      [marker],
+      `pablo: PABLO_VAULT is set to ${vaultPath}, but neither ${styleMarker} nor ${voicesMarker} exists`,
+      [styleMarker, voicesMarker],
     );
   }
 
   const tried: string[] = [];
   let dir = resolve(cwd);
   for (;;) {
-    const marker = join(dir, "style");
-    tried.push(marker);
-    if (existsSync(marker)) return { ok: true, path: dir };
+    const styleMarker = join(dir, "style");
+    const voicesMarker = join(dir, "voices");
+    tried.push(styleMarker, voicesMarker);
+    if (existsSync(styleMarker) || existsSync(voicesMarker)) return { ok: true, path: dir };
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
 
   return refuse(
-    `pablo: no writing vault found above ${resolve(cwd)} (looked for a "style/" directory in every ancestor); set PABLO_VAULT or run inside one`,
+    `pablo: no writing vault found above ${resolve(cwd)} (looked for a "style/" or "voices/" directory in every ancestor); set PABLO_VAULT or run inside one`,
     tried,
   );
 }
