@@ -11,9 +11,12 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { gateTimeline, parseBeatRows, section } from "@openthink/pablo-core";
 import type { BeatRow } from "@openthink/pablo-core";
+import { stateReviewPath } from "../paths";
+import { readEvents } from "../review";
+import type { DecisionEvent, QueuedEvent, ReviewEvent } from "../review";
 
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
 export interface BibleFile {
@@ -34,12 +37,20 @@ export interface ActRow {
   readonly summary: string;
 }
 
+/**
+ * A written chapter's standing in the review queue (AGT-1255's
+ * `packages/cli/src/review.ts`): `pending` (queued, no decision yet),
+ * `approved`, `rejected`, or `none` (never queued at all).
+ */
+export type ReviewState = "pending" | "approved" | "rejected" | "none";
+
 /** One `chapters/NN-*.md` file, parsed just enough to gate on it. */
 export interface ChapterFile {
   readonly number: number;
   readonly file: string;
   readonly status: string | undefined;
   readonly title: string | undefined;
+  readonly review: ReviewState;
 }
 
 export interface NovelState {
@@ -153,7 +164,30 @@ export function parseFrontmatter(text: string): Record<string, string> {
   return fields;
 }
 
-function readChapters(workDir: string): ChapterFile[] {
+/**
+ * The review status of one written piece (AGT-1263): the `queued` event in
+ * `events` whose `path` resolves to the same file as `chapterPath` wins —
+ * when more than one does (the chapter was queued, decided, and queued
+ * again), the one with the latest `at` is authoritative, and its own
+ * decision (if any) is what's reported. `none` when no `queued` event
+ * matches at all. Pure — no disk I/O, so it's testable with hand-built
+ * events (AC3).
+ */
+export function reviewStateFor(events: ReviewEvent[], chapterPath: string): ReviewState {
+  const target = resolve(chapterPath);
+
+  const matches = events.filter((event): event is QueuedEvent => event.type === "queued" && resolve(event.path) === target);
+  if (matches.length === 0) return "none";
+
+  const latest = matches.slice().sort((a, b) => a.at.localeCompare(b.at))[matches.length - 1] as QueuedEvent;
+
+  const decision = events.find(
+    (event): event is DecisionEvent => (event.type === "approved" || event.type === "rejected") && event.id === latest.id,
+  );
+  return decision === undefined ? "pending" : decision.type;
+}
+
+function readChapters(workDir: string, events: ReviewEvent[]): ChapterFile[] {
   const dir = join(workDir, "chapters");
   if (!existsSync(dir)) return [];
 
@@ -168,6 +202,7 @@ function readChapters(workDir: string): ChapterFile[] {
       file: relLabel(workDir, path),
       status: fields["status"],
       title: fields["title"],
+      review: reviewStateFor(events, path),
     });
   }
   return chapters;
@@ -190,8 +225,15 @@ function containsPhrase(haystack: string, phrase: string): boolean {
  * missing file is not an error anywhere here — an absent `bible/overview.md`
  * just makes `premise` false, an absent `chapters/` makes `chapters` empty —
  * because `status` exists to report what is missing, not to throw on it.
+ *
+ * `env` resolves the review queue (`stateReviewPath`, AGT-1263) each chapter
+ * is checked against; it defaults to `process.env` so every existing caller
+ * (the real CLI) is unaffected, and a test points it at a temp
+ * `XDG_STATE_HOME` instead of ever touching the author's real queue. A
+ * missing or malformed queue file degrades to every chapter reading `review:
+ * "none"` — `readEvents` already tolerates both, so this never throws.
  */
-export function readNovelState(workDir: string): NovelState {
+export function readNovelState(workDir: string, env: Record<string, string | undefined> = process.env): NovelState {
   const overviewText = read(join(workDir, "bible", "overview.md"));
   const premise = overviewText !== undefined && hasLogline(overviewText);
 
@@ -228,12 +270,14 @@ export function readNovelState(workDir: string): NovelState {
   const outlineText = read(outlinePath) ?? "";
   const outlineLabel = relLabel(workDir, outlinePath);
 
+  const events = readEvents(stateReviewPath(env));
+
   return {
     premise,
     bible: { files, picks, timelineText },
     acts: parseActs(outlineText),
     beats: parseBeatRows(outlineText, outlineLabel),
-    chapters: readChapters(workDir),
+    chapters: readChapters(workDir, events),
   };
 }
 
