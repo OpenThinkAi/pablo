@@ -205,7 +205,9 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
       await Promise.race([
         deps.sleep(pollMs),
         waker.wait(),
-        new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })),
+        signal.aborted
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })),
       ]);
     }
   } finally {
