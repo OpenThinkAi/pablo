@@ -162,6 +162,32 @@ export function parseBeatRow(outline: string, chapter: number, source: string): 
 }
 
 /**
+ * Every row of the outline's chapter table, in file order — the same table
+ * `parseBeatRow` reads one row from, for callers (the novel stage machine,
+ * in particular) that need the whole beat list rather than one chapter.
+ * A row counts if its first cell parses as an integer; anything else
+ * (the acts table, prose, open-question bullets) is skipped.
+ */
+export function parseBeatRows(outline: string, source: string): readonly BeatRow[] {
+  const rows: BeatRow[] = [];
+  for (const line of outline.split("\n")) {
+    const match = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
+    if (match === null) continue;
+    const cells = (match[2] ?? "").split("|").map((cell) => cell.trim());
+    rows.push({
+      chapter: Number(match[1]),
+      storyDate: cells[0] ?? "",
+      title: cells[1] ?? "",
+      beat: cells[2] ?? "",
+      pov: cells[3] ?? "",
+      status: cells[4] ?? "",
+      source,
+    });
+  }
+  return rows;
+}
+
+/**
  * The story-time gate: `bible/timeline.md` split by the chapter's story date
  * into what is already true and what does not exist yet.
  *

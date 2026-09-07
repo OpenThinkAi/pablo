@@ -8,6 +8,7 @@ import {
   gateTimeline,
   PACK_BUDGETS,
   parseBeatRow,
+  parseBeatRows,
   readDraftingInputs,
   readStyle,
   section,
@@ -44,6 +45,52 @@ test("a beat row is read out of the outline's chapter table", () => {
     source: "outline/chapters.md",
   });
   expect(parseBeatRow(outline, 9, "outline/chapters.md")).toBeUndefined();
+});
+
+test("every beat row is read out of the outline, in file order, skipping non-numeric rows", () => {
+  const outline = `# Outline
+
+## The acts
+
+| Act | Years | What it accomplishes |
+|---|---|---|
+| I | 1929 to 1934 | The ice trade contracts. |
+
+## Act I
+
+| # | Story date | Title (working) | Beat | POV | Status |
+|---|---|---|---|---|---|
+| 1 | January 1929 | The Last Full Cut | Odile keeps the tally. | Odile | draft |
+| 2 | Winter 1931 | Black Ice | Wilfred puts the crew out on thin ice. | Odile | outline |
+
+### Open questions
+
+- Whether the schooner is named in Act I.`;
+
+  const rows = parseBeatRows(outline, "outline/chapters.md");
+
+  expect(rows).toEqual([
+    {
+      chapter: 1,
+      storyDate: "January 1929",
+      title: "The Last Full Cut",
+      beat: "Odile keeps the tally.",
+      pov: "Odile",
+      status: "draft",
+      source: "outline/chapters.md",
+    },
+    {
+      chapter: 2,
+      storyDate: "Winter 1931",
+      title: "Black Ice",
+      beat: "Wilfred puts the crew out on thin ice.",
+      pov: "Odile",
+      status: "outline",
+      source: "outline/chapters.md",
+    },
+  ]);
+  // The acts table's "I" is not numeric, so it never becomes a beat row.
+  expect(rows.some((row) => (row.title as string) === "1929 to 1934")).toBe(false);
 });
 
 test("the timeline is gated by the chapter's story date", () => {

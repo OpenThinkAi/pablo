@@ -25,9 +25,9 @@ binding decisions): `~/saltline-digital-vault/projects/ai-terminal/README.md`
 ## Status
 
 P0 in progress: the repo reshape and CLI skeleton landed 2026-09-06; `init` and the
-`pablo.json` marker landed 2026-09-06. `packages/tui` (the earlier terminal-renderer
-design) is retired; see `CLAUDE.md`'s `Layout` section and the design doc's `History`
-for what carried over.
+`pablo.json` marker landed 2026-09-06; the novel stage machine and `status` landed
+2026-09-06. `packages/tui` (the earlier terminal-renderer design) is retired; see
+`CLAUDE.md`'s `Layout` section and the design doc's `History` for what carried over.
 
 ## Install / run
 
@@ -57,7 +57,8 @@ including an unresolvable project), `1` error.
 | `pablo init <format> <slug> "<Title>"` | scaffold from `<vault>/templates/<format>`, write the marker, commit | `{ok, path, format, slug, title, committed, notice?}` |
 | `pablo init --adopt --project <slug>` | write only the marker into a work that already exists, touching nothing else; never commits | same shape, `committed: false` |
 | `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, stages, last, open, next}` |
-| `pablo status --project <slug> [--for chapter 3]` | the same, or the preconditions for one target and which are unmet | `{ready, missing[]}` |
+| `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object; exit 0 |
+| `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
 | `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--variants V]` | the prose call: check, pack, send, write, rituals | `{path, receipt, rituals[]}` or `{refused, missing[]}` |
 | `pablo save --project <slug> --stage acts\|outline\|bible/... < file` | the agent's planning output saved through pablo so the framework sees it | `{path, stage}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{tells[], unprovenanced[]}` |
@@ -92,6 +93,26 @@ marker: it writes only `pablo.json` (title taken from the work's `README.md` fir
 `# ` heading, minus a trailing "(working title)") and, if absent, the `.gitignore`
 line — nothing else in the work changes, and it never commits. Refuses (exit 2) if
 the work already has a `pablo.json`.
+
+`pablo status --project <slug>` reads the novel machine's state from the vault (see
+the design doc's `Novel` stage table): `premise` (`bible/overview.md` has a
+`## Logline` with text), `bible` (`{file, exists}` for each `bible/characters/*.md`,
+`bible/places.md`, `bible/timeline.md`, plus every `[pick]` placeholder found in a
+bible file's table rows), `acts` (the first `| Act | ... |` table in
+`outline/chapters.md`), `beats` (every numbered row of that file's chapter table),
+and `chapters` (`chapters/NN-*.md` files with their frontmatter). With no `--json` it
+prints one line per stage instead of the state object.
+
+`pablo status --project <slug> --for "chapter N"` (also accepts `chapter-N`, `ch N`,
+or a bare `N`; anything else is a refusal naming the expected form) checks one
+chapter's preconditions and returns `{ready, missing[]}` — a plain body, not the
+`{ok, code, message}` refusal shape, because an unmet precondition here is the
+answer, not a framework-resolution failure. The exit code still carries the
+framework-precondition contract: `0` when ready, `2` when not. Checks, in order:
+beat row N exists (if not, that is the *only* entry in `missing` — everything else
+needs the beat); chapter N-1 is written, unless N is 1; `bible/timeline.md` has a row
+dated at or before the beat's story-date year; and no `[pick]` row's name appears, as
+a whole word or phrase, in beat N's own text.
 
 ## Project layout
 

@@ -119,6 +119,92 @@ test("init novel onto an existing slug exits 2", () => {
   rmSync(vault, { recursive: true, force: true });
 });
 
+test("status --project ice-house --json exits 0 with the novel machine's state", () => {
+  const vault = tempVault();
+
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--json"], { PABLO_VAULT: vault });
+
+  expect(exitCode).toBe(0);
+  const body = JSON.parse(stdout);
+  expect(body.premise).toBe(true);
+  expect(body.beats).toHaveLength(4);
+  expect(body.chapters).toEqual([
+    { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut" },
+  ]);
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test("status --project ice-house (no --json) prints one prose line per stage", () => {
+  const vault = tempVault();
+
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house"], { PABLO_VAULT: vault });
+
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("premise: ok");
+  expect(stdout).toContain("acts: 2");
+  expect(stdout).toContain("beats: 4 (chapters 1");
+  expect(stdout).toContain("chapters: 1 written");
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test('status --project ice-house --for "chapter 2" --json exits 0 with ready:true', () => {
+  const vault = tempVault();
+
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "chapter 2", "--json"], {
+    PABLO_VAULT: vault,
+  });
+
+  expect(exitCode).toBe(0);
+  expect(JSON.parse(stdout)).toEqual({ ready: true, missing: [] });
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test('status --project ice-house --for "chapter 3" --json exits 2 with ready:false and the exact missing strings', () => {
+  const vault = tempVault();
+
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "chapter 3", "--json"], {
+    PABLO_VAULT: vault,
+  });
+
+  expect(exitCode).toBe(2);
+  expect(JSON.parse(stdout)).toEqual({
+    ready: false,
+    missing: ["chapter 2 is not written", "Mrs. Frayne still has a [pick] in bible/characters/family-tree.md"],
+  });
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test('status --project ice-house --for "ch 3" (no --json) prints the not-ready line and each missing item indented', () => {
+  const vault = tempVault();
+
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "ch 3"], { PABLO_VAULT: vault });
+
+  expect(exitCode).toBe(2);
+  expect(stdout).toContain("chapter 3: not ready");
+  expect(stdout).toContain("  chapter 2 is not written");
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test("status --project ice-house --for bogus --json exits 2 with a refusal naming the expected shape", () => {
+  const vault = tempVault();
+
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "bogus", "--json"], {
+    PABLO_VAULT: vault,
+  });
+
+  expect(exitCode).toBe(2);
+  const body = JSON.parse(stdout);
+  expect(body).toMatchObject({ ok: false, code: 2 });
+  expect(body.message).toContain('--for expects "chapter N"');
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
 test("init --adopt --project no-marker writes only the marker and does not commit", () => {
   const vault = tempVault();
 

@@ -49,6 +49,7 @@ export {
   DEFAULT_TAIL_WORDS,
   gateTimeline,
   parseBeatRow,
+  parseBeatRows,
   parseWorkTitle,
   PERIOD_FACTS_SECTION,
   readDraftingInputs,
