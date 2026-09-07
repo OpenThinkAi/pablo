@@ -116,7 +116,8 @@ export function chapterFileName(chapter: number, beatTitle: string): string {
 /** A YAML scalar needs quoting only when it contains `:` or opens with a quote/indicator character. */
 const YAML_INDICATOR_START = /^[-?:,[\]{}#&*!|>'"%@`]/;
 
-function yamlScalar(value: string): string {
+/** Exported for `prose.ts`'s `--out` frontmatter (AGT-1242) — one quoting rule for every frontmatter block pablo writes, not a second copy of it. */
+export function yamlScalar(value: string): string {
   if (!value.includes(":") && !YAML_INDICATOR_START.test(value)) return value;
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }

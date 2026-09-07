@@ -44,9 +44,17 @@ function writeBrief(dir: string, text = "Announce the new dock hours.\n"): strin
   return path;
 }
 
+/**
+ * Every spawned run gets a throwaway `XDG_STATE_HOME` as well as whatever the
+ * caller passes: the send path appends its receipt to
+ * `$XDG_STATE_HOME/pablo/receipts.jsonl` when there is no vault (AGT-1242's
+ * AC3), and a test that forgot it would append to the author's real log.
+ */
 function runCli(args: string[], env: Record<string, string> = {}, stdin?: string): { stdout: string; stderr: string; exitCode: number } {
+  const stateHome = mkdtempSync(join(tmpdir(), "pablo-prose-state-"));
+  cleanupDirs.push(stateHome);
   const result = Bun.spawnSync(["bun", "run", CLI, ...args], {
-    env: { ...process.env, ...env },
+    env: { ...process.env, XDG_STATE_HOME: stateHome, ...env },
     ...(stdin !== undefined ? { stdin: Buffer.from(stdin) } : {}),
   });
   return { stdout: result.stdout.toString(), stderr: result.stderr.toString(), exitCode: result.exitCode };
@@ -56,7 +64,7 @@ function runCli(args: string[], env: Record<string, string> = {}, stdin?: string
 // buildProsePack — pure over TextSources
 // ---------------------------------------------------------------------------
 
-test("buildProsePack resolves --format to its stanza text and refuses an unknown one", () => {
+test("buildProsePack resolves --format to its stanza text and refuses an unknown one", async () => {
   const vault = tempVault();
   const voice = readVoice(join(vault, "voices", "plain"));
 
@@ -86,12 +94,12 @@ test("buildProsePack resolves --format to its stanza text and refuses an unknown
 // proseCore — dry-run JSON shape (AC2), refusals (AC4), determinism (AC3)
 // ---------------------------------------------------------------------------
 
-test("proseCore dry-run on the fixture's plain voice returns AC2's exact shape", () => {
+test("proseCore dry-run on the fixture's plain voice returns AC2's exact shape", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
-  const outcome = proseCore(
-    { voice: "plain", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true },
+  const outcome = await proseCore(
+    { voice: "plain", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -113,20 +121,28 @@ test("proseCore dry-run on the fixture's plain voice returns AC2's exact shape",
   expect(outcome.pack).toBeDefined();
 });
 
-test("proseCore without --dry-run refuses with exit 1 (not wired to the model yet)", () => {
+// AGT-1242 replaced AGT-1241's "not wired to the model yet" exit-1 branch with
+// the real send path. The fixture's `plain` voice carries `model: anthropic`
+// in its frontmatter and the temp config home has no such provider, so this
+// exercises AC1's per-voice override refusing an unknown provider — and, like
+// every send-path test, never reaches an endpoint. The full send path lives in
+// prose-send.test.ts against a fake adapter.
+test("proseCore without --dry-run, on a voice whose model: names an unconfigured provider, refuses (exit 2)", async () => {
   const vault = tempVault();
+  const configHome = tempConfigHome();
   const briefPath = writeBrief(vault);
 
-  const outcome = proseCore(
-    { voice: "plain", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false },
-    { cwd: vault, env: { PABLO_VAULT: vault } },
+  const outcome = await proseCore(
+    { voice: "plain", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: undefined, force: false },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_CONFIG_HOME: configHome } },
   );
 
-  expect(outcome.exitCode).toBe(1);
-  expect(outcome.body).toMatchObject({ ok: false, code: 1 });
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("anthropic");
 });
 
-test("proseCore with two context files in argument order shows both in the slice table, in order", () => {
+test("proseCore with two context files in argument order shows both in the slice table, in order", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
   const aPath = join(vault, "a.md");
@@ -134,8 +150,8 @@ test("proseCore with two context files in argument order shows both in the slice
   writeFileSync(aPath, "The first context file.\n", "utf8");
   writeFileSync(bPath, "The second context file.\n", "utf8");
 
-  const outcome = proseCore(
-    { voice: "plain", brief: briefPath, context: [aPath, bPath], format: undefined, words: undefined, dryRun: true },
+  const outcome = await proseCore(
+    { voice: "plain", brief: briefPath, context: [aPath, bPath], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -145,28 +161,28 @@ test("proseCore with two context files in argument order shows both in the slice
   expect(contextSlices.map((s) => s.source)).toEqual([aPath, bPath]);
 });
 
-test("proseCore: the same voice, brief, context and options produce the same prompt_hash on two runs (AC3)", () => {
+test("proseCore: the same voice, brief, context and options produce the same prompt_hash on two runs (AC3)", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
   const contextPath = join(vault, "c.md");
   writeFileSync(contextPath, "Some context.\n", "utf8");
 
-  const args = { voice: "plain", brief: briefPath, context: [contextPath], format: "email", words: 200, dryRun: true } as const;
+  const args = { voice: "plain", brief: briefPath, context: [contextPath], format: "email", words: 200, dryRun: true, out: undefined, force: false } as const;
   const ctx = { cwd: vault, env: { PABLO_VAULT: vault } };
 
-  const first = proseCore(args, ctx);
-  const second = proseCore(args, ctx);
+  const first = await proseCore(args, ctx);
+  const second = await proseCore(args, ctx);
 
   expect(first.body).toMatchObject({ ok: true });
   expect((first.body as { prompt_hash: string }).prompt_hash).toBe((second.body as { prompt_hash: string }).prompt_hash);
 });
 
-test("proseCore without --voice refuses (exit 2)", () => {
+test("proseCore without --voice refuses (exit 2)", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
-  const outcome = proseCore(
-    { voice: undefined, brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true },
+  const outcome = await proseCore(
+    { voice: undefined, brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -175,12 +191,12 @@ test("proseCore without --voice refuses (exit 2)", () => {
   expect((outcome.body as { message: string }).message).toContain("--voice");
 });
 
-test("proseCore with an unresolvable voice refuses (exit 2), naming what it tried", () => {
+test("proseCore with an unresolvable voice refuses (exit 2), naming what it tried", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
-  const outcome = proseCore(
-    { voice: "nosuchvoice", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true },
+  const outcome = await proseCore(
+    { voice: "nosuchvoice", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -189,11 +205,11 @@ test("proseCore with an unresolvable voice refuses (exit 2), naming what it trie
   expect((outcome.body as unknown as { tried: string[] }).tried.length).toBeGreaterThan(0);
 });
 
-test("proseCore without --brief refuses (exit 2)", () => {
+test("proseCore without --brief refuses (exit 2)", async () => {
   const vault = tempVault();
 
-  const outcome = proseCore(
-    { voice: "plain", brief: undefined, context: [], format: undefined, words: undefined, dryRun: true },
+  const outcome = await proseCore(
+    { voice: "plain", brief: undefined, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -202,11 +218,11 @@ test("proseCore without --brief refuses (exit 2)", () => {
   expect((outcome.body as { message: string }).message).toContain("--brief");
 });
 
-test("proseCore with an unreadable --brief file refuses", () => {
+test("proseCore with an unreadable --brief file refuses", async () => {
   const vault = tempVault();
 
-  const outcome = proseCore(
-    { voice: "plain", brief: join(vault, "does-not-exist.md"), context: [], format: undefined, words: undefined, dryRun: true },
+  const outcome = await proseCore(
+    { voice: "plain", brief: join(vault, "does-not-exist.md"), context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -214,11 +230,11 @@ test("proseCore with an unreadable --brief file refuses", () => {
   expect((outcome.body as { message: string }).message).toContain("does-not-exist.md");
 });
 
-test("proseCore with an unreadable --context file refuses", () => {
+test("proseCore with an unreadable --context file refuses", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
-  const outcome = proseCore(
+  const outcome = await proseCore(
     {
       voice: "plain",
       brief: briefPath,
@@ -226,6 +242,8 @@ test("proseCore with an unreadable --context file refuses", () => {
       format: undefined,
       words: undefined,
       dryRun: true,
+      out: undefined,
+      force: false,
     },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
@@ -234,12 +252,12 @@ test("proseCore with an unreadable --context file refuses", () => {
   expect((outcome.body as { message: string }).message).toContain("no-such-context.md");
 });
 
-test("proseCore with an unknown --format refuses (exit 2), naming the known formats", () => {
+test("proseCore with an unknown --format refuses (exit 2), naming the known formats", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
-  const outcome = proseCore(
-    { voice: "plain", brief: briefPath, context: [], format: "bogus", words: undefined, dryRun: true },
+  const outcome = await proseCore(
+    { voice: "plain", brief: briefPath, context: [], format: "bogus", words: undefined, dryRun: true, out: undefined, force: false },
     { cwd: vault, env: { PABLO_VAULT: vault } },
   );
 
@@ -250,7 +268,7 @@ test("proseCore with an unknown --format refuses (exit 2), naming the known form
 
 // AC4: no --project or --project is required; running with no vault at all
 // works with a global voice.
-test("proseCore with no vault at all resolves a global voice under XDG_CONFIG_HOME", () => {
+test("proseCore with no vault at all resolves a global voice under XDG_CONFIG_HOME", async () => {
   const noVaultCwd = mkdtempSync(join(tmpdir(), "pablo-prose-novault-"));
   cleanupDirs.push(noVaultCwd);
   const configHome = tempConfigHome();
@@ -258,8 +276,8 @@ test("proseCore with no vault at all resolves a global voice under XDG_CONFIG_HO
   writeFileSync(join(configHome, "pablo", "voices", "memo", "voice.md"), "# Voice: memo\n\nShort and plain.\n", "utf8");
   const briefPath = writeBrief(noVaultCwd);
 
-  const outcome = proseCore(
-    { voice: "memo", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true },
+  const outcome = await proseCore(
+    { voice: "memo", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: true, out: undefined, force: false },
     { cwd: noVaultCwd, env: { XDG_CONFIG_HOME: configHome } },
   );
 
@@ -271,7 +289,7 @@ test("proseCore with no vault at all resolves a global voice under XDG_CONFIG_HO
 // Through the spawned CLI — argv parsing, --json/prose text, stdin, exit codes
 // ---------------------------------------------------------------------------
 
-test("prose --dry-run --json through the CLI prints AC2's shape and exits 0", () => {
+test("prose --dry-run --json through the CLI prints AC2's shape and exits 0", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
@@ -285,7 +303,7 @@ test("prose --dry-run --json through the CLI prints AC2's shape and exits 0", ()
   expect(typeof body.prompt_hash).toBe("string");
 });
 
-test("prose --dry-run (no --json) through the CLI prints the human-readable slice table and wait estimate", () => {
+test("prose --dry-run (no --json) through the CLI prints the human-readable slice table and wait estimate", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
@@ -296,7 +314,7 @@ test("prose --dry-run (no --json) through the CLI prints the human-readable slic
   expect(stdout).toContain("Estimated wait");
 });
 
-test("prose --brief - reads stdin through the CLI", () => {
+test("prose --brief - reads stdin through the CLI", async () => {
   const vault = tempVault();
 
   const { stdout, exitCode } = runCli(
@@ -310,7 +328,7 @@ test("prose --brief - reads stdin through the CLI", () => {
   expect(body).toMatchObject({ ok: true, dryRun: true });
 });
 
-test("prose with no --voice through the CLI exits 2, naming the problem", () => {
+test("prose with no --voice through the CLI exits 2, naming the problem", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
@@ -322,7 +340,7 @@ test("prose with no --voice through the CLI exits 2, naming the problem", () => 
   expect(body.message).toContain("--voice");
 });
 
-test("prose --format bogus through the CLI exits 2", () => {
+test("prose --format bogus through the CLI exits 2", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
@@ -336,16 +354,23 @@ test("prose --format bogus through the CLI exits 2", () => {
   expect(body).toMatchObject({ ok: false, code: 2 });
 });
 
-test("prose without --dry-run through the CLI exits 1", () => {
+test("prose without --dry-run through the CLI, on a voice naming an unconfigured provider, exits 2", async () => {
   const vault = tempVault();
+  const configHome = tempConfigHome();
   const briefPath = writeBrief(vault);
 
-  const { exitCode } = runCli(["prose", "--voice", "plain", "--brief", briefPath, "--json"], { PABLO_VAULT: vault });
+  const { stdout, exitCode } = runCli(["prose", "--voice", "plain", "--brief", briefPath, "--json"], {
+    PABLO_VAULT: vault,
+    XDG_CONFIG_HOME: configHome,
+  });
 
-  expect(exitCode).toBe(1);
+  expect(exitCode).toBe(2);
+  const body = JSON.parse(stdout);
+  expect(body).toMatchObject({ ok: false, code: 2 });
+  expect(body.message).toContain("anthropic");
 });
 
-test("prose with no vault at all through the CLI, from a directory with no marker, resolves a global voice", () => {
+test("prose with no vault at all through the CLI, from a directory with no marker, resolves a global voice", async () => {
   const noVaultCwd = mkdtempSync(join(tmpdir(), "pablo-prose-cli-novault-"));
   cleanupDirs.push(noVaultCwd);
   const configHome = tempConfigHome();
@@ -368,7 +393,7 @@ test("prose with no vault at all through the CLI, from a directory with no marke
   expect(body).toMatchObject({ ok: true, dryRun: true });
 });
 
-test("two --dry-run --json runs of the same invocation through the CLI produce the same prompt_hash (AC3)", () => {
+test("two --dry-run --json runs of the same invocation through the CLI produce the same prompt_hash (AC3)", async () => {
   const vault = tempVault();
   const briefPath = writeBrief(vault);
   const args = ["prose", "--voice", "plain", "--brief", briefPath, "--words", "200", "--dry-run", "--json"];

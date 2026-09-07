@@ -21,6 +21,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import type { TextSource } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
 
 /** One mechanical-tell or flagged-line match. `detail` disambiguates which stock name matched when `rule` is `"stock-name"`. */
@@ -194,6 +195,30 @@ export function loadCheckRules(vaultRoot: string): CheckRules {
   for (const name of stockNamesFromBullet(antiTells)) names.add(name);
 
   return { stockNames: [...names], flaggedLines: flaggedLinesIn(prose) };
+}
+
+/**
+ * The same rules, read out of a resolved voice's own text instead of a vault's
+ * `style/` directory (AGT-1242): every `Flagged:` line in the voice's rules,
+ * plus the stock names its `## Names` section or `Stock names:` bullet lists.
+ *
+ * One parser, two sources — the `Flagged:`/`## Names`/`Stock names:` grammar
+ * above is not duplicated here, so a voice's flagged line and the fiction
+ * style guide's are recognised identically. The `fiction` voice needs no
+ * special case at all: `readVoice` gives it `style/*.md` as its rules
+ * (`readStyle`), so `prose.md`'s flagged lines AND `anti-tells.md`'s stock-name
+ * bullet arrive here as ordinary voice rules.
+ */
+export function checkRulesFromVoice(voice: { readonly rules: readonly TextSource[] }): CheckRules {
+  const text = voice.rules.map((rule) => rule.text).join("\n\n");
+
+  const names = new Set<string>();
+  for (const list of stockNameParenListsIn(namesSection(text))) {
+    for (const name of namesFromList(list)) names.add(name);
+  }
+  for (const name of stockNamesFromBullet(text)) names.add(name);
+
+  return { stockNames: [...names], flaggedLines: flaggedLinesIn(text) };
 }
 
 /** 0-based index of the closing `---` line of a leading frontmatter block, or `-1` if `text` has none. */
