@@ -1,22 +1,28 @@
 /**
- * `runRituals` (AGT-1231): the five things every rules file already asked
- * the model to do after a chapter draft and that never actually happened —
- * tick the outline, drop a dated note, update the README's "Where things
- * stand" section, commit exactly the touched paths, and `think sync`. See
- * the design doc's stage table (`~/saltline-digital-vault/projects/ai-terminal/README.md`,
- * the `chapter N` row's "After" column) and `packages/cli/src/write.ts`
+ * `runRituals` (AGT-1231, AGT-1232): the things every rules file already
+ * asked the model to do after a chapter draft and that never actually
+ * happened — tick the outline, drop a dated note, update the README's
+ * "Where things stand" section, extract continuity facts, commit exactly the
+ * touched paths, and `think sync`. See the design doc's stage table
+ * (`~/saltline-digital-vault/projects/ai-terminal/README.md`, the
+ * `chapter N` row's "After" column) and `packages/cli/src/write.ts`
  * (AGT-1237), which calls this once the chapter file is on disk and merges
  * the result into the write response as `rituals`.
  *
  * Every ritual is independent and wrapped so nothing it does can throw out
  * of `runRituals` or undo the chapter write that already landed — a failure
  * anywhere here is a `Ritual` with `status: "failed"`, not an exception. The
- * five run in a fixed order: outline, note, readme, git, think.
+ * six run in a fixed order: outline, note, readme, continuity, git, think.
+ * Continuity runs before git so `continuity.md` can be included in the same
+ * commit — but only when it actually changed (AGT-1232's `runContinuity`
+ * doc comment).
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
+import type { Adapter } from "@openthink/pablo-core";
+import { runContinuity } from "./continuity";
 
 export type RitualStatus = "ran" | "skipped" | "failed";
 
@@ -39,6 +45,16 @@ export interface RitualOptions {
   readonly env?: Record<string, string | undefined> | undefined;
   /** Overrides the `think sync` timeout (default 20s). */
   readonly thinkTimeoutMs?: number | undefined;
+  /**
+   * The adapter to run continuity extraction with (AGT-1232) — the routed
+   * extraction adapter in production, or the same fake adapter a test
+   * injected as `RunWriteDeps.adapter`. `undefined` (the default) skips the
+   * ritual: "no extraction adapter". Optional on `Adapter` itself is a
+   * different, narrower skip — see `runContinuity`.
+   */
+  readonly extractor?: Adapter | undefined;
+  /** Overrides the continuity extraction ritual's 120s ceiling. */
+  readonly continuityTimeoutMs?: number | undefined;
 }
 
 const DEFAULT_THINK_TIMEOUT_MS = 20_000;
@@ -317,12 +333,24 @@ async function runThink(
 }
 
 /**
- * Runs the five after-write rituals, in order: outline, note, readme, git,
- * think. `workDir` is the project directory (e.g. `<vault>/novels/<slug>`);
- * `chapterPath` is the absolute path to the chapter file `write.ts` just
- * wrote. Always resolves to exactly five `Ritual`s, never throws, and is
- * called only on the live write path — never on `--dry-run`, never after a
- * refusal (both return before this would be reached).
+ * Strips a leading YAML frontmatter block (`---\n...\n---\n`, optionally
+ * followed by a blank line) off a chapter file's full text, returning just
+ * the prose — what `write.ts`'s `normalized` was before the frontmatter was
+ * prepended. A file with no frontmatter block is returned unchanged.
+ */
+function stripFrontmatter(text: string): string {
+  const match = text.match(/^---\n[\s\S]*?\n---\n\n?/);
+  return match ? text.slice(match[0].length) : text;
+}
+
+/**
+ * Runs the six after-write rituals, in order: outline, note, readme,
+ * continuity, git, think. `workDir` is the project directory (e.g.
+ * `<vault>/novels/<slug>`); `chapterPath` is the absolute path to the
+ * chapter file `write.ts` just wrote. Always resolves to exactly six
+ * `Ritual`s, never throws, and is called only on the live write path — never
+ * on `--dry-run`, never after a refusal (both return before this would be
+ * reached).
  */
 export async function runRituals(workDir: string, chapter: number, chapterPath: string, opts: RitualOptions): Promise<Ritual[]> {
   const now = opts.now ?? (() => new Date());
@@ -339,11 +367,21 @@ export async function runRituals(workDir: string, chapter: number, chapterPath: 
 
   const readme = attempt("readme", () => tickReadme(workDir, chapter, today, opts.words, opts.model));
 
+  // Reading the chapter file happens inside the wrapper too — a read failure
+  // (the file `write.ts` just wrote should always exist, but nothing here
+  // should be able to throw out of `runRituals`) becomes a "failed" ritual,
+  // same as any other continuity failure.
+  const continuity = await attemptAsync("continuity", () => {
+    const chapterBody = stripFrontmatter(readFileSync(chapterPath, "utf8"));
+    return runContinuity(workDir, chapter, chapterBody, { adapter: opts.extractor, timeoutMs: opts.continuityTimeoutMs });
+  });
+
   const chapterRel = relative(workDir, chapterPath).split(sep).join("/");
   const gitPaths = [chapterRel, "outline/chapters.md", noteRel, "README.md"];
+  if (continuity.status === "ran") gitPaths.push("continuity.md");
   const git = attempt("git", () => runGit(workDir, gitPaths, `${opts.slug}: draft chapter ${chapter}`));
 
   const think = await attemptAsync("think", () => runThink(chapter, opts.words, opts.slug, env, thinkTimeoutMs, allowNvmFallback));
 
-  return [outline, note, readme, git, think];
+  return [outline, note, readme, continuity, git, think];
 }

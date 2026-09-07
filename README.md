@@ -185,15 +185,30 @@ check (`check.ts`'s `checkFile`) runs over the normalized body and its hits are
 returned as `check[]` — a hit never changes the exit code, which is `0` throughout
 this whole path once the file is written.
 
-Once the file is on disk (AGT-1231, `novel/rituals.ts`'s `runRituals`), five
+Once the file is on disk (AGT-1231, `novel/rituals.ts`'s `runRituals`), six
 after-write rituals run in order — outline tick (the chapter's row in
 `outline/chapters.md` moves to `draft`), a dated note under `notes/`, a bullet
-under the work's `README.md` "Where things stand", a git commit of exactly
-those touched paths (never `git add -A`), and `think -C writing sync` — each
-independently wrapped so a failure (no git repo, `think` missing, a malformed
-outline row) is a notice on the returned `rituals[]`, never an exception, and
-never undoes the chapter write; they run only on this live path, never on
+under the work's `README.md` "Where things stand", continuity extraction
+(AGT-1232), a git commit of exactly those touched paths (never `git add -A`),
+and `think -C writing sync` — each independently wrapped so a failure (no git
+repo, `think` missing, a malformed outline row, extraction failing or timing
+out) is a notice on the returned `rituals[]`, never an exception, and never
+undoes the chapter write; they run only on this live path, never on
 `--dry-run` and never after a refusal.
+
+Continuity extraction (`novel/continuity.ts`'s `runContinuity`) sends the new
+chapter's body to the routed extraction adapter's `extractFactsWithAnchors`
+(core's `Adapter` interface; a provider without it, or no adapter at all, is a
+`"skipped"` ritual, not a failure) with a 120s ceiling, then files each fact
+under the matching heading of `continuity.md` — names and ages, dates, objects
+and places, or who knows what, decided from the fact's entities, `storyTime`,
+and text — as `- <fact> [chNN]`, citing the sentence the model anchored it to
+after whitespace-insensitive matching against the chapter. A fact whose anchor
+can't be found in the chapter is filed under `## Check` instead of dropped. A
+bullet that already exists verbatim is never duplicated, so a re-run is
+idempotent. The call is receipted with `intent: "continuity"`, same as any
+other model call; `continuity.md` is added to the after-write git commit only
+when it actually changed.
 
 ## MCP (`pablo mcp`)
 
