@@ -22,6 +22,7 @@ import type { NovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runResumeVerb } from "./resume";
+import { runSave } from "./save";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
 const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp"] as const;
@@ -76,6 +77,10 @@ interface ParsedArgs {
   readonly adopt: boolean;
   /** `status --for "chapter N"` (also accepts `chapter-N`, `ch N`, or bare `N`). */
   readonly for: string | undefined;
+  /** `save --stage acts|beats|premise|bible/<file>`. */
+  readonly stage: string | undefined;
+  /** `save --file <path>` — stdin is read when omitted. */
+  readonly file: string | undefined;
 }
 
 export function parseCliArgs(argv: readonly string[]): ParsedArgs {
@@ -89,6 +94,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       help: { type: "boolean", default: false },
       adopt: { type: "boolean", default: false },
       for: { type: "string" },
+      stage: { type: "string" },
+      file: { type: "string" },
     },
   });
 
@@ -100,6 +107,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     help: values["help"] === true,
     adopt: values["adopt"] === true,
     for: typeof values["for"] === "string" ? values["for"] : undefined,
+    stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
+    file: typeof values["file"] === "string" ? values["file"] : undefined,
   };
 }
 
@@ -337,6 +346,15 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return EXIT_REFUSED;
     }
     return await runResumeVerb(args.json, projectPath, args.project as string);
+  }
+
+  if (args.verb === "save") {
+    if (projectPath === undefined) {
+      const message = "pablo: save requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    return runSave({ stage: args.stage, file: args.file, json: args.json }, projectPath);
   }
 
   const message = `pablo: "${args.verb}" not implemented yet`;

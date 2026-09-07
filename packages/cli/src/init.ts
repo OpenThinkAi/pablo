@@ -160,7 +160,7 @@ function errMessage(err: unknown): string {
  * fails the add. Any git failure (not a repo, nothing to commit, etc.) comes
  * back as `{committed: false, notice}` — never a thrown exception.
  */
-function gitCommit(vault: string, message: string, absPaths: readonly string[]): { committed: boolean; notice?: string } {
+export function gitCommit(vault: string, message: string, absPaths: readonly string[]): { committed: boolean; notice?: string } {
   const relPaths = absPaths.map((p) => relative(vault, p));
   const trackablePaths = relPaths.filter((p) => !isIgnored(vault, p));
 
