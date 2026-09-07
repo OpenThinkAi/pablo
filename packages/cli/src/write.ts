@@ -31,6 +31,7 @@ import { buildChapterPack, DEFAULT_WORD_TARGET } from "./novel/pack";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { runRituals } from "./novel/rituals";
 import type { Ritual } from "./novel/rituals";
+import { mintPieceId } from "./review";
 
 /**
  * Exit codes: the contract every ticket builds on, defined once in `cli.ts`
@@ -181,9 +182,10 @@ function emitWriteSuccess(
   receipt: WriteReceiptSummary,
   hits: readonly Hit[],
   rituals: readonly Ritual[],
+  piece: string,
 ): void {
   if (json) {
-    console.log(JSON.stringify({ ok: true, path, receipt, check: hits, rituals }));
+    console.log(JSON.stringify({ ok: true, path, receipt, check: hits, rituals, piece }));
     return;
   }
   console.log(`wrote ${path} (${receipt.words} words)`);
@@ -194,6 +196,10 @@ function emitWriteSuccess(
   );
   for (const hit of hits) console.log(formatHitLine(hit));
   for (const ritual of rituals) console.log(`ritual ${ritual.name}: ${ritual.status} — ${ritual.detail}`);
+  // AGT-1262 AC4: the review queue's piece id, so the agent driving `write`
+  // can hand it straight to `pablo review wait <id>` without re-parsing the
+  // rituals line.
+  console.log(`piece ${piece}`);
 }
 
 /**
@@ -394,9 +400,12 @@ export async function runWrite(
 
   // AGT-1231: outline tick, dated note, README update, git commit, think
   // sync — the same clock as the frontmatter's `generated` timestamp, so
-  // "today" agrees with what was just written.
+  // "today" agrees with what was just written. AGT-1262: the piece id is
+  // minted here, before `runRituals`, so it reaches the JSON/human output
+  // (AC4) even if the `queue` ritual itself fails to append.
   const writeMs = receipt.wallMs - receipt.timeToFirstTokenMs;
   const receiptLine = `read ${receipt.tokensRead} tokens in ${seconds(receipt.timeToFirstTokenMs)}s, wrote ${receipt.tokensWritten} in ${seconds(writeMs)}s`;
+  const pieceId = mintPieceId(now(), markerResult.marker.slug);
   const rituals = await runRituals(projectPath, chapter, filePath, {
     slug: markerResult.marker.slug,
     words: wordCount,
@@ -407,8 +416,14 @@ export async function runWrite(
     thinkTimeoutMs: deps.thinkTimeoutMs,
     extractor,
     continuityTimeoutMs: deps.continuityTimeoutMs,
+    queue: {
+      id: pieceId,
+      title: packResult.inputs.beat.title,
+      vault: vaultRoot,
+      promptHash: pack.hash,
+    },
   });
 
-  emitWriteSuccess(args.json, workRelativePath, receipt, hits, rituals);
+  emitWriteSuccess(args.json, workRelativePath, receipt, hits, rituals, pieceId);
   return 0;
 }
