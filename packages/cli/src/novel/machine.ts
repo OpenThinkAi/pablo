@@ -135,8 +135,12 @@ function parseActs(outline: string): ActRow[] {
   return rows;
 }
 
-/** `chapters/NN-*.md` (NN = 2+ digits), frontmatter parsed by a small hand parser. */
-function parseFrontmatter(text: string): Record<string, string> {
+/**
+ * `chapters/NN-*.md` (NN = 2+ digits) frontmatter, parsed by a small hand
+ * parser. Exported so other frontmatter readers (`check.ts`'s
+ * `isUnprovenanced`) reuse this instead of writing a second one.
+ */
+export function parseFrontmatter(text: string): Record<string, string> {
   const lines = text.split("\n");
   if ((lines[0] ?? "").trim() !== "---") return {};
   const fields: Record<string, string> = {};

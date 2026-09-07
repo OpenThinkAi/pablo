@@ -14,6 +14,7 @@
  */
 
 import { parseArgs } from "node:util";
+import { runCheck } from "./check";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
@@ -386,6 +387,20 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return vaultResult.code;
     }
     return runWrite(args, vaultResult.path, projectPath);
+  }
+
+  if (args.verb === "check") {
+    if (projectPath === undefined) {
+      const message = "pablo: check requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const vaultResult = findVault(cwd);
+    if (!vaultResult.ok) {
+      emit(refusalResult(vaultResult), args.json);
+      return vaultResult.code;
+    }
+    return runCheck(args, vaultResult.path, projectPath);
   }
 
   const message = `pablo: "${args.verb}" not implemented yet`;
