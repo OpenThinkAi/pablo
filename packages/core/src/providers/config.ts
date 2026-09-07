@@ -75,10 +75,20 @@ const KIND_DEFAULTS: Record<AdapterKind, { endpoint?: string; model?: string }> 
   anthropic: { endpoint: DEFAULT_ANTHROPIC_ENDPOINT, model: DEFAULT_ANTHROPIC_MODEL },
 };
 
+/**
+ * The directory pablo's own files (config, and — AGT-1240 — the global
+ * `voices/` directory) live under: `$XDG_CONFIG_HOME/pablo`, else
+ * `~/.config/pablo`. A sibling of `configPath` rather than a `dirname()` of
+ * it, so a caller that only wants the directory says so.
+ */
+export function configDir(env: Record<string, string | undefined> = process.env): string {
+  const base = env["XDG_CONFIG_HOME"];
+  return base ? join(base, "pablo") : join(homedir(), ".config", "pablo");
+}
+
 /** Where `loadConfig` looks when it is not told otherwise. */
 export function configPath(env: Record<string, string | undefined> = process.env): string {
-  const base = env["XDG_CONFIG_HOME"];
-  return base ? join(base, "pablo", "config.json") : join(homedir(), ".config", "pablo", "config.json");
+  return join(configDir(env), "config.json");
 }
 
 /** The out-of-box configuration: the local writer, no key, nothing to set up. */

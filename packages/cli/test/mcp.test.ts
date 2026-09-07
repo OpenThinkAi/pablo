@@ -55,11 +55,12 @@ function parseTextBody(result: unknown): unknown {
   return JSON.parse(first.text);
 }
 
-test("listTools returns exactly the five verbs, each with a project input", async () => {
+test("listTools returns exactly the six verbs, each project-scoped verb with a project input", async () => {
   const { tools } = await client.listTools();
 
-  expect(tools.map((t) => t.name).sort()).toEqual(["check", "resume", "save", "status", "write"]);
+  expect(tools.map((t) => t.name).sort()).toEqual(["check", "resume", "save", "status", "voice", "write"]);
   for (const tool of tools) {
+    if (tool.name === "voice") continue; // voice resolves via cwd/vault, not a --project slug
     const properties = (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
     expect("project" in properties).toBe(true);
   }

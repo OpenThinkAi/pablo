@@ -14,6 +14,7 @@ export type {
 export { EndpointHung, ProviderConfigError, ProviderResponseError } from "./errors";
 export type { AdapterKind, LoadConfigOptions, PabloConfig, ProviderConfig } from "./config";
 export {
+  configDir,
   configPath,
   defaultConfig,
   DEFAULT_ANTHROPIC_ENDPOINT,

@@ -26,13 +26,15 @@ import type { Refusal } from "./project";
 import { runResumeVerb } from "./resume";
 import { runSave } from "./save";
 import { deriveCliOptions, parseForChapter } from "./verbs";
+import { listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
+import type { Voice } from "./voice";
 import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
-const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp"] as const;
+const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp", "voice"] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
-const LATER_VERBS = ["revise", "voice", "edit", "share", "notes", "publish"] as const;
+const LATER_VERBS = ["revise", "edit", "share", "notes", "publish"] as const;
 
 const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
@@ -55,7 +57,7 @@ function helpText(): string {
     "Every verb accepts --project <slug> and --json.",
     "--project resolves to <vault>/<kind>/<slug> (kind: novels, stories, essays).",
     "The vault is $PABLO_VAULT if set, else the nearest ancestor of the current",
-    "directory holding a style/ directory.",
+    "directory holding a style/ or voices/ directory.",
     "",
     "  pablo init <format> <slug> \"<Title>\"    scaffold a new work and write its marker",
     "  pablo init --adopt --project <slug>      write only the marker into an existing work",
@@ -63,6 +65,9 @@ function helpText(): string {
     "  pablo status --project <slug> --for \"chapter N\"",
     "                                            {ready, missing[]} for one chapter;",
     "                                            exit 0 if ready, 2 if not",
+    "  pablo voice new <name> [--global]        scaffold a voice directory",
+    "  pablo voice list                         every voice in the vault and the global dir",
+    "  pablo voice show <name>                  the assembled voice as a model will see it",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -95,6 +100,8 @@ interface ParsedArgs {
   readonly dryRun: boolean;
   /** `write --force`: overwrite an existing chapter file. */
   readonly force: boolean;
+  /** `voice new --global`: scaffold under the global voices directory instead of the vault. */
+  readonly global: boolean;
 }
 
 /**
@@ -133,6 +140,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     scenes: typeof values["scenes"] === "string" ? values["scenes"] : undefined,
     dryRun: values["dry-run"] === true,
     force: values["force"] === true,
+    global: values["global"] === true,
   };
 }
 
@@ -305,6 +313,92 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
   return EXIT_OK;
 }
 
+/** One line per rule/exemplar/never source — `voice show`'s prose rendering, "the assembled voice as a model will see it." */
+function formatVoice(voice: Voice): string {
+  const parts: string[] = [];
+  for (const rule of voice.rules) parts.push(rule.text);
+  if (voice.never) parts.push(voice.never.text);
+  if (voice.exemplars.length > 0) {
+    parts.push(["Exemplars:", ...voice.exemplars.map((ex) => `- ${ex.path}`)].join("\n"));
+  }
+  return parts.join("\n\n");
+}
+
+/**
+ * `pablo voice new|list|show` (AGT-1240). `sub`/`name` are positionals
+ * (`args.rest`), not named flags — `--global` and `--json` are the only
+ * flags this verb takes. There is no `--project`: a voice resolves from
+ * `cwd`/`PABLO_VAULT` (vault) plus the global voices directory, never a
+ * `<vault>/<kind>/<slug>` project.
+ */
+function runVoice(args: ParsedArgs, cwd: string): number {
+  const [sub, name] = args.rest;
+  const env = process.env;
+
+  if (sub === "list") {
+    const voices = listVoices({ cwd, env });
+    if (args.json) {
+      console.log(JSON.stringify({ ok: true, voices }));
+    } else if (voices.length === 0) {
+      console.log("pablo: no voices found");
+    } else {
+      for (const v of voices) console.log(`${v.name}\t${v.scope}\t${v.path}`);
+    }
+    return EXIT_OK;
+  }
+
+  if (sub === "new") {
+    if (name === undefined) {
+      const message = "pablo: usage: pablo voice new <name> [--global]";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const result = scaffoldVoice(name, { cwd, env, global: args.global });
+    if (!result.ok) {
+      emit(refusalResult(result), args.json);
+      return result.code;
+    }
+    if (args.json) {
+      const body: Record<string, unknown> = {
+        ok: true,
+        path: result.path,
+        scope: result.scope,
+        committed: result.committed,
+      };
+      if (result.notice) body["notice"] = result.notice;
+      console.log(JSON.stringify(body));
+    } else {
+      console.log(`pablo: created ${result.path}${result.committed ? " (committed)" : ""}`);
+      if (result.notice) console.log(result.notice);
+    }
+    return EXIT_OK;
+  }
+
+  if (sub === "show") {
+    if (name === undefined) {
+      const message = "pablo: usage: pablo voice show <name>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const resolution = resolveVoice(name, { cwd, env });
+    if (!resolution.ok) {
+      emit(refusalResult(resolution), args.json);
+      return resolution.code;
+    }
+    const voice = readVoice(resolution.path);
+    if (args.json) {
+      console.log(JSON.stringify({ ok: true, ...voice }));
+    } else {
+      console.log(formatVoice(voice));
+    }
+    return EXIT_OK;
+  }
+
+  const message = `pablo: voice: unknown subcommand "${sub ?? ""}" (expected new, list, or show)`;
+  emit({ ok: false, code: EXIT_ERROR, message }, args.json);
+  return EXIT_ERROR;
+}
+
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
 export async function main(argv: readonly string[], cwd: string = process.cwd()): Promise<number> {
   const args = parseCliArgs(argv);
@@ -397,6 +491,10 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return vaultResult.code;
     }
     return runCheck(args, vaultResult.path, projectPath);
+  }
+
+  if (args.verb === "voice") {
+    return runVoice(args, cwd);
   }
 
   const message = `pablo: "${args.verb}" not implemented yet`;

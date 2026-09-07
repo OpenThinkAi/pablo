@@ -28,15 +28,22 @@ function verb(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the five MCP verbs, each requiring project", () => {
-  expect(VERBS.map((v) => v.name).sort()).toEqual(["check", "resume", "save", "status", "write"]);
+test("VERBS exposes exactly the six MCP verbs, each project-scoped verb requiring project", () => {
+  expect(VERBS.map((v) => v.name).sort()).toEqual(["check", "resume", "save", "status", "voice", "write"]);
   for (const v of VERBS) {
+    if (v.name === "voice") continue; // voice resolves via cwd/vault, not a --project slug (AGT-1240)
     const parsed = v.args.safeParse({});
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
       expect(parsed.error.issues.some((issue) => issue.path[0] === "project")).toBe(true);
     }
   }
+});
+
+test("voice's args require sub, but not project", () => {
+  const voice = verb("voice");
+  expect(voice.args.safeParse({}).success).toBe(false);
+  expect(voice.args.safeParse({ sub: "list" }).success).toBe(true);
 });
 
 // Pinned explicitly (per the ticket) so any future verb.ts change that adds,
@@ -53,6 +60,9 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     force: { type: "boolean", default: false },
     stage: { type: "string" },
     file: { type: "string" },
+    sub: { type: "string" },
+    name: { type: "string" },
+    global: { type: "boolean", default: false },
   });
 });
 
@@ -247,4 +257,142 @@ test("two concurrent write.run dry-run calls each get their own correct body (no
   }
 
   rmSync(vault, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// voice (AGT-1240) — its own ctx, always with a throwaway XDG_CONFIG_HOME:
+// `ctxFor`'s env has no XDG_CONFIG_HOME key at all, which would otherwise
+// leave `voice`'s global-directory fallback resolving against the real
+// `~/.config/pablo` (never a real risk for `list`/`show`, which only stat
+// paths, but `new` without --global falling back to "no vault" would WRITE
+// there — this vault always has a `style/` marker, so that fallback never
+// actually fires in these tests, but every test still pins its own
+// XDG_CONFIG_HOME rather than relying on that).
+// ---------------------------------------------------------------------------
+
+function voiceCtxFor(vault: string, configHome: string): VerbContext {
+  return { cwd: vault, env: { PABLO_VAULT: vault, XDG_CONFIG_HOME: configHome, PATH: NO_THINK_PATH }, stderr: { write: () => {} } };
+}
+
+test("voice.run list includes fiction and every fixture voice", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-config-"));
+
+  const outcome = await verb("voice").run({ sub: "list" }, voiceCtxFor(vault, configHome));
+
+  expect(outcome.exitCode).toBe(0);
+  const body = outcome.body as { ok: boolean; voices: Array<{ name: string; scope: string; path: string }> };
+  expect(body.ok).toBe(true);
+  expect(body.voices).toContainEqual({ name: "fiction", scope: "fiction", path: join(vault, "style") });
+  expect(body.voices.some((v) => v.name === "plain" && v.scope === "vault")).toBe(true);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice.run show on the fixture's plain voice returns the readVoice shape", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-config-"));
+
+  const outcome = await verb("voice").run({ sub: "show", name: "plain" }, voiceCtxFor(vault, configHome));
+
+  expect(outcome.exitCode).toBe(0);
+  expect(outcome.body).toMatchObject({ ok: true, name: "plain", model: "anthropic" });
+  expect((outcome.body as { rules: unknown[] }).rules).toHaveLength(1);
+  expect((outcome.body as { exemplars: unknown[] }).exemplars).toHaveLength(2);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice.run show on an unknown name refuses (exit 2), naming both paths tried", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-config-"));
+
+  const outcome = await verb("voice").run({ sub: "show", name: "nosuchvoice" }, voiceCtxFor(vault, configHome));
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { tried: string[] }).tried).toHaveLength(2);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice.run new scaffolds a voice and voice.run show then reads it back", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-config-"));
+
+  const created = await verb("voice").run({ sub: "new", name: "memo" }, voiceCtxFor(vault, configHome));
+  expect(created.exitCode).toBe(0);
+  expect(created.body).toMatchObject({ ok: true, scope: "vault" });
+
+  const shown = await verb("voice").run({ sub: "show", name: "memo" }, voiceCtxFor(vault, configHome));
+  expect(shown.exitCode).toBe(0);
+  expect(shown.body).toMatchObject({ ok: true, name: "memo" });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+// AGT-1235's review finding, reapplied to `voice`: a path-shaped `name` is
+// model-controlled over MCP, so a path outside the vault must be refused
+// before ever being read (see `looksLikeVoicePath` in verbs.ts).
+test("voice.run show with a path-shaped name outside the vault refuses (exit 2), naming the vault boundary", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-config-"));
+
+  const outcome = await verb("voice").run({ sub: "show", name: "/etc/hosts" }, voiceCtxFor(vault, configHome));
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("inside the vault");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice.run show with a relative path-shaped name that escapes the vault via .. also refuses", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-config-"));
+
+  const outcome = await verb("voice").run(
+    { sub: "show", name: "../../../../../../etc/hosts" },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test('voice.run show with the in-vault path "./voices/plain/voice.md" is allowed (inside the vault boundary)', async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-config-"));
+
+  const outcome = await verb("voice").run(
+    { sub: "show", name: "./voices/plain/voice.md" },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(0);
+  expect(outcome.body).toMatchObject({ ok: true, name: "voice" });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("voice.run new without name refuses (exit 2)", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-voice-config-"));
+
+  const outcome = await verb("voice").run({ sub: "new" }, voiceCtxFor(vault, configHome));
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
 });
