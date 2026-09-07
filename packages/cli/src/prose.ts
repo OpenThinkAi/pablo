@@ -26,7 +26,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, resolve as resolvePath } from "node:path";
+import { basename, dirname, extname, join, resolve as resolvePath } from "node:path";
 import {
   assemblePack,
   createProviders,
@@ -55,8 +55,10 @@ import type { Hit } from "./check";
 import { FORMAT_STANZAS, KNOWN_FORMATS } from "./formats";
 import { gitCommit } from "./init";
 import { parseFrontmatter } from "./novel/machine";
-import { jsonlReceiptSink, stateReceiptsPath } from "./paths";
+import { jsonlReceiptSink, stateDraftsDir, stateReceiptsPath, stateReviewPath } from "./paths";
 import { findVault } from "./project";
+import { appendEvent, mintPieceId } from "./review";
+import type { QueuedEvent } from "./review";
 import { readVoice, resolveVoice } from "./voice";
 import type { Voice } from "./voice";
 import { yamlScalar } from "./write";
@@ -159,12 +161,20 @@ export interface ProseReceiptSummary extends WriteReceiptSummary {
   readonly revised_from?: string;
 }
 
-/** AC2's exact send body. `path`/`committed`/`notice` appear only with `--out`. */
+/**
+ * AC2's exact send body. `path`/`committed`/`notice` appear only with
+ * `--out`. `piece` (AGT-1262 AC4) is the review queue's id for this piece,
+ * always present on a completed send. `queue` (AGT-1262 AC2) appears only
+ * when the queue append itself failed — `"failed: <detail>"` — and never
+ * changes `exitCode`.
+ */
 export interface ProseSendBody {
   readonly ok: true;
   readonly text: string;
   readonly receipt: ProseReceiptSummary;
   readonly check: readonly Hit[];
+  readonly piece: string;
+  readonly queue?: string;
   readonly path?: string;
   readonly committed?: boolean;
   readonly notice?: string;
@@ -333,7 +343,14 @@ function dryRunBody(pack: Pack): ProseDryRunBody {
 }
 
 type AssembleOutcome =
-  | { readonly ok: true; readonly pack: Pack; readonly voice: Voice; readonly revisedFrom: string | undefined }
+  | {
+      readonly ok: true;
+      readonly pack: Pack;
+      readonly voice: Voice;
+      readonly revisedFrom: string | undefined;
+      /** AGT-1262: the brief's own raw text, threaded to `sendProse` so an out-less queued title can use its first line (AC2) without re-reading `--brief -`'s stdin a second time. */
+      readonly briefText: string;
+    }
   | { readonly ok: false; readonly outcome: ProseOutcome };
 
 /**
@@ -410,7 +427,7 @@ function assembleProse(args: ProseCoreArgs, ctx: ProseCoreContext): AssembleOutc
   const built = buildProsePack(voice, { brief: briefResult.source, context, format: args.format, words: args.words, draft, instruction });
   if (!built.ok) return fail({ body: built, exitCode: built.code });
 
-  return { ok: true, pack: built.pack, voice, revisedFrom };
+  return { ok: true, pack: built.pack, voice, revisedFrom, briefText: briefResult.source.text };
 }
 
 /**
@@ -427,7 +444,7 @@ export async function proseCore(args: ProseCoreArgs, ctx: ProseCoreContext, deps
     return { body: dryRunBody(assembled.pack), exitCode: 0, pack: assembled.pack };
   }
 
-  return await sendProse(assembled.pack, assembled.voice, assembled.revisedFrom, args, ctx, deps);
+  return await sendProse(assembled.pack, assembled.voice, assembled.revisedFrom, assembled.briefText, args, ctx, deps);
 }
 
 // ---------------------------------------------------------------------------
@@ -534,17 +551,99 @@ function proseFrontmatter(fields: {
   ].join("\n");
 }
 
+/** The first non-empty line of `text`, trimmed, cut to `maxLen` characters — AGT-1262 AC2's out-less queued title. */
+function firstNonEmptyLine(text: string, maxLen: number): string {
+  const line = text
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l !== "");
+  return (line ?? "").slice(0, maxLen);
+}
+
+interface QueuePieceInput {
+  readonly env: Record<string, string | undefined>;
+  readonly id: string;
+  readonly at: string;
+  readonly title: string;
+  readonly path: string;
+  readonly cwd: string;
+  readonly words: number;
+  readonly promptHash: string;
+  /**
+   * Fix-round (stamp review, standards, BLOCKING): the out-less branch's
+   * drafts-file write (AC3) has to land INSIDE the same try/catch as the
+   * queue append, not before it — an EACCES writing
+   * `stateDraftsDir()/<id>.md` is exactly as much "queueing failed" as an
+   * EACCES appending to `review.jsonl` (there is no other way for the
+   * caller to learn `path` doesn't exist), and leaving it outside the
+   * boundary let a filesystem error escape `sendProse` uncaught. The `--out`
+   * branch passes no `beforeAppend`: writing `--out` already succeeded
+   * (and is reported on its own, via `ProseSendBody.path`/`committed`)
+   * before `queuePiece` is ever called there.
+   */
+  readonly beforeAppend?: () => void;
+}
+
+/**
+ * Appends this piece's `queued` event to `stateReviewPath(env)` — the same
+ * one global queue `write.ts`'s `queue` ritual appends to, never
+ * vault-relative (AGT-1262, the design doc's "one global queue"). `vault` is
+ * included when `findVault` resolves one from `cwd`, omitted otherwise (a
+ * `prose` call has no `--project` and often no vault at all).
+ *
+ * Never throws: `beforeAppend` (when given), `findVault`, and the append
+ * itself all run inside one try/catch, so any failure among them — an
+ * unwritable state directory chief among them — is caught and returned as
+ * `"failed: <detail>"` for the caller to surface as `ProseSendBody.queue`,
+ * exactly as `write.ts`'s `queue` ritual reports a `"failed"` status — a
+ * review-queue write is never allowed to fail the prose call that already
+ * produced its text.
+ */
+function queuePiece(input: QueuePieceInput): string | undefined {
+  try {
+    input.beforeAppend?.();
+
+    // `findVault` is a filesystem walk (`existsSync` up from `cwd`) — it
+    // shouldn't throw, but it is not this function's contract to know that
+    // for certain, and the whole point of `queuePiece` is that nothing here
+    // escapes uncaught, so it stays inside the same try as the append.
+    const vault = findVault(input.cwd, input.env);
+    const event: QueuedEvent = {
+      type: "queued",
+      id: input.id,
+      at: input.at,
+      kind: "prose",
+      title: input.title,
+      path: input.path,
+      ...(vault.ok ? { vault: vault.path } : {}),
+      words: input.words,
+      prompt_hash: input.promptHash,
+    };
+
+    appendEvent(stateReviewPath(input.env), event);
+    return undefined;
+  } catch (err) {
+    return `failed: ${errMessage(err)}`;
+  }
+}
+
 /**
  * Sends the pack once and turns the answer into AC2's body: stream to the
  * routed provider (progress to stderr only, so `--json` stdout stays one
  * line — AC5), normalize, refuse on an empty answer, write `--out` if asked,
  * check the text against the voice's own rules, and return the receipt. The
  * receipt itself is appended by `withReceipts`, whichever way the call ends.
+ * AGT-1262: also writes the out-less drafts file (AC3) and appends this
+ * piece's `queued` event to the review queue (AC2) — a queue-append failure
+ * is reported in the body as `queue: "failed: <detail>"` and never changes
+ * `exitCode`, the same failure-isolation `write.ts`'s `queue` ritual gives
+ * `pablo write`.
  */
 async function sendProse(
   pack: Pack,
   voice: Voice,
   revisedFrom: string | undefined,
+  briefText: string,
   args: ProseCoreArgs,
   ctx: ProseCoreContext,
   deps: ProseDeps,
@@ -631,14 +730,61 @@ async function sendProse(
     ...(revisedFrom !== undefined ? { revised_from: revisedFrom } : {}),
   };
 
+  const generated = now().toISOString();
+  // AGT-1262 AC2/AC4: minted once this piece is a real, completed send — a
+  // dry run or a refusal earlier in this function never mints one.
+  const pieceId = mintPieceId(now(), voice.name);
+
   if (outPath === undefined) {
-    return { body: { ok: true, text: normalized, receipt, check: hits }, exitCode: 0 };
+    // AC3: an out-less piece still prints to stdout unchanged (the caller
+    // does that with `body.text`), but also lands on disk — the same
+    // frontmatter `--out` would write — at `stateDraftsDir()/<id>.md`, so
+    // the review queue's `path` names a file the editor can actually open.
+    // The write happens inside `queuePiece`'s `beforeAppend` (fix-round: it
+    // must share the queue append's try/catch — see `QueuePieceInput`'s doc
+    // comment), not out here unguarded.
+    const draftPath = join(stateDraftsDir(ctx.env), `${pieceId}.md`);
+    const draftFrontmatter = proseFrontmatter({
+      voice: voice.name,
+      model: routed.adapter.model,
+      generated,
+      promptHash: pack.hash,
+      revisedFrom,
+      words,
+    });
+
+    const queueFailure = queuePiece({
+      env: ctx.env,
+      id: pieceId,
+      at: generated,
+      title: firstNonEmptyLine(briefText, 60),
+      path: draftPath,
+      cwd: ctx.cwd,
+      words,
+      promptHash: pack.hash,
+      beforeAppend: () => {
+        mkdirSync(dirname(draftPath), { recursive: true });
+        writeFileSync(draftPath, `${draftFrontmatter}\n\n${normalized}\n`, "utf8");
+      },
+    });
+
+    return {
+      body: {
+        ok: true,
+        text: normalized,
+        receipt,
+        check: hits,
+        piece: pieceId,
+        ...(queueFailure !== undefined ? { queue: queueFailure } : {}),
+      },
+      exitCode: 0,
+    };
   }
 
   const frontmatter = proseFrontmatter({
     voice: voice.name,
     model: routed.adapter.model,
-    generated: now().toISOString(),
+    generated,
     promptHash: pack.hash,
     revisedFrom,
     words,
@@ -653,8 +799,30 @@ async function sendProse(
   // file that is already on disk (CLAUDE.md's git convention).
   const { committed, notice } = gitCommit(dirname(outPath), `prose: ${basename(outPath)}`, [outPath]);
 
+  // AC2: a --out piece's title is the --out basename without its extension.
+  const queueFailure = queuePiece({
+    env: ctx.env,
+    id: pieceId,
+    at: generated,
+    title: basename(outPath, extname(outPath)),
+    path: outPath,
+    cwd: ctx.cwd,
+    words,
+    promptHash: pack.hash,
+  });
+
   return {
-    body: { ok: true, text: normalized, receipt, check: hits, path: outPath, committed, ...(notice ? { notice } : {}) },
+    body: {
+      ok: true,
+      text: normalized,
+      receipt,
+      check: hits,
+      path: outPath,
+      committed,
+      ...(notice ? { notice } : {}),
+      piece: pieceId,
+      ...(queueFailure !== undefined ? { queue: queueFailure } : {}),
+    },
     exitCode: 0,
   };
 }
@@ -727,6 +895,11 @@ export async function runProse(args: ProseCliArgs, ctx: ProseCoreContext, deps: 
     }
     if (outcome.body.notice !== undefined) stderr.write(`${outcome.body.notice}\n`);
     for (const hit of outcome.body.check) stderr.write(`${formatHitLine(hit)}\n`);
+    if (outcome.body.queue !== undefined) stderr.write(`queue: ${outcome.body.queue}\n`);
+    // AGT-1262 AC4: the review queue's piece id, trailing every other line —
+    // stdout stays the deliverable alone (AC2/AC5), so this goes to stderr
+    // with the rest of the report.
+    stderr.write(`piece ${outcome.body.piece}\n`);
     return outcome.exitCode;
   }
 

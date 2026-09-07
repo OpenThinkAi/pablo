@@ -12,16 +12,22 @@
  * Every ritual is independent and wrapped so nothing it does can throw out
  * of `runRituals` or undo the chapter write that already landed — a failure
  * anywhere here is a `Ritual` with `status: "failed"`, not an exception. The
- * six run in a fixed order: outline, note, readme, continuity, git, think.
- * Continuity runs before git so `continuity.md` can be included in the same
- * commit — but only when it actually changed (AGT-1232's `runContinuity`
- * doc comment).
+ * seven run in a fixed order: outline, note, readme, continuity, git, queue,
+ * think. Continuity runs before git so `continuity.md` can be included in
+ * the same commit — but only when it actually changed (AGT-1232's
+ * `runContinuity` doc comment). `queue` (AGT-1262) runs after `git` so the
+ * chapter file is already committed by the time the piece is queued for
+ * review, and before `think` so a queue failure is never masked by a slower
+ * `think sync` outcome.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import type { Adapter } from "@openthink/pablo-core";
+import { stateReviewPath } from "../paths";
+import { appendEvent } from "../review";
+import type { QueuedEvent } from "../review";
 import { runContinuity } from "./continuity";
 
 export type RitualStatus = "ran" | "skipped" | "failed";
@@ -55,6 +61,24 @@ export interface RitualOptions {
   readonly extractor?: Adapter | undefined;
   /** Overrides the continuity extraction ritual's 120s ceiling. */
   readonly continuityTimeoutMs?: number | undefined;
+  /**
+   * AGT-1262: what the `queue` ritual needs to append this chapter's
+   * `queued` event — `write.ts` already has every one of these fields
+   * (`packResult.inputs.beat.title`, `vaultRoot`, `pack.hash`) before it
+   * calls `runRituals`, so they are passed in rather than re-derived here.
+   * `id` is `write.ts`'s own `mintPieceId(...)` call, minted before
+   * `runRituals` runs so it is available for the JSON `piece` field even
+   * when the queue append itself fails.
+   */
+  readonly queue: QueueRitualInput;
+}
+
+/** `RitualOptions.queue` — the fields the `queue` ritual needs beyond `opts.slug` (the project) and `opts.words`. */
+export interface QueueRitualInput {
+  readonly id: string;
+  readonly title: string;
+  readonly vault: string;
+  readonly promptHash: string;
 }
 
 const DEFAULT_THINK_TIMEOUT_MS = 20_000;
@@ -333,6 +357,45 @@ async function runThink(
 }
 
 /**
+ * Appends a `queued` event (AGT-1262) for the chapter file `write.ts` just
+ * wrote and committed, to `stateReviewPath(env)` (the one global queue —
+ * never vault-relative, see `paths.ts`'s `stateReviewPath`). Text-free:
+ * `QueuedEvent` carries no manuscript content, only id/kind/title/path and
+ * the bookkeeping fields (`review-no-text.test.ts` enforces this on the type
+ * itself). `appendEvent` throws on a write failure (an unwritable state
+ * directory); `attempt()` in `runRituals` turns that into a `"failed"`
+ * ritual, never an exception out of this function.
+ *
+ * `env` is `runRituals`'s already-defaulted `opts.env ?? process.env` (the
+ * same resolved value `runThink` takes below), not `opts.env` itself — a
+ * second `opts.env ?? process.env` here would be a second place to keep in
+ * sync with `runRituals`'s own defaulting.
+ */
+function runQueue(
+  env: Record<string, string | undefined>,
+  chapterPath: string,
+  chapter: number,
+  opts: RitualOptions,
+  now: () => Date,
+): Ritual {
+  const event: QueuedEvent = {
+    type: "queued",
+    id: opts.queue.id,
+    at: now().toISOString(),
+    kind: "chapter",
+    title: opts.queue.title,
+    path: chapterPath,
+    vault: opts.queue.vault,
+    project: opts.slug,
+    words: opts.words,
+    prompt_hash: opts.queue.promptHash,
+  };
+
+  appendEvent(stateReviewPath(env), event);
+  return { name: "queue", status: "ran", detail: `queued ${opts.queue.id} (chapter ${chapter})` };
+}
+
+/**
  * Strips a leading YAML frontmatter block (`---\n...\n---\n`, optionally
  * followed by a blank line) off a chapter file's full text, returning just
  * the prose — what `write.ts`'s `normalized` was before the frontmatter was
@@ -344,10 +407,10 @@ function stripFrontmatter(text: string): string {
 }
 
 /**
- * Runs the six after-write rituals, in order: outline, note, readme,
- * continuity, git, think. `workDir` is the project directory (e.g.
+ * Runs the seven after-write rituals, in order: outline, note, readme,
+ * continuity, git, queue, think. `workDir` is the project directory (e.g.
  * `<vault>/novels/<slug>`); `chapterPath` is the absolute path to the
- * chapter file `write.ts` just wrote. Always resolves to exactly six
+ * chapter file `write.ts` just wrote. Always resolves to exactly seven
  * `Ritual`s, never throws, and is called only on the live write path — never
  * on `--dry-run`, never after a refusal (both return before this would be
  * reached).
@@ -381,7 +444,9 @@ export async function runRituals(workDir: string, chapter: number, chapterPath: 
   if (continuity.status === "ran") gitPaths.push("continuity.md");
   const git = attempt("git", () => runGit(workDir, gitPaths, `${opts.slug}: draft chapter ${chapter}`));
 
+  const queue = attempt("queue", () => runQueue(env, chapterPath, chapter, opts, now));
+
   const think = await attemptAsync("think", () => runThink(chapter, opts.words, opts.slug, env, thinkTimeoutMs, allowNvmFallback));
 
-  return [outline, note, readme, continuity, git, think];
+  return [outline, note, readme, continuity, git, queue, think];
 }

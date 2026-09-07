@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,8 @@ import type { Adapter, CompletionEvent, CompletionStats } from "@openthink/pablo
 import { EndpointHung, normalizeOutput } from "@openthink/pablo-core";
 import { proseCore, runProse } from "../src/prose";
 import type { ProseDeps, ProseSendBody } from "../src/prose";
+import { readEvents } from "../src/review";
+import type { QueuedEvent } from "../src/review";
 
 /**
  * `pablo prose`'s send path (AGT-1242), exercised by calling `proseCore`
@@ -218,6 +220,135 @@ test("proseCore sends once and returns the normalized text, receipt and check hi
   // AC5: progress went to the injected stderr sink only.
   expect(lines.some((line) => /waiting for first token/.test(line))).toBe(true);
   expect(lines.some((line) => /first token after/.test(line))).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// AGT-1262: out-less prose also lands in the drafts dir, queues a `prose`
+// event, and carries a `piece` id — plus queue-write failure isolation.
+// ---------------------------------------------------------------------------
+
+test("an out-less prose call writes the drafts file and queues it, path pointing at the drafts file (AC2, AC3, AC4)", async () => {
+  const { vault, env, stateHome, brief } = tempVaultEnv();
+
+  const outcome = await proseCore(sendArgs({ brief }), { cwd: vault, env }, { adapter: fakeAdapter() });
+
+  expect(outcome.exitCode).toBe(0);
+  const body = outcome.body as ProseSendBody;
+  expect(body.path).toBeUndefined(); // stdout is still the deliverable; no --out was given
+  expect(typeof body.piece).toBe("string");
+  expect(body.queue).toBeUndefined(); // queueing succeeded
+
+  const draftPath = join(stateHome, "pablo", "drafts", `${body.piece}.md`);
+  expect(existsSync(draftPath)).toBe(true);
+  const draftText = readFileSync(draftPath, "utf8");
+  const draftLines = draftText.split("\n");
+  expect(draftLines[0]).toBe("---");
+  expect(draftLines.slice(1, 6).map((line) => (line.split(":")[0] ?? "").trim())).toEqual([
+    "voice",
+    "model",
+    "generated",
+    "prompt_hash",
+    "words",
+  ]);
+  expect(draftText).toContain(body.text);
+
+  const queued = readEvents(join(stateHome, "pablo", "review.jsonl")).filter(
+    (event): event is QueuedEvent => event.type === "queued",
+  );
+  expect(queued).toHaveLength(1);
+  expect(queued[0]).toMatchObject({
+    id: body.piece,
+    kind: "prose",
+    title: "Announce the new dock hours.", // the brief's first non-empty line
+    path: draftPath,
+    vault,
+    words: body.receipt.words,
+    prompt_hash: body.receipt.prompt_hash,
+  });
+});
+
+test("a --out prose call queues it with the --out basename (no extension) as the title and --out as the path (AC2)", async () => {
+  const { vault, env, stateHome, brief } = tempVaultEnv();
+  const outPath = join(vault, "notices", "dock-hours.md");
+
+  const outcome = await proseCore(sendArgs({ brief, out: outPath }), { cwd: vault, env }, { adapter: fakeAdapter() });
+
+  expect(outcome.exitCode).toBe(0);
+  const body = outcome.body as ProseSendBody;
+  expect(body.path).toBe(outPath);
+  expect(typeof body.piece).toBe("string");
+
+  const queued = readEvents(join(stateHome, "pablo", "review.jsonl")).filter(
+    (event): event is QueuedEvent => event.type === "queued",
+  );
+  expect(queued).toHaveLength(1);
+  expect(queued[0]).toMatchObject({ id: body.piece, kind: "prose", title: "dock-hours", path: outPath });
+});
+
+test("runProse's human output ends with a 'piece <id>' line on stderr, and stdout still carries only the text (AC4)", async () => {
+  const { vault, env, brief } = tempVaultEnv();
+  const { deps, lines: progress } = progressSink();
+
+  const { result, lines } = await captureStdout(() => runProse(cliArgs({ brief }), { cwd: vault, env }, deps));
+
+  expect(result).toBe(0);
+  expect(lines).toEqual([normalizeOutput(RAW_TEXT)]); // stdout: the piece, and nothing else
+  expect(progress[progress.length - 1]).toMatch(/^piece [0-9a-z-]+\n$/);
+});
+
+test("an unwritable state directory: queueing fails but the send itself still succeeds, exit code unchanged (AC2, AC5)", async () => {
+  const { vault, env, stateHome, brief } = tempVaultEnv();
+  // `--out` (inside the vault, unaffected by the locked state dir) isolates
+  // this test to the queue append alone — an out-LESS call would also need
+  // to create `<stateHome>/pablo/drafts` (AC3), which this same lock would
+  // block too, conflating two different failure modes in one test.
+  const outPath = join(vault, "dock-hours.md");
+  const pabloDir = join(stateHome, "pablo");
+  mkdirSync(pabloDir, { recursive: true });
+  chmodSync(pabloDir, 0o500); // read+execute only: appendEvent's mkdirSync/appendFileSync both fail
+
+  try {
+    const outcome = await proseCore(sendArgs({ brief, out: outPath }), { cwd: vault, env }, { adapter: fakeAdapter() });
+
+    expect(outcome.exitCode).toBe(0);
+    const body = outcome.body as ProseSendBody;
+    expect(body.ok).toBe(true);
+    expect(existsSync(outPath)).toBe(true); // the piece itself still landed on disk
+    expect(typeof body.piece).toBe("string"); // still present even though queueing failed
+    expect(body.queue).toMatch(/^failed: /);
+  } finally {
+    chmodSync(pabloDir, 0o700);
+  }
+});
+
+test("an unwritable state directory with NO --out: the drafts-file write is also inside the failure boundary (AC2, AC3, AC5)", async () => {
+  const { vault, env, stateHome, brief } = tempVaultEnv();
+  // Unlike the --out test above, `stateHome/pablo` itself is what an
+  // out-less call needs to write into (both `drafts/<id>.md`, AC3, and
+  // `review.jsonl`) — locking it here exercises exactly the gap the
+  // fix-round found: `mkdirSync`/`writeFileSync` for the drafts file used to
+  // run OUTSIDE `queuePiece`'s try/catch, so this case used to throw
+  // uncaught instead of returning `queue: "failed: ..."`.
+  const pabloDir = join(stateHome, "pablo");
+  mkdirSync(pabloDir, { recursive: true });
+  chmodSync(pabloDir, 0o500); // read+execute only: mkdirSync("drafts") and appendFileSync("review.jsonl") both fail
+
+  try {
+    const outcome = await proseCore(sendArgs({ brief }), { cwd: vault, env }, { adapter: fakeAdapter() });
+
+    expect(outcome.exitCode).toBe(0);
+    const body = outcome.body as ProseSendBody;
+    expect(body.ok).toBe(true);
+    expect(body.text).toBe(normalizeOutput(RAW_TEXT)); // the deliverable is unaffected
+    expect(body.path).toBeUndefined();
+    expect(typeof body.piece).toBe("string"); // still present even though queueing failed
+    expect(body.queue).toMatch(/^failed: /);
+
+    // The drafts file was never created (its own directory couldn't be made).
+    expect(existsSync(join(pabloDir, "drafts", `${body.piece}.md`))).toBe(false);
+  } finally {
+    chmodSync(pabloDir, 0o700);
+  }
 });
 
 test("the fiction voice's check rules come from style/prose.md (AC4)", async () => {
@@ -495,6 +626,7 @@ test("runProse --json puts exactly one line on stdout, with ok/text/receipt/chec
     "words",
   ]);
   expect(Array.isArray(body.check)).toBe(true);
+  expect(typeof body.piece).toBe("string"); // AGT-1262 AC4
 });
 
 test("runProse without --json puts the piece alone on stdout and the check hits after it on stderr (AC2, AC4, AC5)", async () => {

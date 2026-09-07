@@ -1,10 +1,12 @@
-import { expect, test } from "bun:test";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { afterAll, expect, test } from "bun:test";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent, CompletionStats } from "@openthink/pablo-core";
 import { EndpointHung, normalizeOutput } from "@openthink/pablo-core";
+import { readEvents } from "../src/review";
+import type { QueuedEvent } from "../src/review";
 import type { ProgressSink, RunWriteDeps, WriteArgs } from "../src/write";
 import { runWrite } from "../src/write";
 
@@ -24,9 +26,21 @@ const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url)
  * path, and one of them shells out to `think`; every test in this file must
  * pass this as `deps.env` or it would make a real `think sync` call against
  * the dev machine's actual cortex.
+ *
+ * AGT-1262: the rituals also now include an unconditional `queue` step that
+ * appends to `stateReviewPath(env)` — a global path, never vault-relative —
+ * so `RITUAL_ENV` also pins `XDG_STATE_HOME` at a throwaway directory; a test
+ * that forgot it would append to the author's real
+ * `~/.local/state/pablo/review.jsonl` (this leaked once during this ticket's
+ * own build, before this fix — see the commit history).
  */
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
-const RITUAL_ENV: RunWriteDeps["env"] = { PATH: NO_THINK_PATH };
+const SHARED_STATE_HOME = mkdtempSync(join(tmpdir(), "pablo-write-send-state-"));
+const RITUAL_ENV: RunWriteDeps["env"] = { PATH: NO_THINK_PATH, XDG_STATE_HOME: SHARED_STATE_HOME };
+
+afterAll(() => {
+  rmSync(SHARED_STATE_HOME, { recursive: true, force: true });
+});
 
 function tempVault(): { vault: string; project: string } {
   const dir = mkdtempSync(join(tmpdir(), "pablo-write-send-test-"));
@@ -135,6 +149,13 @@ function receiptLines(projectPath: string): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+/** `<stateHome>/pablo/review.jsonl`'s `queued` events (AGT-1262), in order. */
+function queuedEvents(stateHome: string): QueuedEvent[] {
+  return readEvents(join(stateHome, "pablo", "review.jsonl")).filter(
+    (event): event is QueuedEvent => event.type === "queued",
+  );
+}
+
 test("runWrite sends, normalizes, and writes the chapter file with a fake adapter (AC1, AC2, AC3)", async () => {
   const { vault, project } = tempVault();
 
@@ -191,6 +212,11 @@ test("runWrite sends, normalizes, and writes the chapter file with a fake adapte
   // AC4: progress went to the injected stderr sink, not stdout.
   expect(progressLines.some((l) => /waiting for first token/.test(l))).toBe(true);
   expect(progressLines.some((l) => /first token after/.test(l))).toBe(true);
+
+  // AGT-1262 AC1/AC4: the queue ritual ran and the same piece id is in the JSON body.
+  expect(typeof body.piece).toBe("string");
+  const queueRitual = (body.rituals as Array<{ name: string; status: string }>).find((r) => r.name === "queue");
+  expect(queueRitual?.status).toBe("ran");
 
   rmSync(vault, { recursive: true, force: true });
 });
@@ -276,4 +302,94 @@ test("an empty stream refuses (exit 2) and writes no file", async () => {
   expect(existsSync(join(project, "chapters", "02-black-ice.md"))).toBe(false);
 
   rmSync(vault, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// AGT-1262: the queue ritual — `queued` event fields, the human `piece <id>`
+// trailing line, and failure isolation.
+// ---------------------------------------------------------------------------
+
+test("the queued event carries the chapter title, path, vault, project, words and prompt_hash (AC1)", async () => {
+  const { vault, project } = tempVault();
+  const stateHome = mkdtempSync(join(tmpdir(), "pablo-write-send-state-"));
+  const deps: RunWriteDeps = {
+    adapter: fakeAdapter({ chunks: RAW_CHUNKS }),
+    now: () => new Date("2026-09-06T12:00:00.000Z"),
+    env: { PATH: NO_THINK_PATH, XDG_STATE_HOME: stateHome },
+  };
+
+  const sent = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  expect(sent.result).toBe(0);
+  const body = JSON.parse(sent.lines[0] as string);
+
+  const filePath = join(project, "chapters", "02-black-ice.md");
+  const queued = queuedEvents(stateHome);
+  expect(queued).toHaveLength(1);
+  expect(queued[0]).toMatchObject({
+    id: body.piece,
+    kind: "chapter",
+    title: "Black Ice",
+    path: filePath,
+    vault,
+    project: "ice-house",
+    words: body.receipt.words,
+    prompt_hash: body.receipt.prompt_hash,
+  });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(stateHome, { recursive: true, force: true });
+});
+
+test("the human (non --json) output ends with a 'piece <id>' line naming the same id as --json's piece field (AC4)", async () => {
+  const { vault, project } = tempVault();
+  const stateHome = mkdtempSync(join(tmpdir(), "pablo-write-send-state-"));
+  const deps: RunWriteDeps = {
+    adapter: fakeAdapter({ chunks: RAW_CHUNKS }),
+    now: () => new Date("2026-09-06T12:00:00.000Z"),
+    env: { PATH: NO_THINK_PATH, XDG_STATE_HOME: stateHome },
+  };
+
+  const humanSent = await captureStdout(() => runWrite(baseArgs({ json: false }), vault, project, deps));
+  expect(humanSent.result).toBe(0);
+  expect(humanSent.lines[humanSent.lines.length - 1]).toMatch(/^piece [0-9a-z-]+$/);
+
+  const queued = queuedEvents(stateHome);
+  expect(queued).toHaveLength(1);
+  const pieceLine = humanSent.lines[humanSent.lines.length - 1] as string;
+  expect(pieceLine).toBe(`piece ${queued[0]?.id}`);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(stateHome, { recursive: true, force: true });
+});
+
+test("an unwritable state directory: the queue ritual reports status 'failed' but the write itself still succeeds (AC5)", async () => {
+  const { vault, project } = tempVault();
+  const stateHome = mkdtempSync(join(tmpdir(), "pablo-write-send-state-"));
+  const pabloDir = join(stateHome, "pablo");
+  mkdirSync(pabloDir, { recursive: true });
+  chmodSync(pabloDir, 0o500); // read+execute only: appendEvent's mkdirSync/appendFileSync both fail
+
+  const deps: RunWriteDeps = {
+    adapter: fakeAdapter({ chunks: RAW_CHUNKS }),
+    env: { PATH: NO_THINK_PATH, XDG_STATE_HOME: stateHome },
+  };
+
+  try {
+    const sent = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+    expect(sent.result).toBe(0); // the write itself is unaffected
+    const body = JSON.parse(sent.lines[0] as string);
+    expect(body.ok).toBe(true);
+    expect(typeof body.piece).toBe("string"); // AC4: still present even though queueing failed
+
+    const queueRitual = (body.rituals as Array<{ name: string; status: string; detail: string }>).find(
+      (r) => r.name === "queue",
+    );
+    expect(queueRitual?.status).toBe("failed");
+
+    expect(existsSync(join(project, "chapters", "02-black-ice.md"))).toBe(true);
+  } finally {
+    chmodSync(pabloDir, 0o700);
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(stateHome, { recursive: true, force: true });
+  }
 });

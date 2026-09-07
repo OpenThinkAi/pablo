@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -20,7 +20,19 @@ const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url)
 
 /** Same pattern as `write-send.test.ts`'s `RITUAL_ENV`: `git` resolves, `think` never does. */
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
-const RITUAL_ENV: RunWriteDeps["env"] = { PATH: NO_THINK_PATH };
+/**
+ * AGT-1262: `runWrite`'s `queue` ritual now appends unconditionally to
+ * `stateReviewPath(env)` — without `XDG_STATE_HOME` here every `runWrite`
+ * call below would append to the author's real
+ * `~/.local/state/pablo/review.jsonl`. One shared temp dir for the whole
+ * file (no test here reads it back), removed once every test has run.
+ */
+const STATE_HOME = mkdtempSync(join(tmpdir(), "pablo-continuity-state-"));
+const RITUAL_ENV: RunWriteDeps["env"] = { PATH: NO_THINK_PATH, XDG_STATE_HOME: STATE_HOME };
+
+afterAll(() => {
+  rmSync(STATE_HOME, { recursive: true, force: true });
+});
 
 function runGit(dir: string, args: string[]): void {
   const result = Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "pipe", stderr: "pipe" });
