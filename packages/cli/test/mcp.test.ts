@@ -62,13 +62,14 @@ function parseTextBody(result: unknown): unknown {
 // tools" are resume/status/write/save/check.
 const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "write", "save", "check"]);
 
-test("listTools returns the five project-scoped verbs, prose, and the four narrow voice_* tools", async () => {
+test("listTools returns the five project-scoped verbs, prose, review, and the four narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
 
   expect(tools.map((t) => t.name).sort()).toEqual([
     "check",
     "prose",
     "resume",
+    "review",
     "save",
     "status",
     "voice_exemplar",

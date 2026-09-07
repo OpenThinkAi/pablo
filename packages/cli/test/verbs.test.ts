@@ -36,16 +36,23 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the seven MCP verbs, each project-scoped verb requiring project", () => {
-  expect(VERBS.map((v) => v.name).sort()).toEqual(["check", "prose", "resume", "save", "status", "voice", "write"]);
+test("VERBS exposes exactly the eight MCP verbs, each project-scoped verb requiring project", () => {
+  expect(VERBS.map((v) => v.name).sort()).toEqual(["check", "prose", "resume", "review", "save", "status", "voice", "write"]);
   for (const v of VERBS) {
-    if (v.name === "voice" || v.name === "prose") continue; // neither resolves via a --project slug (AGT-1240, AGT-1241)
+    if (v.name === "voice" || v.name === "prose" || v.name === "review") continue; // none resolves via a --project slug (AGT-1240, AGT-1241, AGT-1261 — the review queue is global)
     const parsed = v.args.safeParse({});
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
       expect(parsed.error.issues.some((issue) => issue.path[0] === "project")).toBe(true);
     }
   }
+});
+
+test("review's args require action, but not project", () => {
+  const review = verb("review");
+  expect(review.args.safeParse({}).success).toBe(false);
+  expect(review.args.safeParse({ action: "list" }).success).toBe(true);
+  expect("project" in review.args.shape).toBe(false);
 });
 
 test("voice's args require sub, but not project", () => {
@@ -87,6 +94,12 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     out: { type: "string" }, // AGT-1242: prose --out (prose reuses `force`, already pinned above)
     draft: { type: "string" }, // AGT-1244: prose --draft
     instruction: { type: "string" }, // AGT-1244: prose --instruction
+    action: { type: "string" }, // AGT-1261: review's action (list|show|approve|reject|wait)
+    id: { type: "string" }, // AGT-1261: review's piece id
+    all: { type: "boolean", default: false }, // AGT-1261: review list --all
+    unread: { type: "boolean", default: false }, // AGT-1261: review approve --unread
+    reason: { type: "string" }, // AGT-1261: review reject --reason
+    timeout: { type: "string" }, // AGT-1261: review wait --timeout
   });
 });
 

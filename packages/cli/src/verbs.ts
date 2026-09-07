@@ -67,11 +67,13 @@ import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { buildResume } from "./resume";
+import { reviewCore } from "./review-verbs";
 import { saveCore } from "./save";
 import { addExemplar, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { VoiceLocation } from "./voice";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
+import { stateReviewPath } from "./paths";
 
 /** A minimal `process.stderr`-shaped sink — mirrors `write.ts`'s `ProgressSink`. */
 export interface ProgressSink {
@@ -83,6 +85,15 @@ export interface VerbContext {
   readonly cwd: string;
   readonly env: Record<string, string | undefined>;
   readonly stderr: ProgressSink;
+  /**
+   * AGT-1261: which surface invoked this verb. `mcp.ts`'s `runMcp` sets this
+   * to `"mcp"`; `cli.ts` never sets it (every other caller — the CLI, and
+   * every existing test's hand-built `ctx` — leaves it `undefined`, read as
+   * `"cli"`). Only `review`'s `run` reads it today, to pick `decide`'s `by`
+   * field (AC3's "`by: \"cli\"` (or `\"mcp\"` when invoked through the MCP
+   * server)"); no other verb's behavior depends on who called it.
+   */
+  readonly caller?: "cli" | "mcp";
 }
 
 /** `run`'s return: `body` is the exact `--json` object; `exitCode` is the CLI's exit-code contract (0 ok, 2 refused, 1 error). */
@@ -786,6 +797,59 @@ async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext):
 }
 
 // ---------------------------------------------------------------------------
+// review (AGT-1261) — list|show|approve|reject|wait over `review.ts`'s queue
+// (AGT-1255). One verb with a positional `action`/`id` (not a `voice`-style
+// `mcpTools` split — AC5 asks for one verb, not five narrow tools), so
+// `pablo mcp` registers a single `review` tool off `verb.mcpTools ?? [verb]`,
+// same as five of the seven verbs above it. Global, not project-scoped (no
+// `project` field): the queue is one file for every vault (or none) to share.
+// ---------------------------------------------------------------------------
+
+const REVIEW_ARGS = z.object({
+  action: z
+    .enum(["list", "show", "approve", "reject", "wait"])
+    .describe("list pending pieces, show one, approve/reject a decision, or wait for one."),
+  id: z.string().optional().describe("The piece id — required for show/approve/reject/wait."),
+  all: z.boolean().optional().default(false).describe("review list: also include decided pieces, with their decision."),
+  unread: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("review approve: record the approval as unread (read: false) — the tray's blind approve."),
+  reason: z.string().optional().describe("review reject: why, recorded on the decision."),
+  timeout: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(3600)
+    .describe("review wait: seconds to wait for a decision before timing out (default 3600)."),
+});
+
+/**
+ * The MCP path for `review`: calls `reviewCore` directly, exactly the way
+ * `runSaveVerb` calls `saveCore` — no printing, `by: "mcp"` (AC3). `cli.ts`'s
+ * own `review` dispatch calls `review-verbs.ts`'s `runReview` instead, which
+ * prints and passes `by: "cli"`; the two never call each other, only the
+ * shared `reviewCore`.
+ */
+async function runReviewVerb(args: z.infer<typeof REVIEW_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const path = stateReviewPath(ctx.env);
+  const outcome = await reviewCore(
+    {
+      action: args.action,
+      id: args.id,
+      all: args.all,
+      unread: args.unread,
+      reason: args.reason,
+      timeoutSeconds: args.timeout,
+    },
+    { path, by: ctx.caller === "mcp" ? "mcp" : "cli" },
+  );
+  return outcome;
+}
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -841,6 +905,13 @@ export const VERBS: readonly Verb[] = [
       "Write a piece in a named voice from a brief: assemble the pack, send it to the routed model, return the text plus a receipt and check hits (or, with `dry-run`, just render the pack). No `--project`, no vault required.",
     args: PROSE_ARGS,
     run: runProseVerb,
+  },
+  {
+    name: "review",
+    description:
+      "The review queue: `list` pending pieces (or `--all` for decided ones too), `show` one, `approve`/`reject` a decision, or `wait` until one exists. No `--project`, no vault required — the queue is one global file.",
+    args: REVIEW_ARGS,
+    run: runReviewVerb,
   },
 ];
 

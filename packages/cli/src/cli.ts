@@ -26,6 +26,7 @@ import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
 import { runResumeVerb } from "./resume";
+import { runReview } from "./review-verbs";
 import { runSave } from "./save";
 import { deriveCliOptions, parseForChapter } from "./verbs";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
@@ -33,7 +34,7 @@ import type { Voice } from "./voice";
 import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
-const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp", "voice", "prose"] as const;
+const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp", "voice", "prose", "review"] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
 const LATER_VERBS = ["revise", "edit", "share", "notes", "publish"] as const;
@@ -84,6 +85,14 @@ function helpText(): string {
     "                                            no --project, no vault required;",
     "                                            --draft + --instruction revise a previous",
     "                                            piece instead of starting fresh",
+    "  pablo review list [--all] [--json]       pending pieces (or, with --all, decided too)",
+    "  pablo review show <id> [--json]          one piece's record, decision, and edits",
+    "  pablo review approve <id> [--unread]     record an approval (--unread: read: false)",
+    '  pablo review reject <id> [--reason "<text>"]',
+    "                                            record a rejection",
+    "  pablo review wait <id> [--timeout <seconds>]",
+    "                                            block until a decision exists (default 3600s);",
+    "                                            exit 0 approved, 2 rejected, 1 timeout, 2 unknown",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -136,6 +145,14 @@ interface ParsedArgs {
   readonly draft: string | undefined;
   /** `prose --instruction "<text>"` (AGT-1244): what to change about `--draft`. Requires `draft`. */
   readonly instruction: string | undefined;
+  /** `review list --all` (AGT-1261): include decided pieces, with their decision. */
+  readonly all: boolean;
+  /** `review approve --unread` (AGT-1261): record the approval as unread (`read: false`). */
+  readonly unread: boolean;
+  /** `review reject --reason "<text>"` (AGT-1261): why, recorded on the decision. */
+  readonly reason: string | undefined;
+  /** `review wait --timeout <seconds>` (AGT-1261); `runReview` defaults this to 3600 when absent. */
+  readonly timeout: string | undefined;
 }
 
 /**
@@ -184,6 +201,10 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     out: typeof values["out"] === "string" ? values["out"] : undefined,
     draft: typeof values["draft"] === "string" ? values["draft"] : undefined,
     instruction: typeof values["instruction"] === "string" ? values["instruction"] : undefined,
+    all: values["all"] === true,
+    unread: values["unread"] === true,
+    reason: typeof values["reason"] === "string" ? values["reason"] : undefined,
+    timeout: typeof values["timeout"] === "string" ? values["timeout"] : undefined,
   };
 }
 
@@ -544,6 +565,29 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         instruction: args.instruction,
       },
       { cwd, env: process.env },
+    );
+  }
+
+  // `review` (AGT-1261), like `prose`, has no `--project` at all — the queue
+  // is one global file, not per-vault — so it is dispatched here too, before
+  // the shared `--project`/marker resolution block below ever runs.
+  if (args.verb === "review") {
+    const [action, id] = args.rest;
+    const parsedTimeout = args.timeout !== undefined ? Number(args.timeout) : undefined;
+    return await runReview(
+      {
+        action,
+        id,
+        all: args.all,
+        unread: args.unread,
+        reason: args.reason,
+        // A non-numeric --timeout falls back to runReview's own default
+        // (3600) rather than becoming NaN, which would never satisfy
+        // waitForDecision's timeout comparison and spin forever.
+        timeoutSeconds: parsedTimeout !== undefined && Number.isFinite(parsedTimeout) ? parsedTimeout : undefined,
+        json: args.json,
+      },
+      process.env,
     );
   }
 
