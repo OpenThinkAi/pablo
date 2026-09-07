@@ -55,6 +55,33 @@ test("review's args require action, but not project", () => {
   expect("project" in review.args.shape).toBe(false);
 });
 
+// AGT-1261 security review finding: the review queue is a human checkpoint
+// on pablo's own output, so a model connected over MCP must never be able to
+// clear it itself — `review`'s `mcpTools` narrows to one tool covering only
+// list/show/wait; `approve`/`reject` stay reachable from the CLI only.
+test("review's mcpTools narrows to list/show/wait — approve/reject are not in its schema's action enum", () => {
+  const tools = verb("review").mcpTools;
+  expect(tools).toBeDefined();
+  expect(tools!.map((t) => t.name)).toEqual(["review"]);
+
+  const mcpReview = tools![0]!;
+  for (const action of ["list", "show", "wait"]) {
+    expect(mcpReview.args.safeParse({ action }).success).toBe(true);
+  }
+  for (const action of ["approve", "reject", "bogus"]) {
+    expect(mcpReview.args.safeParse({ action }).success).toBe(false);
+  }
+  // No `unread`/`reason` either — those only make sense for approve/reject.
+  expect(Object.keys(mcpReview.args.shape).sort()).toEqual(["action", "all", "id", "timeout"]);
+});
+
+test("review's mcpTools run rejects an approve/reject action at the schema level, before run ever executes", () => {
+  const mcpReview = verb("review").mcpTools![0]!;
+  expect(mcpReview.args.safeParse({ action: "approve", id: "x" }).success).toBe(false);
+  expect(mcpReview.args.safeParse({ action: "reject", id: "x" }).success).toBe(false);
+  expect(mcpReview.args.safeParse({ action: "list" }).success).toBe(true);
+});
+
 test("voice's args require sub, but not project", () => {
   const voice = verb("voice");
   expect(voice.args.safeParse({}).success).toBe(false);
@@ -94,8 +121,10 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     out: { type: "string" }, // AGT-1242: prose --out (prose reuses `force`, already pinned above)
     draft: { type: "string" }, // AGT-1244: prose --draft
     instruction: { type: "string" }, // AGT-1244: prose --instruction
-    action: { type: "string" }, // AGT-1261: review's action (list|show|approve|reject|wait)
-    id: { type: "string" }, // AGT-1261: review's piece id
+    // AGT-1261: review's `action`/`id` are NOT here — `positionalArgs` on the
+    // `review` verb tells `deriveCliOptions` to skip them, since `cli.ts`
+    // reads them from positionals (`args.rest`), never a named flag (a
+    // standards review finding — see `Verb.positionalArgs`'s docstring).
     all: { type: "boolean", default: false }, // AGT-1261: review list --all
     unread: { type: "boolean", default: false }, // AGT-1261: review approve --unread
     reason: { type: "string" }, // AGT-1261: review reject --reason

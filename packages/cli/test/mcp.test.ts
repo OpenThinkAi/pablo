@@ -106,6 +106,24 @@ test("each voice_* tool's input schema carries only its own arguments", async ()
   expect(requiredOf("voice_exemplar").sort()).toEqual(["file", "name"]);
 });
 
+// AGT-1261 security review: `review`'s MCP schema narrows `action` to
+// list/show/wait — approve/reject are CLI-only, so a model connected over
+// MCP can never clear its own review checkpoint (see verbs.ts's comment
+// above `REVIEW_MCP_TOOLS`; `verbs.test.ts` covers the same narrowing
+// in-process, off `VERBS` directly, without a stdio round trip).
+test("review's MCP schema enum excludes approve/reject", async () => {
+  const { tools } = await client.listTools();
+  const review = tools.find((t) => t.name === "review")!;
+  const actionSchema = (review.inputSchema as { properties?: Record<string, { enum?: string[] }> }).properties?.["action"];
+
+  expect(actionSchema?.enum?.slice().sort()).toEqual(["list", "show", "wait"]);
+});
+
+test('callTool("review", {action: "approve", id: "x"}) fails schema validation — a tool error, never a normal result carrying a decision', async () => {
+  const result = await client.callTool({ name: "review", arguments: { action: "approve", id: "x" } });
+  expect(result.isError).toBe(true);
+});
+
 test('callTool("status", {project: "ice-house", for: "chapter 3"}) is a normal result carrying ready:false, not a tool error', async () => {
   const result = await client.callTool({ name: "status", arguments: { project: "ice-house", for: "chapter 3" } });
 

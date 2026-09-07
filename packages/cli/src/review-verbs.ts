@@ -90,7 +90,6 @@ export function allRecords(events: readonly ReviewEvent[]): ReviewRecordWithDeci
   const queued = events.filter((event): event is QueuedEvent => event.type === "queued");
 
   return queued
-    .slice()
     .sort((a, b) => b.at.localeCompare(a.at))
     .map(({ type: _type, ...piece }) => {
       const decision = events.find(

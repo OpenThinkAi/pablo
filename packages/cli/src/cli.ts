@@ -93,6 +93,8 @@ function helpText(): string {
     "  pablo review wait <id> [--timeout <seconds>]",
     "                                            block until a decision exists (default 3600s);",
     "                                            exit 0 approved, 2 rejected, 1 timeout, 2 unknown",
+    "                                            (rejected and unknown share exit 2 — use --json's",
+    "                                            \"status\" to tell them apart in a script)",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
