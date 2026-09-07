@@ -60,7 +60,7 @@ including an unresolvable project), `1` error.
 | `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object; exit 0 |
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
 | `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--variants V]` | the prose call: check, pack, send, write, rituals | `{path, receipt, rituals[]}` or `{refused, missing[]}` |
-| `pablo save --project <slug> --stage acts\|outline\|bible/... < file` | the agent's planning output saved through pablo so the framework sees it | `{path, stage}` |
+| `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{tells[], unprovenanced[]}` |
 | `pablo dry-run ...` | any write or revise, assembled and priced, nothing sent | the pack, slice by slice |
 | `pablo mcp` | serve all of the above as MCP tools, same schemas | |
@@ -123,6 +123,18 @@ beat row N exists (if not, that is the *only* entry in `missing` — everything 
 needs the beat); chapter N-1 is written, unless N is 1; `bible/timeline.md` has a row
 dated at or before the beat's story-date year; and no `[pick]` row's name appears, as
 a whole word or phrase, in beat N's own text.
+
+`pablo save --project <slug> --stage <stage> [--file <path>]` (AGT-1233) reads
+stdin, or `--file` when given, and writes the file that `--stage` names:
+`premise` replaces `bible/overview.md` whole; `acts` and `beats` replace their
+table in `outline/chapters.md` (the acts table or the chapter table) and leave
+the rest of the file byte-for-byte intact — the input may be a full table or
+rows only, either way it's normalised to the canonical header before writing;
+`bible/<file>` replaces that file whole and must stay under `bible/` (`.md`
+only). Table input is validated before anything is written — a beat row needs
+six columns with a four-digit year in its story date, an act row needs three
+— and a malformed row is refused (exit 2) naming the row and column, with
+nothing written. The touched file is committed by pathspec, same as `init`.
 
 ## Project layout
 
