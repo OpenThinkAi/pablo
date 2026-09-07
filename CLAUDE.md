@@ -1,106 +1,118 @@
 # pablo — agent guide
 
-`pablo` is an AI-native terminal tool for writing and composition. **It is not a
-text editor.** Selection is the only noun: you select a span of a manuscript and
-tag it, prompt on it, or replace it, and the model's answer comes back as a
-proposal you accept, reject, or edit in place.
+**pablo is a CLI that writes. It is not an app and has no screen.** The
+conversation about a book happens in whatever agent Matt already likes (Claude
+Code, Codex, pi); that agent drives pablo over the shell or `pablo mcp`. pablo
+is the *manager* of the writing project: it knows the vault, the framework a
+format follows, the author's voice, version control, and publishing, and hands
+any agent a structured way in and out.
 
-**Invariant 1 — the model has no write tool. The model proposes; the app
-applies.** Every accepted proposal is written to disk by the app and the view
-re-renders from the file. The model never reports that it wrote anything,
-because it cannot. Any design that hands a provider adapter, a tool schema, or a
-model response the ability to write files is wrong, whatever it is called.
+Two invariants:
+
+1. **Prose is produced only through `pablo write`, on the configured local
+   model.** The agent plans and discusses; it never drafts prose itself and
+   never sends prose through its own context. pablo assembles the prompt,
+   sends it to the configured writer (Gemma 4 for Matt, by default), writes
+   the file, and returns a receipt.
+2. **pablo enforces the framework.** A format is a stage machine (a chapter
+   needs a beat, a beat needs acts, acts need a bible). A verb whose
+   precondition is unmet is refused, naming exactly what is missing, so the
+   agent can steer the author there instead of guessing.
 
 **The canonical design doc is
 `~/saltline-digital-vault/projects/ai-terminal/README.md`** (vault project id
-`ai-terminal`). It holds the interaction model, the CriticMarkup contract, the
-context-pack requirements, the provider/routing decisions, the binding-decisions
-table, and the P0/P1/P2 build order. Read it before any non-trivial change; this
-file deliberately does not restate it. A change that contradicts a binding
-decision there amends the doc in the same task or does not land.
+`ai-terminal`). It holds the session model, the project layout, the full
+verb table, the stage machines, the voice model, and the binding-decisions
+table. Read it before any non-trivial change; this file deliberately does not
+restate it. A change that contradicts a binding decision there amends the doc
+in the same task or does not land.
 
 Documents are the plain markdown files already in the `~/writing` vault. pablo
-is a view over that vault, never a replacement for it, and never a second store.
+is a manager over that vault, never a replacement for it, and never a second
+store.
+
+**No markup, ever.** CriticMarkup and any other inline shorthand were
+eliminated 2026-09-06. A chapter file is plain prose with frontmatter; edits
+are a view (`pablo edit`, a ui-leaf surface), not a notation in the file.
 
 ## Layout
 
 ```
-packages/core   @openthink/pablo-core — TTY-free. Document + span model, and
-                (as P0 lands) the CriticMarkup parser, proposal type, provider
-                adapters, and the map. No terminal dependency, ever.
-packages/tui    @openthink/pablo — the opentui renderer and the `pablo` bin.
-                Everything that touches a terminal lives here.
+packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
+                document model, the markup module (used by the provider
+                adapters' streaming/normalization path, not by any manuscript
+                — no CriticMarkup is ever written to a vault file), the
+                context-pack assembler, and the provider adapters
+                (OpenAI-compatible, Anthropic).
+packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
+                dispatch, `--project` resolution, and (later) `pablo mcp`.
+                Any new dependency the CLI needs goes here; core stays
+                dependency-free.
 ```
 
-The core/tui split is load-bearing, not tidiness: the core is testable without a
-TTY (which is where the proposal-format work runs), and a renderer swap later
-touches nothing important. `packages/core/test/tty-free.test.ts` enforces it —
-it walks `packages/core/src` and fails on any import matching
-`opentui|node:tty|ink|blessed`, and on any dependency in core's manifest. If that
-test fails, the code belongs in `packages/tui`.
+`packages/core/test/tty-free.test.ts` enforces the split — it walks
+`packages/core/src` and fails on any terminal import (`opentui`, `node:tty`,
+`ink`, `blessed`) or on any dependency at all in core's manifest. There is no
+terminal renderer in this repo any more; `packages/tui` (the opentui-based
+screen) was retired 2026-09-06 along with the CriticMarkup/selection design it
+implemented. See the design doc's `History` section for what carried over as
+material (the pack assembler, the vault reader, the provider adapters, the
+config loader) versus what was cut outright (the screen, the CriticMarkup
+parser and renderer, span verbs, the review queue).
 
-## The context pack
+## The project
 
-`packages/core/src/pack` assembles every prompt pablo sends. Two rules that are
-easy to break by accident:
+A **project is a vault directory** under `<vault>/novels|stories|essays/<slug>`,
+with the writing vault's existing layout (`style/`, `bible/`, `outline/`,
+`chapters/`, ...). `--project <slug>` resolves it: the vault is `PABLO_VAULT`
+if set, else the nearest ancestor of the current directory holding a `style/`
+directory. An unresolvable project is a refusal, exit code 2, naming every
+path it tried — see `packages/cli/src/project.ts`.
 
-- **Assembly is pure.** `assemblePack(kind, inputs)` reads no files, calls no
-  model and asks no clock, so the same inputs give the same bytes and the same
-  `sha256` hash. Disk lives in `pack/vault.ts`, which turns a vault into inputs;
-  anything that needs I/O during assembly belongs there instead.
-- **Nothing shrinks silently.** Over budget, the pack reports every truncation
-  and every drop as a `SliceAdjustment` and marks the seam in the prompt.
+pablo state that is not a document (last run, receipts, rates, share links)
+lives in `<work>/.pablo/`, gitignored. Everything the author would want to
+read is a markdown file in the vault, tracked by git.
 
-**Receipts are written to `<vault>/.pablo/receipts.jsonl`** — the *writing*
-vault's root, not this repo. That path must be in the vault's own `.gitignore`:
-it is machine state, it grows without bound, and it is not part of the
-manuscript. pablo never edits the vault's `.gitignore` itself, so a new vault
-needs the line added by hand:
+## Verbs and exit codes
 
-```
-# in ~/writing/.gitignore
-.pablo/
-```
-
-## The write path
-
-**There is exactly one function that writes a manuscript** — `writeDocument` in
-`packages/tui/src/apply.ts` — and exactly one call site for it, in `view.ts`.
-`packages/tui/src/review.ts` is the only module that resolves a pending
-CriticMarkup mark into plain text, so a model's answer can reach the file only
-by way of the key the author pressed to accept it.
-
-`packages/tui/test/write-path.test.ts` enforces all of that mechanically, the
-same way `tty-free.test.ts` enforces the core/tui split: it greps both `src`
-trees for the writer, for every `fs` write API, and for `resolveMark` /
-`resolveAll`, and fails on a call site that is not on the allow-list. **If you
-need a new module on the write path, add it to that list in the same commit** —
-the rule should stay a decision someone made, not one that eroded.
-
-Accepting a proposal also **commits that one file** to the vault's git
-repository (`packages/tui/src/git.ts`). Two rules there: never `git add -A`, and
-git failing is a status-bar notice, never an exception — the manuscript is
-written before git is asked for anything, and nothing about a commit may block
-or undo a write that already landed.
+Every verb accepts `--project <slug>` and `--json`. Exit codes are the
+contract every ticket builds on: **0** success, **2** refused (a framework
+precondition — an unresolvable project, or later an unmet stage
+precondition), **1** error (including "not implemented yet" for a verb whose
+body has not landed). See the design doc's `Commands` table for what each verb
+does and returns; `pablo --help` lists the P0 set.
 
 ## Build commands
 
 ```sh
 bun install            # workspace install; commit the resulting bun.lock
-bun run typecheck      # tsc --noEmit across both packages (root tsconfig.json)
-bun test               # all tests in both packages
-bun run pablo          # run the CLI from source
+bun run typecheck      # tsc --noEmit across packages/core and packages/cli
+bun test               # all tests, both packages
+bun run pablo          # run the CLI from source (bun run packages/cli/src/cli.ts)
 ```
 
 Both `bun run typecheck` and `bun test` are `required_checks` in
 `.stamp/config.yml`: `stamp merge` runs them against the merged tree and rolls
-the merge back on a non-zero exit. There is no `build` step yet — both packages
-ship TypeScript that Bun runs directly. Add a `build` check to
+the merge back on a non-zero exit. There is no `build` step yet — the package
+ships TypeScript that Bun runs directly. Add a `build` check to
 `.stamp/config.yml` the moment that stops being true.
 
-The published manifest is `packages/tui/package.json` (`@openthink/pablo`); the
-root `package.json` is a private workspace shell with no version. Nothing is
-published yet.
+The published manifest is `packages/cli/package.json` (`@openthink/pablo`);
+the root `package.json` is a private workspace shell with no version. Nothing
+is published yet.
+
+## Conventions
+
+- **Git from code**: always `git -C <dir> add -- <paths>` and
+  `git -C <dir> commit -m <msg> -- <paths>`, never `git add -A`. A git failure
+  is a returned notice, never a thrown exception — a write to the vault that
+  already landed on disk is never undone by git failing afterward.
+- **Never write into `~/writing` from tests or from this repo's own tooling.**
+  Tests exercise a synthetic fixture vault (`packages/core/test/fixtures/vault`,
+  copied under `packages/cli/test/fixtures/`) with invented content — the real
+  vault is private, this repo's GitHub mirror is public, and no manuscript
+  content belongs in it. Anything that needs a throwaway vault on disk makes
+  one in a temp directory and cleans it up.
 
 ## Stamp governance
 
