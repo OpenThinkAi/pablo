@@ -20,9 +20,13 @@ import { readMarker } from "./marker";
 import { buildChapterPack, DEFAULT_WORD_TARGET } from "./novel/pack";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 
-export const EXIT_OK = 0;
-export const EXIT_REFUSED = 2;
-export const EXIT_ERROR = 1;
+/**
+ * Exit codes: the contract every ticket builds on, defined once in `cli.ts`
+ * (`EXIT_OK`, `EXIT_REFUSED`, `EXIT_ERROR`) and used here as the same three
+ * literals — `0` ok, `2` refused, `1` error — the way `marker.ts` and
+ * `project.ts` already do (each refusal there is a literal `2`, no local
+ * constant), rather than a second, importable copy of the same three names.
+ */
 
 /** The fields `runWrite` needs off the CLI's parsed args. `cli.ts`'s `ParsedArgs` satisfies this. */
 export interface WriteArgs {
@@ -66,8 +70,8 @@ function emitError(message: string, missing: readonly string[] | undefined, code
 export function runWrite(args: WriteArgs, vaultRoot: string, projectPath: string): number {
   const chapter = parsePositiveInt(args.chapter);
   if (chapter === undefined) {
-    emitError("pablo: write requires --chapter <N> (a positive integer)", undefined, EXIT_REFUSED, args.json);
-    return EXIT_REFUSED;
+    emitError("pablo: write requires --chapter <N> (a positive integer)", undefined, 2, args.json);
+    return 2;
   }
 
   const words = parsePositiveInt(args.words) ?? DEFAULT_WORD_TARGET;
@@ -82,13 +86,8 @@ export function runWrite(args: WriteArgs, vaultRoot: string, projectPath: string
   const state = readNovelState(projectPath);
   const preconditions = chapterPreconditions(state, chapter);
   if (!preconditions.ready) {
-    emitError(
-      `pablo: chapter ${chapter} is not ready to draft`,
-      preconditions.missing,
-      EXIT_REFUSED,
-      args.json,
-    );
-    return EXIT_REFUSED;
+    emitError(`pablo: chapter ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
+    return 2;
   }
 
   const packResult = buildChapterPack(vaultRoot, projectPath, chapter, {
@@ -131,14 +130,14 @@ export function runWrite(args: WriteArgs, vaultRoot: string, projectPath: string
       const providerId = providers.route(DRAFT_INTENT);
       console.log(renderPack(pack, providers.rates(providerId)).text);
     }
-    return EXIT_OK;
+    return 0;
   }
 
   const message = "pablo: write is not wired to the model yet (AGT-1237); use --dry-run";
   if (args.json) {
-    console.log(JSON.stringify({ ok: false, code: EXIT_ERROR, message }));
+    console.log(JSON.stringify({ ok: false, code: 1, message }));
   } else {
     console.error(message);
   }
-  return EXIT_ERROR;
+  return 1;
 }

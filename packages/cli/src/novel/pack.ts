@@ -32,7 +32,12 @@ const CAST_ENDS_AT = "## Decisions for Matt";
 /** A `## ` section heading that addresses the agent, not the reader — dropped by the voice filter. */
 const AGENT_SECTION_HEADING = /repl(y|ies)|agent/i;
 
-export interface Refusal {
+/**
+ * Distinct from `./project`'s `Refusal` (which always carries `tried`, a
+ * list of paths a *resolution* looked at): this refusal is a pack-assembly
+ * violation, which has no `tried` list to report.
+ */
+export interface PackRefusal {
   readonly ok: false;
   readonly code: 2;
   readonly message: string;
@@ -44,7 +49,7 @@ export interface ChapterPackResult {
   readonly inputs: DraftingInputs;
 }
 
-export type ChapterPackOutcome = ChapterPackResult | Refusal;
+export type ChapterPackOutcome = ChapterPackResult | PackRefusal;
 
 export interface BuildChapterPackOptions {
   readonly words?: number | undefined;
@@ -106,12 +111,18 @@ function filterVoice(style: readonly TextSource[]): readonly TextSource[] {
 
 function filterVoiceText(text: string): string {
   const parts = text.split("\n## ");
-  const preamble = parts[0] ?? "";
-  const sections = parts.slice(1).filter((section) => {
-    const heading = section.split("\n", 1)[0] ?? "";
-    return !AGENT_SECTION_HEADING.test(heading);
-  });
-  return [preamble, ...sections.map((section) => `## ${section}`)].join("\n").trim();
+  const preamble = (parts[0] ?? "").trim();
+  const sections = parts
+    .slice(1)
+    .map((section) => section.trim())
+    .filter((section) => {
+      const heading = section.split("\n", 1)[0] ?? "";
+      return !AGENT_SECTION_HEADING.test(heading);
+    })
+    .map((section) => `## ${section}`);
+  // Every kept segment is already trimmed, so joining on a single blank line
+  // gives consistent spacing regardless of how the source file spaced them.
+  return [preamble, ...sections].filter((part) => part !== "").join("\n\n");
 }
 
 interface NeverSendViolation {
