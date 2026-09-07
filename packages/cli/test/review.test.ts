@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   appendEvent,
   decide,
@@ -9,6 +9,7 @@ import {
   pending,
   readEvents,
   record,
+  reviewStateFor,
   waitForDecision,
 } from "../src/review";
 import type { DecisionEvent, EditedEvent, QueuedEvent, ReviewEvent } from "../src/review";
@@ -34,6 +35,17 @@ function queuedEvent(overrides: Partial<QueuedEvent> = {}): QueuedEvent {
     path: "/tmp/hello.md",
     words: 500,
     prompt_hash: "deadbeef",
+    ...overrides,
+  };
+}
+
+function decisionEvent(overrides: Partial<DecisionEvent> = {}): DecisionEvent {
+  return {
+    type: "approved",
+    id: "20260907-hello-abcd",
+    at: "2026-09-07T11:00:00.000Z",
+    by: "cli",
+    read: true,
     ...overrides,
   };
 }
@@ -247,5 +259,68 @@ describe("waitForDecision", () => {
     });
 
     expect(result).toEqual({ status: "timeout" });
+  });
+});
+
+describe("reviewStateFor (pure — no filesystem)", () => {
+  test("none: no queued event matches the path at all", () => {
+    const events: ReviewEvent[] = [queuedEvent({ path: "/vault/chapters/02-other.md" })];
+    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("none");
+  });
+
+  test("pending: queued, no decision yet", () => {
+    const events: ReviewEvent[] = [queuedEvent({ path: "/vault/chapters/01-mine.md" })];
+    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("pending");
+  });
+
+  test("approved: queued then approved", () => {
+    const events: ReviewEvent[] = [
+      queuedEvent({ path: "/vault/chapters/01-mine.md" }),
+      decisionEvent({ type: "approved" }),
+    ];
+    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("approved");
+  });
+
+  test("rejected: queued then rejected", () => {
+    const events: ReviewEvent[] = [
+      queuedEvent({ path: "/vault/chapters/01-mine.md" }),
+      decisionEvent({ type: "rejected", reason: "voice drifted" }),
+    ];
+    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("rejected");
+  });
+
+  test("two queued events for the same path: the latest (by `at`) wins, ignoring the older one's decision", () => {
+    const events: ReviewEvent[] = [
+      // Older run: queued, then rejected.
+      queuedEvent({ id: "old", at: "2026-09-01T00:00:00.000Z", path: "/vault/chapters/01-mine.md" }),
+      decisionEvent({ id: "old", type: "rejected", at: "2026-09-01T01:00:00.000Z" }),
+      // Rewritten and queued again, later, with no decision yet.
+      queuedEvent({ id: "new", at: "2026-09-07T00:00:00.000Z", path: "/vault/chapters/01-mine.md" }),
+    ];
+    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("pending");
+  });
+
+  test("two queued events for the same path: the latest's own decision is what's reported", () => {
+    const events: ReviewEvent[] = [
+      queuedEvent({ id: "old", at: "2026-09-01T00:00:00.000Z", path: "/vault/chapters/01-mine.md" }),
+      decisionEvent({ id: "old", type: "rejected", at: "2026-09-01T01:00:00.000Z" }),
+      queuedEvent({ id: "new", at: "2026-09-07T00:00:00.000Z", path: "/vault/chapters/01-mine.md" }),
+      decisionEvent({ id: "new", type: "approved", at: "2026-09-07T02:00:00.000Z" }),
+    ];
+    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("approved");
+  });
+
+  test("paths are compared resolve()d: a relative chapterPath still matches an absolute queued path for the same file", () => {
+    const absolute = resolve("vault/chapters/01-mine.md");
+    const events: ReviewEvent[] = [queuedEvent({ path: absolute })];
+    expect(reviewStateFor(events, "vault/chapters/01-mine.md")).toBe("pending");
+  });
+
+  test("a decision event for a different id never matches a queued event's id", () => {
+    const events: ReviewEvent[] = [
+      queuedEvent({ id: "mine", path: "/vault/chapters/01-mine.md" }),
+      decisionEvent({ id: "someone-else", type: "approved" }),
+    ];
+    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("pending");
   });
 });

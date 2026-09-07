@@ -11,12 +11,12 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, relative } from "node:path";
 import { gateTimeline, parseBeatRows, section } from "@openthink/pablo-core";
 import type { BeatRow } from "@openthink/pablo-core";
 import { stateReviewPath } from "../paths";
-import { readEvents } from "../review";
-import type { DecisionEvent, QueuedEvent, ReviewEvent } from "../review";
+import { readEvents, reviewStateFor } from "../review";
+import type { ReviewEvent, ReviewState } from "../review";
 
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
 export interface BibleFile {
@@ -36,13 +36,6 @@ export interface ActRow {
   readonly years: string;
   readonly summary: string;
 }
-
-/**
- * A written chapter's standing in the review queue (AGT-1255's
- * `packages/cli/src/review.ts`): `pending` (queued, no decision yet),
- * `approved`, `rejected`, or `none` (never queued at all).
- */
-export type ReviewState = "pending" | "approved" | "rejected" | "none";
 
 /** One `chapters/NN-*.md` file, parsed just enough to gate on it. */
 export interface ChapterFile {
@@ -162,29 +155,6 @@ export function parseFrontmatter(text: string): Record<string, string> {
     if (match) fields[match[1] as string] = (match[2] ?? "").trim();
   }
   return fields;
-}
-
-/**
- * The review status of one written piece (AGT-1263): the `queued` event in
- * `events` whose `path` resolves to the same file as `chapterPath` wins —
- * when more than one does (the chapter was queued, decided, and queued
- * again), the one with the latest `at` is authoritative, and its own
- * decision (if any) is what's reported. `none` when no `queued` event
- * matches at all. Pure — no disk I/O, so it's testable with hand-built
- * events (AC3).
- */
-export function reviewStateFor(events: ReviewEvent[], chapterPath: string): ReviewState {
-  const target = resolve(chapterPath);
-
-  const matches = events.filter((event): event is QueuedEvent => event.type === "queued" && resolve(event.path) === target);
-  if (matches.length === 0) return "none";
-
-  const latest = matches.slice().sort((a, b) => a.at.localeCompare(b.at))[matches.length - 1] as QueuedEvent;
-
-  const decision = events.find(
-    (event): event is DecisionEvent => (event.type === "approved" || event.type === "rejected") && event.id === latest.id,
-  );
-  return decision === undefined ? "pending" : decision.type;
 }
 
 function readChapters(workDir: string, events: ReviewEvent[]): ChapterFile[] {

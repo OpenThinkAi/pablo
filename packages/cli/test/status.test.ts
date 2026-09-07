@@ -4,11 +4,10 @@
  * `queued` events in the review queue (`stateReviewPath()`, AGT-1255/1261)
  * and taking the latest decision for that piece.
  *
- * `reviewStateFor` (AC3) lives in `../src/novel/machine.ts`, not
- * `../src/review.ts` — `review.ts` is a finished, shared dependency other
- * in-flight tickets build on, so this ticket adds the new pure function
- * beside `readNovelState`/`chapterPreconditions` instead of editing it. Its
- * behaviour matches the ticket's spec exactly; only the file changed.
+ * `reviewStateFor` (AC3) lives in `../src/review.ts` and is unit-tested in
+ * `review.test.ts`. This file covers the integration: `readNovelState`
+ * wiring `review` onto each `ChapterFile` from a fixture vault plus a seeded
+ * temp `XDG_STATE_HOME` queue.
  *
  * These tests never touch a real vault or a real `XDG_STATE_HOME` — every
  * disk-touching test copies the fixture vault into a temp dir and seeds a
@@ -18,9 +17,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readNovelState, reviewStateFor } from "../src/novel/machine";
+import { readNovelState } from "../src/novel/machine";
 import { stateReviewPath } from "../src/paths";
 import type { DecisionEvent, QueuedEvent, ReviewEvent } from "../src/review";
 
@@ -76,69 +75,6 @@ function seedQueue(stateHome: string, events: readonly ReviewEvent[]): void {
   mkdirSync(join(stateHome, "pablo"), { recursive: true });
   writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
 }
-
-describe("reviewStateFor (AC3, pure — no filesystem)", () => {
-  test("none: no queued event matches the path at all", () => {
-    const events: ReviewEvent[] = [queuedEvent({ path: "/vault/chapters/02-other.md" })];
-    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("none");
-  });
-
-  test("pending: queued, no decision yet", () => {
-    const events: ReviewEvent[] = [queuedEvent({ path: "/vault/chapters/01-mine.md" })];
-    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("pending");
-  });
-
-  test("approved: queued then approved", () => {
-    const events: ReviewEvent[] = [
-      queuedEvent({ path: "/vault/chapters/01-mine.md" }),
-      decisionEvent({ type: "approved" }),
-    ];
-    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("approved");
-  });
-
-  test("rejected: queued then rejected", () => {
-    const events: ReviewEvent[] = [
-      queuedEvent({ path: "/vault/chapters/01-mine.md" }),
-      decisionEvent({ type: "rejected", reason: "voice drifted" }),
-    ];
-    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("rejected");
-  });
-
-  test("two queued events for the same path: the latest (by `at`) wins, ignoring the older one's decision", () => {
-    const events: ReviewEvent[] = [
-      // Older run: queued, then rejected.
-      queuedEvent({ id: "old", at: "2026-09-01T00:00:00.000Z", path: "/vault/chapters/01-mine.md" }),
-      decisionEvent({ id: "old", type: "rejected", at: "2026-09-01T01:00:00.000Z" }),
-      // Rewritten and queued again, later, with no decision yet.
-      queuedEvent({ id: "new", at: "2026-09-07T00:00:00.000Z", path: "/vault/chapters/01-mine.md" }),
-    ];
-    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("pending");
-  });
-
-  test("two queued events for the same path: the latest's own decision is what's reported", () => {
-    const events: ReviewEvent[] = [
-      queuedEvent({ id: "old", at: "2026-09-01T00:00:00.000Z", path: "/vault/chapters/01-mine.md" }),
-      decisionEvent({ id: "old", type: "rejected", at: "2026-09-01T01:00:00.000Z" }),
-      queuedEvent({ id: "new", at: "2026-09-07T00:00:00.000Z", path: "/vault/chapters/01-mine.md" }),
-      decisionEvent({ id: "new", type: "approved", at: "2026-09-07T02:00:00.000Z" }),
-    ];
-    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("approved");
-  });
-
-  test("paths are compared resolve()d: a relative chapterPath still matches an absolute queued path for the same file", () => {
-    const absolute = resolve("vault/chapters/01-mine.md");
-    const events: ReviewEvent[] = [queuedEvent({ path: absolute })];
-    expect(reviewStateFor(events, "vault/chapters/01-mine.md")).toBe("pending");
-  });
-
-  test("a decision event for a different id never matches a queued event's id", () => {
-    const events: ReviewEvent[] = [
-      queuedEvent({ id: "mine", path: "/vault/chapters/01-mine.md" }),
-      decisionEvent({ id: "someone-else", type: "approved" }),
-    ];
-    expect(reviewStateFor(events, "/vault/chapters/01-mine.md")).toBe("pending");
-  });
-});
 
 describe("readNovelState wires `review` onto each chapter (AC1, AC4 — fixture vault + seeded temp XDG_STATE_HOME)", () => {
   test("a chapter with no queue entry at all reads review: \"none\"", () => {
