@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,6 +76,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     brief: { type: "string" },
     context: { type: "string", multiple: true },
     format: { type: "string" },
+    out: { type: "string" }, // AGT-1242: prose --out (prose reuses `force`, already pinned above)
   });
 });
 
@@ -436,7 +437,12 @@ test("prose.run with dry-run true returns a prompt_hash, exit 0", async () => {
   rmSync(configHome, { recursive: true, force: true });
 });
 
-test("prose.run without dry-run refuses with exit 1 (not wired to the model yet)", async () => {
+// AGT-1242: the send path replaced AGT-1241's exit-1 stub. The fixture's
+// `plain` voice names `model: anthropic`, which the temp config home does not
+// configure, so this refuses on AC1's per-voice override without reaching any
+// endpoint. (The MCP surface has no adapter injection point; the fake-adapter
+// send tests live in prose-send.test.ts.)
+test("prose.run without dry-run, on a voice whose model: is not configured, refuses (exit 2)", async () => {
   const vault = tempVault();
   const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
   const briefPath = join(vault, "brief.md");
@@ -447,8 +453,38 @@ test("prose.run without dry-run refuses with exit 1 (not wired to the model yet)
     voiceCtxFor(vault, configHome),
   );
 
-  expect(outcome.exitCode).toBe(1);
-  expect(outcome.body).toMatchObject({ ok: false, code: 1 });
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("anthropic");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+// AGT-1242: `out` is a WRITE path arriving as a model-controlled tool
+// argument, so it gets the same vault bound `brief`/`context`/`voice` get —
+// and the refusal must happen before any model call, let alone any file
+// creation.
+test("prose.run with an out path outside the vault refuses (exit 2), naming the vault boundary, and creates nothing", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+  const briefPath = join(vault, "brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+  const outside = join(mkdtempSync(join(tmpdir(), "pablo-verbs-prose-outside-")), "escaped.md");
+
+  for (const out of [outside, "../escaped.md", "/tmp/pablo-verbs-escaped.md"]) {
+    const outcome = await verb("prose").run(
+      { voice: "plain", brief: briefPath, context: [], out },
+      voiceCtxFor(vault, configHome),
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+    expect((outcome.body as { message: string }).message).toContain("inside");
+  }
+
+  expect(existsSync(outside)).toBe(false);
+  expect(existsSync("/tmp/pablo-verbs-escaped.md")).toBe(false);
 
   rmSync(vault, { recursive: true, force: true });
   rmSync(configHome, { recursive: true, force: true });

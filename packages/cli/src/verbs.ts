@@ -469,9 +469,14 @@ const PROSE_ARGS = z.object({
     .boolean()
     .optional()
     .default(false)
+    .describe("Preview the assembled pack (slices, tokens, prompt hash) without sending it to the model."),
+  out: z
+    .string()
+    .optional()
     .describe(
-      "Preview the assembled pack without sending to the model. Omitting this flag returns an error until the send path (AGT-1242) is available.",
+      "Write the answer to this file with provenance frontmatter (voice, model, generated, prompt_hash, words); inside a git repository it is committed by pathspec. Must be inside the vault (or the working directory when there is none).",
     ),
+  force: z.boolean().optional().default(false).describe("Overwrite an existing `out` file instead of refusing."),
 });
 
 /**
@@ -494,7 +499,7 @@ const PROSE_ARGS = z.object({
  */
 function bindProsePath(ctx: VerbContext, label: string, value: string): Refusal | undefined {
   if (value === "-") {
-    return { ok: false, code: 2, message: `pablo: prose ${label} "-" (stdin) is not available over MCP; pass a file path instead`, tried: [] };
+    return { ok: false, code: 2, message: `pablo: prose ${label} "-" is not available over MCP; pass a file path instead`, tried: [] };
   }
 
   const vault = findVault(ctx.cwd, ctx.env);
@@ -528,10 +533,30 @@ async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext):
     const problem = bindProsePath(ctx, "--context", path);
     if (problem) return { body: refusalBody(problem), exitCode: problem.code };
   }
+  // `out` is the first WRITE path on this verb (AGT-1242) and gets the same
+  // bound the read paths above get — a stronger requirement, not a weaker one:
+  // an unbounded model-supplied `out` would let a tool call create or (with
+  // `force`) overwrite any file the user can write, anywhere on the machine.
+  // The CLI's own `--out` stays unbounded and author-typed, exactly like
+  // `save`'s `--file`.
+  if (args.out !== undefined) {
+    const problem = bindProsePath(ctx, "--out", args.out);
+    if (problem) return { body: refusalBody(problem), exitCode: problem.code };
+  }
 
-  const outcome = proseCore(
-    { voice: args.voice, brief: args.brief, context: args.context, format: args.format, words: args.words, dryRun: args["dry-run"] },
+  const outcome = await proseCore(
+    {
+      voice: args.voice,
+      brief: args.brief,
+      context: args.context,
+      format: args.format,
+      words: args.words,
+      dryRun: args["dry-run"],
+      out: args.out,
+      force: args.force ?? false,
+    },
     { cwd: ctx.cwd, env: ctx.env },
+    { stderr: ctx.stderr },
   );
   return { body: outcome.body, exitCode: outcome.exitCode };
 }
@@ -580,7 +605,8 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "prose",
-    description: "Assemble a voice-plus-brief prose pack and (with `dry-run`) render it; no `--project`, no vault required.",
+    description:
+      "Write a piece in a named voice from a brief: assemble the pack, send it to the routed model, return the text plus a receipt and check hits (or, with `dry-run`, just render the pack). No `--project`, no vault required.",
     args: PROSE_ARGS,
     run: runProseVerb,
   },

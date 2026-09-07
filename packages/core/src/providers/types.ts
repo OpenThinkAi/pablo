@@ -13,9 +13,15 @@ import type { Document, Span } from "../document";
 /**
  * The routing class of an intent, and the only thing routing looks at when the
  * config has no explicit mapping: planning wants the strongest model available,
- * the other three want the local writer.
+ * every other kind wants the local writer.
+ *
+ * `copy` (AGT-1242) is `pablo prose`'s kind — freeform prose and copywriting
+ * outside the novel machine (emails, posts, replies). It is a separate name
+ * from `drafting` so a config's `"intents"` mapping can send copy somewhere
+ * else without moving chapter drafting too; routing itself treats them the
+ * same, since `route`'s only branch is `kind !== "planning" -> local`.
  */
-export type IntentKind = "planning" | "drafting" | "revising" | "extraction";
+export type IntentKind = "planning" | "drafting" | "revising" | "extraction" | "copy";
 
 /** A named thing the author asked for (`tighten`, `draft-chapter`), plus how it routes. */
 export interface Intent {

@@ -76,8 +76,10 @@ function helpText(): string {
     '  pablo voice exemplar <name> <file> [--title "<t>"]',
     "                                            keep a piece as-is under the voice's exemplars/",
     "  pablo prose --voice <name> --brief <file|-> [--context <file>]...",
-    "              [--format email|post|page|reply|note] [--words N] --dry-run",
-    "                                            assemble a voice-plus-brief prose pack;",
+    "              [--format email|post|page|reply|note] [--words N]",
+    "              [--out <file> [--force]] [--json] [--dry-run]",
+    "                                            write a piece in a voice: assemble, send,",
+    "                                            print the text, receipt it, check it;",
     "                                            no --project, no vault required",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
@@ -125,6 +127,8 @@ interface ParsedArgs {
   readonly context: readonly string[];
   /** `prose --format email|post|page|reply|note`. */
   readonly format: string | undefined;
+  /** `prose --out <path>`: write the answer to a file (with `--force` to overwrite). */
+  readonly out: string | undefined;
 }
 
 /**
@@ -170,6 +174,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     brief: typeof values["brief"] === "string" ? values["brief"] : undefined,
     context: Array.isArray(values["context"]) ? (values["context"] as string[]) : [],
     format: typeof values["format"] === "string" ? values["format"] : undefined,
+    out: typeof values["out"] === "string" ? values["out"] : undefined,
   };
 }
 
@@ -515,8 +520,18 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // shared `--project`/marker resolution below and is dispatched here,
   // before that block runs.
   if (args.verb === "prose") {
-    return runProse(
-      { voice: args.voice, brief: args.brief, context: args.context, format: args.format, words: args.words, dryRun: args.dryRun, json: args.json },
+    return await runProse(
+      {
+        voice: args.voice,
+        brief: args.brief,
+        context: args.context,
+        format: args.format,
+        words: args.words,
+        dryRun: args.dryRun,
+        json: args.json,
+        out: args.out,
+        force: args.force,
+      },
       { cwd, env: process.env },
     );
   }
