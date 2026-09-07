@@ -36,8 +36,18 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the eight MCP verbs, each project-scoped verb requiring project", () => {
-  expect(VERBS.map((v) => v.name).sort()).toEqual(["check", "prose", "resume", "review", "save", "status", "voice", "write"]);
+test("VERBS exposes exactly the nine MCP verbs, each project-scoped verb requiring project", () => {
+  expect(VERBS.map((v) => v.name).sort()).toEqual([
+    "check",
+    "prose",
+    "resume",
+    "review",
+    "revise",
+    "save",
+    "status",
+    "voice",
+    "write",
+  ]);
   for (const v of VERBS) {
     if (v.name === "voice" || v.name === "prose" || v.name === "review") continue; // none resolves via a --project slug (AGT-1240, AGT-1241, AGT-1261 — the review queue is global)
     const parsed = v.args.safeParse({});
@@ -120,7 +130,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     format: { type: "string" },
     out: { type: "string" }, // AGT-1242: prose --out (prose reuses `force`, already pinned above)
     draft: { type: "string" }, // AGT-1244: prose --draft
-    instruction: { type: "string" }, // AGT-1244: prose --instruction
+    instruction: { type: "string" }, // AGT-1244: prose --instruction (revise reuses it, AGT-1264)
     // AGT-1261: review's `action`/`id` are NOT here — `positionalArgs` on the
     // `review` verb tells `deriveCliOptions` to skip them, since `cli.ts`
     // reads them from positionals (`args.rest`), never a named flag (a
@@ -129,6 +139,9 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     unread: { type: "boolean", default: false }, // AGT-1261: review approve --unread
     reason: { type: "string" }, // AGT-1261: review reject --reason
     timeout: { type: "string" }, // AGT-1261: review wait --timeout
+    passage: { type: "string" }, // AGT-1264: revise --passage
+    start: { type: "string" }, // AGT-1264: revise --start (revise reuses `file`, already pinned above)
+    end: { type: "string" }, // AGT-1264: revise --end
   });
 });
 
