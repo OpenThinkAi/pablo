@@ -91,6 +91,18 @@ const uiLeafBinary = resolveUiLeafBinary();
 const chromium = findChromium();
 const CAN_RUN = uiLeafBinary !== undefined && chromium !== undefined;
 
+/**
+ * Whether THIS repo's own `ui-leaf-bin` (resolved to its full, package-scoped
+ * path) shows up in `ps`. A bare `"ui-leaf-bin"` substring would also match
+ * an unrelated ui-leaf-hosting process elsewhere on the machine (e.g.
+ * another project's own daemon) — this checks the exact binary `openEditor`
+ * here would spawn, not the name alone.
+ */
+function ourUiLeafRunning(): boolean {
+  if (uiLeafBinary === undefined) return false;
+  return psCommandLines().some((line) => line.includes(uiLeafBinary));
+}
+
 if (!CAN_RUN) {
   console.log(
     `edit-mount.test.ts: skipping the real mount() — ${
@@ -110,7 +122,7 @@ test.skipIf(!CAN_RUN)(
     process.env["UI_LEAF_NO_OPEN"] = "1";
 
     // Sanity: nothing of ours is running yet.
-    expect(psCommandLines().some((line) => line.includes("ui-leaf-bin"))).toBe(false);
+    expect(ourUiLeafRunning()).toBe(false);
 
     let opened: Awaited<ReturnType<typeof openEditor>> | undefined;
     const tokenedUrl = await captureTokenedUrl(async () => {
@@ -147,7 +159,7 @@ test.skipIf(!CAN_RUN)(
       else process.env["UI_LEAF_NO_OPEN"] = previousNoOpen;
     }
 
-    const clean = await waitUntil(() => !psCommandLines().some((line) => line.includes("ui-leaf-bin")), 5000);
+    const clean = await waitUntil(() => !ourUiLeafRunning(), 5000);
     expect(clean).toBe(true);
 
     while (cleanupDirs.length > 0) {
