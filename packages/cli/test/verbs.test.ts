@@ -191,6 +191,32 @@ test("save.run with a file outside the vault refuses (exit 2), naming the vault 
   rmSync(vault, { recursive: true, force: true });
 });
 
+test("check.run with a file outside the vault refuses (exit 2), naming the vault boundary", async () => {
+  const vault = tempVault();
+
+  const outcome = await verb("check").run({ project: "ice-house", file: "/etc/hosts" }, ctxFor(vault));
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("inside the vault");
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test("check.run with a relative file that escapes the vault via .. also refuses", async () => {
+  const vault = tempVault();
+
+  const outcome = await verb("check").run(
+    { project: "ice-house", file: "../../../../../../etc/hosts" },
+    ctxFor(vault),
+  );
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
 test("save.run with a relative file that escapes the vault via .. also refuses", async () => {
   const vault = tempVault();
 

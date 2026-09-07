@@ -301,6 +301,17 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
 
+  // Over MCP `file` is model-controlled, exactly like save's. `checkWork` already
+  // refuses anything outside the work directory (a stricter bound), so this is
+  // defence in depth at the same layer as save's guard: no path outside the vault
+  // is ever handed down, whatever the lower layer does.
+  if (args.file !== undefined) {
+    const absFile = resolve(resolved.projectPath, args.file);
+    if (absFile !== resolved.vaultRoot && !absFile.startsWith(resolved.vaultRoot + sep)) {
+      return { body: { ok: false, code: 2, message: `pablo: check file must be inside the vault (${absFile})` }, exitCode: 2 };
+    }
+  }
+
   const outcome = checkWork(resolved.vaultRoot, resolved.projectPath, args.file);
   if (!outcome.ok) {
     return { body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried }, exitCode: outcome.code };
