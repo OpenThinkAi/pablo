@@ -15,7 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { selectionText } from "../document";
-import { CRITICMARKUP_EDIT_CLOSING, PROSE_CLOSING, TOOL_EDIT_CLOSING } from "./closing";
+import { CRITICMARKUP_EDIT_CLOSING, PROSE_CLOSING, PROSE_REVISE_CLOSING, TOOL_EDIT_CLOSING } from "./closing";
 import type { SliceSpec } from "./budget";
 import { fitToBudget, PACK_BUDGETS, renderSlice } from "./budget";
 import { estimateTokens } from "./estimate";
@@ -422,11 +422,20 @@ function renderTimeline(inputs: DraftingInputs): string {
  * way, and `keep: "head"` here means a budget squeeze drops the *oldest*
  * ones off the tail of the concatenated text, never the newest), what the
  * voice never does, the format stanza, the `--context` files in argument
- * order, the brief, and the closing directive. The whole pack is sent
- * through `complete()` (like drafting, unlike a span edit's adapter-composed
- * tail), so there is nothing in `tail`.
+ * order, the brief, the revise loop's two slices (AGT-1244, below), and the
+ * closing directive. The whole pack is sent through `complete()` (like
+ * drafting, unlike a span edit's adapter-composed tail), so there is nothing
+ * in `tail`.
  */
 function proseSpecs(inputs: ProseInputs): BuiltSpecs {
+  // AGT-1244's revise loop: the caller (`prose.ts`'s `--draft`/`--instruction`
+  // refusal, AC2) guarantees these are given together or not at all, but this
+  // module never trusts that from the outside — a lone `instruction` with no
+  // `draft` (or vice versa) just renders as one empty, dropped slice rather
+  // than a half-built revise prompt, and the closing only switches when BOTH
+  // are actually present and the instruction isn't blank.
+  const isRevise = inputs.draft !== undefined && (inputs.instruction ?? "").trim() !== "";
+
   const contextSpecs: SliceSpec[] = inputs.context.map((source, index) => ({
     name: `context-${index}`,
     heading: `# Context: ${sourceLabel([source]) ?? "untitled"}`,
@@ -497,9 +506,36 @@ function proseSpecs(inputs: ProseInputs): BuiltSpecs {
       cutOrder: 0,
     },
     {
+      name: "draft",
+      heading: "# The previous text (revise this)",
+      text: inputs.draft?.text.trim() ?? "",
+      source: inputs.draft?.path,
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      // The design doc's budget note (AGT-1244): the draft is the first slice
+      // to give ground after the exemplars (cutOrder 2) — a revise call's own
+      // prior output is worth truncating before the voice's binding rules
+      // ever are, but only once the purely illustrative exemplars are gone.
+      // Sits between exemplars (2) and rules' required 400-token floor (1).
+      cutOrder: 1.5,
+    },
+    {
+      name: "instruction",
+      heading: "# What to change",
+      text: inputs.instruction?.trim() ?? "",
+      source: "the author's instruction",
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    },
+    {
       name: "closing",
       heading: "",
-      text: PROSE_CLOSING,
+      text: isRevise ? PROSE_REVISE_CLOSING : PROSE_CLOSING,
       source: undefined,
       required: true,
       keep: "head",

@@ -31,3 +31,15 @@ export const CRITICMARKUP_EDIT_CLOSING = [
 export const PROSE_CLOSING =
   "Write the piece now, in the voice above. No preamble, no markup, no commentary" +
   " — the finished text, and nothing else.";
+
+/**
+ * `prose`'s revise-loop closing (AGT-1244): selected instead of `PROSE_CLOSING`
+ * whenever the pack carries a `draft` and an `instruction`. It asks for the
+ * whole rewritten piece, never a diff or just the changed part — pablo has no
+ * patch/diff format for prose, and a partial answer would leave the caller to
+ * reconstruct the full piece itself.
+ */
+export const PROSE_REVISE_CLOSING =
+  "Write the complete rewritten piece now, in the voice above, applying the instruction" +
+  " to the previous text. The whole piece, not a diff and not only the changed part" +
+  " — no preamble, no markup, no commentary.";

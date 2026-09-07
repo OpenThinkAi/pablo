@@ -178,4 +178,14 @@ export interface ProseInputs {
   readonly brief: TextSource;
   /** Target word count; defaults to 300 (drafting's own default is a chapter, prose's is a short piece). */
   readonly wordTarget?: number | undefined;
+  /**
+   * The revise loop (AGT-1244): the previous output to rewrite, frontmatter
+   * already stripped by the caller (`readVoice`'s own convention — a pack
+   * input is prose, never pablo's own metadata). Present together with
+   * `instruction`, or not at all; `assemblePack` switches to
+   * `PROSE_REVISE_CLOSING` exactly when both are given.
+   */
+  readonly draft?: TextSource | undefined;
+  /** What to change about `draft`, in the author's own words. See `draft`. */
+  readonly instruction?: string | undefined;
 }

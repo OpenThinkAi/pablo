@@ -170,6 +170,8 @@ function sendArgs(overrides: Record<string, unknown> = {}) {
     dryRun: false,
     out: undefined as string | undefined,
     force: false,
+    draft: undefined as string | undefined,
+    instruction: undefined as string | undefined,
     ...overrides,
   };
 }
@@ -464,6 +466,8 @@ function cliArgs(overrides: Record<string, unknown> = {}) {
     json: false,
     out: undefined as string | undefined,
     force: false,
+    draft: undefined as string | undefined,
+    instruction: undefined as string | undefined,
     ...overrides,
   };
 }

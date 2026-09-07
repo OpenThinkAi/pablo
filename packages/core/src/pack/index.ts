@@ -60,4 +60,4 @@ export {
   readWorkRules,
   section,
 } from "./vault";
-export { CRITICMARKUP_EDIT_CLOSING, PROSE_CLOSING, TOOL_EDIT_CLOSING } from "./closing";
+export { CRITICMARKUP_EDIT_CLOSING, PROSE_CLOSING, PROSE_REVISE_CLOSING, TOOL_EDIT_CLOSING } from "./closing";

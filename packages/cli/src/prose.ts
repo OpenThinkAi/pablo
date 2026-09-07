@@ -54,12 +54,16 @@ import { checkFile, checkRulesFromVoice } from "./check";
 import type { Hit } from "./check";
 import { FORMAT_STANZAS, KNOWN_FORMATS } from "./formats";
 import { gitCommit } from "./init";
+import { parseFrontmatter } from "./novel/machine";
 import { jsonlReceiptSink, stateReceiptsPath } from "./paths";
 import { findVault } from "./project";
 import { readVoice, resolveVoice } from "./voice";
 import type { Voice } from "./voice";
 import { yamlScalar } from "./write";
 import type { ProgressSink, WriteReceiptSummary } from "./write";
+
+/** No `prompt_hash` in the draft's own frontmatter (or no frontmatter at all): AC3's literal `"unknown"`. */
+const UNKNOWN_REVISED_FROM = "unknown";
 
 /** What `proseCore` needs beyond the CLI's own env/cwd — mirrors `write.ts`'s minimal context shape. */
 export interface ProseCoreContext {
@@ -86,6 +90,10 @@ export interface ProseCoreArgs {
   readonly out: string | undefined;
   /** `--force`: overwrite an existing `--out` file. */
   readonly force: boolean;
+  /** `--draft <file>` (AGT-1244): the previous piece to revise. Requires `instruction`; see `assembleProse`'s AC2 refusal. */
+  readonly draft: string | undefined;
+  /** `--instruction "<text>"` (AGT-1244): what to change about `draft`. Requires `draft`. */
+  readonly instruction: string | undefined;
 }
 
 /** The CLI's own argv shape — `words` still a raw string, `json` added for the printing wrapper. */
@@ -99,6 +107,8 @@ export interface ProseCliArgs {
   readonly json: boolean;
   readonly out: string | undefined;
   readonly force: boolean;
+  readonly draft: string | undefined;
+  readonly instruction: string | undefined;
 }
 
 /** Dependencies a caller can inject; production code omits all of them. Mirrors `write.ts`'s `RunWriteDeps`. */
@@ -138,11 +148,16 @@ export interface ProseDryRunBody {
 }
 
 /**
- * The receipt a send returns (AC2). Identical to `write`'s by contract, not by
- * coincidence — one receipt vocabulary for every model call pablo makes — so
- * it is the same type, aliased rather than re-declared.
+ * The receipt a send returns (AC2). `write`'s own shape, extended rather than
+ * aliased: `revised_from` (AGT-1244) is a `prose`-only field with no `write`
+ * equivalent (a chapter is never "revised from" another chapter's receipt),
+ * so it does not belong on `WriteReceiptSummary` itself — that type is
+ * `write.ts`'s and this build must not change its shape or its callers'
+ * expectations. Present only for a `--draft`/`--instruction` revise call.
  */
-export type ProseReceiptSummary = WriteReceiptSummary;
+export interface ProseReceiptSummary extends WriteReceiptSummary {
+  readonly revised_from?: string;
+}
 
 /** AC2's exact send body. `path`/`committed`/`notice` appear only with `--out`. */
 export interface ProseSendBody {
@@ -222,6 +237,10 @@ export interface BuildProseOptions {
   /** A format *name* (`email`, `post`, ...) — resolved to its stanza text here, not in core. */
   readonly format: string | undefined;
   readonly words: number | undefined;
+  /** AGT-1244: the previous piece, frontmatter already stripped by the caller. */
+  readonly draft?: TextSource | undefined;
+  /** AGT-1244: what to change about `draft`, already sanitized by the caller (see `sanitizeInstruction`). */
+  readonly instruction?: string | undefined;
 }
 
 export type BuildProseResult = { readonly ok: true; readonly pack: Pack } | { readonly ok: false; readonly code: 2; readonly message: string };
@@ -247,9 +266,44 @@ export function buildProsePack(voice: Voice, options: BuildProseOptions): BuildP
     context: options.context,
     brief: options.brief,
     wordTarget: options.words,
+    draft: options.draft,
+    instruction: options.instruction,
   });
 
   return { ok: true, pack };
+}
+
+/**
+ * Strips a leading YAML frontmatter block from a `--draft` file — the same
+ * regex `packages/core`'s `chapterTail` and `voice.ts`'s `stripFrontmatter`
+ * both use, so a draft that is itself a previous `pablo prose --out` (or a
+ * chapter file) reads back the same way pablo wrote it. Unlike `chapterTail`,
+ * this keeps the WHOLE body: revise wants the complete previous piece, not a
+ * tail cut to N words.
+ */
+function stripDraftFrontmatter(text: string): string {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\s*/, "").trim();
+}
+
+/**
+ * `--instruction` is untrusted, model-controlled text over MCP: unlike
+ * `--voice`/`--brief`/`--context`/`--draft`/`--out`, it never names a file
+ * (there is nothing to bind to a vault boundary), it is inline text that
+ * lands directly in the assembled prompt as the "# What to change" slice,
+ * immediately before the closing directive. A CR/LF inside it could open a
+ * new line starting with "#" or "---", forging what looks like one of the
+ * pack's own slice headings — or, worse, a fake closing line placed to read
+ * as if it came after the real one. This is exactly the heading-injection
+ * risk `voice.ts`'s `flagLine` already defends `line` AND `section` against
+ * (AGT-1243, security review — that ticket was gate-blocked once for
+ * sanitising `line` but not `section`, its sibling raw-string argument; there
+ * is only one raw-string argument here, but the lesson is the same: every
+ * argument of this shape gets the same treatment, not just the obvious one).
+ * Flattened to a single line before it is ever wrapped in a slice, so no line
+ * inside it can begin a fresh section.
+ */
+function sanitizeInstruction(raw: string): string {
+  return raw.replace(/[\r\n]+/g, " ").trim();
 }
 
 function refuse(code: number, message: string): ProseOutcome {
@@ -279,17 +333,32 @@ function dryRunBody(pack: Pack): ProseDryRunBody {
 }
 
 type AssembleOutcome =
-  | { readonly ok: true; readonly pack: Pack; readonly voice: Voice }
+  | { readonly ok: true; readonly pack: Pack; readonly voice: Voice; readonly revisedFrom: string | undefined }
   | { readonly ok: false; readonly outcome: ProseOutcome };
 
 /**
  * The synchronous, side-effect-free half: resolve `--voice` (AC4: works with
  * no vault at all — a global voice resolves from `~/.config/pablo/voices/`,
- * `resolveVoice`'s own fallback), read the brief and every `--context` file,
- * and assemble the pack. Reads files; sends nothing, writes nothing.
+ * `resolveVoice`'s own fallback), read the brief, every `--context` file and
+ * `--draft` (AGT-1244), and assemble the pack. Reads files; sends nothing,
+ * writes nothing.
  */
 function assembleProse(args: ProseCoreArgs, ctx: ProseCoreContext): AssembleOutcome {
   const fail = (outcome: ProseOutcome): AssembleOutcome => ({ ok: false, outcome });
+
+  // AC2: --draft and --instruction are a pair or neither is given. Checked
+  // first and independent of every other argument, so it refuses (exit 2)
+  // even before an otherwise-missing --voice/--brief would.
+  if ((args.draft === undefined) !== (args.instruction === undefined)) {
+    return fail(
+      refuse(
+        2,
+        args.draft === undefined
+          ? "pablo: prose --instruction requires --draft <file>"
+          : "pablo: prose --draft requires --instruction \"<text>\"",
+      ),
+    );
+  }
 
   if (args.voice === undefined) {
     return fail(refuse(2, "pablo: prose requires --voice <name>"));
@@ -320,10 +389,28 @@ function assembleProse(args: ProseCoreArgs, ctx: ProseCoreContext): AssembleOutc
     context.push(result.source);
   }
 
-  const built = buildProsePack(voice, { brief: briefResult.source, context, format: args.format, words: args.words });
+  let draft: TextSource | undefined;
+  let instruction: string | undefined;
+  let revisedFrom: string | undefined;
+  if (args.draft !== undefined) {
+    const draftResult = readProseFile(args.draft, "--draft");
+    if (!draftResult.ok) return fail({ body: { ok: false, code: draftResult.code, message: draftResult.message }, exitCode: draftResult.code });
+    // AC3: the draft's OWN `prompt_hash`, from its own frontmatter (pablo's
+    // provenance block, written by a prior `pablo prose --out` or `write`) —
+    // "unknown" when the draft carries no frontmatter at all, or frontmatter
+    // with no `prompt_hash` field, rather than a refusal: a hand-edited or
+    // hand-written draft is a legitimate thing to revise.
+    const draftFrontmatter = parseFrontmatter(draftResult.source.text);
+    revisedFrom = draftFrontmatter["prompt_hash"] ?? UNKNOWN_REVISED_FROM;
+    draft = { path: draftResult.source.path, text: stripDraftFrontmatter(draftResult.source.text) };
+    // The pairing check above guarantees instruction is defined here too.
+    instruction = sanitizeInstruction(args.instruction as string);
+  }
+
+  const built = buildProsePack(voice, { brief: briefResult.source, context, format: args.format, words: args.words, draft, instruction });
   if (!built.ok) return fail({ body: built, exitCode: built.code });
 
-  return { ok: true, pack: built.pack, voice };
+  return { ok: true, pack: built.pack, voice, revisedFrom };
 }
 
 /**
@@ -340,7 +427,7 @@ export async function proseCore(args: ProseCoreArgs, ctx: ProseCoreContext, deps
     return { body: dryRunBody(assembled.pack), exitCode: 0, pack: assembled.pack };
   }
 
-  return await sendProse(assembled.pack, assembled.voice, args, ctx, deps);
+  return await sendProse(assembled.pack, assembled.voice, assembled.revisedFrom, args, ctx, deps);
 }
 
 // ---------------------------------------------------------------------------
@@ -423,14 +510,16 @@ function receiptSinkFor(ctx: ProseCoreContext): ReceiptSink {
 
 /**
  * The `--out` file's provenance frontmatter (AC2), key order fixed: `voice`,
- * `model`, `generated`, `prompt_hash`, `words`. `yamlScalar` is `write.ts`'s
- * one quoting rule, imported rather than re-implemented.
+ * `model`, `generated`, `prompt_hash`, `revised_from` (AGT-1244, only for a
+ * revise call), `words`. `yamlScalar` is `write.ts`'s one quoting rule,
+ * imported rather than re-implemented.
  */
 function proseFrontmatter(fields: {
   readonly voice: string;
   readonly model: string;
   readonly generated: string;
   readonly promptHash: string;
+  readonly revisedFrom: string | undefined;
   readonly words: number;
 }): string {
   return [
@@ -439,6 +528,7 @@ function proseFrontmatter(fields: {
     `model: ${yamlScalar(fields.model)}`,
     `generated: ${fields.generated}`,
     `prompt_hash: ${fields.promptHash}`,
+    ...(fields.revisedFrom !== undefined ? [`revised_from: ${yamlScalar(fields.revisedFrom)}`] : []),
     `words: ${fields.words}`,
     "---",
   ].join("\n");
@@ -454,6 +544,7 @@ function proseFrontmatter(fields: {
 async function sendProse(
   pack: Pack,
   voice: Voice,
+  revisedFrom: string | undefined,
   args: ProseCoreArgs,
   ctx: ProseCoreContext,
   deps: ProseDeps,
@@ -537,6 +628,7 @@ async function sendProse(
     timeToFirstTokenMs: Math.round(stats.timeToFirstTokenMs),
     wallMs: Math.round(stats.elapsedMs),
     words,
+    ...(revisedFrom !== undefined ? { revised_from: revisedFrom } : {}),
   };
 
   if (outPath === undefined) {
@@ -548,6 +640,7 @@ async function sendProse(
     model: routed.adapter.model,
     generated: now().toISOString(),
     promptHash: pack.hash,
+    revisedFrom,
     words,
   });
   mkdirSync(dirname(outPath), { recursive: true });
@@ -599,6 +692,8 @@ export async function runProse(args: ProseCliArgs, ctx: ProseCoreContext, deps: 
       dryRun: args.dryRun,
       out: args.out,
       force: args.force,
+      draft: args.draft,
+      instruction: args.instruction,
     },
     ctx,
     deps,

@@ -77,10 +77,13 @@ function helpText(): string {
     "                                            keep a piece as-is under the voice's exemplars/",
     "  pablo prose --voice <name> --brief <file|-> [--context <file>]...",
     "              [--format email|post|page|reply|note] [--words N]",
+    "              [--draft <file> --instruction \"<text>\"]",
     "              [--out <file> [--force]] [--json] [--dry-run]",
     "                                            write a piece in a voice: assemble, send,",
     "                                            print the text, receipt it, check it;",
-    "                                            no --project, no vault required",
+    "                                            no --project, no vault required;",
+    "                                            --draft + --instruction revise a previous",
+    "                                            piece instead of starting fresh",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -129,6 +132,10 @@ interface ParsedArgs {
   readonly format: string | undefined;
   /** `prose --out <path>`: write the answer to a file (with `--force` to overwrite). */
   readonly out: string | undefined;
+  /** `prose --draft <file>` (AGT-1244): the previous piece to revise. Requires `instruction`. */
+  readonly draft: string | undefined;
+  /** `prose --instruction "<text>"` (AGT-1244): what to change about `--draft`. Requires `draft`. */
+  readonly instruction: string | undefined;
 }
 
 /**
@@ -175,6 +182,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     context: Array.isArray(values["context"]) ? (values["context"] as string[]) : [],
     format: typeof values["format"] === "string" ? values["format"] : undefined,
     out: typeof values["out"] === "string" ? values["out"] : undefined,
+    draft: typeof values["draft"] === "string" ? values["draft"] : undefined,
+    instruction: typeof values["instruction"] === "string" ? values["instruction"] : undefined,
   };
 }
 
@@ -531,6 +540,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         json: args.json,
         out: args.out,
         force: args.force,
+        draft: args.draft,
+        instruction: args.instruction,
       },
       { cwd, env: process.env },
     );

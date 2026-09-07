@@ -483,6 +483,14 @@ const PROSE_ARGS = z.object({
     .describe(
       "CLI only: overwrite an existing `out` file instead of refusing. Refused over MCP — an existing file is never overwritten by a tool call.",
     ),
+  draft: z
+    .string()
+    .optional()
+    .describe("The revise loop (AGT-1244): a file path to the previous piece to rewrite. Requires instruction."),
+  instruction: z
+    .string()
+    .optional()
+    .describe("The revise loop: what to change about draft, in the author's own words. Requires draft."),
 });
 
 /**
@@ -539,6 +547,19 @@ async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext):
     const problem = bindProsePath(ctx, "--context", path);
     if (problem) return { body: refusalBody(problem), exitCode: problem.code };
   }
+  // `draft` is a new READ path (AGT-1244), bound exactly like `--brief` and
+  // `--context` above — a compromised/prompt-injected caller must not be able
+  // to name an arbitrary file (e.g. an SSH key) as the "previous piece" and
+  // have its contents echoed back in the pack (and, with `--out`, on disk).
+  // `instruction` is NOT a path — it is inline text with no file to bind —
+  // and is sanitized instead, in `prose.ts`'s `assembleProse`/
+  // `sanitizeInstruction`, on the one code path both the CLI and this verb
+  // share, so the defense cannot drift between the two callers the way
+  // AGT-1243's `line`/`section` split briefly did.
+  if (args.draft !== undefined) {
+    const problem = bindProsePath(ctx, "--draft", args.draft);
+    if (problem) return { body: refusalBody(problem), exitCode: problem.code };
+  }
   // `out` is the first WRITE path on this verb (AGT-1242) and gets the same
   // bound the read paths above get — a stronger requirement, not a weaker one:
   // an unbounded model-supplied `out` would let a tool call create or (with
@@ -578,6 +599,8 @@ async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext):
       dryRun: args["dry-run"],
       out: args.out,
       force: false, // never over MCP — refused above, and pinned here so it cannot come back by way of a schema change
+      draft: args.draft,
+      instruction: args.instruction,
     },
     { cwd: ctx.cwd, env: ctx.env },
     { stderr: ctx.stderr },

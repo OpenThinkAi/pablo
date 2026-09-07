@@ -77,6 +77,8 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     context: { type: "string", multiple: true },
     format: { type: "string" },
     out: { type: "string" }, // AGT-1242: prose --out (prose reuses `force`, already pinned above)
+    draft: { type: "string" }, // AGT-1244: prose --draft
+    instruction: { type: "string" }, // AGT-1244: prose --instruction
   });
 });
 
