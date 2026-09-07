@@ -56,7 +56,7 @@ including an unresolvable project), `1` error.
 |---|---|---|
 | `pablo init <format> <slug> "<Title>"` | scaffold from `<vault>/templates/<format>`, write the marker, commit | `{ok, path, format, slug, title, committed, notice?}` |
 | `pablo init --adopt --project <slug>` | write only the marker into a work that already exists, touching nothing else; never commits | same shape, `committed: false` |
-| `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, stages, last, open, next}` |
+| `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, title, stages, last, open, next, brief?, notices?}` |
 | `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object; exit 0 |
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
 | `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--variants V]` | the prose call: check, pack, send, write, rituals | `{path, receipt, rituals[]}` or `{refused, missing[]}` |
@@ -70,6 +70,16 @@ Everything past the skeleton (parsing, `--help`, `--project` resolution, `init`)
 stub today: each other verb prints "not implemented yet" and exits 1. See the design
 doc's `Commands` table for the full return shapes and the `Build order` section for
 what ships next.
+
+`pablo resume` is how an agent gets competent on a project in one call instead of
+reading ten files: `format`/`title` come from the marker, `stages` from the novel
+machine, `last` is the newest `notes/` file plus the last commit touching the work,
+`open` is every `[pick]` row and every bullet under a "Decisions"/"Open questions"
+heading in `bible/` and `outline/chapters.md`, and `next` is the first unmet stage or
+the next unwritten chapter. A `think brief` for the project's cortex runs off the
+critical path with a 20s timeout and lands as `brief` when it's ready in time; a
+missing `think`, a timeout, or a non-zero exit is a one-line entry in `notices`,
+never a failure. The prose form is under 30 lines and always ends with `next: ...`.
 
 `init` is the one verb that runs without a marker — its job is to write one. Every
 other verb refuses (exit 2) when the resolved project has no valid `pablo.json`,
