@@ -21,6 +21,7 @@ import { chapterPreconditions, readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
+import { runResumeVerb } from "./resume";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
 const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp"] as const;
@@ -286,7 +287,7 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
 }
 
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
-export function main(argv: readonly string[], cwd: string = process.cwd()): number {
+export async function main(argv: readonly string[], cwd: string = process.cwd()): Promise<number> {
   const args = parseCliArgs(argv);
 
   if (args.help || args.verb === undefined) {
@@ -329,11 +330,20 @@ export function main(argv: readonly string[], cwd: string = process.cwd()): numb
     return runStatus(args, projectPath);
   }
 
+  if (args.verb === "resume") {
+    if (projectPath === undefined) {
+      const message = "pablo: resume requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    return await runResumeVerb(args.json, projectPath, args.project as string);
+  }
+
   const message = `pablo: "${args.verb}" not implemented yet`;
   emit({ ok: false, code: EXIT_ERROR, message }, args.json);
   return EXIT_ERROR;
 }
 
 if (import.meta.main) {
-  process.exit(main(process.argv.slice(2)));
+  process.exit(await main(process.argv.slice(2)));
 }

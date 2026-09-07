@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -11,6 +11,13 @@ import { fileURLToPath } from "node:url";
  */
 const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
+
+/**
+ * A PATH that can still run `bun` and `git` but resolves no `think` — the
+ * real dev machine has `think` on PATH, and `resume` shells out to it, so
+ * tests that don't care about the brief use this to avoid a real network call.
+ */
+const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
 
 function tempVault(): string {
   const dir = mkdtempSync(join(tmpdir(), "pablo-cli-test-"));
@@ -60,15 +67,18 @@ test("resume --project nope --json exits 2 with a JSON refusal body", () => {
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("resume --project ice-house --json exits 1 (not implemented) once the project resolves and its marker is valid", () => {
+test("resume --project ice-house --json exits 0 with the resume summary shape", () => {
   const vault = tempVault();
 
-  const { stdout, exitCode } = runCli(["resume", "--project", "ice-house", "--json"], { PABLO_VAULT: vault });
+  const { stdout, exitCode } = runCli(["resume", "--project", "ice-house", "--json"], {
+    PABLO_VAULT: vault,
+    PATH: NO_THINK_PATH,
+  });
 
-  expect(exitCode).toBe(1);
+  expect(exitCode).toBe(0);
   const body = JSON.parse(stdout);
-  expect(body).toMatchObject({ ok: false, code: 1 });
-  expect(body.message).toContain("not implemented");
+  expect(body).toMatchObject({ format: "novel", title: "The Ice House" });
+  expect(typeof body.next).toBe("string");
 
   rmSync(vault, { recursive: true, force: true });
 });
