@@ -611,7 +611,7 @@ async function runTray(args: ParsedArgs): Promise<number> {
     });
     const result = await installTray({ plistPath, plist, logDir, exec: launchctlExec });
     if (!result.ok) {
-      console.error(result.stderr ?? "pablo: tray install: launchctl bootstrap failed");
+      console.error(result.stderr || "pablo: tray install: launchctl bootstrap failed");
       return EXIT_ERROR;
     }
     console.log(`installed ${plistPath}`);

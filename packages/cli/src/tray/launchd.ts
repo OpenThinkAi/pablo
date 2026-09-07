@@ -138,8 +138,8 @@ export async function installTray(opts: InstallTrayOptions): Promise<InstallTray
   mkdirSync(opts.logDir, { recursive: true });
   mkdirSync(dirname(opts.plistPath), { recursive: true });
 
+  // pid-suffixed, so it cannot collide with a leftover from a prior run.
   const tmp = `${opts.plistPath}.${process.pid}.tmp`;
-  rmSync(tmp, { force: true });
   writeFileSync(tmp, opts.plist, "utf8");
   rmSync(opts.plistPath, { force: true });
   renameSync(tmp, opts.plistPath);

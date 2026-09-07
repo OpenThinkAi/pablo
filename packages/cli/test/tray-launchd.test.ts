@@ -191,7 +191,7 @@ describe("installTray / uninstallTray", () => {
     expect(calls).toEqual([["launchctl", "bootout", UID_DOMAIN, plistPath]]);
   });
 
-  test("uninstall never removes a file at plistPath it did not write (a stray file is left alone by exec but still removed once found)", async () => {
+  test("uninstall removes any file found at plistPath regardless of who wrote it", async () => {
     // installTray/uninstallTray operate purely on the passed-in path; the
     // "never delete a file it did not write" guarantee comes from checking
     // existence first, not from tracking provenance. A plist written by
