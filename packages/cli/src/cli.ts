@@ -396,9 +396,8 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
     if (args.json) {
       console.log(JSON.stringify({ ready: result.ready, missing: result.missing, review }));
     } else {
-      console.log(`chapter ${chapter}: ${result.ready ? "ready" : "not ready"}`);
+      console.log(`chapter ${chapter}: ${result.ready ? "ready" : "not ready"} (review: ${review})`);
       for (const item of result.missing) console.log(`  ${item}`);
-      console.log(`  review: ${review}`);
     }
     return result.ready ? EXIT_OK : EXIT_REFUSED;
   }

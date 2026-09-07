@@ -18,12 +18,6 @@ import { stateReviewPath } from "../paths";
 import { readEvents, reviewStateFor } from "../review";
 import type { ReviewEvent, ReviewState } from "../review";
 
-// `reviewStateFor` and `ReviewState` live in `../review` (it's a pure
-// function over the review queue's event log, not novel-machine-specific);
-// re-exported here so a caller can still import either from this module.
-export { reviewStateFor };
-export type { ReviewState };
-
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
 export interface BibleFile {
   readonly file: string;
