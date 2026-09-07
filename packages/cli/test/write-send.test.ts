@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent, CompletionStats } from "@openthink/pablo-core";
 import { EndpointHung, normalizeOutput } from "@openthink/pablo-core";
@@ -16,6 +16,17 @@ import { runWrite } from "../src/write";
  * `--dry-run` path (and everything argv-parsing) by spawning the real bin.
  */
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
+
+/**
+ * A PATH that can still run `git` (the AGT-1231 rituals' git step) but
+ * resolves no `think` — same pattern as `cli.test.ts`'s `NO_THINK_PATH`.
+ * `runWrite` now runs the after-write rituals unconditionally on the live
+ * path, and one of them shells out to `think`; every test in this file must
+ * pass this as `deps.env` or it would make a real `think sync` call against
+ * the dev machine's actual cortex.
+ */
+const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
+const RITUAL_ENV: RunWriteDeps["env"] = { PATH: NO_THINK_PATH };
 
 function tempVault(): { vault: string; project: string } {
   const dir = mkdtempSync(join(tmpdir(), "pablo-write-send-test-"));
@@ -135,6 +146,7 @@ test("runWrite sends, normalizes, and writes the chapter file with a fake adapte
     adapter: fakeAdapter({ chunks: RAW_CHUNKS }),
     now: () => new Date("2026-09-06T12:00:00.000Z"),
     stderr: sink,
+    env: RITUAL_ENV,
   };
 
   const sent = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
@@ -185,7 +197,7 @@ test("runWrite sends, normalizes, and writes the chapter file with a fake adapte
 
 test("a second run without --force refuses (exit 2) and leaves the file byte-identical", async () => {
   const { vault, project } = tempVault();
-  const deps: RunWriteDeps = { adapter: fakeAdapter({ chunks: RAW_CHUNKS }) };
+  const deps: RunWriteDeps = { adapter: fakeAdapter({ chunks: RAW_CHUNKS }), env: RITUAL_ENV };
 
   await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
 
@@ -193,7 +205,7 @@ test("a second run without --force refuses (exit 2) and leaves the file byte-ide
   const before = readFileSync(filePath);
 
   const second = await captureStdout(() =>
-    runWrite(baseArgs(), vault, project, { adapter: fakeAdapter({ chunks: RAW_CHUNKS }) }),
+    runWrite(baseArgs(), vault, project, { adapter: fakeAdapter({ chunks: RAW_CHUNKS }), env: RITUAL_ENV }),
   );
   expect(second.result).toBe(2);
   const body = JSON.parse(second.lines[0] as string);
@@ -208,14 +220,14 @@ test("a second run without --force refuses (exit 2) and leaves the file byte-ide
 
 test("write --force overwrites an existing chapter file", async () => {
   const { vault, project } = tempVault();
-  await captureStdout(() => runWrite(baseArgs(), vault, project, { adapter: fakeAdapter({ chunks: RAW_CHUNKS }) }));
+  await captureStdout(() => runWrite(baseArgs(), vault, project, { adapter: fakeAdapter({ chunks: RAW_CHUNKS }), env: RITUAL_ENV }));
 
   const filePath = join(project, "chapters", "02-black-ice.md");
   const before = readFileSync(filePath, "utf8");
 
   const otherChunks = ["A wholly different draft", " of the same beat, for the --force test."];
   const forced = await captureStdout(() =>
-    runWrite(baseArgs({ force: true }), vault, project, { adapter: fakeAdapter({ chunks: otherChunks }) }),
+    runWrite(baseArgs({ force: true }), vault, project, { adapter: fakeAdapter({ chunks: otherChunks }), env: RITUAL_ENV }),
   );
   expect(forced.result).toBe(0);
 
@@ -229,7 +241,7 @@ test("write --force overwrites an existing chapter file", async () => {
 test("a fake adapter that throws EndpointHung refuses (exit 2) naming the endpoint, writes no file", async () => {
   const { vault, project } = tempVault();
   const hung = new EndpointHung("http://127.0.0.1:9999/v1", 0, 5000);
-  const deps: RunWriteDeps = { adapter: fakeAdapter({ error: hung }) };
+  const deps: RunWriteDeps = { adapter: fakeAdapter({ error: hung }), env: RITUAL_ENV };
 
   const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
   expect(outcome.result).toBe(2);
@@ -253,7 +265,7 @@ test("a fake adapter that throws EndpointHung refuses (exit 2) naming the endpoi
 
 test("an empty stream refuses (exit 2) and writes no file", async () => {
   const { vault, project } = tempVault();
-  const deps: RunWriteDeps = { adapter: emptyStreamAdapter() };
+  const deps: RunWriteDeps = { adapter: emptyStreamAdapter(), env: RITUAL_ENV };
 
   const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
   expect(outcome.result).toBe(2);

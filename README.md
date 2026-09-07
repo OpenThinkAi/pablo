@@ -59,7 +59,7 @@ including an unresolvable project), `1` error.
 | `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, title, stages, last, open, next, brief?, notices?}` |
 | `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object; exit 0 |
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
-| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, and runs the post-write check (AGT-1237) | `{ok, path, receipt, check[]}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
+| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, runs the post-write check (AGT-1237), then runs the after-write rituals (AGT-1231) | `{ok, path, receipt, check[], rituals[]}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
 | `pablo dry-run ...` | (planned; today this is `write`'s own `--dry-run`) any write or revise, assembled and priced, nothing sent | the pack, slice by slice |
@@ -184,6 +184,16 @@ adds one line, `read N tokens in Xs, wrote M in Ys`. The post-write mechanical-t
 check (`check.ts`'s `checkFile`) runs over the normalized body and its hits are
 returned as `check[]` — a hit never changes the exit code, which is `0` throughout
 this whole path once the file is written.
+
+Once the file is on disk (AGT-1231, `novel/rituals.ts`'s `runRituals`), five
+after-write rituals run in order — outline tick (the chapter's row in
+`outline/chapters.md` moves to `draft`), a dated note under `notes/`, a bullet
+under the work's `README.md` "Where things stand", a git commit of exactly
+those touched paths (never `git add -A`), and `think -C writing sync` — each
+independently wrapped so a failure (no git repo, `think` missing, a malformed
+outline row) is a notice on the returned `rituals[]`, never an exception, and
+never undoes the chapter write; they run only on this live path, never on
+`--dry-run` and never after a refusal.
 
 ## Project layout
 
