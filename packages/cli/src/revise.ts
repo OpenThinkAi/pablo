@@ -1,32 +1,15 @@
 /**
  * `pablo revise --project <slug> --file F (--passage "<quoted text>" | --start N --end N)
- *   --instruction "<text>" [--dry-run] [--json]` (AGT-1264): sends ONE located
- * passage of a manuscript through the local model and returns a candidate.
- * **Writes nothing** — the file on disk is byte-identical before and after
- * every call. See the design doc's `revise` row
- * (`~/saltline-digital-vault/projects/ai-terminal/README.md`) and
- * `review-tray.md`'s "The editor" section: the author (or, later, the ui-leaf
- * editor view, AGT-1269) takes the candidate, edits it, or drops it — `save`
- * is the only thing that ever commits a change to the chapter file.
+ *   --instruction "<text>" [--dry-run] [--json]`: sends ONE located passage of
+ * a manuscript through the local model and returns a candidate. Writes
+ * nothing — the file on disk is byte-identical before and after every call.
  *
- * `locatePassage` and the `revise` pack kind (`ReviseInputs`, `reviseSpecs`,
- * `PACK_BUDGETS.revise`, `REVISE_CLOSING`) are AGT-1257's core additions; this
- * file is the send half — assembling those inputs from a real chapter file and
- * a real project's style/work-rules, then routing, streaming, and receipting
- * exactly the way `prose.ts`'s `sendProse` does (AGT-1242), reused rather than
- * reimplemented: same `withReceipts` wrapper, same `packTimeoutMs`, same
- * `EndpointHung`/`ProviderResponseError`/`ProviderConfigError` refusals, same
- * injectable `{adapter, now, stderr}` so no test touches the network.
- *
- * Split mirrors `proseCore`/`runProse` (and `saveCore`/`runSave`): `runRevise`
- * is the CLI's thin printing wrapper; `reviseCore` is the pure-data half (never
- * prints, never throws — every failure is returned data) that both `runRevise`
- * and `verbs.ts`'s MCP `run` call. `assembleRevise` goes one layer further
- * still: given an ALREADY-LOCATED span (no `--passage`/`--start`/`--end`
- * parsing, no `locatePassage` call), it reads the file, strips frontmatter,
- * takes the paragraph before/after, and assembles the pack — the exact shape
- * AGT-1269's editor host needs (it already knows the span it is asking about;
- * it has no argv to parse).
+ * Builds on `packages/core`'s `locatePassage` and `revise` pack kind, and
+ * reuses `prose.ts`'s send shape (routing, streaming, receipting). Three
+ * layers, mirroring `proseCore`/`runProse`: `reviseCore` is pure (never
+ * prints/throws), `assembleRevise` takes an already-located span (no argv —
+ * for a caller like an editor host that already knows the span), and
+ * `runRevise` is the CLI's printing wrapper.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -158,15 +141,11 @@ function refuse(code: number, message: string): ReviseOutcome {
 }
 
 /**
- * `--instruction` is untrusted, model-controlled text over MCP, landing
- * directly in the assembled prompt as the "# What to change" slice,
- * immediately before the closing directive. Flattened to one line for the
- * same reason `prose.ts`'s `sanitizeInstruction` flattens its own —
- * heading-injection via an embedded CR/LF is exactly the risk AGT-1243's
- * security review (and AGT-1244's, on this exact field's `prose` sibling)
- * already found once; duplicated here rather than imported since `prose.ts`
- * doesn't export it and this build must not widen that file's surface for a
- * one-line utility.
+ * Flattens CR/LF out of `--instruction` before it lands in the "# What to
+ * change" slice — an embedded newline could otherwise forge a fake heading
+ * or closing line in the prompt. Duplicated from `prose.ts`'s own
+ * `sanitizeInstruction` rather than imported, since `prose.ts` doesn't
+ * export it.
  */
 function sanitizeInstruction(raw: string): string {
   return raw.replace(/[\r\n]+/g, " ").trim();
@@ -272,21 +251,11 @@ export type AssembleReviseResult =
 
 /**
  * Builds the `revise` pack from an already-read `body` and an already-valid
- * `span` — the one place `style`/`workRules`/`before`/`passage`/`after` are
- * turned into a `Pack`, shared by `assembleRevise` (which reads the file
- * itself) and `reviseCore` (which already has `body` in hand from resolving
- * `--passage`/`--start`/`--end` and must not read the file a second time —
- * `standards` review on this ticket's first pass caught exactly that TOCTOU
- * double-read).
+ * `span` — shared by `assembleRevise` (reads the file itself) and
+ * `reviseCore` (already has `body` in hand; avoids reading the file twice).
  *
- * `instruction` is sanitized HERE, not by each caller: `security` review on
- * this ticket's first pass flagged that a future caller of `assembleRevise`
- * (AGT-1269's editor host) could skip a caller-side `sanitizeInstruction`
- * step and silently reopen the heading-injection risk AGT-1243/AGT-1244
- * already found on `prose`'s sibling field. Sanitizing inside the one
- * function every caller (CLI, MCP, and the future editor host) funnels
- * through makes it impossible to skip; calling it twice (as `reviseCore`
- * does, on top of `runRevise`'s CLI path) is harmless — flatten-and-trim is
+ * `instruction` is sanitized HERE, not by each caller, so no caller can skip
+ * it; sanitizing it again beforehand is harmless since flatten-and-trim is
  * idempotent.
  */
 function buildRevisePack(vaultRoot: string, projectPath: string, body: string, span: Span, instruction: string): Pack {
@@ -406,11 +375,8 @@ interface Routed {
 /**
  * Which provider this call goes to (AC1): `route()`'s default for a
  * `revising`-kind intent, unless a config's `intents` mapping says otherwise.
- * `loadConfig` reads `ctx.env`, never the ambient environment, so a test (or
- * an MCP caller) pointing `XDG_CONFIG_HOME` at a temp directory is never
- * bypassed — the same AGT-1244 lesson `prose.ts`'s `routeProse` already
- * documents: one smoke call leaked to the real Anthropic API when this
- * override was omitted.
+ * Uses `ctx.env`, not `process.env`, so a test (or an MCP caller) pointing
+ * `XDG_CONFIG_HOME` at a temp directory is never bypassed.
  */
 function routeRevise(pack: Pack, ctx: ReviseCoreContext, deps: ReviseDeps): Routed | ReviseOutcome {
   let providers: ReturnType<typeof createProviders>;
@@ -529,8 +495,6 @@ export async function reviseCore(args: ReviseCoreArgs, ctx: ReviseCoreContext, d
   const spanResult = resolveSpan(args, body, resolved);
   if (!spanResult.ok) return spanResult.outcome;
 
-  // `buildRevisePack` sanitizes `instruction` itself (see its own doc
-  // comment) — passed through here unsanitized rather than sanitized twice.
   const pack = buildRevisePack(ctx.vaultRoot, ctx.projectPath, body, spanResult.span, args.instruction);
 
   if (args.dryRun) {

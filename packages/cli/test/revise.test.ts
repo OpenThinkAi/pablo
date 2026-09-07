@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,17 +8,31 @@ import type { ReviseCoreArgs, ReviseCoreContext, ReviseDeps, ReviseDryRunBody, R
 import { reviseCore } from "../src/revise";
 
 /**
- * `reviseCore`'s send path (AGT-1264) — exercised by calling it directly
- * against a fake `Adapter` (see `ReviseDeps.adapter`) so no test ever touches
- * the network, on a throwaway copy of the synthetic fixture vault (never
- * `~/writing`). Mirrors `write-send.test.ts`'s and `prose-send.test.ts`'s own
- * pattern for this repo's model-call verbs.
+ * `reviseCore`'s send path, exercised by calling it directly against a fake
+ * `Adapter` (see `ReviseDeps.adapter`) so no test ever touches the network,
+ * on a throwaway copy of the synthetic fixture vault (never `~/writing`).
+ * Mirrors `write-send.test.ts`'s and `prose-send.test.ts`'s own pattern.
  */
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const CHAPTER_RELATIVE = join("chapters", "01-the-last-full-cut.md");
 
+const cleanupDirs: string[] = [];
+
+afterEach(() => {
+  while (cleanupDirs.length > 0) {
+    const dir = cleanupDirs.pop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  cleanupDirs.push(dir);
+  return dir;
+}
+
 function tempVault(): { vault: string; project: string } {
-  const dir = mkdtempSync(join(tmpdir(), "pablo-revise-test-"));
+  const dir = tempDir("pablo-revise-test-");
   const vault = join(dir, "vault");
   cpSync(FIXTURE_VAULT, vault, { recursive: true });
   return { vault, project: join(vault, "novels", "ice-house") };
@@ -26,14 +40,11 @@ function tempVault(): { vault: string; project: string } {
 
 /**
  * `XDG_CONFIG_HOME` pointed at a fresh, empty temp directory on every context
- * this file builds — the AGT-1244 retro: a call that reaches `loadConfig`
- * without this override can read the real `~/.config/pablo/config.json` on
- * whatever machine the test runs on. `routeRevise` is only ever reached by
- * the send tests below (dry-run and refusal tests never call it), but every
- * context is built this way regardless, so the convention can't drift.
+ * this file builds, so a call that reaches `loadConfig` never reads the real
+ * `~/.config/pablo/config.json` on whatever machine the test runs on.
  */
 function ctxFor(vault: string, project: string): ReviseCoreContext {
-  const configHome = mkdtempSync(join(tmpdir(), "pablo-revise-config-"));
+  const configHome = tempDir("pablo-revise-config-");
   return { vaultRoot: vault, projectPath: project, env: { XDG_CONFIG_HOME: configHome } };
 }
 
@@ -107,8 +118,6 @@ test("revise refuses (exit 2) when --passage matches nothing", async () => {
   expect(outcome.exitCode).toBe(2);
   expect(outcome.body).toMatchObject({ ok: false, code: 2 });
   expect((outcome.body as { message: string }).message).toContain("not found");
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("revise refuses (exit 2) when --passage matches more than once, naming the count", async () => {
@@ -120,8 +129,6 @@ test("revise refuses (exit 2) when --passage matches more than once, naming the 
   const body = outcome.body as { ok: false; code: number; message: string };
   expect(body.ok).toBe(false);
   expect(body.message).toContain("2 places");
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("revise refuses (exit 2) when both --passage and --start/--end are given", async () => {
@@ -131,8 +138,6 @@ test("revise refuses (exit 2) when both --passage and --start/--end are given", 
 
   expect(outcome.exitCode).toBe(2);
   expect((outcome.body as { message: string }).message).toContain("not both");
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("revise refuses (exit 2) when neither --passage nor --start/--end are given", async () => {
@@ -142,8 +147,6 @@ test("revise refuses (exit 2) when neither --passage nor --start/--end are given
 
   expect(outcome.exitCode).toBe(2);
   expect((outcome.body as { message: string }).message).toContain("requires --passage");
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("revise refuses (exit 2) when only one of --start/--end is given", async () => {
@@ -153,8 +156,6 @@ test("revise refuses (exit 2) when only one of --start/--end is given", async ()
 
   expect(outcome.exitCode).toBe(2);
   expect((outcome.body as { message: string }).message).toContain("--start requires --end");
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("revise refuses (exit 2) when --instruction is missing", async () => {
@@ -164,8 +165,6 @@ test("revise refuses (exit 2) when --instruction is missing", async () => {
 
   expect(outcome.exitCode).toBe(2);
   expect((outcome.body as { message: string }).message).toContain("--instruction");
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("revise refuses (exit 2) when --file resolves outside the project", async () => {
@@ -175,8 +174,6 @@ test("revise refuses (exit 2) when --file resolves outside the project", async (
 
   expect(outcome.exitCode).toBe(2);
   expect((outcome.body as { message: string }).message).toContain("outside the work");
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("--dry-run prints the pack slice by slice (rules, before, passage, after, instruction, closing) and sends nothing", async () => {
@@ -194,8 +191,6 @@ test("--dry-run prints the pack slice by slice (rules, before, passage, after, i
 
   // A dry run never appends a receipt.
   expect(receiptLines(project)).toHaveLength(0);
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("the same inputs give the same prompt_hash twice (AC4)", async () => {
@@ -208,8 +203,6 @@ test("the same inputs give the same prompt_hash twice (AC4)", async () => {
   const hashOf = (outcome: typeof first): string => (outcome.body as { prompt_hash: string }).prompt_hash;
   expect(hashOf(first)).toBe(hashOf(second));
   expect(hashOf(first).length).toBeGreaterThan(0);
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("--start/--end locates the same span --passage would have located", async () => {
@@ -227,8 +220,6 @@ test("--start/--end locates the same span --passage would have located", async (
   expect(viaRange.exitCode).toBe(0);
   const hashOf = (outcome: typeof viaPassage): string => (outcome.body as { prompt_hash: string }).prompt_hash;
   expect(hashOf(viaRange)).toBe(hashOf(viaPassage));
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("a fake-adapter send returns the candidate, leaves the file byte-identical, and writes a revise receipt", async () => {
@@ -268,8 +259,6 @@ test("a fake-adapter send returns the candidate, leaves the file byte-identical,
   expect(receipts[0]?.["pack_kind"]).toBe("revise");
   expect(receipts[0]?.["prompt_hash"]).toBe(dryRunBody.prompt_hash);
   expect(receipts[0]?.["error"]).toBeNull();
-
-  rmSync(vault, { recursive: true, force: true });
 });
 
 test("an empty model answer refuses (exit 2) and still leaves the file untouched", async () => {
@@ -287,6 +276,4 @@ test("an empty model answer refuses (exit 2) and still leaves the file untouched
 
   const after = readFileSync(filePath);
   expect(after.equals(before)).toBe(true);
-
-  rmSync(vault, { recursive: true, force: true });
 });
