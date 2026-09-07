@@ -68,10 +68,14 @@ export interface RunWriteDeps {
   readonly env?: Record<string, string | undefined> | undefined;
   /** Overrides the after-write `think sync` ritual's timeout (default 20s). */
   readonly thinkTimeoutMs?: number | undefined;
+  /** Overrides the after-write continuity extraction ritual's 120s ceiling (AGT-1232). */
+  readonly continuityTimeoutMs?: number | undefined;
 }
 
 /** The intent a drafting pack routes under — see `providers/registry.ts`'s `route`. */
 const DRAFT_INTENT: Intent = { name: "draft", kind: "drafting" };
+/** The intent the continuity ritual's extraction call routes under (AGT-1232) — `extraction` routes local, same as drafting. */
+const CONTINUITY_INTENT: Intent = { name: "continuity", kind: "extraction" };
 
 /** How often (ms) the streaming progress line refreshes once tokens are flowing. */
 const PROGRESS_INTERVAL_MS = 2000;
@@ -296,6 +300,15 @@ export async function runWrite(
   const draftAdapter = deps.adapter ?? providers.adapter(providerId);
   const wrapped = withReceipts(draftAdapter, fileReceiptSink(projectPath), { pack, intent: "draft" });
 
+  // AGT-1232: the same routing `providerId` used, but under the `continuity`
+  // intent — an explicit `intents` mapping in config can send it somewhere
+  // else, but `route`'s default (kind !== "planning" -> local) puts it on the
+  // same local writer unless configured otherwise. Tests that inject
+  // `deps.adapter` get the same fake object here too, so a fake implementing
+  // `extractFactsWithAnchors` exercises the real continuity ritual without
+  // touching the network.
+  const extractor = deps.adapter ?? providers.adapter(providers.route(CONTINUITY_INTENT));
+
   const stderr = deps.stderr ?? process.stderr;
   const now = deps.now ?? (() => new Date());
 
@@ -391,6 +404,8 @@ export async function runWrite(
     now,
     env: deps.env,
     thinkTimeoutMs: deps.thinkTimeoutMs,
+    extractor,
+    continuityTimeoutMs: deps.continuityTimeoutMs,
   });
 
   emitWriteSuccess(args.json, workRelativePath, receipt, hits, rituals);

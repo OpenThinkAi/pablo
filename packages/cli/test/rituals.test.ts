@@ -111,12 +111,14 @@ test("runRituals ticks the outline, notes, updates the README, commits exactly t
   const chapterPath = writeChapterFile(project, 2, "black-ice");
 
   const rituals = await runRituals(project, 2, chapterPath, baseOpts());
-  expect(rituals).toHaveLength(5);
+  expect(rituals).toHaveLength(6);
 
   const ritualsByName = byName(rituals);
   expect(ritualsByName["outline"]?.status).toBe("ran");
   expect(ritualsByName["note"]?.status).toBe("ran");
   expect(ritualsByName["readme"]?.status).toBe("ran");
+  expect(ritualsByName["continuity"]?.status).toBe("skipped");
+  expect(ritualsByName["continuity"]?.detail).toBe("no extraction adapter");
   expect(ritualsByName["git"]?.status).toBe("ran");
   expect(ritualsByName["think"]?.status).toBe("skipped");
   expect(ritualsByName["think"]?.detail).toBe("think not on PATH");
