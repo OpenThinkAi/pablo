@@ -49,6 +49,7 @@ const KIND_NAMES: Readonly<Record<PackKind, string>> = {
   spanEdit: "span edit",
   drafting: "drafting",
   prose: "prose",
+  revise: "revise",
 };
 
 export function estimateWait(pack: Pack, rates: PackRates | undefined): WaitEstimate | undefined {

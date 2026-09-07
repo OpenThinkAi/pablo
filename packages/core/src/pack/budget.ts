@@ -26,11 +26,16 @@ import type { PackKind, Slice, SliceAdjustment } from "./types";
  * `--context` thread (the email being replied to, a product page) can run
  * long, so 12k leaves real headroom over `spanEdit`'s 10k without reaching
  * for `drafting`'s chapter-sized ceiling.
+ *
+ * `revise` (AGT-1257) is one located passage plus a little neighbourhood on
+ * each side, smaller than a full span edit's neighbourhood-plus-entity-sheets
+ * pack: 8k is comfortably above a real revise pack and keeps the wait short.
  */
 export const PACK_BUDGETS: Readonly<Record<PackKind, number>> = {
   spanEdit: 10_000,
   drafting: 16_000,
   prose: 12_000,
+  revise: 8_000,
 };
 
 /** Marker left in the prompt where the budget cut, so the model sees the seam too. */
