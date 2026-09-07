@@ -18,12 +18,14 @@ import { runCheck } from "./check";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
+import { runMcp } from "./mcp";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runResumeVerb } from "./resume";
 import { runSave } from "./save";
+import { deriveCliOptions, parseForChapter } from "./verbs";
 import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
@@ -95,24 +97,24 @@ interface ParsedArgs {
   readonly force: boolean;
 }
 
+/**
+ * The five MCP-exposed verbs' own options (`project`, `for`, `stage`, `file`,
+ * `chapter`, `words`, `scenes`, `dry-run`, `force`) are derived from
+ * `verbs.ts`'s zod shapes (`deriveCliOptions`) rather than hand-typed here —
+ * `pablo mcp` reads its tool schemas off the same shapes, so the CLI's argv
+ * and the MCP surface cannot drift apart. `json`/`help`/`adopt` are CLI-only
+ * flags no verb's contract includes, so they're added on top.
+ */
 export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   const { values, positionals } = parseArgs({
     args: argv as string[],
     allowPositionals: true,
     strict: false,
     options: {
-      project: { type: "string" },
+      ...deriveCliOptions(),
       json: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
       adopt: { type: "boolean", default: false },
-      for: { type: "string" },
-      stage: { type: "string" },
-      file: { type: "string" },
-      chapter: { type: "string" },
-      words: { type: "string" },
-      scenes: { type: "string" },
-      "dry-run": { type: "boolean", default: false },
-      force: { type: "boolean", default: false },
     },
   });
 
@@ -234,20 +236,6 @@ function runInit(args: ParsedArgs, cwd: string): number {
 }
 
 /**
- * Parses `--for`'s value into a chapter number. Accepts `chapter N`,
- * `chapter-N`, `ch N`, or a bare `N`; anything else is `undefined`, which the
- * caller turns into a refusal.
- */
-export function parseForChapter(raw: string): number | undefined {
-  const trimmed = raw.trim();
-  for (const pattern of [/^chapter\s+(\d+)$/i, /^chapter-(\d+)$/i, /^ch\s+(\d+)$/i, /^(\d+)$/]) {
-    const match = pattern.exec(trimmed);
-    if (match) return Number(match[1]);
-  }
-  return undefined;
-}
-
-/**
  * `status`'s prose: one line per stage, in the state's own order. `bible`'s
  * file count is how many of the checked files exist, not how many were
  * checked — an absent `places.md` shouldn't read as "1 file" the way a
@@ -334,6 +322,10 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   if (args.verb === "init") {
     return runInit(args, cwd);
+  }
+
+  if (args.verb === "mcp") {
+    return await runMcp(cwd);
   }
 
   let projectPath: string | undefined;
