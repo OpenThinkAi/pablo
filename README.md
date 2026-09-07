@@ -195,6 +195,44 @@ outline row) is a notice on the returned `rituals[]`, never an exception, and
 never undoes the chapter write; they run only on this live path, never on
 `--dry-run` and never after a refusal.
 
+## MCP (`pablo mcp`)
+
+`pablo mcp` is a stdio MCP server exposing five of the verbs above as MCP
+tools — `resume`, `status`, `write`, `save`, `check` (`init` is P1 for MCP).
+Every tool's input schema and every tool's result come straight from
+`packages/cli/src/verbs.ts`'s `VERBS` — the same zod shapes `cli.ts` derives
+its own `--project`/`--for`/`--chapter`/... argv options from — so the CLI
+and the MCP surface cannot drift apart. A tool's result is the verb's exact
+`--json` body: a refused precondition comes back as a normal result carrying
+`{ok: false, code, message, missing[]}` or `{..., tried[]}`, never a thrown
+tool error (only a genuine crash does that).
+
+| Tool | One line |
+|---|---|
+| `resume` | The structured session summary: stage per part, last event, open decisions, next step. |
+| `status` | The novel machine's per-stage state, or (with `for`) one chapter's draft preconditions. |
+| `write` | Draft one chapter on the configured local model: check, pack, send, write, receipt. |
+| `save` | Save the agent's planning output (acts, beats, bible facts, premise) into the vault. |
+| `check` | Scan a work's chapters for mechanical tells and provenance gaps. |
+
+`save` requires `file` over MCP (unlike the CLI, which falls back to stdin) —
+a tool call has no stdin of its own to read without colliding with the
+protocol's own stdio transport.
+
+### Claude Code
+
+Add this to `~/writing/.mcp.json` so a Claude Code session opened in the
+writing vault sees pablo's tools:
+
+```json
+{"mcpServers": {"pablo": {"command": "bun", "args": ["run", "/Users/mattpardini/Development/pablo/packages/cli/src/cli.ts", "mcp"]}}}
+```
+
+This repo does not write that file itself — the orchestrator/author installs
+it at `~/writing/.mcp.json` by hand (or via whatever installs `.mcp.json`
+files today); nothing under `packages/cli` ever writes outside a project's
+own vault directory or a test's own temp directory.
+
 ## Project layout
 
 A project is a vault directory:

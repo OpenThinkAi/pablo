@@ -362,34 +362,68 @@ function emitOk(json: boolean, stage: string, path: string, committed: boolean, 
   if (notice) console.log(notice);
 }
 
+/** `runSave`'s options minus `json` — the fields `saveCore` needs to do the actual work. */
+export interface SaveCoreOptions {
+  readonly stage: string | undefined;
+  readonly file: string | undefined;
+}
+
+/** A refusal body, the exact shape `--json`/MCP print — `{ok:false, code, message}`, no `tried` (save never resolves a project path itself). */
+export interface SaveRefusalBody {
+  readonly ok: false;
+  readonly code: number;
+  readonly message: string;
+}
+
+/** A success body, the exact shape `--json`/MCP print. */
+export interface SaveSuccessBody {
+  readonly ok: true;
+  readonly path: string;
+  readonly stage: string;
+  readonly committed: boolean;
+  readonly notice?: string;
+}
+
+export type SaveBody = SaveRefusalBody | SaveSuccessBody;
+
+export interface SaveOutcome {
+  readonly body: SaveBody;
+  readonly exitCode: number;
+}
+
 /**
- * `pablo save --project <slug> --stage <stage> [--file <path>]`. `projectPath`
- * is already resolved and marker-checked by `cli.ts`'s shared dispatch (the
- * same gate every verb but `init` goes through). Synchronous throughout, per
- * the ticket's constraint — no `await Bun.stdin.text()`.
+ * The pure core of `pablo save`: validates `--stage`, reads the input,
+ * validates/builds the target file's content, writes it, and commits it by
+ * pathspec — everything `runSave` used to do, minus the printing. Returns the
+ * exact `--json` body (never throws), so both `runSave` (CLI, prints prose or
+ * JSON from this) and `verbs.ts` (MCP, returns this verbatim) share one
+ * implementation — the two cannot drift.
  */
-export function runSave(options: SaveOptions, projectPath: string): number {
-  const { stage, file, json } = options;
+export function saveCore(options: SaveCoreOptions, projectPath: string): SaveOutcome {
+  const { stage, file } = options;
 
   if (stage === undefined) {
-    return emitRefusal(json, SAVE_EXIT_REFUSED, "pablo: save requires --stage acts|beats|premise|bible/<file>");
+    return {
+      body: { ok: false, code: SAVE_EXIT_REFUSED, message: "pablo: save requires --stage acts|beats|premise|bible/<file>" },
+      exitCode: SAVE_EXIT_REFUSED,
+    };
   }
 
   const targetResult = resolveStageTarget(projectPath, stage);
   if (!targetResult.ok) {
-    return emitRefusal(json, SAVE_EXIT_REFUSED, targetResult.message);
+    return { body: { ok: false, code: SAVE_EXIT_REFUSED, message: targetResult.message }, exitCode: SAVE_EXIT_REFUSED };
   }
   const target = targetResult.target;
 
   const inputResult = readSaveInput(file);
   if (!inputResult.ok) {
-    return emitRefusal(json, inputResult.code, inputResult.message);
+    return { body: { ok: false, code: inputResult.code, message: inputResult.message }, exitCode: inputResult.code };
   }
 
   const existingText = existsSync(target.absPath) ? readFileSync(target.absPath, "utf8") : "";
   const built = buildContent(target, inputResult.text, existingText);
   if (!built.ok) {
-    return emitRefusal(json, SAVE_EXIT_REFUSED, built.message);
+    return { body: { ok: false, code: SAVE_EXIT_REFUSED, message: built.message }, exitCode: SAVE_EXIT_REFUSED };
   }
 
   writeFileSync(target.absPath, built.content, "utf8");
@@ -397,6 +431,25 @@ export function runSave(options: SaveOptions, projectPath: string): number {
   const commitMessage = `${basename(projectPath)}: save ${stage}`;
   const { committed, notice } = gitCommit(projectPath, commitMessage, [target.absPath]);
 
-  emitOk(json, stage, target.relPath, committed, notice);
-  return SAVE_EXIT_OK;
+  const body: SaveSuccessBody = { ok: true, path: target.relPath, stage, committed };
+  return { body: notice ? { ...body, notice } : body, exitCode: SAVE_EXIT_OK };
+}
+
+/**
+ * `pablo save --project <slug> --stage <stage> [--file <path>]`. `projectPath`
+ * is already resolved and marker-checked by `cli.ts`'s shared dispatch (the
+ * same gate every verb but `init` goes through). Synchronous throughout, per
+ * the ticket's constraint — no `await Bun.stdin.text()`. Delegates the actual
+ * work to `saveCore` (shared with MCP) and only handles prose/JSON printing.
+ */
+export function runSave(options: SaveOptions, projectPath: string): number {
+  const { json, ...core } = options;
+  const { body, exitCode } = saveCore(core, projectPath);
+
+  if (!body.ok) {
+    return emitRefusal(json, body.code, body.message);
+  }
+
+  emitOk(json, body.stage, body.path, body.committed, body.notice);
+  return exitCode;
 }
