@@ -139,9 +139,7 @@ test("runRituals ticks the outline, notes, updates the README, commits exactly t
   expect(readme).toContain("## Where things stand");
   expect(readme).toContain("- 2026-09-06: chapter 2 drafted (42 words, test-writer-model).");
 
-  // Git: exactly the touched paths — continuity.md exists in the fixture but
-  // is never written to by any ritual here, so an unmodified `git add` of it
-  // stages nothing and it correctly does not appear in the commit's diff.
+  // Git: exactly the touched paths.
   expect(lastCommitPaths(project)).toEqual(
     ["chapters/02-black-ice.md", "notes/2026-09-06-chapter-02.md", "outline/chapters.md", "README.md"].sort(),
   );

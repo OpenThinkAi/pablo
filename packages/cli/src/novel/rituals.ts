@@ -341,7 +341,6 @@ export async function runRituals(workDir: string, chapter: number, chapterPath: 
 
   const chapterRel = relative(workDir, chapterPath).split(sep).join("/");
   const gitPaths = [chapterRel, "outline/chapters.md", noteRel, "README.md"];
-  if (existsSync(join(workDir, "continuity.md"))) gitPaths.push("continuity.md");
   const git = attempt("git", () => runGit(workDir, gitPaths, `${opts.slug}: draft chapter ${chapter}`));
 
   const think = await attemptAsync("think", () => runThink(chapter, opts.words, opts.slug, env, thinkTimeoutMs, allowNvmFallback));
