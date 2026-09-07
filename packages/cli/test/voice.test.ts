@@ -82,6 +82,26 @@ test('resolveVoice("fiction") aliases to <vault>/style/', () => {
   rmSync(configHome, { recursive: true, force: true });
 });
 
+test("resolveVoice refuses a plain name that is not a slug rather than joining it onto a directory", () => {
+  const vault = tempVault();
+  const configHome = tempConfigHome();
+
+  // `..` has no "/" and no ".md", so it misses the path branch; without slug
+  // validation it would join() to the vault root and be read as a voice.
+  for (const name of ["..", "Plain", "with space", "under_score"]) {
+    const result = resolveVoice(name, { cwd: vault, env: envFor(configHome) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe(2);
+      expect(result.tried).toEqual([]);
+      expect(result.message).toContain("is not a voice name");
+    }
+  }
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
 test("resolveVoice on an unknown name is a refusal (exit 2) listing every path tried", () => {
   const vault = tempVault();
   const configHome = tempConfigHome();

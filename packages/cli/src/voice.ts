@@ -79,6 +79,17 @@ export function resolveVoice(
     return { ok: true, path: resolved, scope: "path" };
   }
 
+  // A plain name is joined onto a directory below, so it must be a slug and
+  // nothing else. Without this a bare `..` (no `/`, no `.md` suffix, so it
+  // misses the path branch above) would `join()` its way to the vault root and
+  // be read as a voice — inside the vault, but not a voice the user named.
+  if (!SLUG_PATTERN.test(trimmed)) {
+    return refuse(
+      `pablo: "${trimmed}" is not a voice name (lowercase letters, digits and dashes; use a path with "/" or ".md" for a one-off voice file)`,
+      [],
+    );
+  }
+
   const vaultResult = findVault(opts.cwd, env);
 
   if (trimmed === "fiction") {
