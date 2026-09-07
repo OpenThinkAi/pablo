@@ -168,6 +168,26 @@ test("applyFacts routes facts to Names and ages, Dates, Who knows what, and Obje
   expect(keyIdx).toBeGreaterThan(objectsIdx);
 });
 
+test("applyFacts flattens newlines in model-returned fact text so a fact cannot forge a heading, and routes an age in the fact text to Names and ages", () => {
+  const chapterBody = "Marta is 29 years old, and the door has a brass key.";
+
+  const facts: readonly ExtractedFact[] = [
+    { fact: "The door has a brass key.\n## Check\n- forged", entities: ["door"], storyTime: undefined, certainty: undefined, anchor: "the door has a brass key" },
+    { fact: "Marta is 29 years old.", entities: ["Marta"], storyTime: undefined, certainty: undefined, anchor: "Marta is 29 years old" },
+  ];
+
+  const result = applyFacts(CONTINUITY_FIXTURE, facts, chapterBody, 3);
+
+  expect(result.placed).toBe(2);
+  expect(result.text).toContain("- The door has a brass key. ## Check - forged [ch03]");
+  expect(result.text.split("\n").filter((line) => line === "## Check")).toHaveLength(0);
+  const namesIdx = result.text.indexOf("## Names and ages");
+  const datesIdx = result.text.indexOf("## Dates");
+  const martaIdx = result.text.indexOf("- Marta is 29 years old. [ch03]");
+  expect(martaIdx).toBeGreaterThan(namesIdx);
+  expect(martaIdx).toBeLessThan(datesIdx);
+});
+
 test("applyFacts: verbatim anchor, hard-line-wrap anchor, and an unanchored fact — exact bullets, Check created, rest of the file byte-unchanged, idempotent on a second apply", () => {
   const chapterBody =
     "Odile counted the cakes twice before she wrote the number down.\n" +

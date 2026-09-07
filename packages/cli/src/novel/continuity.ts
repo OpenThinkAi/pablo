@@ -97,7 +97,9 @@ function anchorFound(chapterBody: string, anchor: string | undefined): boolean {
  */
 function headingFor(fact: ExtractedFact): string {
   const namesAges =
-    fact.entities.some((entity) => AGE_LIKE_NUMBER.test(entity) || BORN_WORD.test(entity)) || BORN_WORD.test(fact.fact);
+    fact.entities.some((entity) => AGE_LIKE_NUMBER.test(entity) || BORN_WORD.test(entity)) ||
+    AGE_LIKE_NUMBER.test(fact.fact) ||
+    BORN_WORD.test(fact.fact);
   if (namesAges) return NAMES_AGES_HEADING;
 
   const isDate = (fact.storyTime !== undefined && fact.storyTime.trim() !== "") || FOUR_DIGIT_YEAR.test(fact.fact);
@@ -169,7 +171,10 @@ export function applyFacts(
   for (const fact of facts) {
     const anchored = anchorFound(chapterBody, fact.anchor);
     const heading = anchored ? headingFor(fact) : CHECK_HEADING;
-    const bulletLine = anchored ? `- ${fact.fact} [ch${chapterTag}]` : `- ${fact.fact} [ch${chapterTag}, anchor not found]`;
+    // `fact.fact` is model output: a newline inside it would become a real line
+    // break in continuity.md and could forge a `## ` heading, so flatten it first.
+    const safeFact = fact.fact.replace(/[\r\n]+/g, " ").trim();
+    const bulletLine = anchored ? `- ${safeFact} [ch${chapterTag}]` : `- ${safeFact} [ch${chapterTag}, anchor not found]`;
 
     if (lines.includes(bulletLine)) continue;
 
