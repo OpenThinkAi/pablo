@@ -36,6 +36,16 @@ export function stateReceiptsPath(env: Record<string, string | undefined> = proc
 }
 
 /**
+ * `<stateDir>/review.jsonl` — the review queue (AGT-1255's `review.ts`), one
+ * global append-only log beside `receipts.jsonl`. Added by AGT-1263 for
+ * `pablo status`'s per-chapter review lookup; same `env`-default rule as
+ * `stateReceiptsPath` above.
+ */
+export function stateReviewPath(env: Record<string, string | undefined> = process.env): string {
+  return join(stateDir(env), "review.jsonl");
+}
+
+/**
  * A `ReceiptSink` appending to an absolute JSONL path, creating its directory
  * on first use — the state-directory counterpart to core's `fileReceiptSink`.
  * Not a generalisation of that function: core's takes a *vault root* and

@@ -21,7 +21,11 @@ function tempWork(): string {
 }
 
 test("readNovelState reads the fixture's premise, bible, acts, beats, and chapters", () => {
-  const state = readNovelState(WORK);
+  // AGT-1263: an isolated, empty XDG_STATE_HOME so `review` reads "none" from
+  // a queue that provably doesn't exist, never from whatever happens to be on
+  // the machine running this test.
+  const stateHome = mkdtempSync(join(tmpdir(), "pablo-machine-test-state-"));
+  const state = readNovelState(WORK, { XDG_STATE_HOME: stateHome });
 
   expect(state.premise).toBe(true);
 
@@ -41,7 +45,7 @@ test("readNovelState reads the fixture's premise, bible, acts, beats, and chapte
   expect(state.beats[1]?.title).toBe("Black Ice");
 
   expect(state.chapters).toEqual([
-    { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut" },
+    { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut", review: "none" },
   ]);
 });
 

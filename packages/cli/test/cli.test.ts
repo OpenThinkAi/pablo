@@ -131,18 +131,26 @@ test("init novel onto an existing slug exits 2", () => {
 
 test("status --project ice-house --json exits 0 with the novel machine's state", () => {
   const vault = tempVault();
+  // AGT-1263: an isolated, empty XDG_STATE_HOME so `review` reads "none" from
+  // a queue that provably doesn't exist, never from whatever the machine
+  // running this test happens to have queued.
+  const stateHome = mkdtempSync(join(tmpdir(), "pablo-cli-test-state-"));
 
-  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--json"], { PABLO_VAULT: vault });
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--json"], {
+    PABLO_VAULT: vault,
+    XDG_STATE_HOME: stateHome,
+  });
 
   expect(exitCode).toBe(0);
   const body = JSON.parse(stdout);
   expect(body.premise).toBe(true);
   expect(body.beats).toHaveLength(4);
   expect(body.chapters).toEqual([
-    { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut" },
+    { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut", review: "none" },
   ]);
 
   rmSync(vault, { recursive: true, force: true });
+  rmSync(stateHome, { recursive: true, force: true });
 });
 
 test("status --project ice-house (no --json) prints one prose line per stage", () => {
