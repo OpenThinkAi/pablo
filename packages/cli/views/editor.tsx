@@ -109,6 +109,11 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Inline styles don't reach `:disabled` — this dims a button explicitly so "disabled" is visible, not just inert. */
+function withDisabledLook(base: CSSProperties, isDisabled: boolean): CSSProperties {
+  return isDisabled ? { ...base, opacity: 0.45, cursor: "not-allowed" } : base;
+}
+
 // ---------------------------------------------------------------------------
 // DOM-facing helpers. These touch Range/Selection/Node and so stay here
 // rather than in editor-logic.ts, which is pure precisely so it can be
@@ -485,7 +490,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                           type="button"
                           onClick={submitRevise}
                           disabled={revising || instruction.trim() === ""}
-                          style={primaryButtonStyle}
+                          style={withDisabledLook(primaryButtonStyle, revising || instruction.trim() === "")}
                         >
                           {revising ? "Revising…" : "Send"}
                         </button>
@@ -565,7 +570,12 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                     (saveStatus.detail !== undefined ? saveStatus.detail : "saved")}
                 </div>
                 <div style={footButtonsStyle}>
-                  <button type="button" onClick={() => handleSave()} disabled={!dirty || saving} style={saveButtonStyle}>
+                  <button
+                    type="button"
+                    onClick={() => handleSave()}
+                    disabled={!dirty || saving}
+                    style={withDisabledLook(saveButtonStyle, !dirty || saving)}
+                  >
                     {saving ? "Saving…" : "Save"}
                   </button>
                   {canApproveReject && (
@@ -574,7 +584,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                         type="button"
                         onClick={openReject}
                         disabled={decisionStatus.kind === "pending" || rejecting}
-                        style={dangerButtonStyle}
+                        style={withDisabledLook(dangerButtonStyle, decisionStatus.kind === "pending" || rejecting)}
                       >
                         Reject
                       </button>
@@ -582,7 +592,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                         type="button"
                         onClick={handleApprove}
                         disabled={decisionStatus.kind === "pending" || rejecting}
-                        style={approveButtonStyle}
+                        style={withDisabledLook(approveButtonStyle, decisionStatus.kind === "pending" || rejecting)}
                       >
                         {decisionStatus.kind === "pending" ? "Approving…" : "Approve"}
                       </button>
