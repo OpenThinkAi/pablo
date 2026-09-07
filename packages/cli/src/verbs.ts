@@ -67,11 +67,13 @@ import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { buildResume } from "./resume";
+import { reviewCore } from "./review-verbs";
 import { saveCore } from "./save";
 import { addExemplar, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { VoiceLocation } from "./voice";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
+import { stateReviewPath } from "./paths";
 
 /** A minimal `process.stderr`-shaped sink — mirrors `write.ts`'s `ProgressSink`. */
 export interface ProgressSink {
@@ -83,6 +85,15 @@ export interface VerbContext {
   readonly cwd: string;
   readonly env: Record<string, string | undefined>;
   readonly stderr: ProgressSink;
+  /**
+   * AGT-1261: which surface invoked this verb. `mcp.ts`'s `runMcp` sets this
+   * to `"mcp"`; `cli.ts` never sets it (every other caller — the CLI, and
+   * every existing test's hand-built `ctx` — leaves it `undefined`, read as
+   * `"cli"`). Only `review`'s `run` reads it today, to pick `decide`'s `by`
+   * field (AC3's "`by: \"cli\"` (or `\"mcp\"` when invoked through the MCP
+   * server)"); no other verb's behavior depends on who called it.
+   */
+  readonly caller?: "cli" | "mcp";
 }
 
 /** `run`'s return: `body` is the exact `--json` object; `exitCode` is the CLI's exit-code contract (0 ok, 2 refused, 1 error). */
@@ -114,6 +125,18 @@ export interface Verb<Args extends z.ZodRawShape = z.ZodRawShape> {
    * on the verb's own name/args/run, unaffected by how MCP exposes it.
    */
   readonly mcpTools?: readonly McpToolSpec[];
+  /**
+   * AGT-1261 (standards review finding): field names in `args.shape` that
+   * `cli.ts` reads from positionals (`args.rest`), not a named flag —
+   * `deriveCliOptions` skips these for this verb so `parseArgs` never
+   * declares e.g. `--action`/`--id` as recognized string options a caller
+   * could pass and have silently ignored (previously: `pablo review --action
+   * list` parsed as `values.action = "list"`, consumed the token, and left
+   * `args.rest` empty — a misleading "unknown action" refusal). `voice`'s
+   * `sub`/`name` predate this field and have the same latent gap, not
+   * migrated here to keep this ticket's diff to the verb it touches.
+   */
+  readonly positionalArgs?: readonly string[];
 }
 
 function refusalBody(r: Refusal): { ok: false; code: number; message: string; tried: readonly string[] } {
@@ -786,6 +809,123 @@ async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext):
 }
 
 // ---------------------------------------------------------------------------
+// review (AGT-1261) — list|show|approve|reject|wait over `review.ts`'s queue
+// (AGT-1255). One verb with a positional `action`/`id` for the CLI (all five
+// subcommands; `action`/`id` are in `positionalArgs`, so `deriveCliOptions`
+// never declares them as named flags). Over MCP it narrows to a single
+// `review` tool covering only `list`/`show`/`wait` (`mcpTools`, the same
+// mechanism `voice` uses to expose a subset — see that section's comment):
+// security review finding, AGT-1261 round 1 — `approve`/`reject` write a
+// decision that is meant to be a human checkpoint on pablo's own output
+// ("the model has no write tool" extends to "the model cannot clear its own
+// review gate"), so a model connected over MCP can watch the queue and wait
+// on it, but can never approve or reject a piece itself, including one it
+// just wrote. `approve`/`reject` stay CLI/tray/editor-only. Global, not
+// project-scoped (no `project` field): the queue is one file for every vault
+// (or none) to share.
+// ---------------------------------------------------------------------------
+
+const REVIEW_ARGS = z.object({
+  action: z
+    .enum(["list", "show", "approve", "reject", "wait"])
+    .describe("list pending pieces, show one, approve/reject a decision, or wait for one."),
+  id: z.string().optional().describe("The piece id — required for show/approve/reject/wait."),
+  all: z.boolean().optional().default(false).describe("review list: also include decided pieces, with their decision."),
+  unread: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("review approve: record the approval as unread (read: false) — the tray's blind approve."),
+  reason: z.string().optional().describe("review reject: why, recorded on the decision."),
+  // `.positive()` rejects 0 — deliberately CLI/MCP-asymmetric: the CLI's own
+  // `--timeout 0` (an instant, clock-free timeout, exercised by
+  // review-verbs.test.ts) bypasses this schema entirely and is coerced by
+  // `cli.ts`'s own `Number(...)` instead, so `reviewCore` still accepts 0
+  // from that path. Don't "fix" this by allowing 0 here — an MCP caller
+  // asking to wait 0 seconds is asking to not wait at all, which `list`/
+  // `show` already cover.
+  timeout: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(3600)
+    .describe("review wait: seconds to wait for a decision before timing out (default 3600)."),
+});
+
+/**
+ * The CLI's `review` dispatch (`action`/`id` are positionals, not named
+ * flags — see `Verb.positionalArgs`'s docstring and this verb's
+ * `positionalArgs` below).
+ */
+const REVIEW_POSITIONAL_ARGS: readonly string[] = ["action", "id"];
+
+async function runReviewCoreFor(
+  args: { action: z.infer<typeof REVIEW_ARGS>["action"]; id?: string; all?: boolean; unread?: boolean; reason?: string; timeout?: number },
+  ctx: VerbContext,
+): Promise<VerbResult> {
+  const path = stateReviewPath(ctx.env);
+  return reviewCore(
+    {
+      action: args.action,
+      id: args.id,
+      all: args.all,
+      unread: args.unread,
+      reason: args.reason,
+      timeoutSeconds: args.timeout,
+    },
+    { path, by: ctx.caller === "mcp" ? "mcp" : "cli" },
+  );
+}
+
+/**
+ * The CLI-facing `run` (`cli.ts` never calls this directly — it calls
+ * `review-verbs.ts`'s `runReview`, which prints and passes `by: "cli"` — but
+ * `VERBS`/`deriveCliOptions`/`verbs.test.ts` all need a `run` and a full
+ * `args` shape for `review` the same way every other verb has one). All five
+ * actions; `ctx.caller` decides `by` exactly as `runReviewMcp` below does.
+ */
+async function runReviewVerb(args: z.infer<typeof REVIEW_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  return runReviewCoreFor(args, ctx);
+}
+
+// `list`/`show`/`wait` only (no `unread`/`reason` — those are `approve`/
+// `reject`'s own fields, and neither action is offered here).
+const REVIEW_MCP_ARGS = z.object({
+  action: z.enum(["list", "show", "wait"]).describe("list pending pieces, show one, or wait for a decision."),
+  id: z.string().optional().describe("The piece id — required for show/wait."),
+  all: z.boolean().optional().default(false).describe("review list: also include decided pieces, with their decision."),
+  timeout: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(3600)
+    .describe("review wait: seconds to wait for a decision before timing out (default 3600)."),
+});
+
+/**
+ * The MCP path for `review` (AC3's `by: "mcp"`) — `list`/`show`/`wait` only.
+ * `approve`/`reject` are deliberately absent from both this schema and this
+ * function's body: an orchestrating agent can watch the queue and wait on a
+ * decision, but the decision itself is never something a tool call can make
+ * (see the file section comment above `REVIEW_ARGS`).
+ */
+async function runReviewMcp(args: z.infer<typeof REVIEW_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  return runReviewCoreFor(args, ctx);
+}
+
+const REVIEW_MCP_TOOLS: readonly McpToolSpec[] = [
+  {
+    name: "review",
+    description:
+      "The review queue, read-only from here: `list` pending pieces (or `all` for decided ones too), `show` one, or `wait` until a decision exists. `approve`/`reject` are not available over MCP — the review queue is a human checkpoint on pablo's own output, so a model can watch it but never clear it, including for a piece it just wrote.",
+    args: REVIEW_MCP_ARGS,
+    run: runReviewMcp,
+  },
+];
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -841,6 +981,18 @@ export const VERBS: readonly Verb[] = [
       "Write a piece in a named voice from a brief: assemble the pack, send it to the routed model, return the text plus a receipt and check hits (or, with `dry-run`, just render the pack). No `--project`, no vault required.",
     args: PROSE_ARGS,
     run: runProseVerb,
+  },
+  {
+    name: "review",
+    description:
+      "The review queue: `list` pending pieces (or `--all` for decided ones too), `show` one, `approve`/`reject` a decision, or `wait` until one exists. No `--project`, no vault required — the queue is one global file.",
+    args: REVIEW_ARGS,
+    run: runReviewVerb,
+    positionalArgs: REVIEW_POSITIONAL_ARGS,
+    // AGT-1261 security review: over MCP this narrows to list/show/wait —
+    // approve/reject are CLI-only (see the section comment above REVIEW_ARGS
+    // and REVIEW_MCP_TOOLS's own comment).
+    mcpTools: REVIEW_MCP_TOOLS,
   },
 ];
 
@@ -912,7 +1064,9 @@ function cliOptionFor(schema: z.ZodTypeAny): CliOptionConfig {
 export function deriveCliOptions(): Record<string, CliOptionConfig> {
   const options: Record<string, CliOptionConfig> = {};
   for (const verb of VERBS) {
+    const positional = new Set(verb.positionalArgs ?? []);
     for (const [key, schema] of Object.entries(verb.args.shape)) {
+      if (positional.has(key)) continue;
       if (!(key in options)) options[key] = cliOptionFor(schema as z.ZodTypeAny);
     }
   }

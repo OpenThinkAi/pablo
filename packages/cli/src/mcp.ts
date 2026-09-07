@@ -77,7 +77,9 @@ export function buildMcpServer(ctx: VerbContext): McpServer {
 
 /** `pablo mcp`'s entry point: serve over stdio until the client disconnects. Returns the process exit code (always 0 — a clean disconnect, not an error). */
 export async function runMcp(cwd: string = process.cwd()): Promise<number> {
-  const ctx: VerbContext = { cwd, env: process.env, stderr: process.stderr };
+  // `caller: "mcp"` (AGT-1261) is read only by `review`'s `run` today, to pick
+  // `decide`'s `by` field — every other verb ignores `VerbContext.caller`.
+  const ctx: VerbContext = { cwd, env: process.env, stderr: process.stderr, caller: "mcp" };
   const server = buildMcpServer(ctx);
   const transport = new StdioServerTransport();
 
