@@ -399,7 +399,11 @@ export function flagLine(
     return refuse("pablo: voice flag: line must not be empty", []);
   }
 
-  const rawSection = (opts.section ?? DEFAULT_FLAG_HEADING).trim();
+  // `section` is model-controlled over MCP exactly like `line` — flattened the
+  // same way, or a `section: "Flagged\n## Injected"` could still forge a
+  // second, attacker-chosen `## ` heading via insertUnderHeading's
+  // heading-not-found append path (security review, AGT-1243).
+  const rawSection = (opts.section ?? DEFAULT_FLAG_HEADING).replace(/[\r\n]+/g, " ").trim();
   const heading = rawSection.startsWith("#") ? rawSection : `## ${rawSection}`;
 
   const targetPath = flagTargetPath(location);

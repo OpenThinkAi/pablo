@@ -173,6 +173,26 @@ test("flagLine flattens an embedded newline/heading attempt in the line so it ca
   cleanupAll();
 });
 
+test("flagLine flattens an embedded newline/heading attempt in --section too (security review, AGT-1243)", () => {
+  const vault = gitInitVault();
+  const voiceMdPath = join(vault, "voices", "plain", "voice.md");
+
+  const hostileSection = "Flagged\n## Injected";
+  const result = flagLine(plainLocation(vault), "a fine line", { section: hostileSection });
+  expect(result.ok).toBe(true);
+
+  const updated = readFileSync(voiceMdPath, "utf8");
+  const updatedLines = updated.split("\n");
+
+  // The hostile section string never produced a second, attacker-chosen
+  // "## Injected" heading — it was flattened into one heading line instead.
+  expect(updatedLines).not.toContain("## Injected");
+  expect(updatedLines).toContain("## Flagged ## Injected");
+  expect(updatedLines).toContain('Flagged: "a fine line"');
+
+  cleanupAll();
+});
+
 test("flagLine refuses an empty (or whitespace-only) line", () => {
   const vault = gitInitVault();
   const result = flagLine(plainLocation(vault), "   ");
