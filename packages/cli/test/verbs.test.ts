@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,10 +28,10 @@ function verb(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the six MCP verbs, each project-scoped verb requiring project", () => {
-  expect(VERBS.map((v) => v.name).sort()).toEqual(["check", "resume", "save", "status", "voice", "write"]);
+test("VERBS exposes exactly the seven MCP verbs, each project-scoped verb requiring project", () => {
+  expect(VERBS.map((v) => v.name).sort()).toEqual(["check", "prose", "resume", "save", "status", "voice", "write"]);
   for (const v of VERBS) {
-    if (v.name === "voice") continue; // voice resolves via cwd/vault, not a --project slug (AGT-1240)
+    if (v.name === "voice" || v.name === "prose") continue; // neither resolves via a --project slug (AGT-1240, AGT-1241)
     const parsed = v.args.safeParse({});
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
@@ -44,6 +44,12 @@ test("voice's args require sub, but not project", () => {
   const voice = verb("voice");
   expect(voice.args.safeParse({}).success).toBe(false);
   expect(voice.args.safeParse({ sub: "list" }).success).toBe(true);
+});
+
+test("prose's args accept no project, and require nothing on their own (voice/brief are checked by run, not by zod)", () => {
+  const prose = verb("prose");
+  expect(prose.args.safeParse({}).success).toBe(true);
+  expect("project" in prose.args.shape).toBe(false);
 });
 
 // Pinned explicitly (per the ticket) so any future verb.ts change that adds,
@@ -66,6 +72,10 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     line: { type: "string" },
     section: { type: "string" },
     title: { type: "string" },
+    voice: { type: "string" },
+    brief: { type: "string" },
+    context: { type: "string", multiple: true },
+    format: { type: "string" },
   });
 });
 
@@ -397,5 +407,142 @@ test("voice.run new without name refuses (exit 2)", async () => {
   expect(outcome.body).toMatchObject({ ok: false, code: 2 });
 
   rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// prose (AGT-1241) — CLI-level and slice-shape behaviour is covered in
+// packages/cli/test/prose.test.ts; these exercise the MCP-only surface:
+// dry-run through the verb's `run`, and the vault-boundary bound on
+// `brief`/`context` (mirroring `save`'s/`check`'s MCP tests above).
+// ---------------------------------------------------------------------------
+
+test("prose.run with dry-run true returns a prompt_hash, exit 0", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+  const briefPath = join(vault, "brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+
+  const outcome = await verb("prose").run(
+    { voice: "plain", brief: briefPath, context: [], "dry-run": true },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(0);
+  expect(outcome.body).toMatchObject({ ok: true, dryRun: true });
+  expect(typeof (outcome.body as { prompt_hash: string }).prompt_hash).toBe("string");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("prose.run without dry-run refuses with exit 1 (not wired to the model yet)", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+  const briefPath = join(vault, "brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+
+  const outcome = await verb("prose").run(
+    { voice: "plain", brief: briefPath, context: [] },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(1);
+  expect(outcome.body).toMatchObject({ ok: false, code: 1 });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("prose.run without voice refuses (exit 2)", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+
+  const outcome = await verb("prose").run({ context: [], "dry-run": true }, voiceCtxFor(vault, configHome));
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("prose.run with brief \"-\" refuses (exit 2): no stdin to read in an MCP tool call", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+
+  const outcome = await verb("prose").run(
+    { voice: "plain", brief: "-", context: [], "dry-run": true },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("MCP");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+// AGT-1241's own version of the AGT-1235 review finding: `brief`/`context`
+// are model-controlled over MCP, so a path outside the vault must be refused
+// before ever being read.
+test("prose.run with a brief outside the vault refuses (exit 2), naming the vault boundary", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+
+  const outcome = await verb("prose").run(
+    { voice: "plain", brief: "/etc/hosts", context: [], "dry-run": true },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("inside");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+test("prose.run with a context file outside the vault refuses (exit 2), naming the vault boundary", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+  const briefPath = join(vault, "brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+
+  const outcome = await verb("prose").run(
+    { voice: "plain", brief: briefPath, context: ["/etc/hosts"], "dry-run": true },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(2);
+  expect(outcome.body).toMatchObject({ ok: false, code: 2 });
+  expect((outcome.body as { message: string }).message).toContain("inside");
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+// AC4: prose must work with no vault at all — a global voice, from a cwd
+// with no vault/style marker at all. The bound then falls back to `ctx.cwd`
+// (see `bindProsePath`'s comment in verbs.ts), so a brief under `ctx.cwd`
+// is still allowed.
+test("prose.run with no vault resolves a global voice and a brief under ctx.cwd", async () => {
+  const noVaultCwd = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-novault-"));
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+  mkdirSync(join(configHome, "pablo", "voices", "memo", "exemplars"), { recursive: true });
+  writeFileSync(join(configHome, "pablo", "voices", "memo", "voice.md"), "# Voice: memo\n\nShort and plain.\n", "utf8");
+  const briefPath = join(noVaultCwd, "brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+
+  const outcome = await verb("prose").run(
+    { voice: "memo", brief: briefPath, context: [], "dry-run": true },
+    { cwd: noVaultCwd, env: { XDG_CONFIG_HOME: configHome, PATH: NO_THINK_PATH }, stderr: { write: () => {} } },
+  );
+
+  expect(outcome.exitCode).toBe(0);
+  expect(outcome.body).toMatchObject({ ok: true, dryRun: true });
+
+  rmSync(noVaultCwd, { recursive: true, force: true });
   rmSync(configHome, { recursive: true, force: true });
 });

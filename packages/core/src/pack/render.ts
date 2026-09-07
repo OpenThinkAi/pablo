@@ -48,6 +48,7 @@ export const UNMEASURED_PROMPT_TOKENS_PER_SECOND = 120;
 const KIND_NAMES: Readonly<Record<PackKind, string>> = {
   spanEdit: "span edit",
   drafting: "drafting",
+  prose: "prose",
 };
 
 export function estimateWait(pack: Pack, rates: PackRates | undefined): WaitEstimate | undefined {

@@ -4,12 +4,14 @@ export type {
   DraftingInputs,
   Pack,
   PackKind,
+  ProseInputs,
   Slice,
   SliceAction,
   SliceAdjustment,
   SpanEditInputs,
   TextSource,
   TimelineGate,
+  VoiceInputs,
   WorkIdentity,
 } from "./types";
 export type { TokenEstimator } from "./estimate";
@@ -58,4 +60,4 @@ export {
   readWorkRules,
   section,
 } from "./vault";
-export { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "./closing";
+export { CRITICMARKUP_EDIT_CLOSING, PROSE_CLOSING, TOOL_EDIT_CLOSING } from "./closing";

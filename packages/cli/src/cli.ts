@@ -24,6 +24,7 @@ import { chapterPreconditions, readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
+import { runProse } from "./prose";
 import { runResumeVerb } from "./resume";
 import { runSave } from "./save";
 import { deriveCliOptions, parseForChapter } from "./verbs";
@@ -32,7 +33,7 @@ import type { Voice } from "./voice";
 import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
-const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp", "voice"] as const;
+const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp", "voice", "prose"] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
 const LATER_VERBS = ["revise", "edit", "share", "notes", "publish"] as const;
@@ -74,6 +75,10 @@ function helpText(): string {
     "                                            style/prose.md section (default \"Flagged\")",
     '  pablo voice exemplar <name> <file> [--title "<t>"]',
     "                                            keep a piece as-is under the voice's exemplars/",
+    "  pablo prose --voice <name> --brief <file|-> [--context <file>]...",
+    "              [--format email|post|page|reply|note] [--words N] --dry-run",
+    "                                            assemble a voice-plus-brief prose pack;",
+    "                                            no --project, no vault required",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -112,6 +117,14 @@ interface ParsedArgs {
   readonly section: string | undefined;
   /** `voice exemplar --title "<t>"`: the title to file the exemplar under. */
   readonly title: string | undefined;
+  /** `prose --voice <name>`: which voice directory to write in. */
+  readonly voice: string | undefined;
+  /** `prose --brief <file|->`: the ask (a file, or `-` for stdin). */
+  readonly brief: string | undefined;
+  /** `prose --context <file>` (repeatable): sent verbatim, in argument order. */
+  readonly context: readonly string[];
+  /** `prose --format email|post|page|reply|note`. */
+  readonly format: string | undefined;
 }
 
 /**
@@ -153,6 +166,10 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     global: values["global"] === true,
     section: typeof values["section"] === "string" ? values["section"] : undefined,
     title: typeof values["title"] === "string" ? values["title"] : undefined,
+    voice: typeof values["voice"] === "string" ? values["voice"] : undefined,
+    brief: typeof values["brief"] === "string" ? values["brief"] : undefined,
+    context: Array.isArray(values["context"]) ? (values["context"] as string[]) : [],
+    format: typeof values["format"] === "string" ? values["format"] : undefined,
   };
 }
 
@@ -491,6 +508,17 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   if (args.verb === "mcp") {
     return await runMcp(cwd);
+  }
+
+  // `prose` (AGT-1241) has no `--project` at all — AC4 requires it to work
+  // with no vault (a global voice, a brief anywhere), so it never enters the
+  // shared `--project`/marker resolution below and is dispatched here,
+  // before that block runs.
+  if (args.verb === "prose") {
+    return runProse(
+      { voice: args.voice, brief: args.brief, context: args.context, format: args.format, words: args.words, dryRun: args.dryRun, json: args.json },
+      { cwd, env: process.env },
+    );
   }
 
   let projectPath: string | undefined;
