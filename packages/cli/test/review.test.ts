@@ -13,10 +13,15 @@ import {
 } from "../src/review";
 import type { DecisionEvent, EditedEvent, QueuedEvent, ReviewEvent } from "../src/review";
 
-let dir: string;
+let dir: string | undefined;
+
+function tempPath(...segments: string[]): string {
+  if (dir === undefined) throw new Error("useTempDir() must run first");
+  return join(dir, ...segments);
+}
 
 function queuePath(): string {
-  return join(dir, "review.jsonl");
+  return tempPath("review.jsonl");
 }
 
 function queuedEvent(overrides: Partial<QueuedEvent> = {}): QueuedEvent {
@@ -34,36 +39,33 @@ function queuedEvent(overrides: Partial<QueuedEvent> = {}): QueuedEvent {
 }
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+  dir = undefined;
 });
 
-// each test creates its own temp dir since afterEach needs `dir` set before it runs
 function useTempDir(): void {
   dir = mkdtempSync(join(tmpdir(), "pablo-review-"));
 }
 
+// mintPieceId is pure (no filesystem access), so these don't need useTempDir().
 describe("mintPieceId", () => {
   test("shape is <YYYYMMDD>-<slug>-<4 lowercase hex>", () => {
-    useTempDir();
     const id = mintPieceId(new Date("2026-09-07T12:34:56.000Z"), "My Chapter", () => "ab12");
     expect(id).toBe("20260907-my-chapter-ab12");
   });
 
   test("slug is lowercased, non-alphanumerics collapsed to single hyphens, trimmed", () => {
-    useTempDir();
     const id = mintPieceId(new Date("2026-01-02T00:00:00.000Z"), "  Weird!! Slug__Name??  ", () => "0000");
     expect(id).toBe("20260102-weird-slug-name-0000");
   });
 
   test("slug is cut to 24 chars", () => {
-    useTempDir();
     const longSlug = "a".repeat(40);
     const id = mintPieceId(new Date("2026-01-02T00:00:00.000Z"), longSlug, () => "ffff");
     expect(id).toBe(`20260102-${"a".repeat(24)}-ffff`);
   });
 
   test("random defaults to 4 hex chars from node:crypto", () => {
-    useTempDir();
     const id = mintPieceId(new Date("2026-01-02T00:00:00.000Z"), "slug");
     const suffix = id.slice(id.length - 4);
     expect(suffix).toMatch(/^[0-9a-f]{4}$/);
@@ -73,7 +75,7 @@ describe("mintPieceId", () => {
 describe("appendEvent / readEvents", () => {
   test("round trip: appended events read back in order", () => {
     useTempDir();
-    const path = join(dir, "nested", "review.jsonl");
+    const path = tempPath("nested", "review.jsonl");
     const q = queuedEvent();
     const d: DecisionEvent = { type: "approved", id: q.id, at: "2026-09-07T11:00:00.000Z", by: "cli", read: true };
 
@@ -86,14 +88,14 @@ describe("appendEvent / readEvents", () => {
 
   test("creates parent directory and file when missing", () => {
     useTempDir();
-    const path = join(dir, "does", "not", "exist", "review.jsonl");
+    const path = tempPath("does", "not", "exist", "review.jsonl");
     appendEvent(path, queuedEvent());
     expect(readEvents(path)).toHaveLength(1);
   });
 
   test("missing file reads as no events", () => {
     useTempDir();
-    expect(readEvents(join(dir, "nope.jsonl"))).toEqual([]);
+    expect(readEvents(tempPath("nope.jsonl"))).toEqual([]);
   });
 
   test("malformed line is skipped, not thrown", () => {
@@ -213,6 +215,10 @@ describe("waitForDecision", () => {
     const path = queuePath();
     appendEvent(path, queuedEvent({ id: "pending-one" }));
 
+    // waitForDecision reads at the *top* of each loop iteration, before
+    // sleeping. So poll 1 reads (no decision) -> sleeps; while asleep for
+    // poll 2, we write the decision here -> the loop wakes, reads again at
+    // the top of the next iteration, and now sees it.
     let polls = 0;
     const sleep = async (): Promise<void> => {
       polls += 1;

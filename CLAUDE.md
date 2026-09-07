@@ -58,7 +58,11 @@ screen) was retired 2026-09-06 along with the CriticMarkup/selection design it
 implemented. See the design doc's `History` section for what carried over as
 material (the pack assembler, the vault reader, the provider adapters, the
 config loader) versus what was cut outright (the screen, the CriticMarkup
-parser and renderer, span verbs, the review queue).
+parser and renderer, span verbs). The **review queue concept** was cut with
+that design (it was CriticMarkup/span-based) but reintroduced 2026-09-07 as a
+text-free append-only JSONL log (`packages/cli/src/review.ts`, AGT-1255) per
+`projects/ai-terminal/review-tray.md` (an extension of the design doc, not a
+revert of the 2026-09-06 cut) — treat that doc, not this note, as canonical.
 
 ## The project
 

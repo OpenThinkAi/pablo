@@ -118,12 +118,6 @@ export function readEvents(path: string): ReviewEvent[] {
   return events;
 }
 
-function decisionFor(events: ReviewEvent[], id: string): DecisionEvent | undefined {
-  return events.find(
-    (event): event is DecisionEvent => (event.type === "approved" || event.type === "rejected") && event.id === id,
-  );
-}
-
 /** Queued pieces with no `approved` or `rejected` event for their id, newest `at` first. */
 export function pending(events: ReviewEvent[]): PieceRecord[] {
   const decidedIds = new Set<string>();
@@ -150,7 +144,9 @@ export function record(
   if (queuedEvent === undefined) return undefined;
 
   const { type: _type, ...piece } = queuedEvent;
-  const decision = decisionFor(events, id);
+  const decision = events.find(
+    (event): event is DecisionEvent => (event.type === "approved" || event.type === "rejected") && event.id === id,
+  );
   const edits = events.filter((event): event is EditedEvent => event.type === "edited" && event.id === id);
 
   return decision === undefined ? { piece, edits } : { piece, decision, edits };

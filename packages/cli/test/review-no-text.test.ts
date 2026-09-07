@@ -17,7 +17,23 @@ test("QueuedEvent's declaration contains none of the forbidden words", () => {
   const start = source.indexOf("export interface QueuedEvent");
   expect(start).toBeGreaterThanOrEqual(0);
 
-  const end = source.indexOf("}", start);
+  // Depth-tracked brace matching, not a bare `indexOf("}")`: a bare search
+  // finds the first close brace at any nesting depth, so it would silently
+  // under-cover the declaration the moment a field gets an inline object
+  // type (e.g. `metadata?: { origin: string }`).
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < source.length; i++) {
+    const char = source[i];
+    if (char === "{") depth++;
+    else if (char === "}") {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
   expect(end).toBeGreaterThan(start);
 
   const declaration = source.slice(start, end + 1);
