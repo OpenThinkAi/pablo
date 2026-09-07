@@ -493,18 +493,18 @@ test("runProse --json puts exactly one line on stdout, with ok/text/receipt/chec
   expect(Array.isArray(body.check)).toBe(true);
 });
 
-test("runProse without --json prints the text first and the check hits after it (AC2, AC4)", async () => {
+test("runProse without --json puts the piece alone on stdout and the check hits after it on stderr (AC2, AC4, AC5)", async () => {
   const { vault, env, brief } = tempVaultEnv();
   const { deps, lines: progress } = progressSink();
 
   const { result, lines } = await captureStdout(() => runProse(cliArgs({ brief }), { cwd: vault, env }, deps));
 
   expect(result).toBe(0);
-  expect(lines[0]).toBe(normalizeOutput(RAW_TEXT));
-  expect(lines.slice(1).some((line) => /flagged-line/.test(line))).toBe(true);
-  // AC5: nothing from the progress stream reached stdout.
-  expect(lines.some((line) => /tokens|first token/.test(line))).toBe(false);
-  expect(progress.length).toBeGreaterThan(0);
+  // stdout is the deliverable and nothing else: one write, the piece itself.
+  expect(lines).toEqual([normalizeOutput(RAW_TEXT)]);
+  // The hits are reported, after the text, on the progress stream.
+  expect(progress.some((line) => /flagged-line/.test(line))).toBe(true);
+  expect(progress.some((line) => /first token after/.test(line))).toBe(true);
 });
 
 test("an empty answer refuses (exit 2) and writes no --out file (AC5)", async () => {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -485,6 +485,32 @@ test("prose.run with an out path outside the vault refuses (exit 2), naming the 
 
   expect(existsSync(outside)).toBe(false);
   expect(existsSync("/tmp/pablo-verbs-escaped.md")).toBe(false);
+
+  rmSync(vault, { recursive: true, force: true });
+  rmSync(configHome, { recursive: true, force: true });
+});
+
+// AGT-1242 security review: the vault bound stops `out` escaping, but inside
+// the vault `force: true` would still let a tool call destroy an existing
+// file with no read-back. Overwriting is an author's decision, so it is a CLI
+// flag only.
+test("prose.run with force true refuses (exit 2) and leaves the existing file byte-identical", async () => {
+  const vault = tempVault();
+  const configHome = mkdtempSync(join(tmpdir(), "pablo-verbs-prose-config-"));
+  const briefPath = join(vault, "brief.md");
+  writeFileSync(briefPath, "Announce the new dock hours.\n", "utf8");
+  const outPath = join(vault, "notice.md");
+  writeFileSync(outPath, "hand-written, must not be clobbered\n", "utf8");
+  const before = readFileSync(outPath);
+
+  const outcome = await verb("prose").run(
+    { voice: "plain", brief: briefPath, context: [], out: outPath, force: true },
+    voiceCtxFor(vault, configHome),
+  );
+
+  expect(outcome.exitCode).toBe(2);
+  expect((outcome.body as { message: string }).message).toContain("MCP");
+  expect(readFileSync(outPath).equals(before)).toBe(true);
 
   rmSync(vault, { recursive: true, force: true });
   rmSync(configHome, { recursive: true, force: true });

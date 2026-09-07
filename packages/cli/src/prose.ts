@@ -397,8 +397,9 @@ function routeProse(pack: Pack, voice: Voice, ctx: ProseCoreContext, deps: Prose
 
   try {
     // An injected adapter replaces the routed one entirely (tests), but the
-    // routing above still runs — so a test still exercises AC1's real
-    // resolution, and `providers.rates` still prices the timeout.
+    // resolution above still runs — a test still exercises AC1's real routing,
+    // and `providers.rates(providerId)` still prices the timeout from the
+    // routed endpoint's own measurements either way.
     const adapter = deps.adapter ?? providers.adapter(providerId);
     return { providerId, adapter, timeoutMs: packTimeoutMs(pack, providers.rates(providerId)) };
   } catch (error) {
@@ -414,11 +415,10 @@ function routeProse(pack: Pack, voice: Voice, ctx: ProseCoreContext, deps: Prose
  * `fileReceiptSink` and `paths.ts`'s `jsonlReceiptSink` each `mkdir -p` before
  * appending. An email drafted from a random directory still leaves a receipt.
  */
-function receiptSinkFor(ctx: ProseCoreContext): { readonly sink: ReceiptSink; readonly path: string } {
+function receiptSinkFor(ctx: ProseCoreContext): ReceiptSink {
   const vault = findVault(ctx.cwd, ctx.env);
-  if (vault.ok) return { sink: fileReceiptSink(vault.path), path: vault.path };
-  const path = stateReceiptsPath(ctx.env);
-  return { sink: jsonlReceiptSink(path), path };
+  if (vault.ok) return fileReceiptSink(vault.path);
+  return jsonlReceiptSink(stateReceiptsPath(ctx.env));
 }
 
 /**
@@ -470,8 +470,7 @@ async function sendProse(
   const routed = routeProse(pack, voice, ctx, deps);
   if ("body" in routed) return routed;
 
-  const { sink } = receiptSinkFor(ctx);
-  const wrapped = withReceipts(routed.adapter, sink, { pack, intent: "prose" });
+  const wrapped = withReceipts(routed.adapter, receiptSinkFor(ctx), { pack, intent: "prose" });
 
   const stderr = deps.stderr ?? process.stderr;
   const now = deps.now ?? (() => new Date());
@@ -620,16 +619,19 @@ export async function runProse(args: ProseCliArgs, ctx: ProseCoreContext, deps: 
   }
 
   if ("text" in outcome.body) {
-    // AC2/AC4: the normalized answer as plain text, then the check hits after
-    // it. `--out`'s path (and any git notice) go to stderr, not stdout, so
-    // `pablo prose ... --out x.md > y.md` still captures only the prose.
+    // AC2/AC4: the normalized answer, then the check hits after it. stdout
+    // carries the piece and nothing else — the hits, the `--out` path and any
+    // git notice go to stderr, so `pablo prose ... > email.txt` captures the
+    // prose alone. (`write` prints its hits on stdout, but there stdout is a
+    // one-line report about a file; here it IS the deliverable.) On a terminal
+    // both streams still arrive together, in this order.
     console.log(outcome.body.text);
     const stderr = deps.stderr ?? process.stderr;
     if (outcome.body.path !== undefined) {
       stderr.write(`wrote ${outcome.body.path}${outcome.body.committed === true ? " (committed)" : ""}\n`);
     }
     if (outcome.body.notice !== undefined) stderr.write(`${outcome.body.notice}\n`);
-    for (const hit of outcome.body.check) console.log(formatHitLine(hit));
+    for (const hit of outcome.body.check) stderr.write(`${formatHitLine(hit)}\n`);
     return outcome.exitCode;
   }
 

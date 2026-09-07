@@ -476,7 +476,13 @@ const PROSE_ARGS = z.object({
     .describe(
       "Write the answer to this file with provenance frontmatter (voice, model, generated, prompt_hash, words); inside a git repository it is committed by pathspec. Must be inside the vault (or the working directory when there is none).",
     ),
-  force: z.boolean().optional().default(false).describe("Overwrite an existing `out` file instead of refusing."),
+  force: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "CLI only: overwrite an existing `out` file instead of refusing. Refused over MCP — an existing file is never overwritten by a tool call.",
+    ),
 });
 
 /**
@@ -543,6 +549,24 @@ async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext):
     const problem = bindProsePath(ctx, "--out", args.out);
     if (problem) return { body: refusalBody(problem), exitCode: problem.code };
   }
+  // `force` turns `out` from "create a file" into "destroy whatever is there",
+  // and the vault bound above does not help with that — inside the vault, an
+  // existing chapter or notice would simply be replaced, with no read-back and
+  // nothing recoverable but git. A destructive overwrite is an author's
+  // decision, so it lives on the author-typed CLI flag only: over MCP the
+  // model may create a new file and must ask the author to overwrite an
+  // existing one (security review, AGT-1242).
+  if (args.force === true) {
+    return {
+      body: {
+        ok: false,
+        code: 2,
+        message: "pablo: prose force is not available over MCP; an existing out file is never overwritten by a tool call",
+        tried: [],
+      },
+      exitCode: 2,
+    };
+  }
 
   const outcome = await proseCore(
     {
@@ -553,7 +577,7 @@ async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext):
       words: args.words,
       dryRun: args["dry-run"],
       out: args.out,
-      force: args.force ?? false,
+      force: false, // never over MCP — refused above, and pinned here so it cannot come back by way of a schema change
     },
     { cwd: ctx.cwd, env: ctx.env },
     { stderr: ctx.stderr },
