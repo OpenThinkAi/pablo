@@ -59,10 +59,10 @@ including an unresolvable project), `1` error.
 | `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, title, stages, last, open, next, brief?, notices?}` |
 | `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object; exit 0 |
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
-| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--variants V]` | the prose call: check, pack, send, write, rituals | `{path, receipt, rituals[]}` or `{refused, missing[]}` |
+| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--variants V]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, refuses (exit 1) pointing at AGT-1237, which wires the send | `{path, receipt, rituals[]}` / `{refused, missing[]}`, or the dry-run body below |
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{tells[], unprovenanced[]}` |
-| `pablo dry-run ...` | any write or revise, assembled and priced, nothing sent | the pack, slice by slice |
+| `pablo dry-run ...` | (planned; today this is `write`'s own `--dry-run`) any write or revise, assembled and priced, nothing sent | the pack, slice by slice |
 | `pablo mcp` | serve all of the above as MCP tools, same schemas | |
 | *later* `revise`, `voice`, `edit`, `share`, `notes`, `publish` | P1/P2 — the voice loop, local editing, sharing, publishing | |
 
@@ -135,6 +135,23 @@ only). Table input is validated before anything is written — a beat row needs
 six columns with a four-digit year in its story date, an act row needs three
 — and a malformed row is refused (exit 2) naming the row and column, with
 nothing written. The touched file is committed by pathspec, same as `init`.
+
+`pablo write --project <slug> --chapter N [--words W] [--scenes S]` (AGT-1230) first
+runs chapter N's preconditions (same checks as `status --for`) and refuses, exit 2,
+naming `missing[]`, if any fail. Then it assembles the drafting pack from
+`@openthink/pablo-core`'s `readDraftingInputs` + `assemblePack` — the voice
+(`style/*.md`'s prose sections only; any `## ` heading matching `/repl(y|ies)|agent/i`
+is dropped before assembly, never sent), the work's rules, period facts, cast and
+places, the timeline gated by the beat's story date, `continuity.md`, the tail of
+chapter N-1, and the beat row itself, at `--words` (default 1800) and `--scenes`
+(default 3). Any slice sourced under one of the marker's `neverSend` prefixes is a
+refusal naming the slice and the prefix, not a silent drop. `--dry-run` renders the
+pack (a slice table with token counts, and an estimated wait when the target endpoint
+has been measured) and sends nothing, exit 0; `--json --dry-run` returns
+`{ok, dryRun: true, slices[], totalTokens, expectedOutputTokens, prompt_hash,
+adjustments}` — the same inputs produce the same `prompt_hash` on two runs. Without
+`--dry-run`, this ticket stops after the pack: exit 1, pointing at AGT-1237, which
+wires the actual send.
 
 ## Project layout
 

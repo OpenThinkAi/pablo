@@ -62,3 +62,8 @@ without it and leave a question in the work's notes.
 ## Length
 
 Hit the requested length within about ten percent. A 450-word scene is not 735 words.
+
+## Replies to the agent
+
+SENTINEL-SHOULD-NEVER-REACH-A-PACK: this section talks to the driving agent, not the
+reader, and the voice filter must drop it before any pack is assembled.

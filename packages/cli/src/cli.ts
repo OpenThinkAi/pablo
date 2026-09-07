@@ -23,6 +23,7 @@ import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runResumeVerb } from "./resume";
 import { runSave } from "./save";
+import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
 const P0_VERBS = ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp"] as const;
@@ -81,6 +82,14 @@ interface ParsedArgs {
   readonly stage: string | undefined;
   /** `save --file <path>` — stdin is read when omitted. */
   readonly file: string | undefined;
+  /** `write --chapter N`; parsed and validated by `runWrite`, not here. */
+  readonly chapter: string | undefined;
+  /** `write --words W`; defaults to `DEFAULT_WORD_TARGET` when absent. */
+  readonly words: string | undefined;
+  /** `write --scenes S`; defaults to `DEFAULT_MIN_SCENES` when absent. */
+  readonly scenes: string | undefined;
+  /** `write --dry-run`: assemble and render the pack, send nothing. */
+  readonly dryRun: boolean;
 }
 
 export function parseCliArgs(argv: readonly string[]): ParsedArgs {
@@ -96,6 +105,10 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       for: { type: "string" },
       stage: { type: "string" },
       file: { type: "string" },
+      chapter: { type: "string" },
+      words: { type: "string" },
+      scenes: { type: "string" },
+      "dry-run": { type: "boolean", default: false },
     },
   });
 
@@ -109,6 +122,10 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     for: typeof values["for"] === "string" ? values["for"] : undefined,
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
     file: typeof values["file"] === "string" ? values["file"] : undefined,
+    chapter: typeof values["chapter"] === "string" ? values["chapter"] : undefined,
+    words: typeof values["words"] === "string" ? values["words"] : undefined,
+    scenes: typeof values["scenes"] === "string" ? values["scenes"] : undefined,
+    dryRun: values["dry-run"] === true,
   };
 }
 
@@ -355,6 +372,20 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return EXIT_REFUSED;
     }
     return runSave({ stage: args.stage, file: args.file, json: args.json }, projectPath);
+  }
+
+  if (args.verb === "write") {
+    if (projectPath === undefined) {
+      const message = "pablo: write requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const vaultResult = findVault(cwd);
+    if (!vaultResult.ok) {
+      emit(refusalResult(vaultResult), args.json);
+      return vaultResult.code;
+    }
+    return runWrite(args, vaultResult.path, projectPath);
   }
 
   const message = `pablo: "${args.verb}" not implemented yet`;
