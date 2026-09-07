@@ -20,6 +20,16 @@ import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, mar
 import type { Marker } from "./marker";
 import type { Refusal } from "./project";
 
+/**
+ * A vault-safe directory-name shape: lowercase letters, digits, and hyphens,
+ * starting with a letter or digit. `slug` comes from CLI positionals (an
+ * agent's model-suggested `pablo init <format> <slug> ...` call, ultimately),
+ * and is joined into a vault path with `node:path.join` — which silently
+ * resolves `..` segments. Validating against this pattern before any join
+ * is what keeps a slug like `../../tmp/evil` from writing outside the vault.
+ */
+const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
 export interface InitOk {
   readonly ok: true;
   readonly path: string;
@@ -182,6 +192,10 @@ function gitCommit(vault: string, message: string, absPaths: readonly string[]):
  * tests.
  */
 export function initNovel(vault: string, slug: string, title: string, opts: { now?: () => Date } = {}): InitResult {
+  if (!SLUG_PATTERN.test(slug)) {
+    return refuse(`pablo: init: invalid slug "${slug}" (only lowercase letters, digits, and hyphens are allowed)`, []);
+  }
+
   const now = opts.now ?? (() => new Date());
   const templateDir = join(vault, "templates", "novel");
   const destDir = join(vault, "novels", slug);

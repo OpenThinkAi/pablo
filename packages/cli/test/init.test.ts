@@ -176,6 +176,22 @@ test("initNovel onto an existing slug refuses with exit code 2", () => {
   expect(result.message).toContain("already exists");
 });
 
+test("initNovel refuses a slug that would path-traverse out of the vault", () => {
+  const vault = tempVault();
+
+  for (const slug of ["../evil", "../../tmp/evil", "novels/../../evil", "a/b"]) {
+    const result = initNovel(vault, slug, "Evil Title");
+    expect(result.ok).toBe(false);
+    if (result.ok) continue;
+    expect(result.code).toBe(2);
+    expect(result.message).toContain("invalid slug");
+  }
+
+  // Nothing was written outside the vault.
+  expect(existsSync(join(vault, "..", "evil"))).toBe(false);
+  expect(existsSync(join(vault, "..", "..", "tmp", "evil"))).toBe(false);
+});
+
 test("a .gitignore that already ignores .brief.md does not fail the commit — .brief.md is written but simply not tracked", () => {
   const vault = tempVault();
   writeFileSync(join(vault, ".gitignore"), ".brief.md\n");
