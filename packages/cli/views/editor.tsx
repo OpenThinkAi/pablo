@@ -12,6 +12,7 @@ import {
   groupHitsByParagraph,
   joinParagraphs,
   nextSavedText,
+  normalizeCandidate,
   selectionToBodyOffsets,
   splitParagraphs,
 } from "./editor-logic";
@@ -103,8 +104,14 @@ interface CandidateState {
   readonly endParagraphIndex: number;
   readonly start: number;
   readonly end: number;
+  /** The passage the candidate is replacing — never mutated by editing the box. */
   readonly original: string;
-  readonly text: string;
+  /**
+   * The candidate box's current contents: seeded from the model's answer
+   * (through `normalizeCandidate`), then whatever the author types. `Take`
+   * applies this value, not the model's original answer.
+   */
+  readonly edit: string;
 }
 
 type SaveStatus =
@@ -235,6 +242,18 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
   const [revising, setRevising] = useState(false);
   const [candidate, setCandidate] = useState<CandidateState | null>(null);
   const [reviseError, setReviseError] = useState<string | null>(null);
+
+  // Grows the candidate textarea to fit its content, capped by
+  // `candidateTextareaStyle`'s `maxHeight` (CSS handles the cap and the
+  // resulting scroll; this only measures and lifts the `height` far enough
+  // for CSS to have something to cap).
+  const candidateEditRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const el = candidateEditRef.current;
+    if (el === null) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [candidate?.edit]);
 
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -398,7 +417,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
         start: selection.start,
         end: selection.end,
         original: selection.text,
-        text: result.candidate,
+        edit: normalizeCandidate(result.candidate),
       });
       setReviseOpen(false);
     } catch (e) {
@@ -413,9 +432,14 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
     setSelection(null);
   }
 
+  /** The candidate box is a controlled field — every keystroke lands here, never the `original`. */
+  function handleCandidateEdit(next: string) {
+    setCandidate((prev) => (prev === null ? prev : { ...prev, edit: next }));
+  }
+
   async function takeCandidate() {
     if (candidate === null) return;
-    const next = applyCandidate(body, candidate.start, candidate.end, candidate.text);
+    const next = applyCandidate(body, candidate.start, candidate.end, candidate.edit);
     resetTo(next);
     await handleSave(next);
   }
@@ -554,7 +578,12 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                       </div>
                       <div style={compareBoxStyle}>
                         <div style={compareLabelStyle}>Candidate</div>
-                        <p style={compareTextStyle}>{candidate.text}</p>
+                        <textarea
+                          ref={candidateEditRef}
+                          value={candidate.edit}
+                          onChange={(e) => handleCandidateEdit(e.target.value)}
+                          style={candidateTextareaStyle}
+                        />
                       </div>
                     </div>
                     <div style={compareActionsStyle}>
@@ -860,6 +889,29 @@ const compareTextStyle: CSSProperties = {
   // the source's own soft-wrap newlines (a selection made inside a
   // hard-wrapped paragraph) — collapse them for display, same as the sheet.
   whiteSpace: "normal",
+};
+
+// Capped so a long candidate scrolls inside its own box instead of pushing
+// Take/Drop down the page — the box grows with its content up to this height,
+// then `overflowY: auto` takes over.
+const CANDIDATE_BOX_MAX_HEIGHT = "14rem";
+
+const candidateTextareaStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
+  minHeight: "3rem",
+  maxHeight: CANDIDATE_BOX_MAX_HEIGHT,
+  margin: 0,
+  padding: 0,
+  border: "none",
+  outline: "none",
+  background: "transparent",
+  color: INK,
+  fontFamily: SERIF,
+  fontSize: "0.95rem",
+  lineHeight: 1.55,
+  resize: "none",
+  overflowY: "auto",
 };
 
 const compareActionsStyle: CSSProperties = {

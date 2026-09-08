@@ -51,5 +51,8 @@ export const PROSE_REVISE_CLOSING =
  * carry for continuity, and not a diff.
  */
 export const REVISE_CLOSING =
-  "Write the rewritten passage now, and nothing else: no preamble, no quotes around it," +
-  " and no commentary. Keep the same tense and person as the passage above.";
+  "Write the rewritten passage now, and nothing else: no preamble and no commentary." +
+  " Do not wrap the whole answer in quotation marks, and do not add any punctuation of your" +
+  " own after the passage ends — quote only the words that are dialogue within the passage" +
+  " itself, exactly as it should read in the manuscript. Keep the same tense and person as" +
+  " the passage above.";

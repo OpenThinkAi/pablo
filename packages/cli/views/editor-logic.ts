@@ -159,3 +159,61 @@ export function groupHitsByParagraph<H extends { readonly line: number }>(
   }
   return byParagraph;
 }
+
+const STRAIGHT_DOUBLE_QUOTE = '"';
+const CURLY_OPEN_QUOTE = "“"; // “
+const CURLY_CLOSE_QUOTE = "”"; // ”
+
+function isOpeningQuote(char: string | undefined): boolean {
+  return char === STRAIGHT_DOUBLE_QUOTE || char === CURLY_OPEN_QUOTE;
+}
+
+function isClosingQuote(char: string | undefined): boolean {
+  return char === STRAIGHT_DOUBLE_QUOTE || char === CURLY_CLOSE_QUOTE;
+}
+
+/** Whether `close` is the correct closing mark for `open` — a curly open must meet a curly close, never a straight one, and vice versa. */
+function isMatchingPair(open: string, close: string): boolean {
+  if (open === STRAIGHT_DOUBLE_QUOTE) return close === STRAIGHT_DOUBLE_QUOTE;
+  if (open === CURLY_OPEN_QUOTE) return close === CURLY_CLOSE_QUOTE;
+  return false;
+}
+
+/** Whether `text` contains another quote from the same family as `open` — the signal that a passage quotes its own dialogue rather than being wrapped by one. */
+function containsQuoteOfSameFamily(text: string, open: string): boolean {
+  if (open === STRAIGHT_DOUBLE_QUOTE) return text.includes(STRAIGHT_DOUBLE_QUOTE);
+  return text.includes(CURLY_OPEN_QUOTE) || text.includes(CURLY_CLOSE_QUOTE);
+}
+
+/**
+ * Undoes the model wrapping its whole answer in quotation marks, and the
+ * duplicated terminal punctuation that wrapping tends to leave behind (a
+ * sentence that already ends in "." picks up a second, stray one once a
+ * closing quote sits between the two).
+ *
+ * The rule is "unwrap only when the WHOLE string is wrapped in one pair":
+ * `raw` must open with a quote, and — once any stray trailing `.`/`!`/`?`
+ * characters are set aside — close with the matching quote, with no further
+ * quote of that family anywhere in between. A passage that legitimately
+ * opens and closes with dialogue quotes but also quotes something *inside*
+ * itself fails that last check and is returned untouched: this is string
+ * surgery only, never a judgement call about which quotes are "real".
+ */
+export function normalizeCandidate(raw: string): string {
+  if (raw.length < 2) return raw;
+
+  const open = raw.charAt(0);
+  if (!isOpeningQuote(open)) return raw;
+
+  const trailingPunctuation = raw.match(/[.!?]*$/)?.[0] ?? "";
+  const withoutTrailingPunctuation = raw.slice(0, raw.length - trailingPunctuation.length);
+  if (withoutTrailingPunctuation.length < 2) return raw;
+
+  const close = withoutTrailingPunctuation.charAt(withoutTrailingPunctuation.length - 1);
+  if (!isClosingQuote(close) || !isMatchingPair(open, close)) return raw;
+
+  const inner = withoutTrailingPunctuation.slice(1, -1);
+  if (containsQuoteOfSameFamily(inner, open)) return raw;
+
+  return inner;
+}

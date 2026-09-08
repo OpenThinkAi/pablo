@@ -5,6 +5,7 @@ import {
   groupHitsByParagraph,
   joinParagraphs,
   nextSavedText,
+  normalizeCandidate,
   paragraphIndexForLine,
   selectionToBodyOffsets,
   splitParagraphs,
@@ -191,5 +192,37 @@ describe("nextSavedText", () => {
     const savedTextAfterFailedFollowUpSave = nextSavedText(beforeTake, afterTakeLocally, false);
     expect(savedTextAfterFailedFollowUpSave).toBe(beforeTake);
     expect(savedTextAfterFailedFollowUpSave).not.toBe(afterTakeLocally);
+  });
+});
+
+describe("normalizeCandidate", () => {
+  test("a candidate wrapped in one pair of quotes is unwrapped", () => {
+    expect(normalizeCandidate('"He walked away without looking back."')).toBe(
+      "He walked away without looking back.",
+    );
+  });
+
+  test("curly quotes wrapping the whole candidate are unwrapped the same way", () => {
+    expect(normalizeCandidate("“He walked away without looking back.”")).toBe(
+      "He walked away without looking back.",
+    );
+  });
+
+  test("dialogue that opens and closes with quotes but also quotes its own speech inside survives untouched", () => {
+    const dialogue = '"Ramon," Edwin said, stepping toward him. "You can run the machine."';
+    expect(normalizeCandidate(dialogue)).toBe(dialogue);
+  });
+
+  test("the observed bug: a wrapper quote plus a duplicated trailing period collapses to the single period the prose already had", () => {
+    const buggy =
+      '"You can run the machine. You know every cluster on every row of this hill.".';
+    expect(normalizeCandidate(buggy)).toBe(
+      "You can run the machine. You know every cluster on every row of this hill.",
+    );
+  });
+
+  test("plain text with no wrapping quotes is a no-op", () => {
+    const plain = "He nodded once and kept walking.";
+    expect(normalizeCandidate(plain)).toBe(plain);
   });
 });
