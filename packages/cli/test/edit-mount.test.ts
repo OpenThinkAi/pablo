@@ -49,6 +49,30 @@ function psCommandLines(): string[] {
   return result.stdout.toString().split("\n");
 }
 
+/**
+ * The pids of every process currently running `uiLeafBinary`. Comparing a
+ * before/after snapshot is what makes this test safe to run while a real
+ * pablo tray daemon has an editor window open on the same machine — that
+ * window is a legitimate concurrent user of the same binary, and only the
+ * processes this test itself started may be asserted about.
+ */
+function uiLeafPids(): Set<string> {
+  if (uiLeafBinary === undefined) return new Set();
+  const result = Bun.spawnSync(["ps", "-A", "-o", "pid=,command="]);
+  const pids = new Set<string>();
+  for (const line of result.stdout.toString().split("\n")) {
+    if (!line.includes(uiLeafBinary)) continue;
+    const pid = line.trim().split(/\s+/)[0];
+    if (pid !== undefined && /^[0-9]+$/.test(pid)) pids.add(pid);
+  }
+  return pids;
+}
+
+/** Pids running `uiLeafBinary` that are not in `before` — i.e. ones this test spawned. */
+function newUiLeafPids(before: Set<string>): string[] {
+  return [...uiLeafPids()].filter((pid) => !before.has(pid));
+}
+
 async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
   const start = Date.now();
   for (;;) {
@@ -91,18 +115,6 @@ const uiLeafBinary = resolveUiLeafBinary();
 const chromium = findChromium();
 const CAN_RUN = uiLeafBinary !== undefined && chromium !== undefined;
 
-/**
- * Whether THIS repo's own `ui-leaf-bin` (resolved to its full, package-scoped
- * path) shows up in `ps`. A bare `"ui-leaf-bin"` substring would also match
- * an unrelated ui-leaf-hosting process elsewhere on the machine (e.g.
- * another project's own daemon) — this checks the exact binary `openEditor`
- * here would spawn, not the name alone.
- */
-function ourUiLeafRunning(): boolean {
-  if (uiLeafBinary === undefined) return false;
-  return psCommandLines().some((line) => line.includes(uiLeafBinary));
-}
-
 if (!CAN_RUN) {
   console.log(
     `edit-mount.test.ts: skipping the real mount() — ${
@@ -121,8 +133,9 @@ test.skipIf(!CAN_RUN)(
     const previousNoOpen = process.env["UI_LEAF_NO_OPEN"];
     process.env["UI_LEAF_NO_OPEN"] = "1";
 
-    // Sanity: nothing of ours is running yet.
-    expect(ourUiLeafRunning()).toBe(false);
+    // Any ui-leaf already running belongs to someone else (a live pablo tray
+    // window, say); only processes started past this point are ours to assert on.
+    const uiLeafBefore = uiLeafPids();
 
     let opened: Awaited<ReturnType<typeof openEditor>> | undefined;
     const tokenedUrl = await captureTokenedUrl(async () => {
@@ -159,7 +172,7 @@ test.skipIf(!CAN_RUN)(
       else process.env["UI_LEAF_NO_OPEN"] = previousNoOpen;
     }
 
-    const clean = await waitUntil(() => !ourUiLeafRunning(), 5000);
+    const clean = await waitUntil(() => newUiLeafPids(uiLeafBefore).length === 0, 5000);
     expect(clean).toBe(true);
 
     while (cleanupDirs.length > 0) {
