@@ -16,7 +16,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runCheck } from "./check";
-import { runEdit } from "./edit";
+import { openEditor, runEdit } from "./edit";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
@@ -656,6 +656,7 @@ async function runTray(args: ParsedArgs): Promise<number> {
         supervise: superviseHelper,
         spawnHelper: spawnTrayHelper,
         decide,
+        openEditor,
       },
       controller.signal,
     );
