@@ -107,6 +107,49 @@ export function applyCandidate(body: string, start: number, end: number, candida
 }
 
 /**
+ * The inverse of `paragraphStartOffset`: how far into `paragraphIndex`'s own
+ * text a body offset falls. Used by `Edit` (AGT-1293) to turn the absolute
+ * `{start, end}` a selection was captured at back into per-paragraph offsets
+ * a DOM `Range` can be rebuilt from. Clamped to `[0, paragraph length]` — a
+ * stale offset against text that changed underneath it (a race between the
+ * click and an edit) degrades to the nearest valid position in that
+ * paragraph instead of producing an offset the DOM would reject.
+ */
+export function bodyOffsetToParagraphOffset(
+  paragraphs: readonly string[],
+  paragraphIndex: number,
+  bodyOffset: number,
+): number {
+  const start = paragraphStartOffset(paragraphs, paragraphIndex);
+  const length = paragraphs[paragraphIndex]?.length ?? 0;
+  return Math.max(0, Math.min(bodyOffset - start, length));
+}
+
+/** The four numbers that identify a selection's span, independent of any particular `SelectionState` shape the view happens to carry alongside them. */
+export interface SelectionSpan {
+  readonly startParagraphIndex: number;
+  readonly endParagraphIndex: number;
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Whether two selection spans are the same selection (used by `Edit`,
+ * AGT-1293, to tell "the author dismissed this exact selection's control"
+ * apart from "the author made a new selection"). `null` is only equal to
+ * `null` — a live selection is never mistaken for "no selection".
+ */
+export function isSameSelectionSpan(a: SelectionSpan | null, b: SelectionSpan | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.startParagraphIndex === b.startParagraphIndex &&
+    a.endParagraphIndex === b.endParagraphIndex &&
+    a.start === b.start &&
+    a.end === b.end
+  );
+}
+
+/**
  * Which paragraph (0-based) a `check` hit's 1-based `line` number falls in.
  * `line` is a line number into `body.split("\n")` (see `check.ts`'s
  * `checkFile`) — this walks the same paragraphs `splitParagraphs` produced,
