@@ -279,6 +279,43 @@ describe("revise()", () => {
     expect(readFileSync(fx.path, "utf8")).toBe(FRONTMATTER + BODY);
   });
 
+  test("forwards onCandidate through to deps.revise as its second argument (AGT-1294)", async () => {
+    const fx = fixture(FRONTMATTER + BODY);
+    let receivedCb: ((text: string) => void) | undefined;
+    const h = host(fx, {
+      writeFile: neverWriteFile(),
+      gitCommit: neverGitCommit(),
+      revise: async (_input, onCandidate) => {
+        receivedCb = onCandidate;
+        onCandidate?.("partial one");
+        onCandidate?.("partial one and two");
+        return { candidate: "final candidate", receipt: { tokens: 9 } };
+      },
+    });
+
+    const seen: string[] = [];
+    const result = await h.revise({ start: 0, end: 8, instruction: "make it punchier" }, (text) => seen.push(text));
+
+    expect(result).toEqual({ candidate: "final candidate", receipt: { tokens: 9 } });
+    expect(receivedCb).toBeDefined();
+    expect(seen).toEqual(["partial one", "partial one and two"]);
+  });
+
+  test("omitting onCandidate is fine — deps.revise gets undefined and nothing throws", async () => {
+    const fx = fixture(FRONTMATTER + BODY);
+    const h = host(fx, {
+      writeFile: neverWriteFile(),
+      gitCommit: neverGitCommit(),
+      revise: async (_input, onCandidate) => {
+        expect(onCandidate).toBeUndefined();
+        return { candidate: "final candidate", receipt: {} };
+      },
+    });
+
+    const result = await h.revise({ start: 0, end: 8, instruction: "make it punchier" });
+    expect(result.candidate).toBe("final candidate");
+  });
+
   test("rejects a bad span with EditHostError code bad-span, without calling revise", async () => {
     const fx = fixture(FRONTMATTER + BODY);
     const h = host(fx, { revise: neverRevise() });

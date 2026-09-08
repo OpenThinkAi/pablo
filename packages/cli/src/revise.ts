@@ -44,6 +44,15 @@ export interface ReviseDeps {
   readonly adapter?: Adapter | undefined;
   /** Overrides where streaming progress is written. Defaults to `process.stderr`. */
   readonly stderr?: ProgressSink | undefined;
+  /**
+   * Fired with the raw candidate text accumulated so far, on the first token
+   * and then at most once per `PROGRESS_INTERVAL_MS` after that — the same
+   * cadence `sendRevise` already uses for its own stderr progress line. A
+   * caller with no interest in partial text (the CLI's own `runRevise`,
+   * every existing test) simply omits it; `sendRevise` never depends on it
+   * being present.
+   */
+  readonly onCandidate?: ((text: string) => void) | undefined;
 }
 
 /** `reviseCore`'s own fields, already the right *types* — the CLI's raw string argv and MCP's already-typed zod args each map onto this the same way. */
@@ -437,10 +446,12 @@ async function sendRevise(pack: Pack, span: Span, ctx: ReviseCoreContext, deps: 
           firstTokenAt = nowMs;
           lastProgressAt = nowMs;
           stderr.write(`first token after ${seconds(nowMs - startedAt)}s\n`);
+          deps.onCandidate?.(text);
         } else if (nowMs - lastProgressAt >= PROGRESS_INTERVAL_MS) {
           const rate = tokenEvents / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
           stderr.write(`${tokenEvents} tokens, ${rate.toFixed(1)} tok/s\n`);
           lastProgressAt = nowMs;
+          deps.onCandidate?.(text);
         }
       } else {
         stats = ev.stats;
@@ -460,6 +471,11 @@ async function sendRevise(pack: Pack, span: Span, ctx: ReviseCoreContext, deps: 
   if (normalized === "" || stats === undefined) {
     return refuse(2, "pablo: the model returned an empty answer; nothing revised");
   }
+
+  // One last call with the settled, normalized text — a partial view that
+  // stopped short of the final progress tick still converges on exactly what
+  // the caller's own return value carries.
+  deps.onCandidate?.(normalized);
 
   const words = normalized.split(/\s+/).filter((word) => word !== "").length;
 
