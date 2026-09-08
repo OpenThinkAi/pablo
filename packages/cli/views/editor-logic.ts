@@ -44,32 +44,53 @@ export interface BodyOffsets {
 }
 
 /**
- * Converts a selection made inside one paragraph's contentEditable block —
- * `paragraphIndex` (0-based, in `splitParagraphs(body)` order) plus the
- * start/end offsets into *that paragraph's own text* — into the absolute
- * `{start, end}` pair into the full joined body that `mutate("revise", ...)`
- * needs. Returns `undefined` for an empty selection (`startInParagraph ===
- * endInParagraph`) or an out-of-range paragraph index, rather than throwing —
- * callers treat either as "no selection".
+ * The body offset of a paragraph's first character: the blocks are rendered
+ * from `splitParagraphs(body)` in order, so this is just the sum of every
+ * preceding paragraph's length plus one `PARAGRAPH_SEPARATOR` per gap. Exact
+ * and DOM-free — the mapping `selectionToBodyOffsets` builds its answer from.
  */
-export function selectionToBodyOffsets(
-  paragraphs: readonly string[],
-  paragraphIndex: number,
-  startInParagraph: number,
-  endInParagraph: number,
-): BodyOffsets | undefined {
-  if (paragraphIndex < 0 || paragraphIndex >= paragraphs.length) return undefined;
-  if (startInParagraph === endInParagraph) return undefined;
-
-  const lo = Math.min(startInParagraph, endInParagraph);
-  const hi = Math.max(startInParagraph, endInParagraph);
-
+function paragraphStartOffset(paragraphs: readonly string[], paragraphIndex: number): number {
   let offset = 0;
   for (let i = 0; i < paragraphIndex; i++) {
     offset += (paragraphs[i]?.length ?? 0) + PARAGRAPH_SEPARATOR.length;
   }
+  return offset;
+}
 
-  return { start: offset + lo, end: offset + hi };
+/**
+ * Converts a selection anchored inside one paragraph's contentEditable block
+ * and ending inside another (the same block, for a selection that never
+ * leaves one paragraph) into the absolute `{start, end}` pair into the full
+ * joined body that `mutate("revise", ...)` needs. `startParagraphIndex`/
+ * `endParagraphIndex` are 0-based, in `splitParagraphs(body)` order;
+ * `startInParagraph`/`endInParagraph` are offsets into each of those
+ * paragraphs' own text. Each endpoint is resolved to a body offset via
+ * `paragraphStartOffset` independently, so the two endpoints can land in
+ * different blocks — the paragraph separators between them fall out of the
+ * same index arithmetic and end up included in the returned span, which is
+ * what makes `body.slice(start, end)` include the `"\n\n"`s between the
+ * selected paragraphs.
+ *
+ * Returns `undefined` for an empty selection (the two endpoints resolve to
+ * the same body offset) or an out-of-range paragraph index, rather than
+ * throwing — callers treat either as "no selection".
+ */
+export function selectionToBodyOffsets(
+  paragraphs: readonly string[],
+  startParagraphIndex: number,
+  startInParagraph: number,
+  endParagraphIndex: number,
+  endInParagraph: number,
+): BodyOffsets | undefined {
+  if (startParagraphIndex < 0 || startParagraphIndex >= paragraphs.length) return undefined;
+  if (endParagraphIndex < 0 || endParagraphIndex >= paragraphs.length) return undefined;
+
+  const startAbs = paragraphStartOffset(paragraphs, startParagraphIndex) + startInParagraph;
+  const endAbs = paragraphStartOffset(paragraphs, endParagraphIndex) + endInParagraph;
+
+  if (startAbs === endAbs) return undefined;
+
+  return { start: Math.min(startAbs, endAbs), end: Math.max(startAbs, endAbs) };
 }
 
 /**

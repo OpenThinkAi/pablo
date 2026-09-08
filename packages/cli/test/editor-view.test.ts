@@ -43,38 +43,71 @@ describe("countWords", () => {
 
 describe("selectionToBodyOffsets", () => {
   const paragraphs = ["Alpha bravo.", "Charlie delta echo.", "Foxtrot."];
+  const body = joinParagraphs(paragraphs);
 
-  test("offsets within the first paragraph need no adjustment", () => {
-    expect(selectionToBodyOffsets(paragraphs, 0, 0, 5)).toEqual({ start: 0, end: 5 });
+  test("offsets within the first paragraph need no adjustment (single-paragraph path, unchanged)", () => {
+    expect(selectionToBodyOffsets(paragraphs, 0, 0, 0, 5)).toEqual({ start: 0, end: 5 });
   });
 
-  test("offsets within a later paragraph are shifted past every prior paragraph and its separator", () => {
+  test("offsets within a later paragraph are shifted past every prior paragraph and its separator (single-paragraph path, unchanged)", () => {
     // paragraphs[0].length (12) + separator (2) = 14
-    expect(selectionToBodyOffsets(paragraphs, 1, 0, 7)).toEqual({ start: 14, end: 21 });
+    expect(selectionToBodyOffsets(paragraphs, 1, 0, 1, 7)).toEqual({ start: 14, end: 21 });
     // + paragraphs[1].length (19) + separator (2) = 35
-    expect(selectionToBodyOffsets(paragraphs, 2, 0, 8)).toEqual({ start: 35, end: 43 });
+    expect(selectionToBodyOffsets(paragraphs, 2, 0, 2, 8)).toEqual({ start: 35, end: 43 });
   });
 
-  test("a reversed in-paragraph range (end before start) is normalised", () => {
-    expect(selectionToBodyOffsets(paragraphs, 0, 5, 0)).toEqual({ start: 0, end: 5 });
+  test("a reversed in-paragraph range (end before start) is normalised (single-paragraph path, unchanged)", () => {
+    expect(selectionToBodyOffsets(paragraphs, 0, 5, 0, 0)).toEqual({ start: 0, end: 5 });
   });
 
-  test("an empty selection (collapsed caret) is undefined, not a zero-length span", () => {
-    expect(selectionToBodyOffsets(paragraphs, 0, 3, 3)).toBeUndefined();
+  test("an empty selection (collapsed caret) is undefined, not a zero-length span (single-paragraph path, unchanged)", () => {
+    expect(selectionToBodyOffsets(paragraphs, 0, 3, 0, 3)).toBeUndefined();
   });
 
   test("an out-of-range paragraph index is undefined", () => {
-    expect(selectionToBodyOffsets(paragraphs, -1, 0, 1)).toBeUndefined();
-    expect(selectionToBodyOffsets(paragraphs, 3, 0, 1)).toBeUndefined();
+    expect(selectionToBodyOffsets(paragraphs, -1, 0, -1, 1)).toBeUndefined();
+    expect(selectionToBodyOffsets(paragraphs, 3, 0, 3, 1)).toBeUndefined();
+    expect(selectionToBodyOffsets(paragraphs, 0, 0, 3, 1)).toBeUndefined();
+    expect(selectionToBodyOffsets(paragraphs, -1, 0, 0, 1)).toBeUndefined();
   });
 
-  test("agrees with a plain-string reconstruction for every paragraph", () => {
-    const body = joinParagraphs(paragraphs);
+  test("agrees with a plain-string reconstruction for every paragraph (single-paragraph path, unchanged)", () => {
     for (let i = 0; i < paragraphs.length; i++) {
-      const offsets = selectionToBodyOffsets(paragraphs, i, 1, 3);
+      const offsets = selectionToBodyOffsets(paragraphs, i, 1, i, 3);
       expect(offsets).toBeDefined();
       expect(body.slice(offsets!.start, offsets!.end)).toBe(paragraphs[i]!.slice(1, 3));
     }
+  });
+
+  test("a selection spanning two paragraphs includes the separator between them", () => {
+    // "vo." (paragraphs[0] from 9) + separator + "Charlie" (paragraphs[1] to 7)
+    const offsets = selectionToBodyOffsets(paragraphs, 0, 9, 1, 7);
+    expect(offsets).toBeDefined();
+    expect(body.slice(offsets!.start, offsets!.end)).toBe("vo.\n\nCharlie");
+  });
+
+  test("a selection spanning three paragraphs includes both separators between them", () => {
+    // "bravo." (paragraphs[0] from 6) through "Fox" (paragraphs[2] to 3)
+    const offsets = selectionToBodyOffsets(paragraphs, 0, 6, 2, 3);
+    expect(offsets).toBeDefined();
+    expect(body.slice(offsets!.start, offsets!.end)).toBe("bravo.\n\nCharlie delta echo.\n\nFox");
+  });
+
+  test("a selection starting mid-paragraph and ending mid-paragraph two blocks later", () => {
+    // mid-way into paragraphs[0] ("bravo.") through mid-way into paragraphs[2] ("Foxt")
+    const offsets = selectionToBodyOffsets(paragraphs, 0, 6, 2, 4);
+    expect(offsets).toBeDefined();
+    expect(body.slice(offsets!.start, offsets!.end)).toBe("bravo.\n\nCharlie delta echo.\n\nFoxt");
+  });
+
+  test("a reversed multi-paragraph range (end before start in document order) is normalised", () => {
+    const forward = selectionToBodyOffsets(paragraphs, 0, 9, 1, 7);
+    const backward = selectionToBodyOffsets(paragraphs, 1, 7, 0, 9);
+    expect(backward).toEqual(forward);
+  });
+
+  test("a multi-paragraph selection with an out-of-range end paragraph is undefined", () => {
+    expect(selectionToBodyOffsets(paragraphs, 0, 0, 5, 1)).toBeUndefined();
   });
 });
 

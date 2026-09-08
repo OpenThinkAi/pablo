@@ -86,14 +86,21 @@ type DecisionResult =
   | { readonly ok: false; readonly code: string; readonly detail: string };
 
 interface SelectionState {
-  readonly paragraphIndex: number;
+  // The paragraph blocks the selection starts/ends in — equal for a
+  // selection that never leaves one paragraph, different for one that spans
+  // more than one. Controls anchor on `endParagraphIndex` (see the render
+  // loop below), since that's the block the selection's caret naturally
+  // rests in.
+  readonly startParagraphIndex: number;
+  readonly endParagraphIndex: number;
   readonly start: number;
   readonly end: number;
   readonly text: string;
 }
 
 interface CandidateState {
-  readonly paragraphIndex: number;
+  readonly startParagraphIndex: number;
+  readonly endParagraphIndex: number;
   readonly start: number;
   readonly end: number;
   readonly original: string;
@@ -200,11 +207,6 @@ function ParagraphBlock({ index, initialText, onChange }: ParagraphBlockProps) {
       suppressContentEditableWarning
       spellCheck={false}
       data-paragraph-index={index}
-      // A selection crossing into another paragraph doesn't raise Revise…
-      // (see `handleSelectionChange`'s cross-paragraph guard) — this native
-      // tooltip is the only surfaced explanation, since there's no other
-      // idle UI real estate to spend on it.
-      title="Select a passage within this paragraph to revise it"
       onInput={handleInput}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
@@ -268,38 +270,43 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
       const range = sel.getRangeAt(0);
       const startEl = closestParagraphEl(range.startContainer);
       const endEl = closestParagraphEl(range.endContainer);
-      // A selection that leaves the sheet, or crosses paragraph blocks, is
-      // outside this view's supported range — the control simply doesn't
-      // raise rather than guessing at a merged offset across two blocks.
-      if (startEl === undefined || endEl === undefined || startEl !== endEl) {
+      // A selection that leaves the sheet entirely (either end lands outside
+      // every paragraph block) is outside this view's supported range — the
+      // control simply doesn't raise. A selection that spans more than one
+      // paragraph block is supported: `selectionToBodyOffsets` resolves each
+      // end independently by paragraph index, so `startEl` and `endEl` are
+      // allowed to differ.
+      if (startEl === undefined || endEl === undefined) {
         setSelection(null);
         return;
       }
-      const index = Number(startEl.dataset["paragraphIndex"]);
+      const startIndex = Number(startEl.dataset["paragraphIndex"]);
+      const endIndex = Number(endEl.dataset["paragraphIndex"]);
       const a = textOffsetWithin(startEl, range.startContainer, range.startOffset);
-      const b = textOffsetWithin(startEl, range.endContainer, range.endOffset);
-      if (a === b) {
-        setSelection(null);
-        return;
-      }
-      const offsets = selectionToBodyOffsets(paragraphs, index, a, b);
+      const b = textOffsetWithin(endEl, range.endContainer, range.endOffset);
+      const offsets = selectionToBodyOffsets(paragraphs, startIndex, a, endIndex, b);
       if (offsets === undefined) {
         setSelection(null);
         return;
       }
-      const lo = Math.min(a, b);
-      const hi = Math.max(a, b);
       setSelection({
-        paragraphIndex: index,
+        startParagraphIndex: Math.min(startIndex, endIndex),
+        endParagraphIndex: Math.max(startIndex, endIndex),
         start: offsets.start,
         end: offsets.end,
-        text: (startEl.textContent ?? "").slice(lo, hi),
+        // Sliced from the joined body, not DOM `textContent` — this is what
+        // guarantees the selected text includes the `"\n\n"` separator(s)
+        // between paragraphs for a selection that spans more than one.
+        text: body.slice(offsets.start, offsets.end),
       });
     }
 
     document.addEventListener("selectionchange", handleSelectionChange);
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
-  }, [paragraphs, reviseOpen, candidate]);
+    // `body` is derived from `paragraphs` (see the `useMemo` above) and is
+    // always current for the same render this effect closes over — listed
+    // here anyway since the handler reads it directly.
+  }, [paragraphs, body, reviseOpen, candidate]);
 
   function handleParagraphChange(index: number, text: string) {
     setParagraphs((prev) => {
@@ -386,7 +393,8 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
         instruction,
       });
       setCandidate({
-        paragraphIndex: selection.paragraphIndex,
+        startParagraphIndex: selection.startParagraphIndex,
+        endParagraphIndex: selection.endParagraphIndex,
         start: selection.start,
         end: selection.end,
         original: selection.text,
@@ -500,7 +508,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                   </div>
                 </div>
 
-                {selection !== null && selection.paragraphIndex === i && !decisionDone && (
+                {selection !== null && selection.endParagraphIndex === i && !decisionDone && (
                   <div style={selectionBarStyle}>
                     {!reviseOpen && candidate === null && (
                       <button type="button" onClick={openRevise} style={reviseButtonStyle}>
@@ -533,11 +541,11 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                   </div>
                 )}
 
-                {reviseError !== null && selection !== null && selection.paragraphIndex === i && (
+                {reviseError !== null && selection !== null && selection.endParagraphIndex === i && (
                   <ErrorBanner message={reviseError} onDismiss={() => setReviseError(null)} />
                 )}
 
-                {candidate !== null && candidate.paragraphIndex === i && (
+                {candidate !== null && candidate.endParagraphIndex === i && (
                   <div style={compareWrapStyle}>
                     <div style={compareGridStyle}>
                       <div style={compareBoxStyle}>
