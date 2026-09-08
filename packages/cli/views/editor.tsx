@@ -626,7 +626,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                             type="button"
                             onClick={openRevise}
                             style={reviseButtonStyle}
-                            aria-label="Revise the selected text with AI"
+                            aria-label="Revise the selected passage"
                           >
                             Revise…
                           </button>
@@ -929,6 +929,9 @@ const reviseButtonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
+// Outlined, the inverse of `reviseButtonStyle`'s filled look — same shape and
+// size so the pair reads as one control, distinct fills so neither reads as
+// the sole/default action.
 const editButtonStyle: CSSProperties = {
   fontFamily: UI_FONT,
   fontSize: "0.72rem",
@@ -962,6 +965,8 @@ const reviseFormActionsStyle: CSSProperties = {
   justifyContent: "flex-end",
 };
 
+// Single-line only — the reject-reason field below, not the (now multi-line)
+// revise instruction, which has its own `instructionTextareaStyle`.
 const instructionInputStyle: CSSProperties = {
   flex: "1 1 auto",
   fontFamily: UI_FONT,
