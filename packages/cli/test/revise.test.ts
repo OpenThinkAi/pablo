@@ -261,6 +261,28 @@ test("a fake-adapter send returns the candidate, leaves the file byte-identical,
   expect(receipts[0]?.["error"]).toBeNull();
 });
 
+test("onCandidate receives the growing candidate as tokens stream in (AGT-1294)", async () => {
+  const { vault, project } = tempVault();
+  const ctx = ctxFor(vault, project);
+  const seen: string[] = [];
+  const deps: ReviseDeps = { adapter: fakeAdapter(), stderr: silentStderr(), onCandidate: (text) => seen.push(text) };
+
+  const outcome = await reviseCore(baseArgs({ passage: UNIQUE_PASSAGE }), ctx, deps);
+
+  expect(outcome.exitCode).toBe(0);
+  expect(seen.length).toBeGreaterThan(0);
+  // Fired on the first token, before the rest of the completion has arrived.
+  expect(seen[0]).toBe(RAW_CHUNKS[0]);
+  // Every partial candidate seen is a prefix of the full raw text, and the
+  // last one is the settled, normalized candidate the return value carries.
+  const full = RAW_CHUNKS.join("");
+  for (const partial of seen.slice(0, -1)) {
+    expect(full.startsWith(partial)).toBe(true);
+  }
+  const body = outcome.body as ReviseSendBody;
+  expect(seen.at(-1)).toBe(body.candidate);
+});
+
 test("an empty model answer refuses (exit 2) and still leaves the file untouched", async () => {
   const { vault, project } = tempVault();
   const ctx = ctxFor(vault, project);

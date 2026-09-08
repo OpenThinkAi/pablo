@@ -29,13 +29,20 @@ import type { PackKind, Slice, SliceAdjustment } from "./types";
  *
  * `revise` (AGT-1257) is one located passage plus a little neighbourhood on
  * each side, smaller than a full span edit's neighbourhood-plus-entity-sheets
- * pack: 8k is comfortably above a real revise pack and keeps the wait short.
+ * pack. Measured against the live writer (`mlx_lm.server`,
+ * `mlx-community/gemma-4-31b-it-4bit`) on 2026-09-07, a ~36-token completion's
+ * prefill time grows superlinearly with prompt size: 1.7s at 20 tokens, 3.3s
+ * at 563, 4.2s at 1,373, 11.0s at 2,723, 28.5s at 7,043. 8k put every revise
+ * in the slow bucket even though `before`/`after` are already windowed to one
+ * paragraph each side; 2k (AGT-1294) lands the same call near 4-5s while
+ * still leaving the rules slice its 400-token floor above a real
+ * passage+instruction+closing ask.
  */
 export const PACK_BUDGETS: Readonly<Record<PackKind, number>> = {
   spanEdit: 10_000,
   drafting: 16_000,
   prose: 12_000,
-  revise: 8_000,
+  revise: 2_000,
 };
 
 /** Marker left in the prompt where the budget cut, so the model sees the seam too. */

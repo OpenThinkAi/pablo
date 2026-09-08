@@ -44,12 +44,22 @@ export interface EditHostDeps {
   readonly readFile: (path: string) => string;
   readonly writeFile: (path: string, text: string) => void;
   readonly gitCommit: (dir: string, paths: string[], message: string) => { ok: boolean; detail?: string };
-  readonly revise: (input: {
-    path: string;
-    start: number;
-    end: number;
-    instruction: string;
-  }) => Promise<{ candidate: string; receipt: unknown }>;
+  readonly revise: (
+    input: {
+      path: string;
+      start: number;
+      end: number;
+      instruction: string;
+    },
+    /**
+     * Fired with the growing candidate text as it streams in (AGT-1294).
+     * Optional: a fake in a test, or a wiring that hasn't adopted streaming
+     * yet, can simply ignore the second argument. Production wiring
+     * (`edit.ts`'s `realRevise`) forwards it into `reviseCore`'s own
+     * `ReviseDeps.onCandidate`.
+     */
+    onCandidate?: (text: string) => void,
+  ) => Promise<{ candidate: string; receipt: unknown }>;
   readonly check: (body: string) => CheckHit[];
   readonly countWords: (body: string) => number;
   readonly now: () => Date;
@@ -79,7 +89,17 @@ export type DecisionResult =
 export interface EditHost {
   data(): EditorData;
   save(args: { text: string }): Promise<SaveResult>;
-  revise(args: { start: number; end: number; instruction: string }): Promise<{ candidate: string; receipt: unknown }>;
+  /**
+   * `onCandidate`, when given, is called with the growing candidate text as
+   * the model streams it (AGT-1294) — the surface this host exposes for a
+   * caller that wants to show a revise arriving rather than only a spinner.
+   * Nothing in this module reads or displays that text itself; see the
+   * ticket comment on what a view needs to call to consume it.
+   */
+  revise(
+    args: { start: number; end: number; instruction: string },
+    onCandidate?: (text: string) => void,
+  ): Promise<{ candidate: string; receipt: unknown }>;
   approve(): Promise<DecisionResult>;
   reject(args: { reason?: string }): Promise<DecisionResult>;
   refresh(): Promise<EditorData>;
@@ -197,6 +217,7 @@ async function reviseSpan(
   start: number,
   end: number,
   instruction: string,
+  onCandidate?: (text: string) => void,
 ): Promise<{ candidate: string; receipt: unknown }> {
   const { body } = readCurrent(deps);
 
@@ -212,7 +233,7 @@ async function reviseSpan(
     throw new EditHostError("no-instruction", "pablo: revise requires a non-blank instruction");
   }
 
-  return deps.revise({ path: deps.path, start, end, instruction });
+  return deps.revise({ path: deps.path, start, end, instruction }, onCandidate);
 }
 
 async function decideForHost(deps: EditHostDeps, kind: "approved" | "rejected", reason: string | undefined): Promise<DecisionResult> {
@@ -240,8 +261,11 @@ export function createEditHost(deps: EditHostDeps): EditHost {
     async save({ text }: { text: string }): Promise<SaveResult> {
       return saveEdit(deps, text);
     },
-    async revise({ start, end, instruction }: { start: number; end: number; instruction: string }) {
-      return reviseSpan(deps, start, end, instruction);
+    async revise(
+      { start, end, instruction }: { start: number; end: number; instruction: string },
+      onCandidate?: (text: string) => void,
+    ) {
+      return reviseSpan(deps, start, end, instruction, onCandidate);
     },
     async approve(): Promise<DecisionResult> {
       return decideForHost(deps, "approved", undefined);

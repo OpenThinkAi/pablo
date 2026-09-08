@@ -41,7 +41,7 @@ test("a revise pack orders rules -> before -> passage -> after -> instruction ->
     "closing",
   ]);
   expect(pack.budgetTokens).toBe(PACK_BUDGETS.revise);
-  expect(PACK_BUDGETS.revise).toBe(8000);
+  expect(PACK_BUDGETS.revise).toBe(2000);
   expect(pack.withinBudget).toBe(true);
 
   expect(pack.prompt).toContain(PASSAGE);
@@ -95,6 +95,51 @@ test("a small budget cuts before first, after second, and never touches passage/
   expect(pack.adjustments.some((a) => a.name === "passage")).toBe(false);
   expect(pack.adjustments.some((a) => a.name === "instruction")).toBe(false);
   expect(pack.adjustments.some((a) => a.name === "closing")).toBe(false);
+});
+
+test("at the default 2,000-token budget, a long before/after is cut while passage/instruction/closing survive untouched", () => {
+  const longBefore = "before ".repeat(3000);
+  const longAfter = "after ".repeat(3000);
+
+  const pack = assemblePack("revise", inputs({ before: longBefore, after: longAfter }));
+
+  expect(pack.budgetTokens).toBe(2000);
+  expect(pack.withinBudget).toBe(true);
+
+  const names = pack.adjustments.map((a) => a.name);
+  expect(names).toContain("before");
+  expect(names).toContain("after");
+
+  expect(pack.slices.find((slice) => slice.name === "passage")?.text).toBe(PASSAGE);
+  expect(pack.slices.find((slice) => slice.name === "instruction")?.text).toBe(INSTRUCTION);
+  expect(pack.slices.find((slice) => slice.name === "closing")?.text).toBe(REVISE_CLOSING);
+  expect(pack.adjustments.some((a) => a.name === "passage")).toBe(false);
+  expect(pack.adjustments.some((a) => a.name === "instruction")).toBe(false);
+  expect(pack.adjustments.some((a) => a.name === "closing")).toBe(false);
+
+  // rules keeps its 400-token floor rather than being dropped outright.
+  const rules = pack.slices.find((slice) => slice.name === "rules");
+  expect(rules).toBeDefined();
+  expect(rules?.tokens).toBeGreaterThan(0);
+});
+
+test("a pack built from a realistic-sized chapter neighbourhood fits under the new budget (AC2)", () => {
+  // A "paragraph either side" window the way `neighbourParagraphs` (packages/cli/src/revise.ts)
+  // actually hands `assemblePack` — a few hundred words of manuscript, not a whole chapter.
+  const realisticBefore = "The valley kept its own time, and the frost came before anyone was ready for it. ".repeat(40);
+  const realisticAfter = "Nobody spoke of the harvest again, not even at the table where it mattered most. ".repeat(40);
+  const realisticPassage =
+    "Frost came early that year, and the vines paid for it. The pickers worked through the night, hands numb, " +
+    "carrying what they could before the sun made it worse.";
+
+  const pack = assemblePack(
+    "revise",
+    inputs({ before: realisticBefore, after: realisticAfter, passage: realisticPassage }),
+  );
+
+  expect(pack.totalTokens).toBeLessThanOrEqual(PACK_BUDGETS.revise);
+  expect(pack.withinBudget).toBe(true);
+  expect(pack.prompt).toContain(realisticPassage);
 });
 
 test("assembly is deterministic: the same inputs give the same hash on two calls", () => {
