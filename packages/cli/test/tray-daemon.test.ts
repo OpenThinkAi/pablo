@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent, decide } from "../src/review";
 import type { QueuedEvent } from "../src/review";
+import type { OpenEditorOptions, OpenEditorResult } from "../src/edit";
 import { runTrayDaemon, TRAY_LAST_ERROR } from "../src/tray/daemon";
 import type { TrayDaemonDeps } from "../src/tray/daemon";
 import type { SignalTarget, TrayRequest } from "../src/tray/request";
@@ -72,6 +73,56 @@ function queuedEvent(overrides: Partial<QueuedEvent> = {}): QueuedEvent {
   };
 }
 
+/** A window the fake `openEditor` handed out — never a real ui-leaf mount or browser. */
+interface FakeEditorWindow extends OpenEditorResult {
+  /** True once `close()` (the daemon's own call) resolved this window's `closed`. */
+  hostClosed: boolean;
+  /** Test-only: resolves `closed` as the reader would — a decision, or just closing the window. */
+  closeFromReader: () => void;
+}
+
+/**
+ * A fake `openEditor` (never mounts ui-leaf, never launches a browser). Each
+ * call opens one `FakeEditorWindow` whose `closed` only settles when this
+ * test resolves it, either via the daemon's own `close()` or via
+ * `closeFromReader()`. `fails` names piece ids that throw instead of opening,
+ * for AC4.
+ */
+function createFakeOpenEditor(fails: ReadonlySet<string> = new Set()): {
+  openEditor: TrayDaemonDeps["openEditor"];
+  windows: FakeEditorWindow[];
+} {
+  const windows: FakeEditorWindow[] = [];
+  const openEditor = async (opts: OpenEditorOptions): Promise<OpenEditorResult> => {
+    const id = opts.piece?.id ?? opts.path;
+    if (fails.has(id)) throw new Error(`fake refusal opening ${id}`);
+
+    let settle: () => void = () => {};
+    const closed = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    let done = false;
+    const resolveOnce = (): void => {
+      if (done) return;
+      done = true;
+      settle();
+    };
+    const win: FakeEditorWindow = {
+      url: `http://127.0.0.1:0/fake/${id}`,
+      closed,
+      hostClosed: false,
+      close: () => {
+        win.hostClosed = true;
+        resolveOnce();
+      },
+      closeFromReader: resolveOnce,
+    };
+    windows.push(win);
+    return win;
+  };
+  return { openEditor, windows };
+}
+
 function readState(statePath: string): TrayState {
   return JSON.parse(readFileSync(statePath, "utf8")) as TrayState;
 }
@@ -115,6 +166,9 @@ function baseDeps(fixture: Fixture, overrides: Partial<TrayDaemonDeps> = {}): Tr
       throw new Error("no test may spawn a real helper");
     },
     decide,
+    openEditor: () => {
+      throw new Error("no test may open a real editor window");
+    },
     pollMs: 30,
     ...overrides,
   };
@@ -173,29 +227,266 @@ describe("runTrayDaemon", () => {
     fixture.cleanup();
   });
 
-  test("a review request logs without deciding anything", async () => {
+  test("AC1/AC4: a review request opens the editor and clears lastError on success", async () => {
     const fixture = useFixture();
     appendEvent(fixture.queuePath, queuedEvent());
 
     const controller = new AbortController();
     const signalTarget = fakeSignalTarget();
     const logs: string[] = [];
+    const { openEditor, windows } = createFakeOpenEditor();
 
-    const run = runTrayDaemon(baseDeps(fixture, { signalTarget, log: (line) => logs.push(line) }), controller.signal);
+    const run = runTrayDaemon(
+      baseDeps(fixture, { signalTarget, log: (line) => logs.push(line), openEditor }),
+      controller.signal,
+    );
 
     await waitFor(() => readState(fixture.statePath).pending.length === 1);
 
     await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
     signalTarget.fire();
 
-    await waitFor(() =>
-      logs.some((line) => line.includes("review requested for 20260907-chapter-one-aaaa (editor not wired yet)")),
-    );
-    // Never decided: the piece is still pending.
+    await waitFor(() => windows.length === 1);
+    expect(logs.some((line) => line.includes("opened the editor for 20260907-chapter-one-aaaa"))).toBe(true);
+    expect(readState(fixture.statePath).lastError).toBeUndefined();
+    // Reviewing doesn't decide anything on its own.
     expect(readState(fixture.statePath).pending.length).toBe(1);
 
     controller.abort();
     await run;
+    expect(windows[0]?.hostClosed).toBe(true); // AC5, exercised here incidentally
+    fixture.cleanup();
+  });
+
+  test("AC2: a second Review… closes the first before opening the new one, and the replaced window's closed is not reported", async () => {
+    const fixture = useFixture();
+    appendEvent(fixture.queuePath, queuedEvent());
+    appendEvent(fixture.queuePath, queuedEvent({ id: "20260907-chapter-two-bbbb", title: "Chapter Two", path: "/tmp/chapter-two.md" }));
+
+    const controller = new AbortController();
+    const signalTarget = fakeSignalTarget();
+    const { openEditor, windows } = createFakeOpenEditor();
+
+    const run = runTrayDaemon(baseDeps(fixture, { signalTarget, openEditor }), controller.signal);
+
+    await waitFor(() => readState(fixture.statePath).pending.length === 2);
+
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+    await waitFor(() => windows.length === 1);
+
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-two-bbbb" }));
+    signalTarget.fire();
+    await waitFor(() => windows.length === 2);
+
+    expect(windows[0]?.hostClosed).toBe(true); // the daemon closed it, not the reader
+    expect(windows[1]?.hostClosed).toBe(false); // the replacement is still up
+
+    // A late `closed` from the replaced window (as if the reader had also
+    // clicked something in it right as it was being torn down) must not be
+    // reported: `openWindow` has already moved on to window two, so the
+    // approve-closes-the-open-window path below must still see window two as
+    // current, not `null`.
+    windows[0]?.closeFromReader();
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "approve", id: "20260907-chapter-two-bbbb" }));
+    signalTarget.fire();
+    await waitFor(() => windows[1]?.hostClosed === true);
+
+    controller.abort();
+    await run;
+    fixture.cleanup();
+  });
+
+  test("AC3: approve from the menu for the open piece closes its window", async () => {
+    const fixture = useFixture();
+    appendEvent(fixture.queuePath, queuedEvent());
+
+    const controller = new AbortController();
+    const signalTarget = fakeSignalTarget();
+    const { openEditor, windows } = createFakeOpenEditor();
+
+    const run = runTrayDaemon(baseDeps(fixture, { signalTarget, openEditor }), controller.signal);
+
+    await waitFor(() => readState(fixture.statePath).pending.length === 1);
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+    await waitFor(() => windows.length === 1);
+
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "approve", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+
+    await waitFor(() => readState(fixture.statePath).pending.length === 0);
+    expect(windows[0]?.hostClosed).toBe(true);
+
+    controller.abort();
+    await run;
+    fixture.cleanup();
+  });
+
+  test("AC3: a decision made in the window rewrites tray state promptly, without waiting for the poll", async () => {
+    const fixture = useFixture();
+    appendEvent(fixture.queuePath, queuedEvent());
+
+    const controller = new AbortController();
+    const signalTarget = fakeSignalTarget();
+    const { openEditor, windows } = createFakeOpenEditor();
+
+    // A large poll interval: if this only passed via the 10s-style fallback
+    // rather than waking on `closed`, the `waitFor` below would time out.
+    const run = runTrayDaemon(baseDeps(fixture, { signalTarget, openEditor, pollMs: 5000 }), controller.signal);
+
+    await waitFor(() => readState(fixture.statePath).pending.length === 1);
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+    await waitFor(() => windows.length === 1);
+
+    // The editor's own `approve()` records the decision, then closes itself.
+    decide(fixture.queuePath, { id: "20260907-chapter-one-aaaa", kind: "approved", by: "editor", read: true });
+    windows[0]?.closeFromReader();
+
+    await waitFor(() => readState(fixture.statePath).pending.length === 0, 1000);
+
+    // The window is gone; a fresh Review… for the same piece is free to open
+    // a new one rather than being stuck behind stale bookkeeping.
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+    await waitFor(() => windows.length === 2);
+
+    controller.abort();
+    await run;
+    fixture.cleanup();
+  });
+
+  test("AC4: a window that cannot open logs the real reason and sets the fixed lastError sentence, cleared on the next successful open", async () => {
+    const fixture = useFixture();
+    appendEvent(fixture.queuePath, queuedEvent());
+
+    const controller = new AbortController();
+    const signalTarget = fakeSignalTarget();
+    const logs: string[] = [];
+    const fails = new Set(["20260907-chapter-one-aaaa"]);
+    const { openEditor, windows } = createFakeOpenEditor(fails);
+
+    const run = runTrayDaemon(
+      baseDeps(fixture, { signalTarget, log: (line) => logs.push(line), openEditor }),
+      controller.signal,
+    );
+
+    await waitFor(() => readState(fixture.statePath).pending.length === 1);
+
+    // Unknown id: never reaches `openEditor` at all.
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "does-not-exist" }));
+    signalTarget.fire();
+    await waitFor(() => readState(fixture.statePath).lastError === TRAY_LAST_ERROR);
+    expect(logs.some((line) => line.includes('no queued piece with id "does-not-exist"'))).toBe(true);
+
+    // A known piece whose window refuses to open (Chromium probe, mount failure, ...).
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+    await waitFor(() => logs.some((line) => line.includes("fake refusal opening 20260907-chapter-one-aaaa")));
+    expect(readState(fixture.statePath).lastError).toBe(TRAY_LAST_ERROR);
+    expect(windows.length).toBe(0);
+
+    // The next successful open clears it.
+    fails.delete("20260907-chapter-one-aaaa");
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+    await waitFor(() => readState(fixture.statePath).lastError === undefined);
+    expect(windows.length).toBe(1);
+
+    controller.abort();
+    await run;
+    fixture.cleanup();
+  });
+
+  test("AC5: shutdown closes an open window, on the same signal, before the final state is written", async () => {
+    const fixture = useFixture();
+    appendEvent(fixture.queuePath, queuedEvent());
+
+    const controller = new AbortController();
+    const signalTarget = fakeSignalTarget();
+    const { openEditor, windows } = createFakeOpenEditor();
+
+    const run = runTrayDaemon(baseDeps(fixture, { signalTarget, openEditor }), controller.signal);
+
+    await waitFor(() => readState(fixture.statePath).pending.length === 1);
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+    await waitFor(() => windows.length === 1);
+
+    const start = Date.now();
+    controller.abort();
+    await run;
+    const elapsedMs = Date.now() - start;
+
+    expect(windows[0]?.hostClosed).toBe(true);
+    expect(elapsedMs).toBeLessThan(3000);
+    expect(readState(fixture.statePath).daemonPid).toBe(0);
+
+    fixture.cleanup();
+  });
+
+  test("AC5 hard case: an abort that lands while openEditor is still in flight still closes the window once it resolves", async () => {
+    const fixture = useFixture();
+    appendEvent(fixture.queuePath, queuedEvent());
+
+    const controller = new AbortController();
+    const signalTarget = fakeSignalTarget();
+    let openCalled = false;
+    let releaseOpen: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    let window: FakeEditorWindow | undefined;
+
+    const openEditor: TrayDaemonDeps["openEditor"] = async (opts) => {
+      openCalled = true;
+      await gate; // held open by the test until after `controller.abort()`
+      const id = opts.piece?.id ?? opts.path;
+      let settle: () => void = () => {};
+      const closed = new Promise<void>((resolve) => {
+        settle = resolve;
+      });
+      let done = false;
+      window = {
+        url: `http://127.0.0.1:0/fake/${id}`,
+        closed,
+        hostClosed: false,
+        close: () => {
+          if (done) return;
+          done = true;
+          if (window) window.hostClosed = true;
+          settle();
+        },
+        closeFromReader: () => {
+          if (done) return;
+          done = true;
+          settle();
+        },
+      };
+      return window;
+    };
+
+    const run = runTrayDaemon(baseDeps(fixture, { signalTarget, openEditor }), controller.signal);
+
+    await waitFor(() => readState(fixture.statePath).pending.length === 1);
+    await Bun.write(fixture.parcelPath, JSON.stringify({ action: "review", id: "20260907-chapter-one-aaaa" }));
+    signalTarget.fire();
+
+    // Wait until `openEditor` has actually been called (and is now blocked
+    // on `gate`) before aborting — this is the exact race the guard in
+    // `openReviewWindow` exists for: `signal.aborted` is checked once more
+    // AFTER the `await deps.openEditor(...)` resolves, not only before it.
+    await waitFor(() => openCalled);
+    controller.abort();
+    releaseOpen();
+
+    await run;
+
+    expect(window).toBeDefined();
+    expect(window?.hostClosed).toBe(true); // closed by the post-await guard, not left dangling
+    expect(readState(fixture.statePath).daemonPid).toBe(0);
+
     fixture.cleanup();
   });
 

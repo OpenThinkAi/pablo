@@ -7,11 +7,18 @@
  * (AGT-1255) so the append-only log stays the single source of truth.
  *
  * `runTrayDaemon(deps, signal)` is the whole loop with every side effect
- * injectable — `materialize`, `supervise`, `decide` and `now` chief among
- * them — so a test can drive it in-process against a temp `XDG_STATE_HOME`/
- * `XDG_CONFIG_HOME` without ever compiling a real helper, spawning a real
- * process, or creating a real status item. `cli.ts`'s `tray` verb supplies
- * the real implementations and a real `AbortSignal` tied to SIGTERM/SIGINT.
+ * injectable — `materialize`, `supervise`, `decide`, `openEditor` and `now`
+ * chief among them — so a test can drive it in-process against a temp
+ * `XDG_STATE_HOME`/`XDG_CONFIG_HOME` without ever compiling a real helper,
+ * spawning a real process, or opening a real window. `cli.ts`'s `tray` verb
+ * supplies the real implementations and a real `AbortSignal` tied to
+ * SIGTERM/SIGINT.
+ *
+ * A `review` request opens AGT-1258's editor window on the piece, hosted by
+ * this daemon (AGT-1259): at most one window at a time, closed and replaced
+ * by a second `Review…`, closed by a menu `approve` of the piece it shows,
+ * and closed on shutdown before the process exits — all on the same
+ * `signal` this function is given.
  */
 
 import { mkdirSync, watch } from "node:fs";
@@ -24,9 +31,10 @@ import { listenForTrayRequests } from "./request";
 import type { SignalTarget, TrayRequest } from "./request";
 import { toTrayPieces, writeTrayState } from "./state";
 import type { TrayState } from "./state";
-import { pending, readEvents } from "../review";
+import { pending, readEvents, record } from "../review";
 import type { DecideInput, DecideResult } from "../review";
 import { stateReviewPath } from "../paths";
+import type { OpenEditorOptions, OpenEditorResult } from "../edit";
 
 /** Recorded in `build.json` and shown in the state file's `version`. */
 const TRAY_VERSION = "0.1.0";
@@ -69,6 +77,13 @@ export interface TrayDaemonDeps {
   readonly supervise: (opts: SuperviseHelperOptions) => Promise<void>;
   readonly spawnHelper: (helperPath: string, statePath: string) => SupervisedProcess;
   readonly decide: (path: string, input: DecideInput) => DecideResult;
+  /**
+   * Opens the editor window on a piece (AGT-1259) — AGT-1258's `openEditor`
+   * in production, called with the daemon's own `signal` so a shutdown that
+   * fires mid-open still tears the window down. Every test injects a fake
+   * that never mounts a real ui-leaf window or launches a real browser.
+   */
+  readonly openEditor: (opts: OpenEditorOptions) => Promise<OpenEditorResult>;
   /** Injected in tests so no suite installs a real, process-wide SIGUSR1 handler. */
   readonly signalTarget?: SignalTarget;
   /** Milliseconds between the queue-file poll fallback; defaults to 10s. */
@@ -96,6 +111,33 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
   const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
 
   let lastError: string | undefined;
+
+  /**
+   * The one editor window this daemon may have open, and the piece it shows
+   * (AC2). Cleared to `null` the moment it is replaced, closed by a menu
+   * approve, or closed on shutdown — always *before* the corresponding
+   * `close()`/`closed` settles, so the `onWindowClosed` identity check below
+   * can tell a window that is still current from one that has already been
+   * superseded.
+   */
+  let openWindow: { readonly id: string; readonly window: OpenEditorResult } | null = null;
+  /** Set when `openWindow`'s own window closed on its own (AC3) — read at the top of the loop, like `queueChanged`. */
+  let windowClosed = false;
+
+  /**
+   * `window.closed` settles whenever the reader closes it, whether that is a
+   * decision made in the window, the disconnect timeout, or `close()` called
+   * from here. Only report it when `window` is still the one on screen — a
+   * replaced window's `closed` resolving later is not news (AC2), and by the
+   * time this runs `openWindow` may already have moved on, including past an
+   * `await` this same window was part of.
+   */
+  function onWindowClosed(window: OpenEditorResult): void {
+    if (openWindow?.window !== window) return;
+    openWindow = null;
+    windowClosed = true;
+    waker.wake();
+  }
 
   function publish(daemonPidOverride?: number): void {
     const records = pending(readEvents(queuePath));
@@ -163,7 +205,66 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
     });
   }
 
-  function serviceRequest(request: TrayRequest): void {
+  /**
+   * `review` — opens AGT-1258's editor on `id` (AC1), replacing any window
+   * already open (AC2) and clearing/re-arming `lastError` exactly as
+   * `approve` does (AC4).
+   */
+  async function openReviewWindow(id: string): Promise<void> {
+    const found = record(readEvents(queuePath), id);
+    if (found === undefined) {
+      log(`review ${id} failed: no queued piece with id "${id}"`);
+      lastError = TRAY_LAST_ERROR;
+      return;
+    }
+
+    // Closed BEFORE the new one is mounted, not after: two windows alive at
+    // once is exactly what AC2 forbids, and mounting the new one first would
+    // hold both for however long that takes. `openWindow` is cleared here,
+    // synchronously, so `onWindowClosed` never reports this one once it goes.
+    const previous = openWindow;
+    openWindow = null;
+    if (previous !== null) {
+      try {
+        previous.window.close();
+      } catch {
+        // Already gone — the replacement is what matters.
+      }
+    }
+
+    let window: OpenEditorResult;
+    try {
+      window = await deps.openEditor({ path: found.piece.path, piece: found.piece, signal });
+    } catch (error) {
+      log(`review ${id} failed: ${describeError(error)}`);
+      lastError = TRAY_LAST_ERROR;
+      return;
+    }
+
+    // The open can take real time (AC1's own 3s budget), and nothing else in
+    // this function is awaited before it — so a shutdown asked for while it
+    // was in flight has already run the `finally` block below with nothing
+    // in `openWindow` to close. A check made only before this `await` would
+    // already be stale by the time we get here; it has to be repeated after.
+    if (signal.aborted) {
+      try {
+        window.close();
+      } catch {
+        // Shutting down anyway.
+      }
+      return;
+    }
+
+    openWindow = { id, window };
+    lastError = undefined;
+    log(`opened the editor for ${id}`);
+    void window.closed.then(
+      () => onWindowClosed(window),
+      () => onWindowClosed(window),
+    );
+  }
+
+  async function serviceRequest(request: TrayRequest): Promise<void> {
     if (request.action === "approve") {
       const result = deps.decide(queuePath, {
         id: request.id,
@@ -175,6 +276,17 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
       if (result.ok) {
         log(`approved ${request.id}`);
         lastError = undefined;
+        // AC3: an approve from the menu for the piece whose window is open
+        // closes that window.
+        if (openWindow !== null && openWindow.id === request.id) {
+          const window = openWindow.window;
+          openWindow = null;
+          try {
+            window.close();
+          } catch {
+            // Already gone.
+          }
+        }
       } else {
         log(`approve ${request.id} failed: ${result.detail}`);
         lastError = TRAY_LAST_ERROR;
@@ -182,10 +294,8 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
       return;
     }
 
-    // action === "review" — AGT-1259 wires this to the editor; until then,
-    // the click is acknowledged in the log and nothing else happens.
-    log(`review requested for ${request.id} (editor not wired yet)`);
-    lastError = undefined;
+    // action === "review"
+    await openReviewWindow(request.id);
   }
 
   try {
@@ -195,9 +305,17 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
         publish();
       }
 
+      // AC3: a decision or a plain close made in the window rewrites tray
+      // state on this pass rather than waiting on the queue watcher or the
+      // 10s poll.
+      if (windowClosed) {
+        windowClosed = false;
+        publish();
+      }
+
       while (pendingRequests.length > 0) {
         const request = pendingRequests.shift() as TrayRequest;
-        serviceRequest(request);
+        await serviceRequest(request);
         publish();
       }
 
@@ -211,6 +329,21 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
   } finally {
     stopListening();
     watcher?.close();
+    // AC5: shutdown closes an open window, on this same signal, before the
+    // helper exits — awaited so the window is actually gone, not merely told
+    // to go, before the final state is written.
+    if (openWindow !== null) {
+      const window = openWindow.window;
+      openWindow = null;
+      try {
+        window.close();
+      } catch {
+        // Already gone.
+      }
+      await window.closed.catch(() => {
+        // A window that fails to close cleanly still must not hang shutdown.
+      });
+    }
     if (supervisorDone !== undefined) await supervisorDone;
     lastError = undefined;
     publish(0);
