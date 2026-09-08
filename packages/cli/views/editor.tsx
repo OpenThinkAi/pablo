@@ -8,8 +8,10 @@ import type {
 import type { ViewProps } from "@openthink/ui-leaf/view";
 import {
   applyCandidate,
+  bodyOffsetToParagraphOffset,
   countWords,
   groupHitsByParagraph,
+  isSameSelectionSpan,
   joinParagraphs,
   nextSavedText,
   normalizeCandidate,
@@ -21,8 +23,9 @@ import {
  * The paper-sheet editor (AGT-1270), replacing the AGT-1258 read-only stub.
  * Per `~/saltline-digital-vault/projects/ai-terminal/review-tray.md`, "The
  * editor": one white sheet, serif, generous margins, edit in place, a
- * `Revise…` control raised by a selection, `Approve`/`Reject`/`Save` at the
- * foot. The view never touches files or the model — every mutation it calls
+ * control raised by a selection offering both a straight hand edit and
+ * `Revise…`, `Approve`/`Reject`/`Save` at the foot. The view never touches
+ * files or the model — every mutation it calls
  * (`save`, `revise`, `approve`, `reject`) is answered by the host
  * (`edit-host.ts`); this file only displays and asks. The host also answers
  * a `refresh` mutation (re-reads the file), but no AC asks for a UI control
@@ -158,6 +161,39 @@ function closestParagraphEl(node: Node | null): HTMLElement | undefined {
   return undefined;
 }
 
+/** The paragraph block carrying `data-paragraph-index={index}`, or `undefined` if it isn't mounted. */
+function paragraphElAt(index: number): HTMLElement | undefined {
+  return document.querySelector<HTMLElement>(`[data-paragraph-index="${index}"]`) ?? undefined;
+}
+
+/**
+ * Re-selects `span` in the live DOM so the next keystroke replaces it —
+ * what `Edit` needs after a button click has moved focus and the browser's
+ * own Selection away from the paragraph block. Each paragraph keeps its text
+ * in one text node (see the file header on Enter/paste), so `firstChild` is
+ * the node the offsets resolve against; an empty paragraph has no children,
+ * where offset 0 into the element itself is the correct (only) caret spot.
+ * Focus goes to the end block, matching where the control itself anchors —
+ * for a selection that spans more than one paragraph, each block is still a
+ * separate contentEditable root, so continuing to type across the boundary
+ * is a pre-existing limitation of that layout, not something this restores.
+ */
+function restoreSelectionInDom(paragraphs: readonly string[], span: SelectionState): void {
+  const startEl = paragraphElAt(span.startParagraphIndex);
+  const endEl = paragraphElAt(span.endParagraphIndex);
+  if (startEl === undefined || endEl === undefined) return;
+
+  const startOffset = bodyOffsetToParagraphOffset(paragraphs, span.startParagraphIndex, span.start);
+  const endOffset = bodyOffsetToParagraphOffset(paragraphs, span.endParagraphIndex, span.end);
+  const startNode = startEl.firstChild ?? startEl;
+  const endNode = endEl.firstChild ?? endEl;
+
+  endEl.focus();
+  const live = window.getSelection();
+  if (live === null) return;
+  live.setBaseAndExtent(startNode, startOffset, endNode, endOffset);
+}
+
 // ---------------------------------------------------------------------------
 // One paragraph, as an uncontrolled contentEditable block.
 //
@@ -237,6 +273,12 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
   const [revision, setRevision] = useState(0);
 
   const [selection, setSelection] = useState<SelectionState | null>(null);
+  // The span `Edit` or `Escape` last dismissed the control for — compared by
+  // value (`isSameSelectionSpan`), not identity, so the control stays hidden
+  // across the `selectionchange` that `restoreSelectionInDom` itself
+  // triggers (same span, new object), but reappears the instant the author
+  // makes any genuinely different selection.
+  const [dismissedSelection, setDismissedSelection] = useState<SelectionState | null>(null);
   const [reviseOpen, setReviseOpen] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [revising, setRevising] = useState(false);
@@ -327,6 +369,26 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
     // here anyway since the handler reads it directly.
   }, [paragraphs, body, reviseOpen, candidate]);
 
+  // -------------------------------------------------------------------------
+  // Escape dismisses whichever the control is currently showing — the
+  // Edit/Revise… pair or the open instruction form — without touching the
+  // body or the selection itself (AC4). It never fires while the candidate
+  // compare panel is open; that panel has its own Take/Drop, not this one.
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape" || candidate !== null || selection === null) return;
+      e.preventDefault();
+      setReviseOpen(false);
+      setInstruction("");
+      setReviseError(null);
+      setDismissedSelection(selection);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [selection, candidate]);
+
   function handleParagraphChange(index: number, text: string) {
     setParagraphs((prev) => {
       const next = prev.slice();
@@ -353,6 +415,7 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
     setRevision((r) => r + 1);
     if (nextCheck !== undefined) setCheck(nextCheck);
     setSelection(null);
+    setDismissedSelection(null);
     setReviseOpen(false);
     setCandidate(null);
     setInstruction("");
@@ -384,6 +447,18 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
     } finally {
       setSaving(false);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Edit — the hand-edit half of the control (AC1/AC2). Neither destructive
+  // nor a navigation: it dismisses the Edit/Revise… pair and hands focus and
+  // the live Selection back to the paragraph block at the exact span it was
+  // raised for, so the very next keystroke replaces the selected text.
+  // -------------------------------------------------------------------------
+  function handleEditSelection() {
+    if (selection === null) return;
+    restoreSelectionInDom(paragraphs, selection);
+    setDismissedSelection(selection);
   }
 
   // -------------------------------------------------------------------------
@@ -532,38 +607,59 @@ export default function Editor({ data, mutate }: ViewProps<EditorData>) {
                   </div>
                 </div>
 
-                {selection !== null && selection.endParagraphIndex === i && !decisionDone && (
-                  <div style={selectionBarStyle}>
-                    {!reviseOpen && candidate === null && (
-                      <button type="button" onClick={openRevise} style={reviseButtonStyle}>
-                        Revise…
-                      </button>
-                    )}
-                    {reviseOpen && (
-                      <div style={reviseFormStyle}>
-                        <input
-                          type="text"
-                          value={instruction}
-                          onChange={(e) => setInstruction(e.target.value)}
-                          placeholder="How should this passage change?"
-                          style={instructionInputStyle}
-                          autoFocus
-                        />
-                        <button
-                          type="button"
-                          onClick={submitRevise}
-                          disabled={revising || instruction.trim() === ""}
-                          style={withDisabledLook(primaryButtonStyle, revising || instruction.trim() === "")}
-                        >
-                          {revising ? "Revising…" : "Send"}
-                        </button>
-                        <button type="button" onClick={closeRevise} disabled={revising} style={linkButtonStyle}>
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {selection !== null &&
+                  selection.endParagraphIndex === i &&
+                  !decisionDone &&
+                  (reviseOpen || (candidate === null && !isSameSelectionSpan(selection, dismissedSelection))) && (
+                    <div style={selectionBarStyle}>
+                      {!reviseOpen && (
+                        <div style={selectionMenuStyle} role="group" aria-label="Selected passage">
+                          <button
+                            type="button"
+                            onClick={handleEditSelection}
+                            style={editButtonStyle}
+                            aria-label="Edit the selected text directly"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={openRevise}
+                            style={reviseButtonStyle}
+                            aria-label="Revise the selected passage"
+                          >
+                            Revise…
+                          </button>
+                        </div>
+                      )}
+                      {reviseOpen && (
+                        <div style={reviseFormStyle}>
+                          <textarea
+                            value={instruction}
+                            onChange={(e) => setInstruction(e.target.value)}
+                            placeholder="How should this passage change? e.g. this leads into the next paragraph too abruptly"
+                            aria-label="Revision instructions"
+                            style={instructionTextareaStyle}
+                            rows={3}
+                            autoFocus
+                          />
+                          <div style={reviseFormActionsStyle}>
+                            <button type="button" onClick={closeRevise} disabled={revising} style={linkButtonStyle}>
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={submitRevise}
+                              disabled={revising || instruction.trim() === ""}
+                              style={withDisabledLook(primaryButtonStyle, revising || instruction.trim() === "")}
+                            >
+                              {revising ? "Revising…" : "Send"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                 {reviseError !== null && selection !== null && selection.endParagraphIndex === i && (
                   <ErrorBanner message={reviseError} onDismiss={() => setReviseError(null)} />
@@ -816,6 +912,11 @@ const selectionBarStyle: CSSProperties = {
   marginTop: "0.5rem",
 };
 
+const selectionMenuStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.5rem",
+};
+
 const reviseButtonStyle: CSSProperties = {
   fontFamily: UI_FONT,
   fontSize: "0.72rem",
@@ -828,18 +929,44 @@ const reviseButtonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
+// Outlined, the inverse of `reviseButtonStyle`'s filled look — same shape and
+// size so the pair reads as one control, distinct fills so neither reads as
+// the sole/default action.
+const editButtonStyle: CSSProperties = {
+  fontFamily: UI_FONT,
+  fontSize: "0.72rem",
+  letterSpacing: "0.04em",
+  color: INK,
+  background: PAPER,
+  border: `1px solid ${INK}`,
+  borderRadius: "999px",
+  padding: "0.3rem 0.8rem",
+  cursor: "pointer",
+};
+
+// Column, not the single-line control's old row: the instruction is now a
+// multi-line textarea, so the Send/Cancel pair moves to its own row beneath
+// it rather than crowding the field horizontally.
 const reviseFormStyle: CSSProperties = {
   display: "flex",
+  flexDirection: "column",
   gap: "0.5rem",
-  alignItems: "center",
   background: PAPER,
   border: `1px solid ${HAIR}`,
   borderRadius: "8px",
-  padding: "0.4rem",
+  padding: "0.5rem",
   boxShadow: "0 4px 14px rgba(60, 50, 30, 0.12)",
   width: "100%",
 };
 
+const reviseFormActionsStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.5rem",
+  justifyContent: "flex-end",
+};
+
+// Single-line only — the reject-reason field below, not the (now multi-line)
+// revise instruction, which has its own `instructionTextareaStyle`.
 const instructionInputStyle: CSSProperties = {
   flex: "1 1 auto",
   fontFamily: UI_FONT,
@@ -848,6 +975,18 @@ const instructionInputStyle: CSSProperties = {
   border: `1px solid ${HAIR}`,
   borderRadius: "5px",
   minWidth: 0,
+};
+
+const instructionTextareaStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  fontFamily: UI_FONT,
+  fontSize: "0.85rem",
+  lineHeight: 1.5,
+  padding: "0.45rem 0.55rem",
+  border: `1px solid ${HAIR}`,
+  borderRadius: "5px",
+  resize: "vertical",
 };
 
 const compareWrapStyle: CSSProperties = {

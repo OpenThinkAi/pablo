@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   applyCandidate,
+  bodyOffsetToParagraphOffset,
   countWords,
   groupHitsByParagraph,
+  isSameSelectionSpan,
   joinParagraphs,
   nextSavedText,
   normalizeCandidate,
@@ -109,6 +111,62 @@ describe("selectionToBodyOffsets", () => {
 
   test("a multi-paragraph selection with an out-of-range end paragraph is undefined", () => {
     expect(selectionToBodyOffsets(paragraphs, 0, 0, 5, 1)).toBeUndefined();
+  });
+});
+
+describe("bodyOffsetToParagraphOffset", () => {
+  const paragraphs = ["Alpha bravo.", "Charlie delta echo.", "Foxtrot."];
+
+  test("resolves an offset in the first paragraph unchanged", () => {
+    expect(bodyOffsetToParagraphOffset(paragraphs, 0, 5)).toBe(5);
+  });
+
+  test("resolves an offset in a later paragraph relative to that paragraph's own start", () => {
+    // paragraphs[0].length (12) + separator (2) = 14
+    expect(bodyOffsetToParagraphOffset(paragraphs, 1, 14)).toBe(0);
+    expect(bodyOffsetToParagraphOffset(paragraphs, 1, 21)).toBe(7);
+  });
+
+  test("the end of a paragraph resolves to that paragraph's own length", () => {
+    expect(bodyOffsetToParagraphOffset(paragraphs, 0, 12)).toBe(12);
+  });
+
+  test("clamps a body offset that falls before the paragraph's own start to 0", () => {
+    expect(bodyOffsetToParagraphOffset(paragraphs, 1, 0)).toBe(0);
+  });
+
+  test("clamps a body offset past the paragraph's own end to its length", () => {
+    expect(bodyOffsetToParagraphOffset(paragraphs, 0, 999)).toBe(paragraphs[0]!.length);
+  });
+
+  test("round-trips with paragraphStartOffset via selectionToBodyOffsets for every paragraph", () => {
+    for (let i = 0; i < paragraphs.length; i++) {
+      const offsets = selectionToBodyOffsets(paragraphs, i, 1, i, 3);
+      expect(offsets).toBeDefined();
+      expect(bodyOffsetToParagraphOffset(paragraphs, i, offsets!.start)).toBe(1);
+      expect(bodyOffsetToParagraphOffset(paragraphs, i, offsets!.end)).toBe(3);
+    }
+  });
+});
+
+describe("isSameSelectionSpan", () => {
+  const span = { startParagraphIndex: 0, endParagraphIndex: 0, start: 1, end: 3 };
+
+  test("two spans with identical fields are the same selection", () => {
+    expect(isSameSelectionSpan(span, { ...span })).toBe(true);
+  });
+
+  test("null is only equal to null", () => {
+    expect(isSameSelectionSpan(null, null)).toBe(true);
+    expect(isSameSelectionSpan(span, null)).toBe(false);
+    expect(isSameSelectionSpan(null, span)).toBe(false);
+  });
+
+  test("a span differing in any one field is a different selection", () => {
+    expect(isSameSelectionSpan(span, { ...span, start: 2 })).toBe(false);
+    expect(isSameSelectionSpan(span, { ...span, end: 4 })).toBe(false);
+    expect(isSameSelectionSpan(span, { ...span, startParagraphIndex: 1 })).toBe(false);
+    expect(isSameSelectionSpan(span, { ...span, endParagraphIndex: 1 })).toBe(false);
   });
 });
 
