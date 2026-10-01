@@ -2,7 +2,7 @@
  * `pablo write --project <slug> --chapter N` (AGT-1230 part 1: the pack and
  * `--dry-run`; AGT-1237 part 2: send, normalize, write the file, receipt).
  * See the design doc's `The write pipeline` section
- * (`~/saltline-digital-vault/projects/ai-terminal/README.md`) — this file now
+ * (`pm project show ai-terminal`) — this file now
  * covers every step: check, pack, dry-run OR send, normalize, write, and the
  * post-write mechanical-tells check. `save`'s ritual commit (AGT-1231) is a
  * separate concern and does not happen here.

@@ -1,7 +1,7 @@
 /**
  * `pablo prose --format <name>` (AGT-1241): a fixed, short stanza per format —
  * length norms and shape, not a stage machine. See the design doc's "The
- * command" table (`~/saltline-digital-vault/projects/ai-terminal/prose.md`):
+ * command" table (`pm project show ai-terminal --doc prose`):
  * "a short stanza, not a stage machine: length norms and shape (an email has
  * a subject line; a post has a headline; a reply has no greeting)."
  *

@@ -2,7 +2,7 @@
  * Vault and project resolution for the `pablo` bin.
  *
  * A **project** is a directory under `<vault>/<kind>/<slug>` — the layout the
- * writing vault already uses (see `~/saltline-digital-vault/projects/ai-terminal/README.md`).
+ * writing vault already uses (see `pm project show ai-terminal`).
  * Resolution never guesses: an unresolvable vault or project is a typed
  * refusal that names every path it tried, so the driving agent can relay
  * exactly what pablo looked for instead of a generic "not found".

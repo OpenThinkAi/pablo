@@ -427,7 +427,7 @@ function renderTimeline(inputs: DraftingInputs): string {
 /**
  * Prose: a named voice plus a brief, no stage machine (AGT-1241). Order is
  * the design doc's own ("Voices" / "The pack" in
- * `~/saltline-digital-vault/projects/ai-terminal/prose.md`): the voice's
+ * `pm project show ai-terminal --doc prose`): the voice's
  * rules, its exemplars (newest first — `readVoice` already sorts them that
  * way, and `keep: "head"` here means a budget squeeze drops the *oldest*
  * ones off the tail of the concatenated text, never the newest), what the

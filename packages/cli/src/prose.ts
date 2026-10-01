@@ -3,7 +3,7 @@
  *   [--format email|post|page|reply|note] [--words N] [--out <path>]
  *   [--force] [--json] [--dry-run]`: the freeform prose path — a voice plus a
  * brief, no stage machine, no `--project`. See the design doc's extension
- * (`~/saltline-digital-vault/projects/ai-terminal/prose.md`).
+ * (`pm project show ai-terminal --doc prose`).
  *
  * AGT-1241 wired assembly and `--dry-run`; AGT-1242 wires the rest: route
  * (the `copy` intent, or the voice's own `model:`), send once, normalize,

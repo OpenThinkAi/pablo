@@ -1,7 +1,7 @@
 /**
  * `pablo save` (AGT-1233) — the agent's planning output (acts, beats, bible
  * facts) lands in the files the novel stage machine reads (see
- * `packages/cli/src/novel/machine.ts`, `~/saltline-digital-vault/projects/ai-terminal/README.md`).
+ * `packages/cli/src/novel/machine.ts`, `pm project show ai-terminal`).
  *
  * `pablo save --project <slug> --stage acts|beats|premise|bible/<file> [--file <path>]`
  * reads stdin (or `--file`), validates it, and writes the target file for that

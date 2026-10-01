@@ -10,7 +10,7 @@
  *    curly quotes, dash year ranges, foreshadowing phrases, the banned stock
  *    names the style guide lists, and every `Flagged:` line in
  *    `<vault>/style/prose.md`, matched verbatim. See the design doc's
- *    "Voice" section (`~/saltline-digital-vault/projects/ai-terminal/README.md`)
+ *    "Voice" section (`pm project show ai-terminal`)
  *    for where these rules come from — the guide's own flagged lines are "the
  *    best document in the vault and the pattern the rest follows."
  *

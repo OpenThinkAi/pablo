@@ -4,7 +4,7 @@
  * happened — tick the outline, drop a dated note, update the README's
  * "Where things stand" section, extract continuity facts, commit exactly the
  * touched paths, and `think sync`. See the design doc's stage table
- * (`~/saltline-digital-vault/projects/ai-terminal/README.md`, the
+ * (`pm project show ai-terminal`, the
  * `chapter N` row's "After" column) and `packages/cli/src/write.ts`
  * (AGT-1237), which calls this once the chapter file is on disk and merges
  * the result into the write response as `rituals`.

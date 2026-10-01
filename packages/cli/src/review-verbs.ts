@@ -7,8 +7,8 @@
  * `--json`). `verbs.ts`'s `review` verb calls `reviewCore` directly for the
  * MCP path, exactly the way `runSaveVerb` calls `saveCore`.
  *
- * The review queue is global, not project-scoped (`~/saltline-digital-vault/
- * projects/ai-terminal/review-tray.md`: "one file, not one per vault"), so
+ * The review queue is global, not project-scoped (`pm project show
+ * ai-terminal --doc review-tray`: "one file, not one per vault"), so
  * this file never resolves a vault or a project — its only input beyond the
  * action/id/flags is the queue path (`paths.ts`'s `stateReviewPath`).
  */

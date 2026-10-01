@@ -5,9 +5,10 @@ for writing and composition. Not a text editor: selection is the only noun,
 every change is a span operation, and the author is one person working on a
 manuscript — not a developer reading logs.
 
-The canonical design doc is `projects/ai-terminal/README.md` in the product
-vault. The binding decisions there are the product contract; a diff that
-contradicts one is `denied` unless the diff also amends the doc.
+The canonical design doc is the `ai-terminal` project's design doc in pm
+(`pm project show ai-terminal`; named docs `--doc prose`, `--doc review-tray`).
+The binding decisions there are the product contract; a diff that contradicts
+one is `denied` unless the diff also amends the doc.
 
 ## What to check for
 

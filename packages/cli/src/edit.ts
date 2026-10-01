@@ -2,7 +2,7 @@
  * `pablo edit` (AGT-1258): mounts the ui-leaf editor window over a piece or a
  * project file. Wires a real `EditHost` (AGT-1269's `edit-host.ts`) to
  * `views/editor.tsx` through `@openthink/ui-leaf`'s `mount()`. See
- * `~/saltline-digital-vault/projects/ai-terminal/review-tray.md`, "The
+ * `pm project show ai-terminal --doc review-tray`, "The
  * editor" — this ticket is the window, the Chromium probe, and the stub
  * view only; AGT-1270 replaces the view with the full paper-sheet editor.
  *

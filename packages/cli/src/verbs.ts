@@ -6,7 +6,7 @@
  * these shapes, so the CLI's argv and the MCP tool schemas cannot drift) and
  * `mcp.ts` (which registers one MCP tool per verb straight off the same
  * shape and calls the same `run`). See the design doc's "Commands" section
- * (`~/saltline-digital-vault/projects/ai-terminal/README.md`): "`pablo mcp`
+ * (`pm project show ai-terminal`): "`pablo mcp`
  * serves the same verbs as MCP tools with the same schemas, so Claude Code,
  * Codex and pi see one contract."
  *
