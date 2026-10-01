@@ -19,9 +19,10 @@ Two invariants:
    precondition is unmet is refused, naming exactly what is missing, so the
    agent can steer the author there instead of guessing.
 
-**The canonical design doc is
-`~/saltline-digital-vault/projects/ai-terminal/README.md`** (vault project id
-`ai-terminal`). It holds the session model, the project layout, the full
+**The canonical design doc is the pm project `ai-terminal`'s design doc:
+`pm project show ai-terminal`** (named docs: `--doc prose`, `--doc review-tray`;
+the vault's `projects/ai-terminal/*.md` are a frozen pre-AGT-1407 snapshot — don't
+read or edit them). It holds the session model, the project layout, the full
 verb table, the stage machines, the voice model, and the binding-decisions
 table. Read it before any non-trivial change; this file deliberately does not
 restate it. A change that contradicts a binding decision there amends the doc
@@ -61,7 +62,8 @@ config loader) versus what was cut outright (the screen, the CriticMarkup
 parser and renderer, span verbs). The **review queue concept** was cut with
 that design (it was CriticMarkup/span-based) but reintroduced 2026-09-07 as a
 text-free append-only JSONL log (`packages/cli/src/review.ts`, AGT-1255) per
-`projects/ai-terminal/review-tray.md` (an extension of the design doc, not a
+the pm named doc `review-tray` (`pm project show ai-terminal --doc review-tray`;
+an extension of the design doc, not a
 revert of the 2026-09-06 cut) — treat that doc, not this note, as canonical.
 
 ## The project

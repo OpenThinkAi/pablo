@@ -21,7 +21,7 @@ import {
 
 /**
  * The paper-sheet editor (AGT-1270), replacing the AGT-1258 read-only stub.
- * Per `~/saltline-digital-vault/projects/ai-terminal/review-tray.md`, "The
+ * Per `pm project show ai-terminal --doc review-tray`, "The
  * editor": one white sheet, serif, generous margins, edit in place, a
  * control raised by a selection offering both a straight hand edit and
  * `Revise…`, `Approve`/`Reject`/`Save` at the foot. The view never touches

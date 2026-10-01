@@ -2,7 +2,7 @@
  * `pablo.json` — the project marker. Its presence (and shape) is what tells
  * an agent a directory is a pablo project and which format it follows; every
  * verb but `init` refuses when it is missing or malformed. See the design
- * doc's "The project" section (`~/saltline-digital-vault/projects/ai-terminal/README.md`)
+ * doc's "The project" section (`pm project show ai-terminal`)
  * for the canonical shape this mirrors.
  *
  * MARKER_SCHEMA — `pablo.json` fields:

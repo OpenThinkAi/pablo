@@ -2,7 +2,7 @@
  * Editor host handlers (AGT-1269): save as an author edit, revise
  * passthrough, approve, reject, refresh.
  *
- * Per the design (`~/saltline-digital-vault/projects/ai-terminal/review-tray.md`,
+ * Per the design (`pm project show ai-terminal --doc review-tray`,
  * "The editor"): the view never touches files or the model — it displays and
  * asks. Judgement (word counts, the tells check, the commit, the queue
  * decision) lives here, in the host. Every side effect — reading/writing the

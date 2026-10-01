@@ -1,7 +1,7 @@
 /**
  * The novel stage machine (AGT-1228): reads a work's vault files into the
  * state the framework checks against — see the design doc's "Novel" stage
- * table (`~/saltline-digital-vault/projects/ai-terminal/README.md`) — and
+ * table (`pm project show ai-terminal`) — and
  * evaluates the preconditions for drafting one chapter.
  *
  * `readNovelState` does the only disk I/O in this file; `chapterPreconditions`

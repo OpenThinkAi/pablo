@@ -19,8 +19,8 @@ No markup, ever — a chapter file is plain prose with frontmatter; edits are a 
 not a notation.
 
 Canonical design doc (session model, project layout, stage machines, voice model,
-binding decisions): `~/saltline-digital-vault/projects/ai-terminal/README.md`
-(vault project id `ai-terminal`).
+binding decisions): the `ai-terminal` project's design doc in pm
+(`pm project show ai-terminal`).
 
 ## Status
 

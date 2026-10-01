@@ -162,7 +162,7 @@ export interface VoiceInputs {
 /**
  * `pablo prose --voice <name> --brief <file|-> [--context <file>]...` (AGT-1241):
  * a voice plus a brief, no stage machine. See the design doc's extension
- * (`~/saltline-digital-vault/projects/ai-terminal/prose.md`).
+ * (`pm project show ai-terminal --doc prose`).
  */
 export interface ProseInputs {
   readonly voice: VoiceInputs;

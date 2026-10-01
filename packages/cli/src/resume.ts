@@ -2,7 +2,7 @@
  * `pablo resume` (AGT-1229): the structured summary an agent picks a project
  * up from, so it does not have to read ten files to know where the work is
  * and what comes next. See the design doc's "The session, from the agent's
- * side" (`~/saltline-digital-vault/projects/ai-terminal/README.md`).
+ * side" (`pm project show ai-terminal`).
  *
  * All resume logic lives in this file by design (three sibling tickets — the
  * pack/write path, `save`, `check` — are landing on other branches at the

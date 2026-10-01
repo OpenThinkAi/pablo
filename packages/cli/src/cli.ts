@@ -2,7 +2,7 @@
 /**
  * `pablo` — the CLI that writes: the manager for writing projects, driven by
  * whatever agent you like (Claude Code, Codex, pi). See
- * `~/saltline-digital-vault/projects/ai-terminal/README.md` for the design.
+ * `pm project show ai-terminal` for the design.
  *
  * This is the P0 skeleton: argument parsing, `--help`, `--project`
  * resolution, and `init` (which writes the `pablo.json` marker every other

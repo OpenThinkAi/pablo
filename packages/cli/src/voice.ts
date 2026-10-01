@@ -1,7 +1,7 @@
 /**
  * Voice directories (AGT-1240): where `--voice <name>` finds who is
  * speaking. See the design doc's extension
- * (`~/saltline-digital-vault/projects/ai-terminal/prose.md`, "Voices"):
+ * (`pm project show ai-terminal --doc prose`, "Voices"):
  *
  *     voices/<name>/
  *       voice.md        who is speaking, to whom, the register, the rules —

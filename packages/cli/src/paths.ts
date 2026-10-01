@@ -5,7 +5,7 @@
  * `<vault>/.pablo/receipts.jsonl` (core's `fileReceiptSink`). But `pablo
  * prose` (AGT-1242) deliberately runs with no vault at all — an email drafted
  * from a random directory — and that call still has to leave a receipt. The
- * design doc's answer (`~/saltline-digital-vault/projects/ai-terminal/prose.md`)
+ * design doc's answer (`pm project show ai-terminal --doc prose`)
  * is `~/.local/state/pablo/receipts.jsonl`: the XDG state directory, the same
  * shape core's `configDir` already gives `$XDG_CONFIG_HOME/pablo`.
  *
