@@ -36,11 +36,12 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the ten MCP verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the eleven MCP verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "check",
     "migrate",
     "prose",
+    "publish",
     "resume",
     "review",
     "revise",
@@ -145,6 +146,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     passage: { type: "string" }, // AGT-1264: revise --passage
     start: { type: "string" }, // AGT-1264: revise --start (revise reuses `file`, already pinned above)
     end: { type: "string" }, // AGT-1264: revise --end
+    target: { type: "string" }, // AGT-1534: publish --target
   });
 });
 

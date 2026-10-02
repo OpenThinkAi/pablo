@@ -63,9 +63,10 @@ including an unresolvable project), `1` error.
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
 | `pablo migrate lines --project <slug> [--dry-run]` | one-time split of `chapters/*.md` to one sentence per line (frontmatter untouched), committed as its own commit holding only those files; a second run changes nothing; `--dry-run` lists the files it would change (AGT-1533) | `{ok, dryRun, changed[], committed, notice?}` |
+| `pablo publish --project <slug> --target draft` | the compiler (AGT-1534): every `chapters/NN-*.md` in order into one markdown file at `<work>/.pablo/out/<slug>-draft.md` — frontmatter stripped, sentence lines joined into paragraphs, straight quotes and apostrophes curled. `review`/`final` are refused (not implemented); pandoc formats are deferred | `{ok, target, where, chapters, words}`; `{ok: false, code: 2, message}` on refusal |
 | `pablo write --dry-run` (also `prose`/`revise --dry-run`) | any write or revise, assembled and priced, nothing sent; a standalone `pablo dry-run` verb is not implemented | the pack, slice by slice |
 | `pablo mcp` | serve all of the above as MCP tools, same schemas | |
-| *later* `revise`, `voice`, `share`, `notes`, `publish` | P1/P2 — the voice loop, sharing, publishing | |
+| *later* `revise`, `voice`, `share`, `notes` | P1/P2 — the voice loop, sharing | |
 
 `check` scans `chapters/*.md` (or one `--file`, work-relative or absolute inside the
 work — outside it is a refusal, exit `2`) for two things: chapters whose frontmatter
@@ -230,6 +231,7 @@ tool error (only a genuine crash does that).
 | `write` | Draft one chapter on the configured local model: check, pack, send, write, receipt. |
 | `save` | Save the agent's planning output (acts, beats, bible facts, premise) into the vault. |
 | `check` | Scan a work's chapters for mechanical tells and provenance gaps. |
+| `publish` | Compile the chapters into one publishable markdown file under `.pablo/out/` (draft target only). |
 
 `save` requires `file` over MCP (unlike the CLI, which falls back to stdin) —
 a tool call has no stdin of its own to read without colliding with the
