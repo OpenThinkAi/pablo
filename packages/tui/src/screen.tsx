@@ -3,7 +3,7 @@
 import { render } from "ink";
 import { App } from "./app";
 import { bookRail, type BookStage } from "./book";
-import { loadKeymap } from "./key-config";
+import { loadEditor, loadKeymap } from "./key-config";
 import { KeysError } from "./keys";
 
 const ENTER_ALT = "\x1b[?1049h\x1b[H";
@@ -35,7 +35,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   const total = (options.stages ?? []).filter((s) => s.depth > 0).length;
   stdout.write(ENTER_ALT);
   try {
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} editor={loadEditor()} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

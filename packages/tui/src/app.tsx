@@ -10,14 +10,17 @@
 
 import { useEffect, useReducer } from "react";
 import { Box, Text, useApp, useInput } from "ink";
+import { configPath } from "@openthink/pablo-core";
 import { tooSmall, useTerminalSize, MIN_COLS, MIN_ROWS } from "./resize";
 import type { Size } from "./resize";
 import { resolve, tokenOf } from "./chord";
 import { missingContent, type BookRail } from "./book";
 import { KeyPanel } from "./key-panel";
-import { DEFAULT_KEYMAP, keyStateOf, type Command, type Keymap } from "./keys";
+import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
 import { clean } from "./sanitize";
+import { openSettings, settingsPaste, settingsStep } from "./settings";
+import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { initialState, pendingText, reduce, shownRows, viewOf, type RailRow, type State } from "./state";
 
@@ -40,7 +43,11 @@ export interface AppProps {
   readonly lines?: readonly string[];
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
   readonly keymap?: Keymap;
-  /** A command a key caused (`ai.plan`, `settings`, ...); `quit` is handled here and never reaches it. */
+  /** The editor command the config sets ("" for none); what the settings screen opens with. */
+  readonly editor?: string;
+  /** The config file the settings screen saves to. Tests pass a temporary one. */
+  readonly configFile?: string;
+  /** A command a key caused (`ai.plan`, ...); `quit` and `settings` are handled here and never reach it. */
   readonly onCommand?: (command: Command) => void;
   /** Tests pass a fixed size; the real screen measures the terminal. */
   readonly size?: Size;
@@ -51,16 +58,27 @@ const NO_LINES: readonly string[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows = book?.rows ?? NO_ROWS, labels = book?.labels ?? {}, mainTitle = "", lines = NO_LINES, size: override, keymap = DEFAULT_KEYMAP, onCommand }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows = book?.rows ?? NO_ROWS, labels = book?.labels ?? {}, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
+  // A save puts the new bindings in force at once; until one, the keymap and editor the screen opened with.
+  const keymap = state.saved ? effectiveKeys(state.saved.overrides) : given;
+  const editor = state.saved ? state.saved.editor : givenEditor;
   useInput((input, key) => {
     const token = tokenOf(input, key);
+    if (state.mode.kind === "settings" && state.settings) {
+      // The settings screen takes every key itself (a binding being captured must not also act); Esc asks to save.
+      if (!token) { if (input && !input.includes("\x1b")) dispatch({ type: "settings.set", settings: settingsPaste(state.settings, input) }); return; }
+      const step = settingsStep(state.settings, token);
+      dispatch("close" in step ? { type: "settings.close", ...(step.close ? { saved: step.close } : {}) } : { type: "settings.set", settings: step.s });
+      return;
+    }
     if (!token) return;
     for (const action of resolve(keyStateOf(state), state.pending, token, keymap)) {
       if (action.type !== "command") dispatch(action);
       else if (action.id === "quit") exit();
+      else if (action.id === "settings") dispatch({ type: "settings.open", settings: openSettings(keymap, editor, configFile ?? configPath()) });
       else onCommand?.(action);
     }
   });
@@ -88,6 +106,8 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       </Text>
     );
   }
+
+  if (state.mode.kind === "settings" && state.settings) return <SettingsScreen s={state.settings} cols={size.cols} rows={size.rows} />;
 
   const view = viewOf(state);
   const where = `${state.mode.kind === "review" ? `review ${state.mode.branch}` : "book"} · ${state.focus}`;

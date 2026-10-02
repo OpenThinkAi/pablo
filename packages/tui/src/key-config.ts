@@ -42,3 +42,19 @@ export function loadKeymap(options: LoadKeymapOptions = {}): Keymap {
   const text = read(path);
   return text === undefined ? DEFAULT_KEYMAP : effectiveKeys(parseKeys(text, path));
 }
+
+/** The editor command in a config file's text (`"editor": "hx"`); undefined when there is none. */
+export function parseEditor(text: string): string | undefined {
+  let raw: unknown;
+  try { raw = JSON.parse(text); } catch { return undefined; }
+  const editor = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>)["editor"] : undefined;
+  return typeof editor === "string" && editor.trim() ? editor.trim() : undefined;
+}
+
+/** The editor command this machine's config sets, or "" for none (then $EDITOR, else hx). */
+export function loadEditor(options: LoadKeymapOptions = {}): string {
+  const path = configPath(options.env ?? process.env);
+  const read = options.readFile ?? ((p: string) => { try { return readFileSync(p, "utf8"); } catch { return undefined; } });
+  const text = read(path);
+  return text === undefined ? "" : parseEditor(text) ?? "";
+}

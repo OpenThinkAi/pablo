@@ -1,6 +1,8 @@
 // The screen's state model, without a terminal: every action, applied to a state built by earlier actions.
 
 import { expect, test } from "bun:test";
+import { openSettings } from "../src/settings";
+import { DEFAULT_KEYMAP } from "../src/keys";
 import { initialState, pendingText, railRow, reduce, shownRows, viewOf, type Action, type ActionType, type RailRow, type State } from "../src/state";
 
 /** A state after `actions`, from the initial one. */
@@ -54,6 +56,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "prefix.press": { type: "prefix.press", prefix: "a" }, "prefix.digit": { type: "prefix.digit", digit: "1" }, "prefix.backspace": { type: "prefix.backspace" }, "prefix.clear": { type: "prefix.clear" },
     "view.zen": { type: "view.zen" }, "view.full": { type: "view.full" },
     "review.open": { type: "review.open", branch: "draft/ch02" }, "review.close": { type: "review.close" },
+    "settings.open": { type: "settings.open", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.set": { type: "settings.set", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.close": { type: "settings.close" },
     escape: { type: "escape" }, measured: { type: "measured", measure: { rail: 4, main: 4, content: { visible: 2, lines: 3 } } },
   };
   for (const a of Object.values(every)) {
@@ -320,4 +323,35 @@ test("Esc backs out one thing at a time: the prefix, full-screen, content focus,
   expect(steps[5]!.mode).toEqual({ kind: "book" });
   // With nothing open, Esc is nothing.
   expect(steps[6]).toBe(steps[5]);
+});
+
+// ---------------------------------------------------------------- settings
+
+const settings = () => openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json");
+
+test("settings.open is a mode over the place it came from; settings.close returns there with that place's cursors", () => {
+  const s = book({ type: "rail.down" }, { type: "rail.down" });
+  const open = then(s, { type: "settings.open", settings: settings() });
+  expect(open.mode).toEqual({ kind: "settings", from: { kind: "book" } });
+  expect(open.settings).not.toBeNull();
+  expect(at(open)).toBe("acts"); // the book's rail is still the view
+  const closed = then(open, { type: "settings.close" });
+  expect(closed.mode).toEqual({ kind: "book" });
+  expect(closed.settings).toBeNull();
+  expect(at(closed)).toBe("acts");
+  // From a review, back to that review.
+  const rev = then(after({ type: "review.open", branch: "draft/ch02" }), { type: "settings.open", settings: settings() }, { type: "settings.close" });
+  expect(rev.mode).toEqual({ kind: "review", branch: "draft/ch02" });
+});
+
+test("settings: Esc and the review and prefix actions leave it alone; settings.set only applies inside it; close can carry a save", () => {
+  const open = after({ type: "settings.open", settings: settings() });
+  expect(then(open, { type: "escape" })).toBe(open);
+  expect(then(open, { type: "review.open", branch: "x" })).toBe(open);
+  expect(then(open, { type: "settings.open", settings: settings() })).toBe(open);
+  const idle = initialState();
+  expect(then(idle, { type: "settings.set", settings: settings() })).toBe(idle);
+  expect(then(idle, { type: "settings.close" })).toBe(idle);
+  const saved = { overrides: { "rail.down": { primary: "n", secondary: "" } }, editor: "hx" };
+  expect(then(open, { type: "settings.close", saved }).saved).toEqual(saved);
 });

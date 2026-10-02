@@ -12,6 +12,8 @@ src/chord.ts     a keypress, in a state with a prefix pending, to actions; Ink's
 src/panel.ts     the key panel's entries and layout, from the rows
 src/key-panel.tsx  the key panel as a component the layout places
 src/key-config.ts  `keys` in ~/.config/pablo/config.json, laid over the defaults
+src/settings.ts  the settings screen's rules (`\`): capture a key, refuse a conflict, type the editor command, save the config
+src/settings-view.tsx  the settings screen as a component
 src/app.tsx      the Ink root: reads the state, draws it, dispatches actions from keys
 src/screen.tsx   mounts the app in the alternate screen and restores the terminal
 src/layout.ts    the layout geometry, pure: region sizes at a terminal size, text wrapping, the `measured` payload
@@ -40,6 +42,8 @@ something dispatches an action instead.
 
 ```
 mode      { kind: "book" } | { kind: "review", branch }   each mode keeps its own rail and main pane
+          { kind: "settings", from }                      over a book or review; its model is `settings`, no rail or main pane
+saved     the bindings and editor a save put in force, over what the screen opened with
 pane      "rail" | "main"                                   where the cursor is
 focus     the pane, or "content" while Tab has moved focus into the content area
 content   the one thing the bottom panel shows, with its scroll
@@ -81,6 +85,20 @@ the same rows the key handler resolves through (`chord.ts`).
 Overrides live in `~/.config/pablo/config.json` as `"keys": { "rail.down": "n", "main.page_down": { "primary": "pgdn",
 "secondary": "" } }`. A conflict in one state, an unknown or fixed action, or Esc/Tab as a binding is refused when the
 screen opens, with the reason on stderr; the screen does not start on a bad config.
+
+### Settings
+
+`\` opens the settings over the book or review (`settings.open`) and Esc closes it again (`settings.close`). While it
+is open the screen takes every key itself (`settings.ts`, not the chord), so a key pressed to rebind an action does not
+also run it. Every action's keys are listed; Enter on one captures the next key as its primary (→ first for the
+secondary, Backspace clears a secondary), and a key that clashes in one of the action's states is refused on the spot,
+with the same check that refuses a bad `keys` at startup. The last line is the editor command (`"editor"` in the config,
+what `v e` will run; empty means `$EDITOR`, else `hx`). Esc with changes asks to save: `y` writes `keys` and `editor`
+into `~/.config/pablo/config.json` (every other entry is kept, a default key's entry is removed), and the new keys act
+at once; `n` discards. The file is re-parsed before it is written, and a save that would not read back writes nothing.
+
+The model is data in `state.ts` (`SettingsModel`) and reaches it as whole values (`settings.set`); the rules that
+produce the next value are in `settings.ts`, so `state.ts` stays import-free.
 
 ### Adding a key
 

@@ -14,9 +14,13 @@
 //   pending  a prefix waiting for its second key (`a`, `g`), with the digits of a `g <n>` line number
 //   zen      the rail hidden; `full`: the content area taking the screen under the status area
 //
-// Each mode keeps its own rail and main pane, so leaving a review returns to the book where it was left.
+// Each mode keeps its own rail and main pane, so leaving a review returns to the book where it was left. Settings holds
+// its own model (`settings`, below) instead of a rail and main pane; the settings logic is settings.ts, and reaches
+// here as whole values (`settings.set`), so this file stays free of imports.
 
-export type Mode = { kind: "book" } | { kind: "review"; branch: string };
+export type Place = { kind: "book" } | { kind: "review"; branch: string };
+/** Settings (`\`) is a mode over a place: closing it returns to where it was opened, with that place's own rail and main pane. */
+export type Mode = Place | { kind: "settings"; from: Place };
 export type PaneName = "rail" | "main";
 export type Focus = PaneName | "content";
 
@@ -30,6 +34,31 @@ export interface Pane extends Scroll { readonly cursor: number }
 /** The rail: `cursor` indexes `rows`; a folded group's rows are skipped by the moves and left out of the scroll. */
 export interface Rail { readonly rows: readonly RailRow[]; readonly collapsed: ReadonlySet<string>; readonly cursor: number; readonly scroll: number; readonly visible: number }
 export interface View { readonly rail: Rail; readonly main: Pane }
+
+// ---- the settings screen's model: data only; the rules that change it are in settings.ts
+
+/** A line of the settings list: one action's keys, or the editor command. */
+export type SettingsField = { readonly kind: "key"; readonly id: string } | { readonly kind: "editor" };
+/** What the screen edits, spelled out: an unbound secondary or an unset editor is "". */
+export interface SettingsValues { readonly keys: Readonly<Record<string, { readonly primary: string; readonly secondary: string }>>; readonly editor: string }
+/** What is being captured, typed or asked: a key press, the editor line, or the save question on the way out. */
+export type SettingsSub = { readonly kind: "capture" } | { readonly kind: "typing"; readonly text: string } | { readonly kind: "confirm" };
+export interface SettingsModel {
+  readonly fields: readonly SettingsField[];
+  /** As loaded: what "unsaved changes" and a save compare against. */
+  readonly initial: SettingsValues;
+  readonly values: SettingsValues;
+  readonly cursor: number;
+  /** On a key: which of its two bindings the cursor is on. */
+  readonly slot: "primary" | "secondary";
+  readonly sub: SettingsSub | null;
+  /** The config file a save writes. */
+  readonly path: string;
+  /** What the last key did, or why it was refused. */
+  readonly message?: { readonly text: string; readonly error?: boolean };
+}
+/** What a save leaves in force for the rest of the session: the `keys` overrides and the editor command, as written. */
+export interface SavedSettings { readonly overrides: Readonly<Record<string, { readonly primary?: string; readonly secondary?: string }>>; readonly editor: string }
 
 /** What the content area shows: a planner turn, a receipt, a beat, a refusal's missing reasons. */
 export interface Content { readonly title: string; readonly body: string; /** Which feature put it up, so that feature can take it down again (`missing`: a stage's unmet reasons). */ readonly kind?: string }
@@ -47,6 +76,10 @@ export interface State {
   readonly pending: Pending | null;
   readonly zen: boolean;
   readonly full: boolean;
+  /** The settings screen's model while the mode is `settings`. */
+  readonly settings: SettingsModel | null;
+  /** Set by a save: the bindings and editor now in force, over what the screen opened with. */
+  readonly saved: SavedSettings | null;
 }
 
 /**
@@ -85,6 +118,9 @@ export type Action =
   // ---- modes
   | { type: "review.open"; branch: string }
   | { type: "review.close" }
+  | { type: "settings.open"; settings: SettingsModel }
+  | { type: "settings.set"; settings: SettingsModel }
+  | { type: "settings.close"; saved?: SavedSettings }
   // ---- Esc: back out of whatever is open, one thing at a time
   | { type: "escape" }
   // ---- the layout's measure of each region
@@ -97,13 +133,16 @@ const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor:
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, book: emptyView(), review: emptyView(),
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null,
 });
 
 // ---------------------------------------------------------------- reading the state
 
-/** The rail and main pane of the current mode. */
-export const viewOf = (s: State): View => (s.mode.kind === "book" ? s.book : s.review);
+/** The book or review the screen is over: the mode itself, or what settings was opened from. */
+export const placeOf = (s: State): Place => (s.mode.kind === "settings" ? s.mode.from : s.mode);
+
+/** The rail and main pane of the current mode (under settings, those of the place it was opened from). */
+export const viewOf = (s: State): View => (placeOf(s).kind === "book" ? s.book : s.review);
 
 /** The rail's rows as drawn, in order, with their index in `rows`: a folded group's rows are left out. */
 export function shownRows(rail: Rail): { row: RailRow; index: number }[] {
@@ -217,7 +256,7 @@ function reduceMain(main: Pane, a: Action): Pane {
 /** The state after `a`. Every action type has its case here; an action that cannot apply where the screen is leaves the state as it was. */
 export function reduce(s: State, a: Action): State {
   const view = viewOf(s);
-  const withView = (v: View): State => (s.mode.kind === "book" ? { ...s, book: v } : { ...s, review: v });
+  const withView = (v: View): State => (placeOf(s).kind === "book" ? { ...s, book: v } : { ...s, review: v });
   switch (a.type) {
     case "rail.loaded": case "rail.down": case "rail.up": case "rail.next_group": case "rail.prev_group": case "rail.collapse":
       return withView({ ...view, rail: reduceRail(view.rail, a) });
@@ -257,10 +296,17 @@ export function reduce(s: State, a: Action): State {
     case "view.full": return s.content ? { ...s, full: !s.full } : s;
 
     // A review opens on a branch with a fresh rail and main pane; the book keeps its place for when the review closes.
-    case "review.open": return { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), pane: "rail", focus: "rail", content: null, full: false, pending: null };
+    case "review.open": return s.mode.kind === "settings" ? s : { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), pane: "rail", focus: "rail", content: null, full: false, pending: null };
     case "review.close": return s.mode.kind === "review" ? { ...s, mode: { kind: "book" }, pane: "rail", focus: "rail", content: null, full: false, pending: null } : s;
 
+    // Settings opens over the book or review and closes back to it. Its keys never reach the chord (settings.ts reads
+    // them, including Esc), so `escape` leaves it alone.
+    case "settings.open": return s.mode.kind === "settings" ? s : { ...s, mode: { kind: "settings", from: s.mode }, settings: a.settings, pending: null };
+    case "settings.set": return s.mode.kind === "settings" ? { ...s, settings: a.settings } : s;
+    case "settings.close": return s.mode.kind === "settings" ? { ...s, mode: s.mode.from, settings: null, saved: a.saved ?? s.saved } : s;
+
     case "escape":
+      if (s.mode.kind === "settings") return s;
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });
       if (s.focus === "content") return reduce(s, { type: "focus.back" });
