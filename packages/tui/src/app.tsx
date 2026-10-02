@@ -27,7 +27,7 @@ import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow } from "./review";
 import type { Finisher, Rejected } from "./screen";
 import type { Writer } from "./screen";
-import { composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
+import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
 import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, shownRows, viewOf, type Mark, type RailRow, type State } from "./state";
 
@@ -210,7 +210,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     void (async () => {
       try {
         if (!composer) throw new Error("pablo isn't connected to this screen");
-        for await (const event of composer.send(outbox)) if (live) dispatch({ type: "compose.event", event });
+        for await (const event of composer.send(outbox)) if (live) dispatch({ type: "compose.event", event, at: Date.now() });
         if (live) dispatch({ type: "compose.done" });
       } catch (error) {
         if (live) dispatch({ type: "compose.failed", message: (error as Error).message });
@@ -235,7 +235,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   if (state.mode.kind === "settings" && state.settings) return <SettingsScreen s={state.settings} cols={size.cols} rows={size.rows} />;
 
   const view = viewOf(state);
-  const working = state.compose.busy ? ` · pablo: ${clean(state.compose.activity) || "working"}` : "";
+  const working = state.compose.busy ? ` · pablo: ${clean(activityNow(state.compose)) || "working"}` : "";
   const where = state.mode.kind === "compose" ? `compose · Esc back to the book${working}` : `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}` : "book"} · ${state.focus}${working}`;
   const pending = pendingText(state.pending);
   const shownComments = hits.length ? { ...comments, check: hits.length } : comments;

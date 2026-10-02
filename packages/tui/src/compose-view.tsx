@@ -4,7 +4,7 @@
 import { Box, Text } from "ink";
 import { FOOTER_H, STATUS_H } from "./layout";
 import { clean } from "./sanitize";
-import { composeLayout, composeLines, inputTail, visibleLines, type LineStyle } from "./compose";
+import { activityNow, composeLayout, composeLines, inputTail, visibleLines, type LineStyle } from "./compose";
 import type { Compose } from "./state";
 import type { Size } from "./resize";
 
@@ -25,7 +25,7 @@ export function ComposeView({ compose, size }: { compose: Compose; size: Size })
           <Text key={i} wrap="truncate" {...(COLOR[line.style] ? { color: COLOR[line.style] } : {})} dimColor={DIM.includes(line.style)}>{line.text || " "}</Text>
         ))}
       </Box>
-      <Text color="magenta" wrap="truncate">{compose.busy ? `● ${clean(compose.activity) || "working"}…` : " "}</Text>
+      <Text color="magenta" wrap="truncate">{compose.busy ? `● ${clean(activityNow(compose)) || "working"}…` : " "}</Text>
       <Box borderStyle="single" paddingX={1} height={3} borderColor={compose.busy ? "gray" : "cyan"}>
         <Text wrap="truncate">
           <Text dimColor>{"› "}</Text>
