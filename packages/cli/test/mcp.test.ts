@@ -61,7 +61,7 @@ function parseTextBody(result: unknown): unknown {
 // already an MCP tool before this ticket (AGT-1241); AC1's "five existing
 // tools" are resume/status/write/save/check. AGT-1264 adds `revise`, also
 // project-scoped.
-const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "write", "save", "check", "revise", "migrate", "publish", "read", "search"]);
+const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "write", "save", "check", "revise", "migrate", "publish", "read", "search"]);
 
 test("listTools returns the seven project-scoped verbs, prose, review, and the four narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
@@ -78,6 +78,7 @@ test("listTools returns the seven project-scoped verbs, prose, review, and the f
     "save",
     "search",
     "status",
+    "timeline",
     "voice_exemplar",
     "voice_flag",
     "voice_list",

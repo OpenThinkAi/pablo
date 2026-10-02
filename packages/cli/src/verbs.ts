@@ -58,7 +58,9 @@
  */
 
 import { z } from "zod";
-import { resolve, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { timelineAt } from "@openthink/pablo-core";
+import { join, resolve, sep } from "node:path";
 import { checkWork } from "./check";
 import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
@@ -260,6 +262,28 @@ async function runStatusVerb(args: z.infer<typeof STATUS_ARGS>, ctx: VerbContext
 
   const preconditions = chapterPreconditions(state, chapter);
   return { body: { ready: preconditions.ready, missing: preconditions.missing }, exitCode: preconditions.ready ? 0 : 2 };
+}
+
+// ---------------------------------------------------------------------------
+// timeline
+// ---------------------------------------------------------------------------
+
+const TIMELINE_ARGS = z.object({
+  project: projectField,
+  date: z.string().describe('A story date, e.g. "Winter 1931". Only the first four-digit year counts; a date with no year gates nothing.'),
+});
+
+/** AGT-1555: the story-time gate as a tool. Read-only; the same `gateTimeline` the drafting pack uses, via `timelineAt`. */
+async function runTimelineVerb(args: z.infer<typeof TIMELINE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+
+  const path = join(resolved.projectPath, "bible", "timeline.md");
+  if (!existsSync(path)) {
+    return { body: { ok: false, code: 2, message: "pablo: bible/timeline.md does not exist" }, exitCode: 2 };
+  }
+  const at = timelineAt(readFileSync(path, "utf8"), args.date, "bible/timeline.md");
+  return { body: { date: at.date, exists: at.exists, notYet: at.notYet, source: at.source, text: at.text }, exitCode: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -1099,6 +1123,13 @@ export const VERBS: readonly Verb[] = [
     description: "The novel machine's per-stage state, or (with `for`) one chapter's draft preconditions and which are unmet.",
     args: STATUS_ARGS,
     run: runStatusVerb,
+  },
+  {
+    name: "timeline",
+    description:
+      "What exists yet at a story date: the work's timeline rows at or before the date, and the rows after it marked as not existing yet (do not mention or foreshadow). The same story-time gate the drafting pack uses.",
+    args: TIMELINE_ARGS,
+    run: runTimelineVerb,
   },
   {
     name: "write",
