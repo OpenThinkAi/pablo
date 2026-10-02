@@ -214,6 +214,36 @@ export function gateTimeline(timeline: string, storyDate: string, source: string
   return { exists, later, source };
 }
 
+/** What `timelineAt` answers: the gate's two halves, plus a ready-to-send rendering. */
+export interface TimelineAt {
+  /** The date asked about, as given. */
+  readonly date: string;
+  /** Rows dated at or before the date, one per line. */
+  readonly exists: readonly string[];
+  /** Rows dated after it: they do not exist yet and must not be mentioned. */
+  readonly notYet: readonly string[];
+  readonly source: string;
+  /** The same two halves as text, the later rows marked as not existing yet. */
+  readonly text: string;
+}
+
+/**
+ * The story-time gate as a question (AGT-1555): what exists at `date`. Pure,
+ * and built on `gateTimeline`, the exact code behind the drafting pack's
+ * timeline slice, so the harness's tool and the pack can never disagree.
+ */
+export function timelineAt(timeline: string, date: string, source: string): TimelineAt {
+  const gate = gateTimeline(timeline, date, source);
+  const blocks: string[] = [];
+  if (gate.exists.length > 0) blocks.push([`## Exists at ${date}`, ...gate.exists].join("\n"));
+  if (gate.later.length > 0) {
+    blocks.push(
+      [`## Does not exist yet at ${date}: do not mention or foreshadow`, ...gate.later].join("\n"),
+    );
+  }
+  return { date, exists: gate.exists, notYet: gate.later, source, text: blocks.join("\n\n") };
+}
+
 /**
  * The last `words` words of a chapter file, frontmatter stripped. Sentence
  * lines are joined into paragraphs first (AGT-1532) so a split chapter reads

@@ -12,6 +12,7 @@ import {
   readDraftingInputs,
   readStyle,
   section,
+  timelineAt,
 } from "../src/index";
 
 /**
@@ -242,4 +243,33 @@ test("the drafting pack is deterministic over the fixture vault", () => {
 
   expect(second.hash).toBe(first.hash);
   expect(second.prompt).toBe(first.prompt);
+});
+
+test("timelineAt splits the timeline at a date with the same gate as the pack (AGT-1555)", () => {
+  const timeline = `| Year | Real events | In the novel |
+|---|---|---|
+| 1922 | first electric refrigerators sold | the route loses a third of its stops |
+| 1931 | | the January cut is thin |
+| 1938 | the September hurricane | the schooner is lost |`;
+
+  const at = timelineAt(timeline, "Winter 1931", "bible/timeline.md");
+  const gate = gateTimeline(timeline, "Winter 1931", "bible/timeline.md");
+
+  expect(at.exists).toEqual(gate.exists);
+  expect(at.notYet).toEqual(gate.later);
+  expect(at.notYet).toEqual(["- 1938: the September hurricane; the schooner is lost"]);
+  expect(at.text).toContain("## Exists at Winter 1931\n- 1922:");
+  expect(at.text).toContain("## Does not exist yet at Winter 1931: do not mention or foreshadow\n- 1938:");
+  expect(at.text.indexOf("1931")).toBeLessThan(at.text.indexOf("Does not exist yet"));
+});
+
+test("timelineAt before every row marks all of them not yet, and an empty timeline is empty", () => {
+  const timeline = "| Year | Real | Novel |\n|---|---|---|\n| 1938 | a storm | |";
+
+  const early = timelineAt(timeline, "1900", "t.md");
+  expect(early.exists).toEqual([]);
+  expect(early.notYet).toEqual(["- 1938: a storm"]);
+
+  const none = timelineAt("", "1900", "t.md");
+  expect(none).toMatchObject({ exists: [], notYet: [], text: "" });
 });
