@@ -2,13 +2,14 @@
  * The harness's `save_research(title, note, sources)` tool (AGT-1559): keeps a
  * finding with its sources and retrieval date as `research/<slug>.md` on the
  * session's plan branch. Built around the session's `PlanSession`, so like
- * `ask_author` it is not a `VERBS` entry; a session with no plan session has
- * no `save_research` tool. The model never sees a path argument: the note
+ * `ask_author` it is not a `VERBS` entry; it is attached through `planTools`
+ * (`plan-tools.ts`) with propose and record_fact. The model never sees a path argument: the note
  * lands under the work's own `research/`. The write is `saveResearch`
  * (`../research.ts`); the web fetching that precedes it is the model's own
  * WebSearch / WebFetch.
  */
 
+import { relative } from "node:path";
 import { z } from "zod";
 import type { PlanSession } from "../plan";
 import { saveResearch } from "../research";
@@ -22,8 +23,9 @@ const ARGS = z.object({
 
 export const SAVE_RESEARCH_TOOL = "save_research";
 
-/** `dir` is the work's directory relative to the repo root ("" when the work is the repo). */
-export function saveResearchTool(session: PlanSession, dir = ""): McpToolSpec {
+/** `workPath` is the work's directory inside the session's repo; notes land under its `research/`. */
+export function saveResearchTool(session: PlanSession, workPath: string): McpToolSpec {
+  const dir = relative(session.repo, workPath).split("\\").join("/");
   return {
     name: SAVE_RESEARCH_TOOL,
     description:
