@@ -28,6 +28,8 @@ const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url)
  * the dev machine's actual cortex.
  */
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
+/** `runWrite` appends a receipt under `$XDG_STATE_HOME/pablo` when it has no vault receipt sink to use, so every env pins it at a throwaway directory. */
+const SHARED_STATE_HOME = mkdtempSync(join(tmpdir(), "pablo-write-send-state-"));
 /**
  * AGT-1536: `write` commits on a `draft/chNN` worktree under `$PABLO_HOME`
  * (default `~/.cache/pablo`), so every env here pins `PABLO_HOME` at a
@@ -36,7 +38,7 @@ const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/
  * the author's real cache) otherwise.
  */
 function ritualEnv(vault: string): Record<string, string> {
-  return { PATH: NO_THINK_PATH, PABLO_HOME: join(vault, "..", "pablo-home") };
+  return { PATH: NO_THINK_PATH, XDG_STATE_HOME: SHARED_STATE_HOME, PABLO_HOME: join(vault, "..", "pablo-home") };
 }
 
 /** Where `write --chapter 2` put its chapter file: inside the draft branch's worktree. */
@@ -44,6 +46,10 @@ function draftChapterFile(vault: string, branch = "draft/ch02"): string {
   const home = ritualEnv(vault)["PABLO_HOME"];
   return join(worktreePath("ice-house", branch, { PABLO_HOME: home }), "novels", "ice-house", "chapters", "02-black-ice.md");
 }
+
+afterAll(() => {
+  rmSync(SHARED_STATE_HOME, { recursive: true, force: true });
+});
 
 function git(dir: string, ...args: string[]): string {
   const result = Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "pipe", stderr: "pipe" });
