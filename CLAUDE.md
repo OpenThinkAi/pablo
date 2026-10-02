@@ -65,7 +65,10 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 dispatch, `--project` resolution, `pablo mcp`, and the
                 harness (`src/harness/`, `pablo agent`, AGT-1552): the
                 Claude Agent SDK configured as pablo (`--doc harness`) —
-                pablo's system prompt in place of Claude Code's, WebSearch
+                pablo's system prompt in place of Claude Code's (role, the
+                judgement policy `pablo.json`'s `policy` names from
+                `packages/cli/policies/`, and the work's `QWEN.md` minus
+                `<!-- writer-only -->` sections; AGT-1553), WebSearch
                 and WebFetch the only built-ins, pablo's MCP tools attached
                 in-process, the subscription by default with a config key
                 overriding. A tool added to `VERBS` reaches both `pablo mcp`

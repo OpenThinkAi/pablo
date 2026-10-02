@@ -10,8 +10,9 @@
  * and one line is read back (a number picks an option).
  *
  * Exit codes follow the CLI's contract: 0 when the session ends in a success
- * result, 2 for a refusal (no project, no marker, no message), 1 for anything
- * else (an error result, no result at all, or the SDK failing to start).
+ * result, 2 for a refusal (no project, no marker, no message, a policy pablo
+ * does not ship), 1 for anything else (an error result, no result at all, or
+ * the SDK failing to start).
  */
 
 import { loadConfig } from "@openthink/pablo-core";
@@ -22,6 +23,7 @@ import type { ProgressSink, VerbContext } from "../verbs";
 import { lineReader, stdinAskAuthor } from "./ask-author";
 import { harnessAuth } from "./auth";
 import type { HarnessAuth } from "./auth";
+import { loadPromptWork } from "./prompt";
 import { runHarness, sdkQuery } from "./session";
 import type { HarnessQuery } from "./session";
 import { formatEntry, transcriptEntries } from "./transcript";
@@ -67,6 +69,9 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   if (!project.ok) return refuse(ctx, args.json, project.code, project.message, project.tried);
   const marker = readMarker(project.path);
   if (!marker.ok) return refuse(ctx, args.json, marker.code, marker.message, marker.tried);
+  // The system prompt's inputs: the work's judgement policy and its QWEN.md (AGT-1553).
+  const work = loadPromptWork(project.path, marker.marker, args.project);
+  if (!work.ok) return refuse(ctx, args.json, work.code, work.message, work.tried);
 
   let auth: HarnessAuth;
   try {
@@ -80,7 +85,7 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   // into the transcript on stdout.
   const verbCtx: VerbContext = { cwd: ctx.cwd, env: ctx.env, stderr: ctx.stderr, caller: "mcp" };
   const spec = {
-    work: { title: marker.marker.title, format: marker.marker.format, slug: args.project },
+    work: work.work,
     projectPath: project.path,
     auth,
     ctx: verbCtx,
