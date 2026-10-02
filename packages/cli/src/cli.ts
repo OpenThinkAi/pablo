@@ -46,6 +46,7 @@ import { runSave } from "./save";
 import { screenEditor } from "./edit-session";
 import { screenFinisher } from "./review-finish";
 import { screenReviser } from "./screen-revise";
+import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
 import { deriveCliOptions, parseForChapter } from "./verbs";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
@@ -661,6 +662,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         ...(vault.ok ? { writer: screenWriter(vault.path, screen.dir) } : {}),
         // `a r` revises the selected sentences; taking the candidate commits it on a revise/ branch (AGT-1544).
         ...(vault.ok ? { reviser: screenReviser(vault.path, screen.dir) } : {}),
+        // `a v` adds the selected sentences to the project's voice: flagged, or kept as an exemplar (AGT-1547).
+        ...(vault.ok ? { voicer: screenVoicer(vault.path, screen.dir) } : {}),
         // The compose view's session is built when the first message is sent (AGT-1566).
         composer: screenComposer(screen.dir, cwd),
         // `s` in a review merges the accepted changes and runs the after-write steps (AGT-1540).

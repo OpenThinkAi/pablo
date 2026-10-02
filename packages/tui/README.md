@@ -61,6 +61,16 @@ inclusive, counted in the file as stored), which is what `a r` (revise, below) a
 the selection; `Esc` clears it before it backs out of anything else; a different document, or one whose sentence count
 changes, drops it. In a review the pane shows changes, not sentences, so nothing is selectable there.
 
+### `a v`: the voice
+
+With sentences selected, `a v` puts them up in the content area with two choices: `f` flags them (a rejected tell,
+written as a `Flagged:` line) and `e` keeps them (an exemplar). Esc withdraws the offer before it clears the selection.
+The screen does not write the voice: `ScreenOptions.voicer` is the CLI's `screenVoicer` (`screen-voice.ts`), which
+calls `flagLine` / `addExemplar`, the functions behind `voice flag` / `voice exemplar`, on the voice the project's
+`pablo.json` names (`fiction`, the vault's `style/`, unless it points into `voices/<name>`). The content area then
+says where it was written. A fiction voice has no `exemplars/`, so `e` there is refused with that reason. State: `voice`
+(the offered sentences) and the `voice.*` actions.
+
 ### Check hits and comment boxes
 
 Opening a chapter (a `MainDoc` with a `file`) runs the `checks` the CLI passes in (`screenChecks`, core-free `checkFile`

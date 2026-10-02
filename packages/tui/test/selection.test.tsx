@@ -102,7 +102,7 @@ test("selectedOf: the selected sentences and the stored lines they span, across 
   expect(all!.stored).toEqual({ from: 4, to: 7 });
 });
 
-test("on the screen: ⇧↓ marks the selected lines, `a v` hands the selection to onCommand, Esc clears it", async () => {
+test("on the screen: ⇧↓ marks the selected lines, `a p` hands the selection to onCommand, Esc clears it", async () => {
   cleanup();
   const calls: unknown[] = [];
   const app = render(<App title="T" format="novel" rows={[{ id: "ch1", depth: 0 }]} labels={{ ch1: "ch 1" }} load={() => ({ title: "chapters/01.md", text: FILE })} onCommand={(c, sel) => calls.push([c.id, sel])} size={{ cols: 100, rows: 28 }} />);
@@ -112,8 +112,8 @@ test("on the screen: ⇧↓ marks the selected lines, `a v` hands the selection 
   app.stdin.write("\x1b[1;2B"); await sleep(30); // ⇧↓
   app.stdin.write("\x1b[1;2B"); await sleep(30);
   expect(app.lastFrame()).toContain("▌");
-  app.stdin.write("a"); await sleep(20); app.stdin.write("v"); await sleep(30);
-  expect(calls).toEqual([["ai.voice", { sentences: ["The well had been dry since June.", "She did not look up."], stored: { from: 4, to: 5 } }]]);
+  app.stdin.write("a"); await sleep(20); app.stdin.write("p"); await sleep(30);
+  expect(calls).toEqual([["ai.plan", { sentences: ["The well had been dry since June.", "She did not look up."], stored: { from: 4, to: 5 } }]]);
   app.stdin.write("\x1b"); await sleep(40);
   expect(app.lastFrame()).not.toContain("▌");
   cleanup();
