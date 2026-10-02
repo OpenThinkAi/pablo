@@ -36,3 +36,7 @@ export type { OpenAiAdapterOptions } from "./openai";
 export { createOpenAiAdapter, PREFERRED_OUTPUT } from "./openai";
 export type { Providers, ProvidersOptions } from "./registry";
 export { createProviders, route } from "./registry";
+export type { ClaudeCliAdapterOptions, ClaudeRun, ClaudeRunResult, ClaudeRunner } from "./claude-cli";
+export { CLAUDE_CLI_ID, claudeArgs, createClaudeCliAdapter, spawnClaude, subscriptionEnv } from "./claude-cli";
+export type { Planner, PlannerOptions, PlannerRoute } from "./planner";
+export { createPlanner, PLAN_INTENT } from "./planner";
