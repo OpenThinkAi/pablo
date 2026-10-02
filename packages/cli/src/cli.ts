@@ -13,7 +13,7 @@
  * yet").
  */
 
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runCheck } from "./check";
 import { runEdit } from "./edit";
@@ -565,9 +565,35 @@ function runVoice(args: ParsedArgs, cwd: string): number {
   return EXIT_ERROR;
 }
 
+/**
+ * The project the screen opens on: the nearest ancestor of `cwd` (inclusive)
+ * with a valid `pablo.json`, or undefined when `cwd` is not inside a project.
+ */
+export function bareScreenTarget(cwd: string): { title: string; format: string } | undefined {
+  let dir = resolve(cwd);
+  for (;;) {
+    const found = readMarker(dir);
+    if (found.ok) return { title: found.marker.title, format: found.marker.format };
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
 export async function main(argv: readonly string[], cwd: string = process.cwd()): Promise<number> {
   const args = parseCliArgs(argv);
+
+  // Bare `pablo` (no verb, no flags) inside a pablo project opens the screen
+  // (AGT-1522). Anywhere else — no project, or no terminal to draw on — it
+  // prints usage as it always did.
+  if (args.verb === undefined && !args.help && argv.length === 0) {
+    const screen = bareScreenTarget(cwd);
+    if (screen !== undefined && process.stdin.isTTY && process.stdout.isTTY) {
+      const { runScreen } = await import("@openthink/pablo-tui");
+      return await runScreen(screen);
+    }
+  }
 
   if (args.help || args.verb === undefined) {
     console.log(helpText());

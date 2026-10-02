@@ -444,3 +444,33 @@ test("voice show nosuchvoice --json exits 2 listing both paths tried", () => {
   rmSync(vault, { recursive: true, force: true });
   rmSync(configHome, { recursive: true, force: true });
 });
+
+test("bare pablo outside a pablo project, with no terminal, still prints usage (AGT-1522)", () => {
+  const vault = tempVault();
+  const result = Bun.spawnSync(["bun", "run", CLI], {
+    env: { ...process.env, PABLO_VAULT: vault },
+    cwd: join(vault, "novels", "no-marker"),
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString()).toContain("Usage: pablo");
+});
+
+test("bare pablo inside a project prints usage when stdout is not a terminal (AGT-1522)", () => {
+  const vault = tempVault();
+  const { stdout, exitCode } = (() => {
+    const r = Bun.spawnSync(["bun", "run", CLI], { cwd: join(vault, "novels", "ice-house"), env: { ...process.env, PABLO_VAULT: vault } });
+    return { stdout: r.stdout.toString(), exitCode: r.exitCode };
+  })();
+
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("Usage: pablo");
+});
+
+test("bareScreenTarget finds the project from a subdirectory and not outside one (AGT-1522)", async () => {
+  const { bareScreenTarget } = await import("../src/cli");
+  const vault = tempVault();
+
+  expect(bareScreenTarget(join(vault, "novels", "ice-house", "chapters"))?.format).toBe("novel");
+  expect(bareScreenTarget(join(vault, "novels", "no-marker"))).toBeUndefined();
+});
