@@ -23,6 +23,7 @@ import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { McpToolSpec, VerbContext } from "../verbs";
 import type { AskAuthor } from "./ask-author";
 import type { HarnessAuth } from "./auth";
+import type { SessionChoice } from "./sessions";
 import { harnessSystemPrompt } from "./prompt";
 import type { PromptWork } from "./prompt";
 import { allowedTools, BUILTIN_TOOLS, harnessTools, PABLO_SERVER, pabloServer } from "./tools";
@@ -51,6 +52,12 @@ export interface HarnessSpec {
    * the session gets the `ask_author` tool; absent, it has none.
    */
   readonly ask?: AskAuthor;
+  /**
+   * The saved session to run in (AGT-1565, `sessions.ts`): resumed when it has
+   * a transcript, otherwise started under its id, and mirrored into the work's
+   * `.pablo/sessions/`. Absent, the session is ephemeral and nothing is kept.
+   */
+  readonly session?: SessionChoice;
 }
 
 export function harnessOptions(spec: HarnessSpec): Options {
@@ -67,7 +74,15 @@ export function harnessOptions(spec: HarnessSpec): Options {
     cwd: spec.projectPath,
     env: spec.auth.env,
   };
-  return spec.auth.model === undefined ? options : { ...options, model: spec.auth.model };
+  const withModel = spec.auth.model === undefined ? options : { ...options, model: spec.auth.model };
+  if (spec.session === undefined) return withModel;
+  const { id, resume, store } = spec.session;
+  return {
+    ...withModel,
+    persistSession: true,
+    sessionStore: store,
+    ...(resume ? { resume: id } : { sessionId: id }),
+  };
 }
 
 /** One message, one session: the SDK's message stream, as it arrives. */

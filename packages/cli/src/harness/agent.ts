@@ -9,6 +9,10 @@
  * `ask_author` (AGT-1560) is answered from stdin: the question card is printed
  * and one line is read back (a number picks an option).
  *
+ * The conversation is saved per work under `.pablo/sessions/` and resumed on the
+ * next run (`sessions.ts`); `--new` starts a fresh session and leaves the old one
+ * on disk (AGT-1565).
+ *
  * Exit codes follow the CLI's contract: 0 when the session ends in a success
  * result, 2 for a refusal (no project, no marker, no message, a policy pablo
  * does not ship), 1 for anything else (an error result, no result at all, or
@@ -24,6 +28,7 @@ import { lineReader, stdinAskAuthor } from "./ask-author";
 import { harnessAuth } from "./auth";
 import type { HarnessAuth } from "./auth";
 import { loadPromptWork } from "./prompt";
+import { chooseSession } from "./sessions";
 import { runHarness, sdkQuery } from "./session";
 import { runTagFacts } from "./tag-facts";
 import type { TagFactsDeps } from "./tag-facts";
@@ -37,6 +42,8 @@ export interface AgentArgs {
   readonly json: boolean;
   /** AGT-1570: tag every untagged fact on a plan branch instead of running a session. */
   readonly tagFacts?: boolean;
+  /** `--new` (AGT-1565): start a fresh session instead of resuming the work's current one. */
+  readonly new?: boolean;
 }
 
 export interface AgentContext {
@@ -91,7 +98,9 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   // pablo's tools run in this process; their progress goes to stderr, never
   // into the transcript on stdout.
   const verbCtx: VerbContext = { cwd: ctx.cwd, env: ctx.env, stderr: ctx.stderr, caller: "mcp" };
+  const session = chooseSession(project.path, { fresh: args.new === true });
   const spec = {
+    session,
     work: work.work,
     projectPath: project.path,
     auth,
@@ -102,6 +111,7 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
 
   const entries: TranscriptEntry[] = [];
   let result: Extract<TranscriptEntry, { kind: "result" }> | undefined;
+  ctx.stderr.write(`pablo: ${session.resume ? "resuming" : "starting"} session ${session.id}\n`);
   if (!args.json) ctx.stdout.write(`› ${args.message}\n`);
   try {
     for await (const message of runHarness(args.message, spec, deps.query ?? sdkQuery)) {
@@ -120,7 +130,7 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   }
 
   const ok = result?.ok === true;
-  if (args.json) ctx.stdout.write(`${JSON.stringify({ ok, route: auth.route, entries, result: result ?? null })}\n`);
+  if (args.json) ctx.stdout.write(`${JSON.stringify({ ok, route: auth.route, session: { id: session.id, resumed: session.resume }, entries, result: result ?? null })}\n`);
   else if (result === undefined) ctx.stderr.write("pablo: the session ended without a result\n");
   return ok ? 0 : 1;
 }

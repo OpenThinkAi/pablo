@@ -140,10 +140,11 @@ function helpText(): string {
     "                                            send one located passage to the local model;",
     "                                            returns {candidate, span, receipt} and writes",
     "                                            nothing — the file is never touched",
-    '  pablo agent --project <slug> "<message>"',
+    '  pablo agent --project <slug> [--new] "<message>"',
     "                                            one headless harness session (Claude on",
     "                                            the subscription, or the config's key);",
-    "                                            prints the transcript",
+    "                                            prints the transcript; resumes the work's",
+    "                                            saved session, --new starts a fresh one",
     "  pablo agent --project <slug> --tag-facts",
     "                                            tag every untagged bible and continuity fact",
     "                                            (researched/invented/author) on a plan/ branch;",
@@ -222,6 +223,8 @@ interface ParsedArgs {
   readonly end: string | undefined;
   /** `publish --target draft|review|final` (AGT-1534). */
   readonly target: string | undefined;
+  /** `agent --new` (AGT-1565): start a fresh harness session; the old one stays on disk. */
+  readonly new: boolean;
 }
 
 /**
@@ -243,6 +246,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       help: { type: "boolean", default: false },
       adopt: { type: "boolean", default: false },
       "tag-facts": { type: "boolean", default: false },
+      new: { type: "boolean", default: false },
     },
   });
 
@@ -254,6 +258,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     help: values["help"] === true,
     adopt: values["adopt"] === true,
     tagFacts: values["tag-facts"] === true,
+    new: values["new"] === true,
     for: typeof values["for"] === "string" ? values["for"] : undefined,
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
     file: typeof values["file"] === "string" ? values["file"] : undefined,
@@ -678,7 +683,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // the way an MCP verb does, so it is dispatched before the shared block too.
   if (args.verb === "agent") {
     return await runAgent(
-      { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json, tagFacts: args.tagFacts },
+      { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json, tagFacts: args.tagFacts, new: args.new },
       { cwd, env: process.env, stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
     );
   }
