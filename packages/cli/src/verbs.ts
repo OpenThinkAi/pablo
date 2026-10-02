@@ -823,7 +823,7 @@ async function runProseVerb(args: z.infer<typeof PROSE_ARGS>, ctx: VerbContext):
 // ("the model has no write tool" extends to "the model cannot clear its own
 // review gate"), so a model connected over MCP can watch the queue and wait
 // on it, but can never approve or reject a piece itself, including one it
-// just wrote. `approve`/`reject` stay CLI/tray/editor-only. Global, not
+// just wrote. `approve`/`reject` stay CLI/editor-only. Global, not
 // project-scoped (no `project` field): the queue is one file for every vault
 // (or none) to share.
 // ---------------------------------------------------------------------------
@@ -838,7 +838,7 @@ const REVIEW_ARGS = z.object({
     .boolean()
     .optional()
     .default(false)
-    .describe("review approve: record the approval as unread (read: false) — the tray's blind approve."),
+    .describe("review approve: record the approval as unread (read: false) — a blind approve."),
   reason: z.string().optional().describe("review reject: why, recorded on the decision."),
   // `.positive()` rejects 0 — deliberately CLI/MCP-asymmetric: the CLI's own
   // `--timeout 0` (an instant, clock-free timeout, exercised by
@@ -1119,7 +1119,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "edit",
     description:
-      "Open the ui-leaf editor window on a queued piece (piece) or a project file (project + file) for a human to read, revise, approve, reject, or save. Returns {url} immediately — a model never blocks on the window closing, and can never approve/reject through it (that stays CLI/tray/editor-only, exactly like the review tool).",
+      "Open the ui-leaf editor window on a queued piece (piece) or a project file (project + file) for a human to read, revise, approve, reject, or save. Returns {url} immediately — a model never blocks on the window closing, and can never approve/reject through it (that stays CLI/editor-only, exactly like the review tool).",
     args: EDIT_ARGS,
     run: runEditVerb,
   },

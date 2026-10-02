@@ -296,6 +296,21 @@ the loader; it rejects an unknown `format` or a missing required key, naming it.
 A directory with no `pablo.json` at all is a refusal naming
 `pablo init --adopt --project <slug>` as the fix.
 
+## Removing the old menu-bar tray
+
+`pablo tray` (the menu-bar daemon and its `pablo tray install` launchd agent) was
+removed 2026-10-01; `pablo tray` is now an unknown verb. If you installed the agent
+earlier, remove it by hand:
+
+```sh
+launchctl bootout gui/$(id -u)/ai.openthink.pablo.tray
+rm ~/Library/LaunchAgents/ai.openthink.pablo.tray.plist
+rm -rf ~/Library/Logs/pablo ~/Library/Application\ Support/pablo
+```
+
+The last line deletes the tray's logs (`tray.log`, `tray.err`) and the helper bundle
+it built; skip it if you keep other files there.
+
 ## Contributing
 
 Read `CLAUDE.md` and `AGENTS.md` before any change — this repo is stamp-governed

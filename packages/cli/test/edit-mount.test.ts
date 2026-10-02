@@ -52,7 +52,7 @@ function psCommandLines(): string[] {
 /**
  * The pids of every process currently running `uiLeafBinary`. Comparing a
  * before/after snapshot is what makes this test safe to run while a real
- * pablo tray daemon has an editor window open on the same machine — that
+ * pablo editor window is open on the same machine — that
  * window is a legitimate concurrent user of the same binary, and only the
  * processes this test itself started may be asserted about.
  */
@@ -133,7 +133,7 @@ test.skipIf(!CAN_RUN)(
     const previousNoOpen = process.env["UI_LEAF_NO_OPEN"];
     process.env["UI_LEAF_NO_OPEN"] = "1";
 
-    // Any ui-leaf already running belongs to someone else (a live pablo tray
+    // Any ui-leaf already running belongs to someone else (a live pablo editor
     // window, say); only processes started past this point are ours to assert on.
     const uiLeafBefore = uiLeafPids();
 

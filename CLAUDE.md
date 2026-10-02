@@ -64,7 +64,11 @@ that design (it was CriticMarkup/span-based) but reintroduced 2026-09-07 as a
 text-free append-only JSONL log (`packages/cli/src/review.ts`, AGT-1255) per
 the pm named doc `review-tray` (`pm project show ai-terminal --doc review-tray`;
 an extension of the design doc, not a
-revert of the 2026-09-06 cut) — treat that doc, not this note, as canonical.
+revert of the 2026-09-06 cut). The **menu-bar tray** that doc describes (daemon,
+Swift helper, launchd agent) was retired 2026-10-01 (AGT-1520): the
+`pm project show ai-terminal --doc screen` decisions supersede it, and a
+full-terminal screen replaces it. The review queue itself stays until the
+branch-based review lands.
 
 ## The project
 

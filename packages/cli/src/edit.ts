@@ -7,11 +7,11 @@
  * view only; AGT-1270 replaces the view with the full paper-sheet editor.
  *
  * `openEditor` is the one function both this file's CLI wrapper (`runEdit`)
- * and `verbs.ts`'s MCP tool (`runEditVerb`) call, and the one AGT-1259's tray
- * daemon calls directly with a piece's own path — no argv, no `--project`.
+ * and `verbs.ts`'s MCP tool (`runEditVerb`) call, taking a piece's own path —
+ * no argv, no `--project`.
  * It derives the vault/project a file lives under purely from the file's own
  * path (`deriveEditContext`), so a caller with nothing but a resolved path
- * (a piece record, a daemon click) never needs a working directory at all.
+ * (a piece record) never needs a working directory at all.
  */
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -177,7 +177,7 @@ export interface EditContext {
  * Derives the vault/project a file lives under purely from its own path — no
  * `--project`, no cwd needed. This is what lets `openEditor` take nothing but
  * `{path, piece?}` (AC5): both `pablo edit`'s own CLI/MCP resolution and
- * AGT-1259's daemon (which only ever has a queued piece's `path` in hand) get
+ * any caller that only has a queued piece's `path` in hand get
  * the same revise/check context for free. Either field is `undefined` for a
  * file with no vault or no `pablo.json` above it (a global `prose` piece) —
  * `check`/`revise` degrade gracefully rather than failing to resolve.
@@ -294,7 +294,7 @@ export async function openEditor(opts: OpenEditorOptions): Promise<OpenEditorRes
 
   // ui-leaf reads this from its own inherited environment (there is no `env`
   // mount option) and, on its own initiative, suppresses the launch under an
-  // SSH session — wrong here, since the daemon hosting this window may well
+  // SSH session — wrong here, since the process hosting this window may well
   // be started from an ssh session on a Mac with a screen. Only defaulted, so
   // an explicit UI_LEAF_NO_OPEN (e.g. "1" in a test) is still honoured.
   if (process.env["UI_LEAF_NO_OPEN"] === undefined) {
