@@ -337,7 +337,8 @@ test("the screen shows the card in place, the author answers it there, and the c
   let frame = plain(app.lastFrame());
   expect(frame).toContain("Does Cora know?");
   expect(frame).toContain("1. yes");
-  expect(frame).toContain("waiting for your answer");
+  expect(frame).toContain("type a number to pick"); // the card's own prompt
+  expect(frame).toContain("waiting for your answer"); // the activity line (state.ts reduceEvent), not the card
   expect(frame).toContain("answer ›");
   await keys(app, "1");
   app.stdin.write("\r");
