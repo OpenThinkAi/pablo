@@ -659,7 +659,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   if (args.verb === "agent") {
     return await runAgent(
       { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json },
-      { cwd, env: process.env, stdout: process.stdout, stderr: process.stderr },
+      { cwd, env: process.env, stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
     );
   }
 

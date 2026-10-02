@@ -15,6 +15,8 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { askAuthorTool } from "./ask-author";
+import type { AskAuthor } from "./ask-author";
 import { buildMcpServer, mcpTools } from "../mcp";
 import type { McpToolSpec, VerbContext } from "../verbs";
 
@@ -29,9 +31,12 @@ export function harnessToolName(tool: string): string {
   return `mcp__${PABLO_SERVER}__${tool}`;
 }
 
-/** pablo's tools as the harness attaches them. Defaults to every tool `pablo mcp` serves. */
-export function harnessTools(): readonly McpToolSpec[] {
-  return mcpTools();
+/**
+ * pablo's tools as the harness attaches them: every tool `pablo mcp` serves,
+ * plus `ask_author` (AGT-1560) when the front end can ask the author.
+ */
+export function harnessTools(ask?: AskAuthor): readonly McpToolSpec[] {
+  return ask === undefined ? mcpTools() : [...mcpTools(), askAuthorTool(ask)];
 }
 
 /**

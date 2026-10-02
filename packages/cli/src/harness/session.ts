@@ -20,6 +20,7 @@
 
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { McpToolSpec, VerbContext } from "../verbs";
+import type { AskAuthor } from "./ask-author";
 import type { HarnessAuth } from "./auth";
 import { harnessSystemPrompt } from "./prompt";
 import type { PromptWork } from "./prompt";
@@ -43,10 +44,15 @@ export interface HarnessSpec {
   readonly ctx: VerbContext;
   /** pablo's tools to attach; defaults to `harnessTools()`. */
   readonly tools?: readonly McpToolSpec[];
+  /**
+   * The front end's way to put a question to the author (AGT-1560). Present,
+   * the session gets the `ask_author` tool; absent, it has none.
+   */
+  readonly ask?: AskAuthor;
 }
 
 export function harnessOptions(spec: HarnessSpec): Options {
-  const tools = spec.tools ?? harnessTools();
+  const tools = spec.tools ?? harnessTools(spec.ask);
   const options: Options = {
     systemPrompt: harnessSystemPrompt(spec.work),
     tools: [...BUILTIN_TOOLS],
