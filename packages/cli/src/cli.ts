@@ -44,7 +44,6 @@ const P0_VERBS = [
   "write",
   "save",
   "check",
-  "dry-run",
   "mcp",
   "voice",
   "prose",
@@ -54,7 +53,7 @@ const P0_VERBS = [
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
-const LATER_VERBS = ["share", "notes", "publish"] as const;
+const LATER_VERBS = ["dry-run", "share", "notes", "publish"] as const;
 
 const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
@@ -73,6 +72,8 @@ function helpText(): string {
     "",
     "Later (not yet implemented):",
     ...LATER_VERBS.map((verb) => `  ${verb}`),
+    "",
+    "dry-run as its own verb is later; today use `write --dry-run` (or `prose`/`revise --dry-run`).",
     "",
     "Every verb accepts --project <slug> and --json.",
     "--project resolves to <vault>/<kind>/<slug> (kind: novels, stories, essays).",
