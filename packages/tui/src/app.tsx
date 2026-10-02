@@ -18,7 +18,8 @@ import { missingContent, type BookRail } from "./book";
 import { KeyPanel } from "./key-panel";
 import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
-import { displayLines, type MainDoc } from "./document";
+import type { MainDoc } from "./document";
+import { hitAt, hitDetail, mainRows, nextHitRow, textRows, type CheckHit, type MainRow } from "./hits";
 import { clean } from "./sanitize";
 import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
@@ -43,6 +44,8 @@ export interface AppProps {
   /** The document behind a rail row id (document.ts), shown in the main pane for the row under the rail's cursor. */
   readonly load?: (id: string) => MainDoc | undefined;
   /** The main pane's heading and its document when no row names one (no `load`, or it has nothing for the row). */
+  /** Scans a document's raw text for `check` hits, shown as boxes under their lines; run when a chapter (a doc with a `file`) is opened. */
+  readonly checks?: (file: string, text: string) => readonly CheckHit[];
   readonly mainTitle?: string;
   readonly lines?: readonly string[];
   /** Branches waiting for review (draft/, revise/, edit/, reader/): book mode lists them; Enter opens one as a review. */
@@ -65,16 +68,18 @@ const NO_ROWS: readonly RailRow[] = [];
 const NO_LINES: readonly string[] = [];
 const NO_LABELS: Readonly<Record<string, string>> = {};
 const NO_BRANCHES: readonly string[] = [];
+const NO_HITS: readonly CheckHit[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
   // A save puts the new bindings in force at once; until one, the keymap and editor the screen opened with.
   const keymap = state.saved ? effectiveKeys(state.saved.overrides) : given;
   const editor = state.saved ? state.saved.editor : givenEditor;
+  const layout = layoutOf(size.cols, size.rows, { zen: state.zen, full: state.full });
   useInput((input, key) => {
     const token = tokenOf(input, key);
     if (state.mode.kind === "settings" && state.settings) {
@@ -89,11 +94,16 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       if (action.type !== "command") dispatch(action);
       else if (action.id === "quit") exit();
       else if (action.id === "settings") dispatch({ type: "settings.open", settings: openSettings(keymap, editor, configFile ?? configPath()) });
+      else if (action.id === "check.open") openHit();
+      else if (action.id === "check.next" || action.id === "check.prev") {
+        const to = nextHitRow(paneRows, viewOf(state).main.cursor, action.id === "check.next" ? 1 : -1);
+        // The box's last row first, so the pane scrolls far enough to show the whole box, then its first row.
+        if (to !== undefined) { dispatch({ type: "main.goto", line: to + 3 }); dispatch({ type: "main.goto", line: to + 1 }); }
+      }
       else onCommand?.(action);
     }
   });
 
-  const layout = layoutOf(size.cols, size.rows, { zen: state.zen, full: state.full });
   const contentBody = state.content ? clean(state.content.body) : null;
   // Book mode's rows (the stages, then the branches waiting for review), or in a review the branch's changes.
   const place = placeOf(state);
@@ -112,14 +122,23 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     if (reasons) dispatch({ type: "content.show", content: missingContent(labels[stageId!]?.replace(/^\S+ /, "") ?? stageId!, reasons) });
     else if (state.content?.kind === "missing") dispatch({ type: "content.close" });
   }, [stageId, reasons]);
-  // The main pane shows the file behind the rail's row, wrapped to its width; a different row starts at the top. In a
-  // review it shows the change under the cursor instead: its removed and added sentences.
+  // The main pane shows the file behind the rail's row, wrapped to its width; a different row starts at the top. A
+  // chapter is scanned for `check` hits as it opens, and each hit is a box under its line. In a review the pane shows
+  // the change under the cursor instead: its removed and added sentences.
   const rowId = railRow(viewOf(state).rail)?.id;
   const doc = useMemo(() => (rowId !== undefined && !review ? load?.(rowId) : undefined), [rowId, load, review]);
+  const hits = useMemo(() => (doc?.file !== undefined && checks ? checks(doc.file, doc.text) : NO_HITS), [doc, checks]);
   const shownTitle = doc ? doc.title : mainTitle;
-  const shownLines = useMemo(() => (doc ? displayLines(doc.text, layout.mainInner) : lines), [doc, lines, layout.mainInner]);
+  const paneRows = useMemo<readonly MainRow[]>(() => (doc ? mainRows(doc.text, layout.mainInner, hits) : textRows(lines)), [doc, hits, lines, layout.mainInner]);
   const changes = useMemo(() => (review ? reviewLines(review, rowId, layout.mainInner - 2) : undefined), [review, rowId, layout.mainInner]);
-  const mainLength = changes ? changes.rows.length : shownLines.length;
+  const mainLength = changes ? changes.rows.length : paneRows.length;
+  // `→` on a hit (its box, or the line above it) opens its rule and flagged pattern in the content area.
+  const openHit = () => {
+    const at = hitAt(paneRows, viewOf(state).main.cursor);
+    if (at !== undefined) dispatch({ type: "content.show", content: { ...hitDetail(hits[at]!), kind: "check" } });
+  };
+  // A hit's detail belongs to the document it was opened in: opening another takes it down.
+  useEffect(() => { if (state.content?.kind === "check") dispatch({ type: "content.close" }); }, [rowId]);
   useEffect(() => { dispatch({ type: "main.loaded", lines: mainLength, ...(changes && rowId !== undefined ? { doc: `${reviewBranch}\0${rowId}` } : doc && rowId !== undefined ? { doc: rowId } : {}) }); }, [mainLength, doc, rowId, changes === undefined]);
   useEffect(() => {
     dispatch({ type: "measured", measure: measureOf(layout, contentBody) });
@@ -138,7 +157,8 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const view = viewOf(state);
   const where = `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}` : "book"} · ${state.focus}`;
   const pending = pendingText(state.pending);
-  const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments }), size.cols - 4);
+  const shownComments = hits.length ? { ...comments, check: hits.length } : comments;
+  const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments: shownComments }), size.cols - 4);
   return (
     <Box flexDirection="column" width={size.cols} height={size.rows}>
       <Box flexDirection="column" borderStyle="single" paddingX={1} height={4}>
@@ -157,7 +177,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
         <Box height={layout.middleH}>
           {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
-          <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} lines={shownLines} changes={changes?.rows} active={state.focus === "main"} />
+          <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />
         </Box>
       )}
       <Box height={layout.bottomH}>
@@ -203,7 +223,7 @@ function DiffLine({ row, width, at }: { row: DiffRow; width: number; at: boolean
   );
 }
 
-function Main({ layout, view, title, lines, changes, active }: { layout: Layout; view: ViewT; title: string; lines: readonly string[]; changes: readonly DiffRow[] | undefined; active: boolean }) {
+function Main({ layout, view, title, rows, changes, active }: { layout: Layout; view: ViewT; title: string; rows: readonly MainRow[]; changes: readonly DiffRow[] | undefined; active: boolean }) {
   const { scroll, cursor } = view.main;
   if (changes) {
     return (
@@ -216,9 +236,16 @@ function Main({ layout, view, title, lines, changes, active }: { layout: Layout;
   return (
     <Box flexDirection="column" width={layout.mainW} height={layout.middleH} paddingLeft={1}>
       <Text dimColor wrap="truncate">{fit(title, layout.mainInner)}</Text>
-      {lines.slice(scroll, scroll + layout.mainRows).map((line, i) => (
-        <Text key={scroll + i} wrap="truncate" inverse={active && scroll + i === cursor}>{fit(line, layout.mainInner) || " "}</Text>
-      ))}
+      {rows.slice(scroll, scroll + layout.mainRows).map((row, i) => {
+        const at = active && scroll + i === cursor;
+        if (row.kind === "text") return <Text key={scroll + i} wrap="truncate" inverse={at}>{fit(row.text, layout.mainInner) || " "}</Text>;
+        // A hit's box under its line: the header in the top border, its tag dimmed.
+        return (
+          <Text key={scroll + i} wrap="truncate" color={row.color} inverse={at}>
+            {row.head !== undefined ? <>{row.head}{row.tag ? <Text dimColor>{row.tag}</Text> : null}{row.text.slice(row.head.length + (row.tag?.length ?? 0))}</> : row.text}
+          </Text>
+        );
+      })}
     </Box>
   );
 }

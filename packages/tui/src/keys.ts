@@ -73,6 +73,7 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "main.up", states: MAIN, key: "up", secondary: "k", label: "line", description: "Move up a sentence line.", do: { type: "main.up" } },
   { id: "main.page_down", states: MAIN, key: "pgdn", secondary: "ctrl-d", label: "page", description: "Page down.", do: { type: "main.page_down" } },
   { id: "main.page_up", states: MAIN, key: "pgup", secondary: "ctrl-u", label: "page", description: "Page up.", do: { type: "main.page_up" } },
+  { id: "main.open", states: MAIN, key: "right", secondary: "l", label: "open hit", description: "Open the check hit on this line (its rule and the pattern it flagged) in the content area.", do: cmd("check.open") },
   { id: "main.to_rail", states: MAIN, key: "left", secondary: "h", label: "rail", description: "Back to the rail.", do: { type: "main.to_rail" } },
   { id: "main.focus_content", states: MAIN, needs: "content", key: "tab", label: "content", description: "Move focus into the content area to scroll it.", do: { type: "focus.content" }, fixed: true },
 
@@ -111,6 +112,8 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   // ---- g: go to
   { id: "go.top", states: MAIN, prefix: "g", key: "g", label: "top", description: "Go to the first line of the document.", do: { type: "main.top" } },
   { id: "go.end", states: MAIN, prefix: "g", key: "e", label: "end", description: "Go to the last line of the document.", do: { type: "main.end" } },
+  { id: "go.hit_next", states: MAIN, prefix: "g", key: "f", label: "next hit", description: "Go to the next check hit in the document, wrapping round at the end.", do: cmd("check.next") },
+  { id: "go.hit_prev", states: MAIN, prefix: "g", key: "F", label: "previous hit", description: "Go to the previous check hit in the document, wrapping round at the start.", do: cmd("check.prev") },
   { id: "go.line", states: MAIN, prefix: "g", key: "<n>", label: "line", description: "Type a line number, then close it with the go prefix key again or Enter, to go to that line.", fixed: true },
 ];
 

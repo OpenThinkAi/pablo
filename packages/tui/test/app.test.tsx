@@ -92,7 +92,7 @@ test("the arrows act in the focused region, Tab moves focus, Esc backs out", () 
   const main = { ...rail, pane: "main" as const, focus: "main" as const };
   expect(at(main, "down")).toEqual([{ type: "main.down" }]);
   expect(at(main, "left")).toEqual([{ type: "main.to_rail" }]);
-  expect(at(main, "right")).toEqual([]);
+  expect(at(main, "right")).toEqual([{ type: "command", id: "check.open" }]); // the hit on this line, if any
   const content = { ...rail, focus: "content" as const, content: { title: "t", body: "b" } };
   expect(at(content, "down")).toEqual([{ type: "content.down" }]);
   expect(at(content, "tab")).toEqual([{ type: "focus.back" }]);
@@ -179,4 +179,44 @@ test("the main pane shows the file behind the selected row, and starts a new doc
   expect(plain(app.lastFrame())).not.toContain("She did not look up.");
   app.stdin.write("g"); await sleep(20); app.stdin.write("g"); await sleep(40);
   expect(plain(app.lastFrame())).toContain("She did not look up.");
+});
+
+test("an opened chapter is checked: each hit is a box under its line, g f / g F walk them, → opens the detail", async () => {
+  const text = "---\nchapter: 1\n---\n\nThe well had been dry since June.\nShe did not look up — not once.\n\nEdwin stood in the doorway.\nLittle did he know.";
+  const docs: Record<string, { title: string; text: string; file?: string }> = {
+    premise: { title: "bible/overview.md", text: "A pond." },
+    ch1: { title: "chapters/01-the-well.md · draft", text, file: "chapters/01-the-well.md" },
+  };
+  const scanned: string[] = [];
+  const checks = (file: string, t: string) => {
+    scanned.push(file);
+    return t === text ? [{ line: 6, rule: "em-dash", excerpt: "She did not look up — not once." }, { line: 9, rule: "foreshadow", excerpt: "Little did he know." }] : [];
+  };
+  const app = render(<App {...book} lines={[]} mainTitle="" load={(id) => docs[id]} checks={checks} size={{ cols: 120, rows: 32 }} />);
+  await sleep(30);
+  // The premise has no file, so it is not scanned; the first chapter is, as it opens.
+  expect(scanned).toEqual([]);
+  for (const key of ["\x1b[B", "\x1b[B", "\x1b[B"]) { app.stdin.write(key); await sleep(20); }
+  await sleep(30);
+  expect(scanned).toContain("chapters/01-the-well.md");
+  let frame = plain(app.lastFrame());
+  expect(frame).toContain("╭ ▲ tells · em-dash");
+  expect(frame).toContain("╭ ▲ tells · foreshadow");
+  expect(frame).toContain("▲ 3 continuity · 2 check"); // the status area counts them
+  // The box is under its line: the line, then its top border, before the next paragraph.
+  expect(frame.indexOf("She did not look up")).toBeLessThan(frame.indexOf("tells · em-dash"));
+  expect(frame.indexOf("tells · em-dash")).toBeLessThan(frame.indexOf("Edwin stood"));
+  // → enters the main pane (cursor on the first line, which is not yet a hit's); g f goes to the first box; → opens it.
+  app.stdin.write("\x1b[C"); await sleep(30);
+  app.stdin.write("g"); await sleep(20); app.stdin.write("f"); await sleep(30);
+  app.stdin.write("\x1b[C"); await sleep(30);
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("check · em-dash · line 6");
+  expect(frame).toContain("pattern: an em-dash");
+  // g F from the first hit wraps to the last; Esc closes the detail.
+  app.stdin.write("g"); await sleep(20); app.stdin.write("F"); await sleep(30);
+  app.stdin.write("\x1b[C"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("check · foreshadow · line 9");
+  app.stdin.write("\x1b"); await sleep(30);
+  expect(plain(app.lastFrame())).not.toContain("check · foreshadow · line 9");
 });
