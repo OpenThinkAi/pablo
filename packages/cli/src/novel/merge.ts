@@ -13,7 +13,10 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createProviders, loadConfig } from "@openthink/pablo-core";
+import type { Adapter, Intent } from "@openthink/pablo-core";
 import { deleteBranch, mergeBranch, repoRoot } from "../branch";
+import { readMarker } from "../marker";
 import { runAfterMerge } from "./rituals";
 import type { Ritual, RitualOptions } from "./rituals";
 
@@ -81,4 +84,40 @@ export async function mergeDraft(
     receiptLine: `merged ${branch}`,
   });
   return { ok: true, sha, chapter, rituals, notices };
+}
+
+/** The intent continuity extraction routes under (AGT-1232): `extraction` routes local, same as drafting. */
+const CONTINUITY_INTENT: Intent = { name: "continuity", kind: "extraction" };
+
+/**
+ * `mergeDraft` as the `merge` verb runs it: the slug comes from the project's
+ * marker and the continuity extractor from the routed provider. The result
+ * carries the exit code the CLI contract wants: 2 for a refusal (not a draft
+ * branch, no marker), 1 for a git failure such as a conflict.
+ */
+export async function mergeDraftInProject(
+  projectPath: string,
+  branch: string,
+  env: Record<string, string | undefined> = process.env,
+  /** Overrides the routed extraction adapter; tests inject a fake so no model is called. */
+  extractorOverride?: Adapter,
+): Promise<{ readonly exitCode: number; readonly body: Record<string, unknown> }> {
+  if (draftChapter(branch) === undefined) {
+    return { exitCode: 2, body: { ok: false, code: 2, message: `pablo: merge: "${branch}" is not a draft branch (draft/chNN)` } };
+  }
+  const marker = readMarker(projectPath);
+  if (!marker.ok) return { exitCode: marker.code, body: { ok: false, code: marker.code, message: marker.message } };
+
+  const extractor =
+    extractorOverride ??
+    (() => {
+      const providers = createProviders(loadConfig());
+      return providers.adapter(providers.route(CONTINUITY_INTENT));
+    })();
+  const merged = await mergeDraft(projectPath, branch, { slug: marker.marker.slug, env, extractor });
+  if (!merged.ok) return { exitCode: 1, body: { ok: false, code: 1, message: merged.notice } };
+  return {
+    exitCode: 0,
+    body: { ok: true, branch, chapter: merged.chapter, commit: merged.sha, rituals: merged.rituals, notices: merged.notices },
+  };
 }

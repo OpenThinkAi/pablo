@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { commitAs, createBranch } from "../src/branch";
-import { draftChapter, mergeDraft } from "../src/novel/merge";
+import { draftChapter, mergeDraft, mergeDraftInProject } from "../src/novel/merge";
 import { runWrite } from "../src/write";
 
 /**
@@ -156,4 +156,21 @@ test("mergeDraft refuses a branch that is not a draft", async () => {
   if (made.ok) commitAs(made.path as string, { message: "x", author: { name: "a", email: "a@b" } });
   const merged = await mergeDraft(project, "revise/abc", { slug: "ice-house", env });
   expect(merged.ok).toBe(false);
+});
+
+test("pablo merge: a non-draft branch is refused (exit 2) by the CLI verb; the verb entry merges with an injected extractor", async () => {
+  const { vault, project, env } = setup();
+  await write(vault, project, env);
+  const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+  const refused = Bun.spawnSync(["bun", "run", cli, "merge", "--project", "ice-house", "main", "--json"], {
+    env: { ...process.env, ...env, PABLO_VAULT: vault },
+  });
+  expect(refused.exitCode).toBe(2);
+  expect(JSON.parse(refused.stdout.toString())).toMatchObject({ ok: false, code: 2 });
+
+  // The CLI's success path routes a real extraction adapter; the verb's entry takes a fake instead.
+  const outcome = await mergeDraftInProject(project, "draft/ch02", env, adapter);
+  expect(outcome.exitCode).toBe(0);
+  expect(outcome.body).toMatchObject({ ok: true, branch: "draft/ch02", chapter: 2 });
+  expect(existsSync(join(project, "chapters", "02-black-ice.md"))).toBe(true);
 });

@@ -39,6 +39,7 @@ function voiceMcpTool(name: string) {
 test("VERBS exposes exactly the fourteen MCP verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "check",
+    "merge",
     "migrate",
     "prose",
     "publish",
@@ -898,4 +899,11 @@ test("timeline refuses a work with no bible/timeline.md, and an unknown project 
   } finally {
     rmSync(dirname(vault), { recursive: true, force: true });
   }
+
+// AGT-1536: merging a draft is the human's review gate, so it is not an MCP tool.
+test("merge is a verb with no MCP tool, and requires project and branch", () => {
+  const merge = verb("merge");
+  expect(merge.mcpTools).toEqual([]);
+  expect(merge.args.safeParse({ project: "ice-house" }).success).toBe(false);
+  expect(merge.args.safeParse({ project: "ice-house", branch: "draft/ch02" }).success).toBe(true);
 });

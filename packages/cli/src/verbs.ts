@@ -64,6 +64,7 @@ import { join, resolve, sep } from "node:path";
 import { checkWork } from "./check";
 import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
+import { mergeDraftInProject } from "./novel/merge";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { readTool, searchTool } from "./harness-tools";
@@ -484,6 +485,22 @@ async function runMigrateVerb(args: z.infer<typeof MIGRATE_ARGS>, ctx: VerbConte
   const outcome = migrateLines(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] });
   if (!outcome.ok) return { body: outcome, exitCode: outcome.code };
   return { body: outcome, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// merge (AGT-1536)
+// ---------------------------------------------------------------------------
+
+const MERGE_ARGS = z.object({
+  project: projectField,
+  branch: z.string().describe("The draft branch to merge to main, e.g. draft/ch02 (the receipt of `write` names it)."),
+});
+
+async function runMergeVerb(args: z.infer<typeof MERGE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const outcome = await mergeDraftInProject(resolved.projectPath, args.branch, ctx.env);
+  return { body: outcome.body, exitCode: outcome.exitCode };
 }
 
 // ---------------------------------------------------------------------------
@@ -1166,6 +1183,17 @@ export const VERBS: readonly Verb[] = [
     args: MIGRATE_ARGS,
     run: runMigrateVerb,
     positionalArgs: ["sub"],
+  },
+  {
+    name: "merge",
+    description:
+      "Merge a reviewed draft branch (draft/chNN, named in `write`'s receipt) into main, then run the after-write steps for its chapter: outline tick, dated note, README, continuity, commit, think sync. A conflict changes nothing.",
+    args: MERGE_ARGS,
+    run: runMergeVerb,
+    positionalArgs: ["branch"],
+    // Merging is the human's review gate: a model connected over MCP must not
+    // be able to land its own draft, so this verb registers no MCP tool.
+    mcpTools: [],
   },
   {
     name: "publish",
