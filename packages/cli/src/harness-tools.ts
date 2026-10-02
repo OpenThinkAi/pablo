@@ -14,13 +14,13 @@
  * `research/` IS readable here: the harness may read it, Gemma never does
  * (that rule is the pack assembler's, not this module's).
  *
- * Chapters come back joined into paragraphs (`joinParagraphs`): on disk they
+ * Chapters come back joined into paragraphs (`joinManuscript`): on disk they
  * are one sentence per line, and a model reads paragraphs.
  */
 
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { joinParagraphs, splitSentences } from "@openthink/pablo-core";
+import { joinManuscript, splitSentences } from "@openthink/pablo-core";
 
 export type ReadableKind = "bible" | "chapter" | "outline" | "continuity" | "research";
 
@@ -113,7 +113,7 @@ export function readTool(workDir: string, path: string): ReadResult {
   if (resolved.kind !== "chapter") return { ok: true, path: resolved.rel, kind: resolved.kind, text: raw };
 
   const { frontmatter, body } = splitFrontmatter(raw);
-  const text = joinParagraphs(body);
+  const text = joinManuscript(body);
   return frontmatter === undefined
     ? { ok: true, path: resolved.rel, kind: resolved.kind, text }
     : { ok: true, path: resolved.rel, kind: resolved.kind, frontmatter, text };
