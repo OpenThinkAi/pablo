@@ -104,6 +104,13 @@ test("an unknown verb exits 1", () => {
   expect(stderr).toContain("unknown verb");
 });
 
+test("the retired `pablo tray` answers as an unknown verb (AGT-1520)", () => {
+  const { exitCode, stderr } = runCli(["tray"]);
+
+  expect(exitCode).toBe(1);
+  expect(stderr).toContain('unknown verb "tray"');
+});
+
 test("init novel <slug> \"<Title>\" scaffolds the work and exits 0 with a JSON summary", () => {
   const vault = tempVault();
 

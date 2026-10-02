@@ -16,7 +16,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runCheck } from "./check";
-import { openEditor, runEdit } from "./edit";
+import { runEdit } from "./edit";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
@@ -30,21 +30,7 @@ import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
 import { runResumeVerb } from "./resume";
 import { runReview } from "./review-verbs";
-import { decide } from "./review";
 import { runSave } from "./save";
-import { materializeTrayBundle } from "./tray/bundle";
-import {
-  defaultCliPath,
-  defaultEnvPath,
-  defaultLogDir,
-  defaultPlistPath,
-  installTray,
-  launchdPlist,
-  TRAY_LABEL,
-  uninstallTray,
-} from "./tray/launchd";
-import { spawnTrayHelper, superviseHelper } from "./tray/supervise";
-import { runTrayDaemon } from "./tray/daemon";
 import { deriveCliOptions, parseForChapter } from "./verbs";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
@@ -64,7 +50,6 @@ const P0_VERBS = [
   "prose",
   "review",
   "revise",
-  "tray",
   "edit",
 ] as const;
 
@@ -133,12 +118,6 @@ function helpText(): string {
     "                                            send one located passage to the local model;",
     "                                            returns {candidate, span, receipt} and writes",
     "                                            nothing — the file is never touched",
-    "  pablo tray                               run the menu-bar daemon in the foreground",
-    "                                            (SIGTERM/SIGINT to stop); PABLO_TRAY=0 skips",
-    "                                            the helper, PABLO_APP_SUPPORT_DIR overrides",
-    "                                            where it is built",
-    "  pablo tray install|uninstall              install/remove the launchd agent that keeps",
-    "                                            the tray running after login",
     "  pablo edit --piece <id>",
     "  pablo edit --project <slug> --file F      mount the ui-leaf editor window on a queued",
     "                                            piece or a project file; prints the URL",
@@ -586,88 +565,6 @@ function runVoice(args: ParsedArgs, cwd: string): number {
   return EXIT_ERROR;
 }
 
-/**
- * The real `Exec` for `installTray`/`uninstallTray`: shells out to
- * `launchctl` with `Bun.spawn`. Never used by a test — `tray-launchd.test.ts`
- * injects a fake `Exec` so no suite touches the real launchd.
- */
-async function launchctlExec(cmd: string[]): Promise<{ code: number; stderr: string }> {
-  const proc = Bun.spawn(cmd, { stdout: "ignore", stderr: "pipe" });
-  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-  return { code, stderr };
-}
-
-/**
- * `pablo tray [install|uninstall]`. Bare `tray` runs the daemon
- * (`tray/daemon.ts`) in the foreground until SIGTERM/SIGINT, wiring the real
- * `materializeTrayBundle`/`superviseHelper`/`spawnTrayHelper`/`decide` and a
- * real clock/sleep. `install`/`uninstall` (AGT-1268) write and load, or
- * unload and remove, `~/Library/LaunchAgents/ai.openthink.pablo.tray.plist`
- * through `tray/launchd.ts`, with a real `exec` built on `Bun.spawn` above.
- * `tray` is CLI-only — it is never an MCP tool and has no `--project`, so it
- * is dispatched here, before the shared `--project`/marker resolution block.
- */
-async function runTray(args: ParsedArgs): Promise<number> {
-  const [sub] = args.rest;
-  if (sub === "install") {
-    const plistPath = defaultPlistPath();
-    const logDir = defaultLogDir();
-    const plist = launchdPlist({
-      label: TRAY_LABEL,
-      bun: process.execPath,
-      cli: defaultCliPath(),
-      logDir,
-      path: defaultEnvPath(),
-    });
-    const result = await installTray({ plistPath, plist, logDir, exec: launchctlExec });
-    if (!result.ok) {
-      console.error(result.stderr || "pablo: tray install: launchctl bootstrap failed");
-      return EXIT_ERROR;
-    }
-    console.log(`installed ${plistPath}`);
-    return EXIT_OK;
-  }
-  if (sub === "uninstall") {
-    const plistPath = defaultPlistPath();
-    const result = await uninstallTray({ plistPath, exec: launchctlExec });
-    console.log(result.removed ? "uninstalled" : "nothing installed");
-    return EXIT_OK;
-  }
-  if (sub !== undefined) {
-    console.error(`pablo: tray: unknown subcommand "${sub}" (expected install or uninstall)`);
-    return EXIT_ERROR;
-  }
-
-  const controller = new AbortController();
-  const onSignal = (): void => controller.abort();
-  process.on("SIGTERM", onSignal);
-  process.on("SIGINT", onSignal);
-
-  try {
-    await runTrayDaemon(
-      {
-        env: process.env,
-        log: (line) => {
-          process.stderr.write(`${line}\n`);
-        },
-        now: () => new Date(),
-        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-        materialize: materializeTrayBundle,
-        supervise: superviseHelper,
-        spawnHelper: spawnTrayHelper,
-        decide,
-        openEditor,
-      },
-      controller.signal,
-    );
-  } finally {
-    process.off("SIGTERM", onSignal);
-    process.off("SIGINT", onSignal);
-  }
-
-  return EXIT_OK;
-}
-
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
 export async function main(argv: readonly string[], cwd: string = process.cwd()): Promise<number> {
   const args = parseCliArgs(argv);
@@ -737,17 +634,10 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     );
   }
 
-  // `tray` (AGT-1267), like `prose` and `review`, has no `--project` and is
-  // never an MCP tool — dispatched here, before the shared `--project`/marker
-  // resolution block ever runs.
-  if (args.verb === "tray") {
-    return await runTray(args);
-  }
-
   // `edit` (AGT-1258) may run as `--piece <id>` with no vault at all, or as
   // `--project <slug> --file F` — its own resolution (`edit.ts`'s
   // `resolveEditTarget`) handles both and does its own marker check, so like
-  // `prose`/`review`/`tray` it is dispatched here, before the shared
+  // `prose`/`review` it is dispatched here, before the shared
   // `--project`/marker resolution block below (which requires `--project`
   // unconditionally).
   if (args.verb === "edit") {
