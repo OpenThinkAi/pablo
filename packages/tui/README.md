@@ -7,6 +7,11 @@ prview, never shared with it.
 
 ```
 src/state.ts     the state model: modes, focus, cursors, scroll, the pending prefix; `reduce(state, action)`
+src/keys.ts      the key rows (data): states, primary and secondary keys, prefixes, what each does; overrides and conflicts
+src/chord.ts     a keypress, in a state with a prefix pending, to actions; Ink's keys to tokens
+src/panel.ts     the key panel's entries and layout, from the rows
+src/key-panel.tsx  the key panel as a component the layout places
+src/key-config.ts  `keys` in ~/.config/pablo/config.json, laid over the defaults
 src/app.tsx      the Ink root: reads the state, draws it, dispatches actions from keys
 src/screen.tsx   mounts the app in the alternate screen and restores the terminal
 src/resize.ts    the terminal size as state (below the model: plumbing, not where the author is)
@@ -41,8 +46,8 @@ and the model keeps every cursor in view; it never wraps or measures text itself
    refuses a missing case). An action that cannot apply where the screen is returns the state unchanged.
 2. Test it in `test/state.test.ts`, applied to a state built by earlier actions, and add it to the `every` table there
    so it is known to apply anywhere.
-3. Bind a key to it in the key tables (AGT-1524) and draw whatever it changes from the state in `app.tsx`. Nothing
-   about it lives in the component.
+3. Bind a key to it: a row in `DEFAULT_ACTIONS` in `keys.ts` (see "Adding a key"), and draw whatever it changes from
+   the state in `app.tsx`. Nothing about it lives in the component.
 
 ### Adding a mode
 
@@ -51,3 +56,23 @@ are. Add the variant, the view field, the actions that enter and leave it (`revi
 pattern: entering resets the view, leaving restores the pane and focus), extend `viewOf` and `withView` in `reduce`,
 and give `escape` its place in the backing-out order. The rail, main pane, content and prefix actions then work in it
 unchanged, because they act on `viewOf(state)`.
+
+## Keys
+
+Keys are data (`keys.ts`), copied from prview's key map and free to drift from it. A row has an id, the states it acts
+in (`rail`, `main`, `content`, narrowed by `needs`: in a `review`, outside one (`book`), or with the `content` area
+open), a primary key, an optional secondary key, a label and a `do`: a model action, or a `Command` for the layer above
+(`quit` is the app's; the rest reach `onCommand`). `a`, `f`, `v`, `g` are prefixes: a row with `prefix` is that
+prefix's second key, and the key panel shows the second keys while the prefix is pending. `Esc` is not a row: it is
+always the model's `escape`. `Tab` is fixed. The panel lists exactly the rows that act in the state, because it reads
+the same rows the key handler resolves through (`chord.ts`).
+
+Overrides live in `~/.config/pablo/config.json` as `"keys": { "rail.down": "n", "main.page_down": { "primary": "pgdn",
+"secondary": "" } }`. A conflict in one state, an unknown or fixed action, or Esc/Tab as a binding is refused when the
+screen opens, with the reason on stderr; the screen does not start on a bad config.
+
+### Adding a key
+
+Add a row to `DEFAULT_ACTIONS` with its `do`; the panel, the chord and the overrides pick it up. Add its action first
+if it is a model action (above). A row that needs a command gets one in the layer that owns the work, handled from
+`onCommand`; until it is built the key is bound and does nothing. Keep a test in `test/keys.test.ts` and `test/chord.test.ts`.
