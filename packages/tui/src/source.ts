@@ -27,11 +27,12 @@ export function loadDocument(root: string, id: string): MainDoc | undefined {
       if (!file) return { title: `chapter ${source.number}`, text: `Chapter ${source.number} has no draft yet.` };
       const text = read(join(dir, file)) ?? "";
       const status = /^---\r?\n(?:[^\n]*\r?\n)*?status:[ \t]*([^\r\n]+)/.exec(text)?.[1]?.trim();
-      return { title: `chapters/${file}${status ? ` · ${status}` : ""}`, text, file: `chapters/${file}` };
+      return { title: `chapters/${file}${status ? ` · ${status}` : ""}`, text, file: `chapters/${file}`, editable: `chapters/${file}` };
     }
     case "file": {
       const file = source.file;
-      return { title: file, text: read(join(root, file)) ?? `${file} does not exist yet.` };
+      const text = read(join(root, file));
+      return { title: file, text: text ?? `${file} does not exist yet.`, ...(text === undefined ? {} : { editable: file }) };
     }
     case "bible": {
       const files = markdownUnder(root, join(root, "bible"));
@@ -43,7 +44,7 @@ export function loadDocument(root: string, id: string): MainDoc | undefined {
       const path = resolve(root, source.path);
       if (path !== resolve(root) && !path.startsWith(resolve(root) + sep)) return undefined;
       const text = read(path);
-      return text === undefined ? undefined : { title: source.path, text };
+      return text === undefined ? undefined : { title: source.path, text, editable: relative(resolve(root), path) };
     }
   }
 }

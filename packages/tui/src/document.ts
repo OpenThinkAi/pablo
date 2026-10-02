@@ -21,6 +21,8 @@ export interface MainDoc {
   readonly text: string;
   /** The project-relative path when the document is one file the checks can scan (a chapter); `text` is then that file's raw contents. */
   readonly file?: string;
+  /** The project-relative path of the one file the text is, when `v e` can open it (it exists and the document is not a blend of files). */
+  readonly editable?: string;
 }
 
 /** Where a row id's text lives, relative to the project: one file, a chapter by number, the bible's files, or any path. */
@@ -161,3 +163,18 @@ function markSentences(block: readonly { n: number; text: string }[], paragraph:
 
 /** The display lines of `text` at `width` columns (see `displayDoc`). */
 export const displayLines = (text: string, width: number): string[] => displayDoc(text, width).lines;
+
+/**
+ * The line of the file (1-based, frontmatter counted) `v e` opens the editor at for the main pane's `cursor`: the first
+ * file line whose sentence ends at or after the display line the cursor is on, so a sentence wrapped over three rows is
+ * one line whichever row the cursor is on. `rows` is the pane's text and box rows in order (a hit's box is not a line
+ * of the file: the cursor on one counts as the line above it). 1 when the file has no line there.
+ */
+export function fileLineAt(text: string, width: number, rows: readonly { readonly kind: string }[], cursor: number): number {
+  const { anchors } = displayDoc(text, width);
+  let display = -1;
+  for (let i = 0; i <= Math.min(cursor, rows.length - 1); i++) if (rows[i]!.kind === "text") display++;
+  const at = Math.max(display, 0);
+  const found = [...anchors.entries()].filter(([, row]) => row >= at).map(([n]) => n).sort((a, b) => a - b)[0];
+  return found ?? Math.max(1, ...anchors.keys());
+}

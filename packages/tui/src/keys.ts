@@ -110,7 +110,8 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   // ---- v: view
   { id: "view.zen", states: OUTSIDE, prefix: "v", key: "z", label: "zen", description: "Hide or show the rail.", do: { type: "view.zen" } },
   { id: "view.fullscreen", states: ["rail", "main", "content"], needs: "content", prefix: "v", key: "c", label: "full-screen content", description: "Make the content area full-screen, or restore it; Esc restores it too.", do: { type: "view.full" } },
-  { id: "view.editor", states: MAIN, prefix: "v", key: "e", label: "editor", description: "Open the editor at the cursor.", do: cmd("view.editor") },
+  { id: "view.editor", states: MAIN, prefix: "v", key: "e", label: "editor", description: "Open the editor at the cursor, on an edit branch.", do: cmd("view.editor") },
+  { id: "view.save", states: OUTSIDE, needs: "book", prefix: "v", key: "s", label: "save edits", description: "Save your edits: merge the edit branch into main.", do: cmd("view.save") },
 
   // ---- g: go to
   { id: "go.top", states: MAIN, prefix: "g", key: "g", label: "top", description: "Go to the first line of the document.", do: { type: "main.top" } },
