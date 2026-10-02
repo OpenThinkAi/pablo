@@ -76,3 +76,15 @@ test("a dir that escapes the repo is refused, and a multi-line title stays one c
   expect(r.ok).toBe(true);
   expect(sh(repo, "log", "-1", "--format=%B", "plan/2026-10-01-ab12").trim()).toBe("research: Two Lines");
 });
+
+test("harness: save_research exists only with a plan session, and writes under the work's research/", async () => {
+  const { harnessTools } = await import("../src/harness/tools");
+  const { repo, session } = setup();
+  expect(harnessTools().map((t) => t.name)).not.toContain("save_research");
+  const tool = harnessTools(undefined, session, join(repo, "novels", "valley")).find((t) => t.name === "save_research")!;
+  expect(tool).toBeDefined();
+  const out = await tool.run({ title: "Wells", note: "Hand-dug.", sources: ["https://example.test/w"] }, {} as never);
+  expect(out.body).toEqual({ ok: true, path: "novels/valley/research/wells.md", branch: "plan/2026-10-01-ab12" });
+  const bad = await tool.run({ title: "Wells", note: "x", sources: [] }, {} as never);
+  expect(bad.exitCode).toBe(2);
+});
