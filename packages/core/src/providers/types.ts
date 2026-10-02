@@ -96,6 +96,8 @@ export interface CompletionRequest {
   readonly model?: string;
   readonly maxTokens?: number;
   readonly temperature?: number;
+  /** Sampling seed, forwarded where the endpoint honours one (OpenAI-compatible); ignored elsewhere. */
+  readonly seed?: number;
   /** Raised for a large context pack; see `Adapter.complete` on the idle timeout. */
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;

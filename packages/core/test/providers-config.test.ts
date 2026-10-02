@@ -86,3 +86,11 @@ test("a trailing slash on an endpoint does not become a double slash in the requ
 test("a config file that is not JSON names the file it could not read", () => {
   expect(() => parseConfig("{ nope", "/tmp/pablo/config.json")).toThrow(/\/tmp\/pablo\/config\.json is not valid JSON/);
 });
+
+test("a provider's sampling temperature is read, inherited, and range-checked", () => {
+  const config = parseConfig(JSON.stringify({ providers: { local: { temperature: 0.6 } } }));
+  expect(config.providers.get("local")?.temperature).toBe(0.6);
+  expect(defaultConfig().providers.get("local")?.temperature).toBeUndefined();
+  expect(() => parseConfig(JSON.stringify({ providers: { local: { temperature: 3 } } }))).toThrow(/"temperature" must be a number from 0 to 2/);
+  expect(() => parseConfig(JSON.stringify({ providers: { local: { temperature: "hot" } } }))).toThrow(/"temperature"/);
+});

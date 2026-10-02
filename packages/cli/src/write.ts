@@ -50,6 +50,10 @@ export interface WriteArgs {
   readonly json: boolean;
   /** `write --force`: overwrite an existing chapter file. Defaults to `false`. */
   readonly force: boolean;
+  /** `write --temperature T`: sampling temperature, 0 to 2. Defaults to the provider's config, then `DEFAULT_WRITE_TEMPERATURE`. */
+  readonly temperature?: string | undefined;
+  /** `write --seed N`: sampling seed, for a reproducible draw. Absent means the endpoint picks one. */
+  readonly seed?: string | undefined;
 }
 
 /** A minimal `process.stderr`-shaped sink, so tests can capture progress without a real TTY. */
@@ -78,6 +82,14 @@ const DRAFT_INTENT: Intent = { name: "draft", kind: "drafting" };
 /** The intent the continuity ritual's extraction call routes under (AGT-1232) — `extraction` routes local, same as drafting. */
 const CONTINUITY_INTENT: Intent = { name: "continuity", kind: "extraction" };
 
+/**
+ * The temperature a chapter draft is sampled at when neither `--temperature`
+ * nor the provider's config names one. Without any, mlx_lm.server decodes
+ * greedily and an identical pack reproduces byte-identical prose (AGT-1272),
+ * which makes a second opinion on a chapter, and `--variants`, impossible.
+ */
+export const DEFAULT_WRITE_TEMPERATURE = 0.8;
+
 /** How often (ms) the streaming progress line refreshes once tokens are flowing. */
 const PROGRESS_INTERVAL_MS = 2000;
 
@@ -88,6 +100,24 @@ function parsePositiveInt(raw: string | undefined): number | undefined {
   if (!/^\d+$/.test(trimmed)) return undefined;
   const value = Number(trimmed);
   return value > 0 ? value : undefined;
+}
+
+/** `--temperature`'s value as a number from 0 to 2, `undefined` when absent, `null` for anything else. */
+function parseTemperature(raw: string | undefined): number | undefined | null {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return value <= 2 ? value : null;
+}
+
+/** `--seed`'s value as a non-negative integer, `undefined` when absent, `null` for anything else. */
+function parseSeed(raw: string | undefined): number | undefined | null {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 function emitError(message: string, missing: readonly string[] | undefined, code: number, json: boolean): void {
@@ -174,6 +204,9 @@ export interface WriteReceiptSummary {
   readonly timeToFirstTokenMs: number;
   readonly wallMs: number;
   readonly words: number;
+  /** The sampling the draft was made with; also in the receipts.jsonl line's `params`. */
+  readonly temperature?: number;
+  readonly seed?: number;
 }
 
 function emitWriteSuccess(
@@ -194,6 +227,9 @@ function emitWriteSuccess(
     `read ${receipt.tokensRead} tokens in ${seconds(receipt.timeToFirstTokenMs)}s, ` +
       `wrote ${receipt.tokensWritten} in ${seconds(writeMs)}s`,
   );
+  if (receipt.temperature !== undefined) {
+    console.log(`sampled at temperature ${receipt.temperature}${receipt.seed === undefined ? "" : `, seed ${receipt.seed}`}`);
+  }
   for (const hit of hits) console.log(formatHitLine(hit));
   for (const ritual of rituals) console.log(`ritual ${ritual.name}: ${ritual.status} — ${ritual.detail}`);
   // AGT-1262 AC4: the review queue's piece id, so the agent driving `write`
@@ -226,6 +262,17 @@ export async function runWrite(
 
   const words = parsePositiveInt(args.words) ?? DEFAULT_WORD_TARGET;
   const scenes = parsePositiveInt(args.scenes) ?? DEFAULT_MIN_SCENES;
+
+  const requestedTemperature = parseTemperature(args.temperature);
+  if (requestedTemperature === null) {
+    emitError("pablo: write --temperature must be a number from 0 to 2", undefined, 2, args.json);
+    return 2;
+  }
+  const seed = parseSeed(args.seed);
+  if (seed === null) {
+    emitError("pablo: write --seed must be a non-negative integer", undefined, 2, args.json);
+    return 2;
+  }
 
   const markerResult = readMarker(projectPath);
   if (!markerResult.ok) {
@@ -295,8 +342,14 @@ export async function runWrite(
     return 2;
   }
 
-  const providers = createProviders(loadConfig());
+  const config = loadConfig();
+  const providers = createProviders(config);
   const providerId = providers.route(DRAFT_INTENT);
+  // The flag wins, then the routed provider's own config, then the default. The
+  // pack (and so `prompt_hash`) never sees any of this: sampling is a property
+  // of the call, recorded in the receipt's `params`.
+  const temperature =
+    requestedTemperature ?? config.providers.get(providerId)?.temperature ?? DEFAULT_WRITE_TEMPERATURE;
 
   // "Serialized per endpoint": createProviders/registry.ts's gateFor gives every
   // local endpoint one shared Gate (queue.ts), and the OpenAI-compatible
@@ -332,6 +385,8 @@ export async function runWrite(
     for await (const ev of wrapped.complete({
       prompt: pack.prompt,
       maxTokens: pack.expectedOutputTokens * 2,
+      temperature,
+      ...(seed === undefined ? {} : { seed }),
       timeoutMs: packTimeoutMs(pack, providers.rates(providerId)),
     })) {
       if (ev.type === "token") {
@@ -396,6 +451,8 @@ export async function runWrite(
     timeToFirstTokenMs: Math.round(stats.timeToFirstTokenMs),
     wallMs: Math.round(stats.elapsedMs),
     words: wordCount,
+    temperature,
+    ...(seed === undefined ? {} : { seed }),
   };
 
   // AGT-1231: outline tick, dated note, README update, git commit, think

@@ -114,6 +114,8 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     chapter: { type: "string" },
     words: { type: "string" },
     scenes: { type: "string" },
+    temperature: { type: "string" }, // AGT-1272: write --temperature
+    seed: { type: "string" }, // AGT-1272: write --seed
     "dry-run": { type: "boolean", default: false },
     force: { type: "boolean", default: false },
     stage: { type: "string" },

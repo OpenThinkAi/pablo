@@ -244,12 +244,18 @@ function toReceiptSlice(slice: { name: string; tokens: number; source: string | 
 
 /** Only the numbers: a receipt records the shape of the call, never its content. */
 function numericParams(
-  request: { maxTokens?: number | undefined; temperature?: number | undefined; timeoutMs?: number | undefined },
+  request: {
+    maxTokens?: number | undefined;
+    temperature?: number | undefined;
+    seed?: number | undefined;
+    timeoutMs?: number | undefined;
+  },
   variants?: number,
 ): Readonly<Record<string, number>> {
   const params: Record<string, number> = {};
   if (request.maxTokens !== undefined) params["max_tokens"] = request.maxTokens;
   if (request.temperature !== undefined) params["temperature"] = request.temperature;
+  if (request.seed !== undefined) params["seed"] = request.seed;
   if (request.timeoutMs !== undefined) params["timeout_ms"] = request.timeoutMs;
   if (variants !== undefined) params["variants"] = variants;
   return params;
