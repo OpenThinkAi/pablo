@@ -323,7 +323,7 @@ function emitInitResult(result: InitResult, json: boolean): number {
     console.log(JSON.stringify(body));
   } else {
     const committedNote = result.committed ? " (committed)" : "";
-    console.log(`pablo: created ${result.path}${committedNote}`);
+    console.log(result.adoptedLine ?? `pablo: created ${result.path}${committedNote}`);
     if (result.notice) console.log(result.notice);
   }
 
