@@ -25,6 +25,8 @@ import { harnessAuth } from "./auth";
 import type { HarnessAuth } from "./auth";
 import { loadPromptWork } from "./prompt";
 import { runHarness, sdkQuery } from "./session";
+import { runTagFacts } from "./tag-facts";
+import type { TagFactsDeps } from "./tag-facts";
 import type { HarnessQuery } from "./session";
 import { formatEntry, transcriptEntries } from "./transcript";
 import type { TranscriptEntry } from "./transcript";
@@ -33,6 +35,8 @@ export interface AgentArgs {
   readonly project: string | undefined;
   readonly message: string | undefined;
   readonly json: boolean;
+  /** AGT-1570: tag every untagged fact on a plan branch instead of running a session. */
+  readonly tagFacts?: boolean;
 }
 
 export interface AgentContext {
@@ -49,6 +53,8 @@ export interface AgentDeps {
   readonly query?: HarnessQuery;
   readonly keys?: Partial<KeyLookup>;
   readonly readConfig?: LoadConfigOptions["readFile"];
+  /** `--tag-facts` (AGT-1570): a fake classifier, no real planner call. */
+  readonly tagFacts?: TagFactsDeps;
 }
 
 function refuse(ctx: AgentContext, json: boolean, code: number, message: string, tried: readonly string[] = []): number {
@@ -58,6 +64,7 @@ function refuse(ctx: AgentContext, json: boolean, code: number, message: string,
 }
 
 export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDeps = {}): Promise<number> {
+  if (args.tagFacts === true) return runTagFacts(args.project, ctx, deps.tagFacts);
   if (args.project === undefined) return refuse(ctx, args.json, 2, "pablo: agent requires --project <slug>");
   if (args.message === undefined || args.message.trim() === "") {
     return refuse(ctx, args.json, 2, 'pablo: agent requires a message: pablo agent --project <slug> "<message>"');

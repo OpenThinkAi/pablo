@@ -144,6 +144,10 @@ function helpText(): string {
     "                                            one headless harness session (Claude on",
     "                                            the subscription, or the config's key);",
     "                                            prints the transcript",
+    "  pablo agent --project <slug> --tag-facts",
+    "                                            tag every untagged bible and continuity fact",
+    "                                            (researched/invented/author) on a plan/ branch;",
+    "                                            chapters are never touched",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -160,6 +164,8 @@ interface ParsedArgs {
   readonly json: boolean;
   readonly help: boolean;
   readonly adopt: boolean;
+  /** `agent --tag-facts` (AGT-1570): tag every untagged fact on a plan branch. */
+  readonly tagFacts: boolean;
   /** `status --for "chapter N"` (also accepts `chapter-N`, `ch N`, or bare `N`). */
   readonly for: string | undefined;
   /** `save --stage acts|beats|premise|bible/<file>`. */
@@ -236,6 +242,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       json: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
       adopt: { type: "boolean", default: false },
+      "tag-facts": { type: "boolean", default: false },
     },
   });
 
@@ -246,6 +253,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     json: values["json"] === true,
     help: values["help"] === true,
     adopt: values["adopt"] === true,
+    tagFacts: values["tag-facts"] === true,
     for: typeof values["for"] === "string" ? values["for"] : undefined,
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
     file: typeof values["file"] === "string" ? values["file"] : undefined,
@@ -670,7 +678,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // the way an MCP verb does, so it is dispatched before the shared block too.
   if (args.verb === "agent") {
     return await runAgent(
-      { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json },
+      { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json, tagFacts: args.tagFacts },
       { cwd, env: process.env, stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
     );
   }
