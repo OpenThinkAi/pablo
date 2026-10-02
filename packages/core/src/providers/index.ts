@@ -38,5 +38,5 @@ export type { Providers, ProvidersOptions } from "./registry";
 export { createProviders, route } from "./registry";
 export type { ClaudeCliAdapterOptions, ClaudeRun, ClaudeRunResult, ClaudeRunner } from "./claude-cli";
 export { CLAUDE_CLI_ID, claudeArgs, createClaudeCliAdapter, spawnClaude, subscriptionEnv } from "./claude-cli";
-export type { Planner, PlannerOptions, PlannerRoute } from "./planner";
-export { createPlanner, PLAN_INTENT } from "./planner";
+export type { ClaudeCredential, Planner, PlannerOptions, PlannerRoute } from "./planner";
+export { claudeCredential, createPlanner, PLAN_INTENT } from "./planner";

@@ -13,12 +13,13 @@
 
 import type { ReceiptSink } from "../pack/receipts";
 import { withReceipts } from "../pack/receipts";
-import type { PabloConfig } from "./config";
+import type { PabloConfig, ProviderConfig } from "./config";
 import type { ClaudeCliAdapterOptions } from "./claude-cli";
 import { createClaudeCliAdapter } from "./claude-cli";
 import type { ProvidersOptions } from "./registry";
 import { createProviders } from "./registry";
 import { resolveKey } from "./keys";
+import type { KeyLookup } from "./keys";
 import type { Adapter, Intent } from "./types";
 
 /** The intent a planner call carries; map it in the config's `intents` to pick a provider. */
@@ -46,18 +47,31 @@ function planningProviderId(config: PabloConfig): string | undefined {
   return undefined;
 }
 
-export function createPlanner(config: PabloConfig, options: PlannerOptions = {}): Planner {
+/**
+ * Which way Claude is reached, and with what: the planner's anthropic provider
+ * when its key resolves, else the subscription. The harness (AGT-1552) reads
+ * the same choice, so the planner and the harness never disagree about whether
+ * a key in the config is billing. `key` is for the caller that sends it; it is
+ * never logged or put in a message.
+ */
+export type ClaudeCredential =
+  | { readonly route: "subscription" }
+  | { readonly route: "api-key"; readonly provider: ProviderConfig; readonly key: string };
+
+export function claudeCredential(config: PabloConfig, keys?: Partial<KeyLookup>): ClaudeCredential {
   const id = planningProviderId(config);
   const provider = id === undefined ? undefined : config.providers.get(id);
+  const key = provider === undefined ? undefined : resolveKey(provider.key, keys);
+  return provider !== undefined && key !== undefined ? { route: "api-key", provider, key } : { route: "subscription" };
+}
 
-  let route: PlannerRoute = "subscription";
-  let adapter: Adapter;
-  if (provider !== undefined && resolveKey(provider.key, options.keys) !== undefined) {
-    route = "api-key";
-    adapter = createProviders(config, options).adapter(provider.id);
-  } else {
-    adapter = createClaudeCliAdapter(options.claude);
-  }
+export function createPlanner(config: PabloConfig, options: PlannerOptions = {}): Planner {
+  const credential = claudeCredential(config, options.keys);
+  const route: PlannerRoute = credential.route;
+  const adapter: Adapter =
+    credential.route === "api-key"
+      ? createProviders(config, options).adapter(credential.provider.id)
+      : createClaudeCliAdapter(options.claude);
 
   const log = options.receipts;
   return { route, adapter: log === undefined ? adapter : withReceipts(adapter, log, { intent: PLAN_INTENT.name }) };
