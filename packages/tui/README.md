@@ -106,6 +106,15 @@ sentences are one edit, a changed edit gets word marks, a moved paragraph (core'
 review back to the book where it was left. Accept, reject, edit and finish are commands the layer above has yet to handle.
 Every string from a branch (its name, the diff text) passes `clean()` before it is shown.
 
+## Writing from the screen
+
+`a w` on a `chapter:N` row (`ai.write`, book mode only) calls the `writer` prop, which cli.ts builds from `runWrite`
+(`screen-write.ts`) and passes through `runScreen`'s options; this package never imports the CLI. `write.start` puts a
+"Writing chapter N" panel in the content area, each progress line the writer reports is `write.progress` (the panel keeps
+the latest few), and the end is `write.done` (the branch and the receipt lines: the review opens on that `draft/` branch,
+the receipt stays up until Esc, and the branch is added to the branches waiting) or `write.failed` (the refusal and its
+missing reasons, in book mode). One write runs at a time; off a chapter row `a w` says to select one.
+
 ## Keys
 
 Keys are data (`keys.ts`), copied from prview's key map and free to drift from it. A row has an id, the states it acts

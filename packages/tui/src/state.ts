@@ -87,6 +87,10 @@ export interface State {
   readonly settings: SettingsModel | null;
   /** Set by a save: the bindings and editor now in force, over what the screen opened with. */
   readonly saved: SavedSettings | null;
+  /** The chapter being written (`a w`) while the writer runs; one at a time. */
+  readonly writing: number | null;
+  /** Branches this session's writes made, so the book lists them as waiting for review. */
+  readonly written: readonly string[];
 }
 
 /**
@@ -127,6 +131,12 @@ export type Action =
   // ---- modes
   | { type: "review.open"; branch: string }
   | { type: "review.close" }
+  // `a w`: start writing a chapter, stream the writer's progress into the content area, then open the review on the new
+  // branch with the receipt shown, or show the refusal and its missing reasons
+  | { type: "write.start"; chapter: number }
+  | { type: "write.progress"; line: string }
+  | { type: "write.done"; branch: string; lines: readonly string[] }
+  | { type: "write.failed"; message: string; missing: readonly string[] }
   | { type: "settings.open"; settings: SettingsModel }
   | { type: "settings.set"; settings: SettingsModel }
   | { type: "settings.close"; saved?: SavedSettings }
@@ -138,11 +148,15 @@ export type Action =
 export type ActionType = Action["type"];
 export type Dispatch = (action: Action) => void;
 
+/** A write streams a progress line every couple of seconds; the content area keeps the latest few, so the newest is always in view. */
+const PROGRESS_LINES = 5;
+const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
+
 const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor: 0, scroll: 0, visible: 0 }, main: { cursor: 0, scroll: 0, length: 0, visible: 0 } });
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, book: emptyView(), review: emptyView(),
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, written: [],
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -315,6 +329,19 @@ export function reduce(s: State, a: Action): State {
 
     // A review opens on a branch with a fresh rail and main pane; the book keeps its place for when the review closes.
     case "review.open": return s.mode.kind === "settings" ? s : { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), pane: "rail", focus: "rail", content: null, full: false, pending: null };
+    case "write.start":
+      if (s.writing !== null) return s;
+      return { ...s, writing: a.chapter, content: writeContent(`Writing chapter ${a.chapter}`, "starting…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "write.progress":
+      return s.writing === null || s.content?.kind !== "write" ? s : { ...s, content: { ...s.content, body: s.content.body === "starting…" ? a.line : `${s.content.body}\n${a.line}`.split("\n").slice(-PROGRESS_LINES).join("\n") } };
+    case "write.done": {
+      const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
+      const next = reduce({ ...s, writing: null, written }, { type: "review.open", branch: a.branch });
+      // The receipt stays up beside the review it led to; Esc takes it down.
+      return next.mode.kind === "review" ? { ...next, content: writeContent(`Wrote ${s.writing === null ? "" : `chapter ${s.writing} `}on ${a.branch}`, a.lines.join("\n")) } : next;
+    }
+    case "write.failed":
+      return { ...s, writing: null, content: writeContent("Not written", [a.message, ...a.missing.map((m) => `- ${m}`)].join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "review.close": return s.mode.kind === "review" ? { ...s, mode: { kind: "book" }, pane: "rail", focus: "rail", content: null, full: false, pending: null } : s;
 
     // Settings opens over the book or review and closes back to it. Its keys never reach the chord (settings.ts reads

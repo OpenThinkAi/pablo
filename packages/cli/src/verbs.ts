@@ -324,7 +324,7 @@ const WRITE_ARGS = z.object({
  * `runWrite` itself (it always prints; MCP must never write anything but the
  * protocol to stdout). Restores `console.log` even if `fn` throws.
  */
-async function captureConsoleLog(fn: () => Promise<number>): Promise<{ readonly exitCode: number; readonly text: string }> {
+export async function captureConsoleLog(fn: () => Promise<number>): Promise<{ readonly exitCode: number; readonly text: string }> {
   const captured: string[] = [];
   const originalLog = console.log;
   console.log = (...values: unknown[]) => {
@@ -352,7 +352,7 @@ async function captureConsoleLog(fn: () => Promise<number>): Promise<{ readonly 
  */
 let writeLock: Promise<void> = Promise.resolve();
 
-async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+export async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
   const previous = writeLock;
   let release!: () => void;
   writeLock = new Promise((resolveLock) => {

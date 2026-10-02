@@ -25,6 +25,7 @@ import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow } from "./review";
+import type { Writer } from "./screen";
 import { initialState, pendingText, placeOf, railRow, reduce, shownRows, viewOf, type RailRow, type State } from "./state";
 
 export interface AppProps {
@@ -52,6 +53,8 @@ export interface AppProps {
   readonly branches?: readonly string[];
   /** A branch's changes against `main` as git's diff, for review mode. */
   readonly diffOf?: (branch: string) => BranchDiff;
+  /** `a w`: writes a chapter and says what came of it (the CLI's `runWrite`, passed in; this package cannot import it). */
+  readonly writer?: Writer;
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
   readonly keymap?: Keymap;
   /** The editor command the config sets ("" for none); what the settings screen opens with. */
@@ -72,7 +75,7 @@ const NO_HITS: readonly CheckHit[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -100,15 +103,31 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
         // The box's last row first, so the pane scrolls far enough to show the whole box, then its first row.
         if (to !== undefined) { dispatch({ type: "main.goto", line: to + 3 }); dispatch({ type: "main.goto", line: to + 1 }); }
       }
+      else if (action.id === "ai.write") startWrite();
       else onCommand?.(action);
     }
   });
+
+  // `a w` on a chapter row: the writer runs in the background, its progress lines and its end arrive as actions.
+  function startWrite() {
+    const id = railRow(viewOf(state).rail)?.id ?? "";
+    const chapter = /^chapter:(\d+)$/.exec(id)?.[1];
+    if (state.writing !== null) return void dispatch({ type: "write.progress", line: `chapter ${state.writing} is still being written` });
+    if (chapter === undefined) return void dispatch({ type: "write.failed", message: "Select a chapter to write.", missing: [] });
+    if (!writer) return void dispatch({ type: "write.failed", message: "Writing is not available here.", missing: [] });
+    dispatch({ type: "write.start", chapter: Number(chapter) });
+    writer(Number(chapter), (line) => dispatch({ type: "write.progress", line })).then(
+      (r) => dispatch(r.ok ? { type: "write.done", branch: r.branch, lines: r.lines } : { type: "write.failed", message: r.message, missing: r.missing }),
+      (e: unknown) => dispatch({ type: "write.failed", message: e instanceof Error ? e.message : String(e), missing: [] }),
+    );
+  }
 
   const contentBody = state.content ? clean(state.content.body) : null;
   // Book mode's rows (the stages, then the branches waiting for review), or in a review the branch's changes.
   const place = placeOf(state);
   const reviewBranch = place.kind === "review" ? place.branch : undefined;
-  const extra = useMemo(() => branchRows(branches), [branches]);
+  const waiting = useMemo(() => [...branches, ...state.written.filter((b) => !branches.includes(b))], [branches, state.written]);
+  const extra = useMemo(() => branchRows(waiting), [waiting]);
   const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch))), [reviewBranch, diffOf]);
   const bookAll = useMemo(() => [...bookRows, ...extra.rows], [bookRows, extra]);
   const rows = review ? review.rows : bookAll;

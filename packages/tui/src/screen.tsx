@@ -12,6 +12,12 @@ import { loadDocument } from "./source";
 const ENTER_ALT = "\x1b[?1049h\x1b[H";
 const LEAVE_ALT = "\x1b[?1049l";
 
+/** What a write came to: the branch it made and the receipt lines, or the refusal and the reasons it names. */
+export type WriteResult =
+  | { readonly ok: true; readonly branch: string; readonly lines: readonly string[] }
+  | { readonly ok: false; readonly message: string; readonly missing: readonly string[] };
+export type Writer = (chapter: number, progress: (line: string) => void) => Promise<WriteResult>;
+
 export interface ScreenOptions {
   readonly title: string;
   readonly format: string;
@@ -25,6 +31,8 @@ export interface ScreenOptions {
   readonly diffOf?: (branch: string) => BranchDiff;
   /** Scans a chapter's raw text for `check` hits (pablo-cli's checkFile, with the vault's rules): each shows as a box under its line. */
   readonly checks?: (file: string, text: string) => readonly CheckHit[];
+  /** `a w`: writes a chapter (the CLI's `runWrite`, passed in from cli.ts) and says what came of it (AGT-1542). */
+  readonly writer?: Writer;
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -48,7 +56,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   try {
     const root = options.dir;
     const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),
