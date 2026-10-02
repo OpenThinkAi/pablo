@@ -3,13 +3,9 @@ import { detectMoves, parseDiff } from "@openthink/pablo-core";
 import { cleanup, render } from "ink-testing-library";
 import { App } from "../src/app";
 import { bookRail, type BookStage } from "../src/book";
-<<<<<<< HEAD
-import { branchRows, loadReview, reviewLines, wrapLine } from "../src/review";
-import type { FinishResult, Finisher, Rejected } from "../src/screen";
-=======
 import { branchRows, commentRows, loadReview, reviewLines, wrapLine } from "../src/review";
 import type { ReviewComment } from "../src/review";
->>>>>>> b8d0554 (critique(branch): continuity, timeline and voice comments, each re-checked (AGT-1564))
+import type { FinishResult, Finisher, Rejected } from "../src/screen";
 import { markWords, stitch } from "../src/stitch";
 
 afterEach(() => cleanup());
@@ -168,7 +164,6 @@ test("loadReview renders through core's stitcher: a moved paragraph is one row, 
   expect(split.labels["edit:0"]).toBe("+ (paragraph break)");
 });
 
-<<<<<<< HEAD
 /** A finisher the test records: it resolves with `result` and notes what the screen handed it. */
 const finishing = (result: FinishResult = { ok: true, lines: ["merged draft/ch03 into main (abc1234)", "outline: ran"] }) => {
   const calls: { branch: string; rejected: Rejected }[] = [];
@@ -219,7 +214,8 @@ test("a failed finish stays in the review with the reason", async () => {
   expect(frame).toContain("Not finished");
   expect(frame).toContain("git merge failed: conflict");
   expect(frame).toContain("review draft/ch03");
-=======
+});
+
 const COMMENTS: ReviewComment[] = [
   { file: "chapters/03-the-well.md", line: 3, kind: "continuity", claim: "Edwin died in chapter 1; he cannot sit at the table.\x1b[2J" },
   { file: "chapters/03-the-well.md", line: 22, kind: "tells", claim: "stock intensifier" },
@@ -261,5 +257,4 @@ test("review mode shows the saved comments as boxes under the edit, and the stat
   expect(frame).toContain("▲ continuity · line 3");
   expect(frame).toContain("Edwin died in chapter 1");
   expect(frame).toContain("1 continuity");
->>>>>>> b8d0554 (critique(branch): continuity, timeline and voice comments, each re-checked (AGT-1564))
 });
