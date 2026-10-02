@@ -21,6 +21,11 @@
 /** The id prefix of a rail row that names a branch waiting for review (`branch:draft/ch03`). */
 export const BRANCH_ROW = "branch:";
 
+/** The id prefix of a rail row that is one change in a review (`edit:3`): the rows a mark can be put on. */
+export const EDIT_ROW = "edit:";
+/** The author's decision on a change; a change with none is still pending. */
+export type Mark = "accepted" | "rejected";
+
 export type Place = { kind: "book" } | { kind: "review"; branch: string };
 /** Settings (`\`) is a mode over a place: closing it returns to where it was opened, with that place's own rail and main pane. */
 export type Mode = Place | { kind: "settings"; from: Place };
@@ -76,6 +81,8 @@ export interface State {
   readonly mode: Mode;
   readonly book: View;
   readonly review: View;
+  /** The open review's decisions, by change id (`edit:<n>`); empty outside a review and fresh on each `review.open`. */
+  readonly marks: Readonly<Record<string, Mark>>;
   readonly pane: PaneName;
   readonly focus: Focus;
   readonly content: Content | null;
@@ -137,6 +144,8 @@ export type Action =
   | { type: "write.progress"; line: string }
   | { type: "write.done"; branch: string; lines: readonly string[] }
   | { type: "write.failed"; message: string; missing: readonly string[] }
+  // y / n on the change under the rail's cursor: sets the mark; the same mark again clears it, the other one changes it
+  | { type: "review.mark"; mark: Mark }
   | { type: "settings.open"; settings: SettingsModel }
   | { type: "settings.set"; settings: SettingsModel }
   | { type: "settings.close"; saved?: SavedSettings }
@@ -155,7 +164,7 @@ const writeContent = (title: string, body: string): Content => ({ title, body, k
 const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor: 0, scroll: 0, visible: 0 }, main: { cursor: 0, scroll: 0, length: 0, visible: 0 } });
 
 export const initialState = (): State => ({
-  mode: { kind: "book" }, book: emptyView(), review: emptyView(),
+  mode: { kind: "book" }, book: emptyView(), review: emptyView(), marks: {},
   pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, written: [],
 });
 
@@ -181,6 +190,18 @@ export function shownRows(rail: Rail): { row: RailRow; index: number }[] {
 
 /** The row under the rail's cursor, or undefined with no rows loaded. */
 export const railRow = (rail: Rail): RailRow | undefined => rail.rows[rail.cursor];
+
+/** The open review's changes by decision: how many are accepted, rejected and still pending (a mark on a change no longer in the rail is not counted). */
+export function reviewCounts(s: State): { accepted: number; rejected: number; pending: number } {
+  const out = { accepted: 0, rejected: 0, pending: 0 };
+  if (placeOf(s).kind !== "review") return out;
+  for (const r of s.review.rail.rows) {
+    if (!r.id.startsWith(EDIT_ROW)) continue;
+    const m = s.marks[r.id];
+    if (m === "accepted") out.accepted++; else if (m === "rejected") out.rejected++; else out.pending++;
+  }
+  return out;
+}
 
 /** What the footer shows while a chord is being typed: `g`, `g 12`. */
 export const pendingText = (p: Pending | null): string => (!p ? "" : `${p.prefix}${p.digits !== undefined ? ` ${p.digits}` : ""}`);
@@ -328,7 +349,7 @@ export function reduce(s: State, a: Action): State {
     case "view.full": return s.content ? { ...s, full: !s.full } : s;
 
     // A review opens on a branch with a fresh rail and main pane; the book keeps its place for when the review closes.
-    case "review.open": return s.mode.kind === "settings" ? s : { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), pane: "rail", focus: "rail", content: null, full: false, pending: null };
+    case "review.open": return s.mode.kind === "settings" ? s : { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null };
     case "write.start":
       if (s.writing !== null) return s;
       return { ...s, writing: a.chapter, content: writeContent(`Writing chapter ${a.chapter}`, "starting…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
@@ -342,7 +363,13 @@ export function reduce(s: State, a: Action): State {
     }
     case "write.failed":
       return { ...s, writing: null, content: writeContent("Not written", [a.message, ...a.missing.map((m) => `- ${m}`)].join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
-    case "review.close": return s.mode.kind === "review" ? { ...s, mode: { kind: "book" }, pane: "rail", focus: "rail", content: null, full: false, pending: null } : s;
+    case "review.mark": {
+      const row = s.mode.kind === "review" ? railRow(s.review.rail) : undefined;
+      if (!row || !row.id.startsWith(EDIT_ROW)) return s;
+      const { [row.id]: was, ...rest } = s.marks;
+      return { ...s, marks: was === a.mark ? rest : { ...rest, [row.id]: a.mark } };
+    }
+    case "review.close": return s.mode.kind === "review" ? { ...s, mode: { kind: "book" }, marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null } : s;
 
     // Settings opens over the book or review and closes back to it. Its keys never reach the chord (settings.ts reads
     // them, including Esc), so `escape` leaves it alone.

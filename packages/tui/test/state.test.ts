@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { openSettings } from "../src/settings";
 import { DEFAULT_KEYMAP } from "../src/keys";
-import { initialState, pendingText, railRow, reduce, shownRows, viewOf, type Action, type ActionType, type RailRow, type State } from "../src/state";
+import { initialState, pendingText, railRow, reduce, reviewCounts, shownRows, viewOf, type Action, type ActionType, type RailRow, type State } from "../src/state";
 
 /** A state after `actions`, from the initial one. */
 const after = (...actions: Action[]): State => actions.reduce(reduce, initialState());
@@ -55,7 +55,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "focus.content": { type: "focus.content" }, "focus.back": { type: "focus.back" },
     "prefix.press": { type: "prefix.press", prefix: "a" }, "prefix.digit": { type: "prefix.digit", digit: "1" }, "prefix.backspace": { type: "prefix.backspace" }, "prefix.clear": { type: "prefix.clear" },
     "view.zen": { type: "view.zen" }, "view.full": { type: "view.full" },
-    "review.open": { type: "review.open", branch: "draft/ch02" }, "review.close": { type: "review.close" },
+    "review.open": { type: "review.open", branch: "draft/ch02" }, "review.close": { type: "review.close" }, "review.mark": { type: "review.mark", mark: "accepted" },
     "settings.open": { type: "settings.open", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.set": { type: "settings.set", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.close": { type: "settings.close" },
     "write.start": { type: "write.start", chapter: 2 }, "write.progress": { type: "write.progress", line: "x" }, "write.done": { type: "write.done", branch: "draft/ch02", lines: ["ok"] }, "write.failed": { type: "write.failed", message: "no", missing: ["a"] },
     escape: { type: "escape" }, measured: { type: "measured", measure: { rail: 4, main: 4, content: { visible: 2, lines: 3 } } },
@@ -382,4 +382,33 @@ test("rail.open on a branch row of the book opens that branch as a review; elsew
   // Inside a review a row that happens to look like a branch row opens nothing.
   const inside = then(r, { type: "rail.loaded", rows: [{ id: "branch:x", depth: 0 }] }, { type: "rail.open" });
   expect(inside.mode).toEqual({ kind: "review", branch: "draft/ch03" });
+});
+
+// ---------------------------------------------------------------- accept and reject (AGT-1539)
+
+const CHANGES: readonly RailRow[] = [{ id: "file:a.md", depth: 0, group: true }, { id: "edit:0", depth: 1 }, { id: "edit:1", depth: 1 }, { id: "edit:2", depth: 1 }];
+const review = (...actions: Action[]) => after({ type: "review.open", branch: "draft/ch01" }, { type: "rail.loaded", rows: CHANGES }, ...actions);
+
+test("review.mark sets the mark on the change under the cursor; the same mark again clears it, the other changes it", () => {
+  let s = review({ type: "rail.down" });
+  expect(at(s)).toBe("edit:0");
+  s = then(s, { type: "review.mark", mark: "accepted" });
+  expect(s.marks).toEqual({ "edit:0": "accepted" });
+  s = then(s, { type: "review.mark", mark: "rejected" });
+  expect(s.marks).toEqual({ "edit:0": "rejected" });
+  s = then(s, { type: "review.mark", mark: "rejected" });
+  expect(s.marks).toEqual({});
+});
+
+test("review.mark does nothing on a file row, in a book, or under settings; marks are per change and reset on open and close", () => {
+  const onFile = review();
+  expect(then(onFile, { type: "review.mark", mark: "accepted" })).toBe(onFile);
+  const b = book({ type: "rail.down" });
+  expect(then(b, { type: "review.mark", mark: "accepted" })).toBe(b);
+  const marked = review({ type: "rail.down" }, { type: "review.mark", mark: "accepted" }, { type: "rail.down" }, { type: "review.mark", mark: "rejected" });
+  expect(marked.marks).toEqual({ "edit:0": "accepted", "edit:1": "rejected" });
+  expect(reviewCounts(marked)).toEqual({ accepted: 1, rejected: 1, pending: 1 });
+  expect(then(marked, { type: "review.close" }).marks).toEqual({});
+  expect(then(marked, { type: "review.close" }, { type: "review.open", branch: "draft/ch01" }).marks).toEqual({});
+  expect(reviewCounts(b)).toEqual({ accepted: 0, rejected: 0, pending: 0 });
 });
