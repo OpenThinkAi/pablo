@@ -52,13 +52,7 @@ export function entryLines(entry: ComposeEntry, width: number): ComposeLine[] {
       if (entry.result) lines.push({ text: cut(`  ${entry.result.isError ? "✗" : "←"} ${flat(entry.result.text).slice(0, PREVIEW)}`, width), style: entry.result.isError ? "error" : "result" });
       return lines;
     }
-    case "question": {
-      const lines = hanging(entry.question, width, "? ", "question");
-      entry.options?.forEach((option, i) => lines.push(...hanging(option, width, `   ${i + 1}. `, "question")));
-      if (entry.why) lines.push(...hanging(entry.why, width, "   why: ", "dim"));
-      lines.push(entry.answer === undefined ? { text: "   waiting for your answer", style: "dim" } : { text: cut(`   → ${flat(entry.answer)}`, width), style: "author" });
-      return [...lines, { text: "", style: "blank" }];
-    }
+    case "question": return [...questionCard(entry, width), { text: "", style: "blank" }];
   }
 }
 
@@ -70,6 +64,30 @@ export function activityNow(compose: { readonly entries: readonly ComposeEntry[]
     if (e.kind !== "tool") break;
   }
   return compose.activity;
+}
+
+/**
+ * The `ask_author` card (AGT-1568): boxed so it reads as a thing that wants an answer, with the question, the reason
+ * (`why`), the numbered options and, under them, either the prompt to answer or the answer given. The answered card
+ * keeps its box, so the conversation shows what was asked and what the author said.
+ */
+function questionCard(entry: Extract<ComposeEntry, { kind: "question" }>, width: number): ComposeLine[] {
+  const inner = Math.max(1, width - 4);
+  const rows: ComposeLine[] = [
+    ...hanging(entry.question, inner, "", "question"),
+    ...(entry.why ? hanging(entry.why, inner, "why: ", "dim") : []),
+    ...(entry.options ?? []).flatMap((option, i) => hanging(option, inner, `${i + 1}. `, "question")),
+  ];
+  if (entry.answer === undefined) rows.push({ text: (entry.options?.length ?? 0) > 0 ? "type a number to pick, or answer in your own words" : "type your answer", style: "dim" });
+  else rows.push(...hanging(flat(entry.answer), inner, "→ ", "author"));
+  const pad = (text: string) => `│ ${text}${" ".repeat(Math.max(0, inner - [...text].length))} │`;
+  const title = entry.answer === undefined ? " pablo asks " : " pablo asked ";
+  const top = `┌─${title}${"─".repeat(Math.max(0, inner - [...title].length))}─┐`;
+  return [
+    { text: top, style: "question" },
+    ...rows.map((row) => ({ text: pad(row.text), style: row.style })),
+    { text: `└${"─".repeat(inner + 2)}┘`, style: "question" },
+  ];
 }
 
 export const composeLines = (entries: readonly ComposeEntry[], width: number): ComposeLine[] => entries.flatMap((e) => entryLines(e, width));

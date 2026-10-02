@@ -5,7 +5,7 @@ import { Box, Text } from "ink";
 import { FOOTER_H, STATUS_H } from "./layout";
 import { clean } from "./sanitize";
 import { activityNow, composeLayout, composeLines, inputTail, visibleLines, type LineStyle } from "./compose";
-import type { Compose } from "./state";
+import { openQuestion, type Compose } from "./state";
 import type { Size } from "./resize";
 
 const COLOR: Partial<Record<LineStyle, string>> = { author: "cyan", error: "red", question: "yellow" };
@@ -14,6 +14,7 @@ const DIM: readonly LineStyle[] = ["tool", "result", "dim"];
 export function ComposeView({ compose, size }: { compose: Compose; size: Size }) {
   const layout = composeLayout(size.cols, size.rows);
   const lines = visibleLines(composeLines(compose.entries, layout.inner), layout.rows, compose.offset);
+  const asking = openQuestion(compose) !== undefined;
   const id = compose.sessionId ? ` · session ${clean(compose.sessionId).slice(0, 8)}` : "";
   const scrolled = compose.offset > 0 ? " · scrolled back, ↓ for the newest" : "";
   return (
@@ -26,10 +27,10 @@ export function ComposeView({ compose, size }: { compose: Compose; size: Size })
         ))}
       </Box>
       <Text color="magenta" wrap="truncate">{compose.busy ? `● ${clean(activityNow(compose)) || "working"}…` : " "}</Text>
-      <Box borderStyle="single" paddingX={1} height={3} borderColor={compose.busy ? "gray" : "cyan"}>
+      <Box borderStyle="single" paddingX={1} height={3} borderColor={asking ? "yellow" : compose.busy ? "gray" : "cyan"}>
         <Text wrap="truncate">
-          <Text dimColor>{"› "}</Text>
-          {inputTail(compose.input, layout.inputInner)}
+          <Text dimColor={!asking} color={asking ? "yellow" : undefined}>{asking ? "answer › " : "› "}</Text>
+          {inputTail(compose.input, layout.inputInner - (asking ? 7 : 0))}
           <Text inverse>{" "}</Text>
         </Text>
       </Box>

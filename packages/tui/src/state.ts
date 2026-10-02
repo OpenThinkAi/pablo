@@ -377,7 +377,7 @@ function reduceMain(main: Pane, a: Action): Pane {
 const scrollCompose = (c: Compose, by: number): Compose => ({ ...c, offset: clamp(c.offset + by, 0, Math.max(0, c.length - (c.visible || c.length))) });
 
 /** The question card still waiting for an answer, if any. */
-const openQuestion = (c: Compose): Extract<ComposeEntry, { kind: "question" }> | undefined =>
+export const openQuestion = (c: Compose): Extract<ComposeEntry, { kind: "question" }> | undefined =>
   c.entries.find((e): e is Extract<ComposeEntry, { kind: "question" }> => e.kind === "question" && e.answer === undefined);
 
 /** A session event applied to the conversation; a new line of it brings the view back to the newest. */

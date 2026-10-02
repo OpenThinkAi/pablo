@@ -70,10 +70,23 @@ test("a failed result or a failed stream is an error entry and frees the input",
 test("the conversation is open to a question card: compose.add appends one and it draws in place", () => {
   const s = then(initialState(), { type: "compose.add", entry: { kind: "question", id: "q1", question: "Does Cora know?", options: ["yes", "no"], why: "it changes chapter 4" } });
   const text = composeLines(s.compose.entries, 60).map((l) => l.text).join("\n");
-  expect(text).toContain("? Does Cora know?");
+  expect(text).toContain("pablo asks");
+  expect(text).toContain("Does Cora know?");
   expect(text).toContain("1. yes");
   expect(text).toContain("why: it changes chapter 4");
-  expect(text).toContain("waiting for your answer");
+  expect(text).toContain("type a number to pick");
+  // A card is a box: every row is the same width.
+  const rows = composeLines(s.compose.entries, 60).filter((l) => l.text !== "");
+  expect(new Set(rows.map((l) => [...l.text].length))).toEqual(new Set([60]));
+});
+
+test("an answered card keeps its box and shows the answer; a card with no options asks for free text", () => {
+  const answered = composeLines([{ kind: "question", id: "q1", question: "Does Cora know?", options: ["yes", "no"], why: "w", answer: "no" }], 40).map((l) => l.text).join("\n");
+  expect(answered).toContain("pablo asked");
+  expect(answered).toContain("→ no");
+  expect(answered).not.toContain("type a number");
+  const free = composeLines([{ kind: "question", id: "q2", question: "Who?", options: [], why: "w" }], 40).map((l) => l.text).join("\n");
+  expect(free).toContain("type your answer");
 });
 
 test("scrolling back is held within the conversation and a new line brings the view to the newest", () => {
@@ -322,9 +335,11 @@ test("the screen shows the card in place, the author answers it there, and the c
   app.stdin.write("\r");
   await sleep(60);
   let frame = plain(app.lastFrame());
-  expect(frame).toContain("? Does Cora know?");
+  expect(frame).toContain("Does Cora know?");
   expect(frame).toContain("1. yes");
-  expect(frame).toContain("waiting for your answer");
+  expect(frame).toContain("type a number to pick"); // the card's own prompt
+  expect(frame).toContain("waiting for your answer"); // the activity line (state.ts reduceEvent), not the card
+  expect(frame).toContain("answer ›");
   await keys(app, "1");
   app.stdin.write("\r");
   await sleep(80);
@@ -389,4 +404,23 @@ test("the screen shows what pablo is doing while a tool runs, then the line with
   const frame = plain(app.lastFrame());
   expect(frame).toMatch(/→ researching 1919 grape prices \(\d+ms\)/);
   expect(frame).not.toContain("●");
+});
+
+test("a composer that cannot take answers says so instead of leaving the turn waiting", async () => {
+  const composer: Composer = {
+    async *send() {
+      yield { kind: "question", id: "q1", question: "Who?", options: [], why: "w" };
+      await new Promise(() => {});
+    },
+  };
+  const app = render(<App {...props} composer={composer} />);
+  await sleep(20);
+  await keys(app, "ac");
+  await keys(app, "go");
+  app.stdin.write("\r");
+  await sleep(60);
+  await keys(app, "Edwin");
+  app.stdin.write("\r");
+  await sleep(60);
+  expect(plain(app.lastFrame())).toContain("cannot take answers");
 });

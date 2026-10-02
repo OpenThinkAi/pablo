@@ -221,7 +221,10 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   // An answer to a question card goes to the session that asked; the turn's own stream carries on from it.
   const { replySeq, reply } = state.compose;
   useEffect(() => {
-    if (reply !== null) composer?.answer?.(reply.id, reply.text);
+    if (reply === null) return;
+    // A session that cannot take answers would leave the card's turn waiting for good: say so instead.
+    if (composer?.answer) composer.answer(reply.id, reply.text);
+    else dispatch({ type: "compose.failed", message: "this session cannot take answers to questions" });
   }, [replySeq]);
 
   if (tooSmall(size)) {
