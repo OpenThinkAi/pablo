@@ -56,6 +56,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "prefix.press": { type: "prefix.press", prefix: "a" }, "prefix.digit": { type: "prefix.digit", digit: "1" }, "prefix.backspace": { type: "prefix.backspace" }, "prefix.clear": { type: "prefix.clear" },
     "view.zen": { type: "view.zen" }, "view.full": { type: "view.full" },
     "review.open": { type: "review.open", branch: "draft/ch02" }, "review.close": { type: "review.close" }, "review.mark": { type: "review.mark", mark: "accepted" },
+    "finish.start": { type: "finish.start", branch: "draft/ch02" }, "finish.done": { type: "finish.done", branch: "draft/ch02", lines: ["l"] }, "finish.failed": { type: "finish.failed", message: "m" },
     "settings.open": { type: "settings.open", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.set": { type: "settings.set", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.close": { type: "settings.close" },
     "write.start": { type: "write.start", chapter: 2 }, "write.progress": { type: "write.progress", line: "x" }, "write.done": { type: "write.done", branch: "draft/ch02", lines: ["ok"] }, "write.failed": { type: "write.failed", message: "no", missing: ["a"] },
     "compose.open": { type: "compose.open" }, "compose.close": { type: "compose.close" }, "compose.type": { type: "compose.type", text: "hi" }, "compose.backspace": { type: "compose.backspace" },
@@ -415,4 +416,24 @@ test("review.mark does nothing on a file row, in a book, or under settings; mark
   expect(then(marked, { type: "review.close" }).marks).toEqual({});
   expect(then(marked, { type: "review.close" }, { type: "review.open", branch: "draft/ch01" }).marks).toEqual({});
   expect(reviewCounts(b)).toEqual({ accepted: 0, rejected: 0, pending: 0 });
+});
+
+test("finish.start shows the merge in progress; finish.done closes the review, shows the result and retires the branch; finish.failed stays in the review", () => {
+  const started = review({ type: "finish.start", branch: "draft/ch01" });
+  expect(started.finishing).toBe("draft/ch01");
+  expect(started.content?.title).toBe("Finishing draft/ch01");
+  expect(then(started, { type: "finish.start", branch: "draft/ch01" })).toBe(started); // one at a time
+  const done = then(started, { type: "finish.done", branch: "draft/ch01", lines: ["merged draft/ch01 into main (abc1234)", "outline: ran"] });
+  expect(done.mode.kind).toBe("book");
+  expect(done.finishing).toBeNull();
+  expect(done.finished).toEqual(["draft/ch01"]);
+  expect(done.content).toMatchObject({ title: "Finished draft/ch01", body: "merged draft/ch01 into main (abc1234)\noutline: ran" });
+  const failed = then(started, { type: "finish.failed", message: "conflict" });
+  expect(failed.mode).toEqual({ kind: "review", branch: "draft/ch01" });
+  expect(failed.finishing).toBeNull();
+  expect(failed.content).toMatchObject({ title: "Not finished", body: "conflict" });
+  // Outside a review a finish does not start; a done with nothing finishing changes nothing.
+  const b = book();
+  expect(then(b, { type: "finish.start", branch: "x" })).toBe(b);
+  expect(then(b, { type: "finish.done", branch: "x", lines: [] })).toBe(b);
 });

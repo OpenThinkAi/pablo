@@ -25,6 +25,7 @@ import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow } from "./review";
+import type { Finisher, Rejected } from "./screen";
 import type { Writer } from "./screen";
 import { composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
@@ -57,6 +58,8 @@ export interface AppProps {
   readonly diffOf?: (branch: string) => BranchDiff;
   /** `a w`: writes a chapter and says what came of it (the CLI's `runWrite`, passed in; this package cannot import it). */
   readonly writer?: Writer;
+  /** `s` in a review: merges the accepted changes and runs the after-write steps (the CLI's `screenFinisher`, passed in). */
+  readonly finisher?: Finisher;
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
   readonly keymap?: Keymap;
   /** The editor command the config sets ("" for none); what the settings screen opens with. */
@@ -79,7 +82,7 @@ const NO_HITS: readonly CheckHit[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, composer }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, finisher, composer }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -114,6 +117,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
         if (to !== undefined) { dispatch({ type: "main.goto", line: to + 3 }); dispatch({ type: "main.goto", line: to + 1 }); }
       }
       else if (action.id === "ai.write") startWrite();
+      else if (action.id === "review.finish") startFinish();
       else onCommand?.(action);
     }
   });
@@ -132,11 +136,31 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     );
   }
 
+  // `s` in a review: every change needs a decision first (an undecided change is neither accepted nor rejected, so it
+  // is not merged on a guess); the rejected edits go to the finisher as the lines they own.
+  function startFinish() {
+    if (state.mode.kind !== "review" || state.finishing !== null) return;
+    const open = reviewBranch ?? state.mode.branch;
+    const counts = reviewCounts(state);
+    if (!finisher) return void dispatch({ type: "finish.failed", message: "Finishing is not available here." });
+    if (!review || review.edits.size === 0) return void dispatch({ type: "finish.failed", message: "There are no changes to finish." });
+    if (counts.pending > 0) return void dispatch({ type: "finish.failed", message: `${counts.pending} change${counts.pending === 1 ? " has" : "s have"} no decision yet: y accepts, n rejects.` });
+    const rejected: Rejected = {
+      removed: [...review.edits.values()].filter((e) => state.marks[e.id] === "rejected").flatMap((e) => e.removedLines),
+      added: [...review.edits.values()].filter((e) => state.marks[e.id] === "rejected").flatMap((e) => e.addedLines),
+    };
+    dispatch({ type: "finish.start", branch: open });
+    finisher(open, rejected).then(
+      (r) => dispatch(r.ok ? { type: "finish.done", branch: open, lines: r.lines } : { type: "finish.failed", message: r.message }),
+      (e: unknown) => dispatch({ type: "finish.failed", message: e instanceof Error ? e.message : String(e) }),
+    );
+  }
+
   const contentBody = state.content ? clean(state.content.body) : null;
   // Book mode's rows (the stages, then the branches waiting for review), or in a review the branch's changes.
   const place = placeOf(state);
   const reviewBranch = place.kind === "review" ? place.branch : undefined;
-  const waiting = useMemo(() => [...branches, ...state.written.filter((b) => !branches.includes(b))], [branches, state.written]);
+  const waiting = useMemo(() => [...branches, ...state.written.filter((b) => !branches.includes(b))].filter((b) => !state.finished.includes(b)), [branches, state.written, state.finished]);
   const extra = useMemo(() => branchRows(waiting), [waiting]);
   const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch))), [reviewBranch, diffOf]);
   const bookAll = useMemo(() => [...bookRows, ...extra.rows], [bookRows, extra]);

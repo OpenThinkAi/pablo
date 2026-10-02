@@ -203,6 +203,52 @@ export function branchDiff(repo: string, branch: string): { ok: true; text: stri
   }
 }
 
+/** The commit `branch` left `main` at (`git merge-base`), or a notice. */
+export function mergeBaseOf(repo: string, branch: string): { ok: true; sha: string } | { ok: false; notice: string } {
+  try {
+    return { ok: true, sha: git(repo, ["merge-base", "main", branch]).trim() };
+  } catch (err) {
+    return { ok: false, notice: `pablo: git merge-base failed: ${errMessage(err)}` };
+  }
+}
+
+/** A file's text at `rev`, or undefined when `rev` does not have it. */
+export function fileAt(repo: string, rev: string, path: string): string | undefined {
+  try {
+    return execFileSync("git", ["-C", repo, "show", `${rev}:${path}`], { stdio: "pipe", encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  } catch {
+    return undefined;
+  }
+}
+
+/** True when `branch` changes nothing against `main` since it left it. A git failure reads as "changes". */
+export function branchIsEmpty(repo: string, branch: string): boolean {
+  try {
+    git(repo, ["diff", "--quiet", "--no-ext-diff", `main...${branch}`, "--"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The branch's worktree path, adding the worktree if the branch has none (a branch made outside `createBranch`).
+ * `deleteBranch` removes it again.
+ */
+export function ensureWorktree(repo: string, slug: string, branch: string, env: Env = process.env): BranchResult {
+  const invalid = validate(slug, branch);
+  if (invalid) return { ok: false, notice: invalid };
+  const path = worktreePath(slug, branch, env);
+  if (existsSync(path)) return { ok: true, path };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    git(repo, ["worktree", "add", path, branch]);
+  } catch (err) {
+    return { ok: false, notice: `pablo: git worktree add failed: ${errMessage(err)}` };
+  }
+  return { ok: true, path };
+}
+
 /**
  * Merges `branch` into `main` with a merge commit, run in the repo's own
  * checkout (which must have `main` checked out and be clean). A conflict is
