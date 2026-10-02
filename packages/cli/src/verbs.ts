@@ -67,6 +67,7 @@ import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
+import { publishWork } from "./publish";
 import { reviseCore } from "./revise";
 import type { ReviseCoreArgs } from "./revise";
 import { buildResume } from "./resume";
@@ -448,6 +449,27 @@ async function runMigrateVerb(args: z.infer<typeof MIGRATE_ARGS>, ctx: VerbConte
   const outcome = migrateLines(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] });
   if (!outcome.ok) return { body: outcome, exitCode: outcome.code };
   return { body: outcome, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// publish (AGT-1534)
+// ---------------------------------------------------------------------------
+
+const PUBLISH_ARGS = z.object({
+  project: projectField,
+  target: z.string().describe("draft|review|final — the publish target. Only draft is implemented: one compiled markdown file under .pablo/out/."),
+});
+
+async function runPublishVerb(args: z.infer<typeof PUBLISH_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+
+  const marker = readMarker(resolved.projectPath);
+  if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
+
+  const outcome = publishWork(resolved.projectPath, marker.marker.slug, marker.marker.title, args.target);
+  if (!outcome.ok) return { body: refusalBody(outcome), exitCode: outcome.code };
+  return { body: { ok: true, target: outcome.target, where: outcome.where, chapters: outcome.chapters, words: outcome.words }, exitCode: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,6 +1091,13 @@ export const VERBS: readonly Verb[] = [
     args: MIGRATE_ARGS,
     run: runMigrateVerb,
     positionalArgs: ["sub"],
+  },
+  {
+    name: "publish",
+    description:
+      "Compile the work's chapters into one publishable markdown file (frontmatter stripped, sentence lines joined into paragraphs, quotes curled) under .pablo/out/. Only the draft target exists today.",
+    args: PUBLISH_ARGS,
+    run: runPublishVerb,
   },
   {
     name: "voice",

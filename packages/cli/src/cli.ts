@@ -17,6 +17,7 @@ import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runCheck } from "./check";
 import { migrateLines } from "./migrate";
+import { publishWork } from "./publish";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
@@ -45,6 +46,7 @@ const P0_VERBS = [
   "save",
   "check",
   "migrate",
+  "publish",
   "mcp",
   "voice",
   "prose",
@@ -53,7 +55,7 @@ const P0_VERBS = [
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
-const LATER_VERBS = ["dry-run", "share", "notes", "publish"] as const;
+const LATER_VERBS = ["dry-run", "share", "notes"] as const;
 
 const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
@@ -89,6 +91,10 @@ function helpText(): string {
     "  pablo migrate lines --project <slug> [--dry-run]",
     "                                            one-time split of chapters/*.md to one",
     "                                            sentence per line, committed on its own",
+    "  pablo publish --project <slug> --target draft",
+    "                                            compile every chapter into one markdown file",
+    "                                            under <work>/.pablo/out/ (frontmatter stripped,",
+    "                                            sentences joined, quotes curled)",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list                         every voice in the vault and the global dir",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
@@ -192,6 +198,8 @@ interface ParsedArgs {
   readonly start: string | undefined;
   /** `revise --end <n>` (AGT-1264): a UTF-16 offset into the frontmatter-stripped body. Requires `--start`. */
   readonly end: string | undefined;
+  /** `publish --target draft|review|final` (AGT-1534). */
+  readonly target: string | undefined;
 }
 
 /**
@@ -249,6 +257,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     passage: typeof values["passage"] === "string" ? values["passage"] : undefined,
     start: typeof values["start"] === "string" ? values["start"] : undefined,
     end: typeof values["end"] === "string" ? values["end"] : undefined,
+    target: typeof values["target"] === "string" ? values["target"] : undefined,
   };
 }
 
@@ -762,6 +771,30 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       console.log(`pablo: migrate lines: ${verb} ${outcome.changed.length} chapter(s)${outcome.committed ? " (committed)" : ""}`);
       for (const f of outcome.changed) console.log(`  ${f}`);
       if (outcome.notice) console.log(outcome.notice);
+    }
+    return EXIT_OK;
+  }
+
+  if (args.verb === "publish") {
+    if (projectPath === undefined) {
+      const message = "pablo: publish requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const markerResult = readMarker(projectPath);
+    if (!markerResult.ok) {
+      emit(refusalResult(markerResult), args.json);
+      return markerResult.code;
+    }
+    const outcome = publishWork(projectPath, markerResult.marker.slug, markerResult.marker.title, args.target);
+    if (!outcome.ok) {
+      emit(refusalResult(outcome), args.json);
+      return outcome.code;
+    }
+    if (args.json) {
+      console.log(JSON.stringify({ ok: true, target: outcome.target, where: outcome.where, chapters: outcome.chapters, words: outcome.words }));
+    } else {
+      console.log(`pablo: published ${outcome.target}: ${outcome.where} (${outcome.chapters} chapters, ${outcome.words} words)`);
     }
     return EXIT_OK;
   }
