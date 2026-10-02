@@ -3,7 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
-import { commitAs, createBranch, deleteBranch, listBranches, mergeBranch, worktreePath } from "../src/branch";
+import { parseDiff } from "@openthink/pablo-core";
+import { branchDiff, commitAs, createBranch, deleteBranch, listBranches, mergeBranch, waitingBranches, worktreePath } from "../src/branch";
 
 const cleanupDirs: string[] = [];
 
@@ -142,4 +143,34 @@ test("git failures are notices, never exceptions", () => {
   expect(mergeBranch(dir, "draft/ch01", env).ok).toBe(false);
   expect(deleteBranch(dir, "valley", "draft/ch01", { env }).ok).toBe(false);
   expect(commitAs(dir, { message: "x", author: { name: "a", email: "a@a.example" } }).ok).toBe(false);
+});
+
+test("waitingBranches lists change branches with commits main lacks; branchDiff is that branch's own changes against main", () => {
+  const { repo, env } = setup();
+  const made = createBranch(repo, "valley", "draft/ch03", env) as { ok: true; path: string };
+  createBranch(repo, "valley", "revise/ab12", env); // no commits yet: nothing waiting
+  expect(waitingBranches(repo)).toEqual({ ok: true, branches: [] });
+
+  writeFileSync(join(made.path, "ch01.md"), "One.\nTwo, changed.\nThree.\n");
+  expect(commitAs(made.path, { message: "draft", author: { name: "pablo", email: "p@x.example" } }).ok).toBe(true);
+  expect(waitingBranches(repo)).toEqual({ ok: true, branches: ["draft/ch03"] });
+
+  // Work landing on main afterwards is not shown as the branch undoing it.
+  writeFileSync(join(repo, "other.md"), "Elsewhere.\n");
+  sh(repo, "add", "--", "other.md");
+  sh(repo, "commit", "-qm", "other");
+
+  const diff = branchDiff(repo, "draft/ch03");
+  expect(diff.ok).toBe(true);
+  const files = parseDiff((diff as { text: string }).text);
+  expect(files.map((f) => f.path)).toEqual(["ch01.md"]);
+  expect(files[0]!.hunks[0]!.lines.filter((l) => l.t !== " ").map((l) => l.t + l.text)).toEqual(["-Two.", "+Two, changed.", "+Three."]);
+});
+
+test("branchDiff refuses a name that is not a change branch, and reports an unknown branch as a notice", () => {
+  const { repo } = setup();
+  expect(branchDiff(repo, "main")).toEqual({ ok: false, notice: 'pablo: diff: "main" is not a change branch' });
+  expect(branchDiff(repo, "--output=x").ok).toBe(false);
+  const missing = branchDiff(repo, "draft/none");
+  expect(missing.ok).toBe(false);
 });

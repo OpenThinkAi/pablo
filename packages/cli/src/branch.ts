@@ -169,6 +169,40 @@ export function listBranches(repo: string): { ok: true; branches: BranchList } |
   return { ok: true, branches };
 }
 
+/** Change branches with commits `main` does not have yet: the ones waiting for review. Sorted by name; a git failure is a notice. */
+export function waitingBranches(repo: string): { ok: true; branches: string[] } | { ok: false; notice: string } {
+  const listed = listBranches(repo);
+  if (!listed.ok) return listed;
+  const waiting: string[] = [];
+  for (const name of Object.values(listed.branches).flat().sort()) {
+    try {
+      if (Number(git(repo, ["rev-list", "--count", `main..${name}`]).trim()) > 0) waiting.push(name);
+    } catch (err) {
+      return { ok: false, notice: `pablo: git rev-list failed: ${errMessage(err)}` };
+    }
+  }
+  return { ok: true, branches: waiting };
+}
+
+/**
+ * What `branch` changes against `main`, as git's unified diff of the branch since it left `main` (`main...branch`,
+ * so work that has landed on `main` since is not shown as the branch undoing it). Two lines of context, renames
+ * detected, no colour and no external diff driver: the screen parses this text (core's `parseDiff`).
+ */
+export function branchDiff(repo: string, branch: string): { ok: true; text: string } | { ok: false; notice: string } {
+  if (!branchKind(branch)) return { ok: false, notice: `pablo: diff: "${branch}" is not a change branch` };
+  try {
+    const text = execFileSync(
+      "git",
+      ["-C", repo, "diff", "--no-color", "--no-ext-diff", "-M", "-U2", "--src-prefix=a/", "--dst-prefix=b/", `main...${branch}`, "--"],
+      { stdio: "pipe", encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+    );
+    return { ok: true, text };
+  } catch (err) {
+    return { ok: false, notice: `pablo: git diff failed: ${errMessage(err)}` };
+  }
+}
+
 /**
  * Merges `branch` into `main` with a merge commit, run in the repo's own
  * checkout (which must have `main` checked out and be clean). A conflict is

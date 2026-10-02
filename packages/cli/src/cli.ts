@@ -16,6 +16,7 @@
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
+import { branchDiff, repoRoot, waitingBranches } from "./branch";
 import { runCheck } from "./check";
 import { migrateLines } from "./migrate";
 import { mergeDraftInProject } from "./novel/merge";
@@ -633,7 +634,14 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       const { runScreen } = await import("@openthink/pablo-tui");
       // The book's stages come from the same stage machine `pablo status` reads (AGT-1526).
       // `dir` goes on too: the main pane reads the selected stage's file from it (AGT-1527).
-      return await runScreen({ ...screen, stages: bookStages(readNovelState(screen.dir)) });
+      // Branches waiting for review and their diffs against main come from the branch layer (AGT-1538).
+      const repo = repoRoot(screen.dir);
+      const waiting = repo === undefined ? undefined : waitingBranches(repo);
+      return await runScreen({
+        ...screen,
+        stages: bookStages(readNovelState(screen.dir)),
+        ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch) } : {}),
+      });
     }
   }
 
