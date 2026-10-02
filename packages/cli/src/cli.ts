@@ -613,8 +613,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     if (screen !== undefined && process.stdin.isTTY && process.stdout.isTTY) {
       const { runScreen } = await import("@openthink/pablo-tui");
       // The book's stages come from the same stage machine `pablo status` reads (AGT-1526).
-      const { dir, ...project } = screen;
-      return await runScreen({ ...project, stages: bookStages(readNovelState(dir)) });
+      // `dir` goes on too: the main pane reads the selected stage's file from it (AGT-1527).
+      return await runScreen({ ...screen, stages: bookStages(readNovelState(screen.dir)) });
     }
   }
 
