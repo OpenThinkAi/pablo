@@ -74,6 +74,7 @@ import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { publishWork } from "./publish";
+import { revisePassage } from "./screen-revise";
 import { reviseCore } from "./revise";
 import type { ReviseCoreArgs } from "./revise";
 import { buildResume } from "./resume";
@@ -1058,6 +1059,38 @@ async function runReviseVerb(args: z.infer<typeof REVISE_ARGS>, ctx: VerbContext
 }
 
 // ---------------------------------------------------------------------------
+// revise_passage (AGT-1563) — `revise` for the harness: the candidate is
+// committed on a revise/<id> branch instead of being returned.
+// ---------------------------------------------------------------------------
+
+const REVISE_PASSAGE_ARGS = z.object({
+  project: projectField,
+  file: REVISE_ARGS.shape.file,
+  passage: z.string().describe("The passage to rewrite, quoted verbatim (whitespace-run tolerant)."),
+  instruction: REVISE_ARGS.shape.instruction,
+});
+
+/**
+ * The same locate-and-revise as `revise`, then the candidate lands on a
+ * `revise/<id>` branch authored as the model (what `a r` does when the author
+ * takes it). The result names the branch, file and receipt; it never carries
+ * the prose, so the harness reads the branch through `read` to see it.
+ */
+async function runRevisePassageVerb(args: z.infer<typeof REVISE_PASSAGE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const bound = boundedPath(
+    resolved.projectPath,
+    resolved.vaultRoot,
+    args.file,
+    (abs) => `pablo: revise_passage file must be inside the vault (${abs})`,
+  );
+  if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
+  const result = await revisePassage(resolved.vaultRoot, resolved.projectPath, args, { env: ctx.env });
+  return { body: result, exitCode: result.ok ? 0 : result.code };
+}
+
+// ---------------------------------------------------------------------------
 // read / search (AGT-1554) — the harness's way to find what the work has
 // already established; the logic is `harness-tools.ts`.
 // ---------------------------------------------------------------------------
@@ -1200,6 +1233,13 @@ export const VERBS: readonly Verb[] = [
       "Send one located passage of a manuscript to the local model and return a candidate: locate it (by quoted text or a start/end offset pair), assemble the pack with the project's own style and work rules, send once, and return {candidate, span, receipt} — never writes the file.",
     args: REVISE_ARGS,
     run: runReviseVerb,
+  },
+  {
+    name: "revise_passage",
+    description:
+      "Revise one passage of a chapter on the local model (Gemma) following an instruction such as \"tighten, keep the dread\". The revision lands on a revise/<id> branch for the author to review. Returns the branch, file and receipt, never the prose; read the branch to see it.",
+    args: REVISE_PASSAGE_ARGS,
+    run: runRevisePassageVerb,
   },
   {
     name: "read",

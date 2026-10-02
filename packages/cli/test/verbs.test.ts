@@ -48,6 +48,7 @@ test("VERBS exposes exactly the seventeen verbs, each project-required verb requ
     "read",
     "resume",
     "revise",
+    "revise_passage",
     "save",
     "search",
     "status",
@@ -907,4 +908,18 @@ test("draftChapterBody keeps the branch, path and receipt and drops prose-bearin
   expect(JSON.stringify(body)).not.toContain("SHOULD NOT SURVIVE");
   expect(JSON.stringify(body)).not.toContain("the storm came up");
   expect(draftChapterBody({ ok: false, code: 2, message: "no" })).toEqual({ ok: false, code: 2, message: "no" });
+});
+
+test("revise_passage requires file, passage and instruction, and refuses an outside file (AGT-1563)", async () => {
+  const tool = verb("revise_passage");
+  expect(tool.args.safeParse({ project: "ice-house", file: "chapters/x.md", passage: "p" }).success).toBe(false);
+  expect(tool.args.safeParse({ project: "ice-house", file: "chapters/x.md", passage: "p", instruction: "tighten" }).success).toBe(true);
+  const vault = tempVault();
+  try {
+    const refused = await tool.run({ project: "ice-house", file: "../../../etc/passwd", passage: "p", instruction: "x" }, ctxFor(vault));
+    expect(refused.exitCode).toBe(2);
+    expect((refused.body as { ok: boolean }).ok).toBe(false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
 });
