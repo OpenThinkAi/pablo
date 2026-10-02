@@ -44,6 +44,8 @@ export interface ProviderConfig {
   readonly key: KeySource;
   /** Idle timeout before the endpoint is declared hung. */
   readonly timeoutMs: number;
+  /** Sampling temperature `write` sends when `--temperature` is not given; absent means write's own default. */
+  readonly temperature?: number;
 }
 
 export interface PabloConfig {
@@ -183,6 +185,14 @@ function readProvider(
     throw new ProviderConfigError(`pablo: ${where}: "timeoutMs" must be a positive number of milliseconds`);
   }
 
+  const rawTemperature = entry["temperature"] ?? existing?.temperature;
+  if (
+    rawTemperature !== undefined &&
+    (typeof rawTemperature !== "number" || !Number.isFinite(rawTemperature) || rawTemperature < 0 || rawTemperature > 2)
+  ) {
+    throw new ProviderConfigError(`pablo: ${where}: "temperature" must be a number from 0 to 2`);
+  }
+
   const rawKey = entry["key"];
   if (rawKey !== undefined && typeof rawKey !== "string") {
     throw new ProviderConfigError(`pablo: ${where}: "key" must be a string`);
@@ -196,6 +206,7 @@ function readProvider(
     local,
     key: keySourceFor(id, rawKey, where),
     timeoutMs: rawTimeout,
+    ...(rawTemperature === undefined ? {} : { temperature: rawTemperature }),
   };
 }
 

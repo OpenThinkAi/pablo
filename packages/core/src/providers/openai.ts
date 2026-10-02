@@ -389,6 +389,7 @@ function body(provider: ProviderConfig, request: CompletionRequest): Record<stri
     stream_options: { include_usage: true },
     ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+    ...(request.seed === undefined ? {} : { seed: request.seed }),
   };
 }
 

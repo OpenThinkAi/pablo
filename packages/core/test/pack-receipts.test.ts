@@ -182,3 +182,20 @@ test("receipts land one JSON object per line at <vault>/.pablo/receipts.jsonl", 
   expect(JSON.parse(lines[0] ?? "{}")).toEqual(receipt);
   expect((JSON.parse(lines[1] ?? "{}") as Receipt).intent).toBe("draft");
 });
+
+test("a receipt records the seed beside the temperature, and the prompt hash is still the pack's alone", async () => {
+  const fake = startFakeEndpoint({ tokens: ["a"], usage: { prompt_tokens: 4, completion_tokens: 1 } });
+  running.push(fake);
+
+  const pack = assemblePack("spanEdit", inputs);
+  const log: Receipt[] = [];
+  const adapter = withReceipts(adapterAt(fake.url), (receipt) => void log.push(receipt), { pack, intent: "draft" });
+
+  await drain(adapter.complete({ prompt: pack.prompt, temperature: 0.8, seed: 42 }));
+  await drain(adapter.complete({ prompt: pack.prompt, temperature: 0.3 }));
+
+  expect(log[0]?.params).toEqual({ temperature: 0.8, seed: 42 });
+  expect(log[1]?.params).toEqual({ temperature: 0.3 });
+  expect(log[0]?.prompt_hash).toBe(pack.hash);
+  expect(log[1]?.prompt_hash).toBe(pack.hash);
+});

@@ -3,7 +3,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Adapter, CompletionEvent, CompletionStats } from "@openthink/pablo-core";
+import type { Adapter, CompletionEvent, CompletionRequest, CompletionStats } from "@openthink/pablo-core";
 import { EndpointHung, normalizeOutput } from "@openthink/pablo-core";
 import { readEvents } from "../src/review";
 import type { QueuedEvent } from "../src/review";
@@ -71,6 +71,8 @@ const FAKE_STATS: CompletionStats = {
 };
 
 function fakeAdapter(options: {
+  /** Receives each `complete` request, so a test can see what sampling was sent. */
+  readonly onRequest?: (request: CompletionRequest) => void;
   readonly chunks?: readonly string[];
   readonly error?: Error;
   readonly stats?: CompletionStats;
@@ -80,7 +82,8 @@ function fakeAdapter(options: {
     id: "local",
     model: options.model ?? "test-writer-model",
     preferredOutput: "text",
-    async *complete(): AsyncIterable<CompletionEvent> {
+    async *complete(request: CompletionRequest): AsyncIterable<CompletionEvent> {
+      options.onRequest?.(request);
       if (options.error) throw options.error;
       for (const chunk of options.chunks ?? []) {
         yield { type: "token", text: chunk };
@@ -391,5 +394,57 @@ test("an unwritable state directory: the queue ritual reports status 'failed' bu
     chmodSync(pabloDir, 0o700);
     rmSync(vault, { recursive: true, force: true });
     rmSync(stateHome, { recursive: true, force: true });
+  }
+});
+
+/** Runs one send of chapter 2 with the given args and returns what the adapter was asked and the receipt line written. */
+async function sendSampled(args: Partial<WriteArgs>, env: RunWriteDeps["env"] = RITUAL_ENV) {
+  const { vault, project } = tempVault();
+  const requests: CompletionRequest[] = [];
+  const deps: RunWriteDeps = {
+    adapter: fakeAdapter({ chunks: RAW_CHUNKS, onRequest: (request) => requests.push(request) }),
+    now: () => new Date("2026-09-06T12:00:00.000Z"),
+    stderr: progressSink().sink,
+    env,
+  };
+  const sent = await captureStdout(() => runWrite(baseArgs(args), vault, project, deps));
+  const receipt = existsSync(join(project, ".pablo", "receipts.jsonl")) ? receiptLines(project)[0] : undefined;
+  return { sent, requests, receipt };
+}
+
+test("write sends a temperature by default and records it in the receipt, leaving prompt_hash alone (AGT-1272 AC1, AC2)", async () => {
+  const { sent, requests, receipt } = await sendSampled({});
+  expect(sent.result).toBe(0);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.temperature).toBe(0.8);
+  expect(requests[0]).not.toHaveProperty("seed");
+
+  const body = JSON.parse(sent.lines[0] as string);
+  expect(body.receipt.temperature).toBe(0.8);
+  expect(body.receipt).not.toHaveProperty("seed");
+  expect((receipt?.["params"] as Record<string, number>)["temperature"]).toBe(0.8);
+  expect(receipt?.["prompt_hash"]).toBe(body.receipt.prompt_hash);
+});
+
+test("write --temperature and --seed override the default and reach the receipt (AGT-1272 AC1, AC2)", async () => {
+  const { sent, requests, receipt } = await sendSampled({ temperature: "1.1", seed: "99" });
+  expect(sent.result).toBe(0);
+  expect(requests[0]?.temperature).toBe(1.1);
+  expect(requests[0]?.seed).toBe(99);
+  expect(receipt?.["params"]).toMatchObject({ temperature: 1.1, seed: 99 });
+  expect(JSON.parse(sent.lines[0] as string).receipt).toMatchObject({ temperature: 1.1, seed: 99 });
+});
+
+test("the prompt_hash is the same whatever the sampling (AGT-1272 AC2)", async () => {
+  const cold = await sendSampled({ temperature: "0" });
+  const hot = await sendSampled({ temperature: "1.5", seed: "3" });
+  expect(cold.receipt?.["prompt_hash"]).toBe(hot.receipt?.["prompt_hash"]);
+});
+
+test("write refuses a temperature outside 0 to 2 and a non-integer seed before sending anything", async () => {
+  for (const bad of [{ temperature: "3" }, { temperature: "hot" }, { temperature: "-1" }, { seed: "1.5" }, { seed: "x" }]) {
+    const { sent, requests } = await sendSampled(bad);
+    expect(sent.result).toBe(2);
+    expect(requests).toHaveLength(0);
   }
 });

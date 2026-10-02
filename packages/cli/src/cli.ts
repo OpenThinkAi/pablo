@@ -149,6 +149,10 @@ interface ParsedArgs {
   readonly dryRun: boolean;
   /** `write --force`: overwrite an existing chapter file. */
   readonly force: boolean;
+  /** `write --temperature T`: sampling temperature; validated by `runWrite`. */
+  readonly temperature: string | undefined;
+  /** `write --seed N`: sampling seed; validated by `runWrite`. */
+  readonly seed: string | undefined;
   /** `voice new --global`: scaffold under the global voices directory instead of the vault. */
   readonly global: boolean;
   /** `voice flag --section <heading>`: which `## ` section to append the flagged line under (default "Flagged"). */
@@ -221,6 +225,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     scenes: typeof values["scenes"] === "string" ? values["scenes"] : undefined,
     dryRun: values["dry-run"] === true,
     force: values["force"] === true,
+    temperature: typeof values["temperature"] === "string" ? values["temperature"] : undefined,
+    seed: typeof values["seed"] === "string" ? values["seed"] : undefined,
     global: values["global"] === true,
     section: typeof values["section"] === "string" ? values["section"] : undefined,
     title: typeof values["title"] === "string" ? values["title"] : undefined,

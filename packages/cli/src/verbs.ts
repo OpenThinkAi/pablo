@@ -270,6 +270,13 @@ const WRITE_ARGS = z.object({
   scenes: z.number().int().positive().optional().describe("Minimum scene count (defaults to the format's own minimum)."),
   "dry-run": z.boolean().optional().default(false).describe("Assemble and render the pack; send nothing to the model."),
   force: z.boolean().optional().default(false).describe("Overwrite an existing chapter file."),
+  temperature: z
+    .number()
+    .min(0)
+    .max(2)
+    .optional()
+    .describe("Sampling temperature, 0 to 2 (defaults to the provider's config, then 0.8). 0 decodes greedily: the same pack gives the same text."),
+  seed: z.number().int().nonnegative().optional().describe("Sampling seed, to reproduce a draw (default: the endpoint picks one)."),
 });
 
 /**
@@ -331,6 +338,8 @@ async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext):
     dryRun: args["dry-run"] ?? false,
     json: true,
     force: args.force ?? false,
+    temperature: args.temperature !== undefined ? String(args.temperature) : undefined,
+    seed: args.seed !== undefined ? String(args.seed) : undefined,
   };
   const deps: RunWriteDeps = { stderr: ctx.stderr };
 

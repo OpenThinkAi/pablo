@@ -339,3 +339,16 @@ test("a forced extract_facts call answered with an empty message is a NoToolCall
     .catch((error: unknown) => error);
   expect((said as NoToolCallError).answer.length).toBeLessThanOrEqual(201);
 });
+
+test("a completion forwards temperature and seed only when the request sets them", async () => {
+  const fake = endpoint({ tokens: ["a"] });
+  const adapter = providersAt(fake.url).adapter("local");
+
+  await drain(adapter.complete({ prompt: "plain" }));
+  await drain(adapter.complete({ prompt: "sampled", temperature: 0.8, seed: 7 }));
+
+  expect(fake.requests[0]?.body).not.toHaveProperty("temperature");
+  expect(fake.requests[0]?.body).not.toHaveProperty("seed");
+  expect(fake.requests[1]?.body?.["temperature"]).toBe(0.8);
+  expect(fake.requests[1]?.body?.["seed"]).toBe(7);
+});
