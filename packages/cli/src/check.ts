@@ -22,6 +22,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { TextSource } from "@openthink/pablo-core";
+import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
 
 /** One mechanical-tell or flagged-line match. `detail` disambiguates which stock name matched when `rule` is `"stock-name"`. */
@@ -230,42 +231,113 @@ function frontmatterEndIndex(lines: readonly string[]): number {
   return -1;
 }
 
+/** A paragraph of a chapter body: its lines joined into one string, and where each line starts in it. */
+interface Paragraph {
+  readonly text: string;
+  /** `starts[i]` is the offset in `text` where the paragraph's i-th line begins; `lines[i]` is that line's 1-based number and raw text. */
+  readonly starts: readonly number[];
+  readonly lines: ReadonlyArray<{ readonly number: number; readonly raw: string }>;
+}
+
+/**
+ * Groups the body lines (frontmatter skipped) into paragraphs, each a run of
+ * non-blank lines joined with `joinSentences`. Chapters are stored one
+ * sentence per line (AGT-1532), so a rule that spans a sentence break — a
+ * flagged line, a foreshadowing phrase — only matches in the joined text.
+ */
+function paragraphsOf(lines: readonly string[], frontmatterEnd: number): Paragraph[] {
+  const paragraphs: Paragraph[] = [];
+  let run: Array<{ number: number; raw: string }> = [];
+  const flush = (): void => {
+    if (run.length === 0) return;
+    const starts: number[] = [];
+    let offset = 0;
+    const pieces = run.map((line) => joinSentences([line.raw]));
+    for (const piece of pieces) {
+      starts.push(offset);
+      offset += piece.length + 1;
+    }
+    paragraphs.push({ text: joinSentences(pieces), starts, lines: run });
+    run = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i] ?? "";
+    if (i <= frontmatterEnd || raw.trim() === "") flush();
+    else run.push({ number: i + 1, raw });
+  }
+  flush();
+  return paragraphs;
+}
+
+/** Every start offset at which `regex` (made global) matches `text`. */
+function matchOffsets(regex: RegExp, text: string): number[] {
+  const global = new RegExp(regex.source, regex.flags.includes("g") ? regex.flags : `${regex.flags}g`);
+  return [...text.matchAll(global)].map((match) => match.index ?? 0);
+}
+
+/** Every offset at which `needle` occurs in `text`. */
+function indexesOf(text: string, needle: string): number[] {
+  const offsets: number[] = [];
+  for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) offsets.push(at);
+  return offsets;
+}
+
 /**
  * Scans `text` (a chapter file's full contents, `path` its report label)
- * against `rules`, line by line, skipping the frontmatter block. One hit per
- * `(line, rule)` for the mechanical rules and `flagged-line` — repeated
- * matches on one line count once — but each matching stock name gets its own
- * hit (`rule: "stock-name"`, the name in `detail` and in `excerpt`, since
- * `excerpt` is just the line). Pure: no disk I/O.
+ * against `rules`, a paragraph at a time, skipping the frontmatter block.
+ * Sentence lines are joined into their paragraph first, so a match may span
+ * lines; it is reported on the line where it starts, with that line as the
+ * excerpt. One hit per `(line, rule)` for the mechanical rules — repeated
+ * matches on one line count once — and per `(line, flagged line)` for
+ * `flagged-line`, but each matching stock name gets its own hit
+ * (`rule: "stock-name"`, the name in `detail`). Pure: no disk I/O.
  */
 export function checkFile(text: string, path: string, rules: CheckRules): Hit[] {
   const lines = text.split("\n");
   const frontmatterEnd = frontmatterEndIndex(lines);
   const hits: Hit[] = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    if (i <= frontmatterEnd) continue;
-    const line = lines[i] ?? "";
-    if (line.trim() === "") continue;
-    const lineNumber = i + 1;
-    const excerpt = excerptOf(line);
+  for (const paragraph of paragraphsOf(lines, frontmatterEnd)) {
+    /** The physical line a joined-text offset falls on. */
+    const lineAt = (offset: number): { number: number; raw: string } => {
+      let index = 0;
+      for (let i = 0; i < paragraph.starts.length; i++) {
+        if ((paragraph.starts[i] as number) <= offset) index = i;
+      }
+      return paragraph.lines[index] as { number: number; raw: string };
+    };
+    /** Distinct physical lines the offsets fall on, in order. */
+    const linesOf = (offsets: readonly number[]): Array<{ number: number; raw: string }> => {
+      const seen = new Map<number, { number: number; raw: string }>();
+      for (const offset of offsets) {
+        const line = lineAt(offset);
+        if (!seen.has(line.number)) seen.set(line.number, line);
+      }
+      return [...seen.values()];
+    };
 
+    const found: Hit[] = [];
     for (const { rule, regex } of MECHANICAL_RULES) {
-      if (regex.test(line)) hits.push({ path, line: lineNumber, rule, excerpt });
+      for (const line of linesOf(matchOffsets(regex, paragraph.text))) {
+        found.push({ path, line: line.number, rule, excerpt: excerptOf(line.raw) });
+      }
     }
 
     for (const name of rules.stockNames) {
-      if (new RegExp(`\\b${escapeRegex(name)}\\b`).test(line)) {
-        hits.push({ path, line: lineNumber, rule: "stock-name", excerpt, detail: name });
+      for (const line of linesOf(matchOffsets(new RegExp(`\\b${escapeRegex(name)}\\b`), paragraph.text))) {
+        found.push({ path, line: line.number, rule: "stock-name", excerpt: excerptOf(line.raw), detail: name });
       }
     }
 
-    const collapsedLine = collapseWhitespace(line);
     for (const flagged of rules.flaggedLines) {
-      if (flagged !== "" && collapsedLine.includes(flagged)) {
-        hits.push({ path, line: lineNumber, rule: "flagged-line", excerpt });
+      if (flagged === "") continue;
+      for (const line of linesOf(indexesOf(paragraph.text, flagged))) {
+        found.push({ path, line: line.number, rule: "flagged-line", excerpt: excerptOf(line.raw) });
       }
     }
+
+    // Line order, rules in declaration order within a line (Array.sort is stable).
+    hits.push(...found.sort((a, b) => a.line - b.line));
   }
 
   return hits;

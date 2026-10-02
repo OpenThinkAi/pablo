@@ -7,7 +7,7 @@ import type { Adapter, CompletionEvent, CompletionStats, ExtractedFact } from "@
 import { NoToolCallError } from "@openthink/pablo-core";
 import type { RunWriteDeps, WriteArgs } from "../src/write";
 import { runWrite } from "../src/write";
-import { applyFacts } from "../src/novel/continuity";
+import { applyFacts, runContinuity } from "../src/novel/continuity";
 
 /**
  * `applyFacts` (the pure core, no I/O) and `runContinuity`/the `continuity`
@@ -477,4 +477,33 @@ test("an error that is not a missing tool call does not trigger the plain-text r
   expect(retried).toBe(false);
 
   rmSync(vault, { recursive: true, force: true });
+});
+
+test("runContinuity joins sentence lines into paragraphs before extraction, and a two-sentence anchor still places the fact (AGT-1532)", async () => {
+  const { project } = tempGitVault();
+  const split =
+    "Odile counted the cakes twice.\nThen she wrote the number down.\n\nThe mill closed its books in 1931.\nIt was the same every year.\n";
+  let sent = "";
+  const adapter = fakeAdapter({
+    extractFactsWithAnchors: async (request) => {
+      sent = request.text;
+      return [
+        {
+          fact: "Odile counted the cakes twice.",
+          entities: ["Odile"],
+          storyTime: undefined,
+          certainty: undefined,
+          anchor: "Odile counted the cakes twice. Then she wrote the number down.",
+        },
+      ];
+    },
+  });
+
+  const ritual = await runContinuity(project, 2, split, { adapter });
+
+  expect(ritual.status).toBe("ran");
+  expect(sent).toBe(
+    "Odile counted the cakes twice. Then she wrote the number down.\n\nThe mill closed its books in 1931. It was the same every year.",
+  );
+  expect(readFileSync(join(project, "continuity.md"), "utf8")).toContain("- Odile counted the cakes twice. [ch02]");
 });

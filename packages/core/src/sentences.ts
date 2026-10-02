@@ -289,3 +289,25 @@ export function splitSentences(paragraph: string): string[] {
 export function joinSentences(lines: readonly string[]): string {
   return normalizeWhitespace(lines.join(" "));
 }
+
+/**
+ * Joins a whole document's sentence lines back into paragraphs: each run of
+ * non-blank lines becomes one line, and paragraphs stay separated by one blank
+ * line. For code that assumes one paragraph per line (AGT-1532) — a document
+ * already stored one paragraph per line comes back unchanged, so it is safe to
+ * call on either layout. Lines are trimmed; runs of blank lines collapse to one.
+ */
+export function joinParagraphs(text: string): string {
+  const paragraphs: string[] = [];
+  let run: string[] = [];
+  const flush = (): void => {
+    if (run.length > 0) paragraphs.push(joinSentences(run));
+    run = [];
+  };
+  for (const line of text.split(/\r?\n/)) {
+    if (line.trim() === "") flush();
+    else run.push(line);
+  }
+  flush();
+  return paragraphs.join("\n\n");
+}

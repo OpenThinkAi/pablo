@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { joinSentences, splitSentences } from "../src/index";
+import { joinParagraphs, joinSentences, splitSentences } from "../src/index";
 
 /**
  * The fiction sentence splitter (AGT-1530). Every fixture below is invented
@@ -390,5 +390,19 @@ describe("joinSentences", () => {
     for (const c of CASES) {
       expect(splitSentences(joinSentences(c.lines))).toEqual([...c.lines]);
     }
+  });
+});
+
+describe("joinParagraphs (AGT-1532)", () => {
+  test("joins each paragraph's sentence lines and keeps one blank line between paragraphs", () => {
+    expect(joinParagraphs("One.\nTwo.\n\n\nThree.\nFour.\n")).toBe("One. Two.\n\nThree. Four.");
+  });
+
+  test("a document already one paragraph per line comes back unchanged", () => {
+    expect(joinParagraphs("One. Two.\n\nThree.")).toBe("One. Two.\n\nThree.");
+  });
+
+  test("is empty for blank text", () => {
+    expect(joinParagraphs("\n  \n")).toBe("");
   });
 });

@@ -22,6 +22,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
+import { joinParagraphs } from "../sentences";
 import type { BeatRow, DraftingInputs, TextSource, TimelineGate, WorkIdentity } from "./types";
 
 /** Words of the previous chapter carried into a drafting pack, as `draft-chapter` sends. */
@@ -213,11 +214,24 @@ export function gateTimeline(timeline: string, storyDate: string, source: string
   return { exists, later, source };
 }
 
-/** The last `words` words of a chapter file, frontmatter stripped. */
+/**
+ * The last `words` words of a chapter file, frontmatter stripped. Sentence
+ * lines are joined into paragraphs first (AGT-1532) so a split chapter reads
+ * to the model as ordinary prose; paragraph breaks inside the tail are kept.
+ */
 export function chapterTail(chapterText: string, words: number): string {
   const body = chapterText.replace(/^---\r?\n[\s\S]*?\r?\n---\s*/, "");
-  const tokens = body.split(/\s+/).filter((word) => word !== "");
-  return tokens.slice(Math.max(0, tokens.length - words)).join(" ");
+  const paragraphs = joinParagraphs(body)
+    .split("\n\n")
+    .filter((paragraph) => paragraph !== "");
+  const kept: string[] = [];
+  let remaining = words;
+  for (let i = paragraphs.length - 1; i >= 0 && remaining > 0; i--) {
+    const tokens = (paragraphs[i] as string).split(" ");
+    kept.unshift(tokens.slice(Math.max(0, tokens.length - remaining)).join(" "));
+    remaining -= tokens.length;
+  }
+  return kept.join("\n\n");
 }
 
 /** The title from a work's `QWEN.md` first heading, without the "(working title)" suffix. */

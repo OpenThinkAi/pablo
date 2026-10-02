@@ -78,3 +78,20 @@ test("locatePassage treats an empty or whitespace-only quote as zero matches", (
   expect(locatePassage(body, "")).toEqual({ ok: false, matches: 0 });
   expect(locatePassage(body, "   \n\t  ")).toEqual({ ok: false, matches: 0 });
 });
+
+test("locatePassage finds a paragraph quoted whole in a body stored one sentence per line (AGT-1532)", () => {
+  const body = "Frost came early that year.\nThe valley kept its own time.\n\nNobody minded.\n";
+  const quoted = "Frost came early that year. The valley kept its own time.";
+
+  const result = locatePassage(body, quoted);
+
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(selectionText({ path: "/tmp/x.md", text: body }, result.span)).toBe(
+      "Frost came early that year.\nThe valley kept its own time.",
+    );
+  }
+  // A quote crossing a paragraph break matches too, and a repeated sentence on split lines is still ambiguous.
+  expect(locatePassage(body, "own time. Nobody minded.").ok).toBe(true);
+  expect(locatePassage("Hello.\nHello.\n", "Hello.")).toEqual({ ok: false, matches: 2 });
+});

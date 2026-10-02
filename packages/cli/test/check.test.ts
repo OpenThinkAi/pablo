@@ -219,3 +219,24 @@ test("check --project ice-house --file outside the work exits 2 through the spaw
 
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("checkFile on a sentence-split chapter finds what the paragraph form finds, across line breaks (AGT-1532)", () => {
+  const rules = loadCheckRules(VAULT);
+  const paragraph = "---\nmodel: gemma-4\nprompt_hash: abc\n---\n\nThe crew filed out. In that moment Thorne looked up.\n\nHe left—quietly.\n";
+  const split = "---\nmodel: gemma-4\nprompt_hash: abc\n---\n\nThe crew filed out.\nIn that\nmoment Thorne looked up.\n\nHe left—quietly.\n";
+
+  const rulesOf = (text: string) => checkFile(text, "c.md", rules).map((h) => h.rule).sort();
+  expect(rulesOf(split)).toEqual(rulesOf(paragraph));
+  expect(rulesOf(split)).toContain("foreshadow");
+
+  // A match spanning lines is reported on the line it starts on.
+  const foreshadow = checkFile(split, "c.md", rules).find((h) => h.rule === "foreshadow");
+  expect(foreshadow?.line).toBe(7);
+  expect(foreshadow?.excerpt).toBe("In that");
+});
+
+test("checkFile matches a flagged line that spans sentence lines", () => {
+  const rules = { stockNames: [], flaggedLines: ["the ice trade has been in decline. Nobody argued."] };
+  const hits = checkFile("one\nthe ice trade has been in decline.\nNobody argued.\n", "c.md", rules);
+  expect(hits).toEqual([{ path: "c.md", line: 2, rule: "flagged-line", excerpt: "the ice trade has been in decline." }]);
+});
