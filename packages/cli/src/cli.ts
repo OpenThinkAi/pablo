@@ -17,7 +17,7 @@ import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
 import { branchDiff, repoRoot, waitingBranches } from "./branch";
-import { runCheck } from "./check";
+import { runCheck, screenChecks } from "./check";
 import { migrateLines } from "./migrate";
 import { mergeDraftInProject } from "./novel/merge";
 import { initAdopt, initNovel } from "./init";
@@ -640,9 +640,12 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       // Branches waiting for review and their diffs against main come from the branch layer (AGT-1538).
       const repo = repoRoot(screen.dir);
       const waiting = repo === undefined ? undefined : waitingBranches(repo);
+      const vault = findVault(cwd);
       return await runScreen({
         ...screen,
         stages: bookStages(readNovelState(screen.dir)),
+        // A chapter opened there is scanned with `check`'s rules from the vault, each hit a box under its line (AGT-1528).
+        ...(vault.ok ? { checks: screenChecks(vault.path) } : {}),
         ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch) } : {}),
       });
     }

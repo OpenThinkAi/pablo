@@ -11,12 +11,17 @@
 //   chapter:N            chapters/NN-*.md (`ch1`, `ch-1` and `chapter-1` are read the same)
 //   any other id         a path relative to the project, if it names a file in it
 
-import { joinManuscript } from "@openthink/pablo-core";
+import { joinSentences } from "@openthink/pablo-core";
 import { wrapText } from "./layout";
 import { clean } from "./sanitize";
 
 /** A document for the main pane: a heading for it, and its text with the frontmatter already removed or never present. */
-export interface MainDoc { readonly title: string; readonly text: string }
+export interface MainDoc {
+  readonly title: string;
+  readonly text: string;
+  /** The project-relative path when the document is one file the checks can scan (a chapter); `text` is then that file's raw contents. */
+  readonly file?: string;
+}
 
 /** Where a row id's text lives, relative to the project: one file, a chapter by number, the bible's files, or any path. */
 export type Source = { readonly kind: "file"; readonly file: string } | { readonly kind: "chapter"; readonly number: number } | { readonly kind: "bible" } | { readonly kind: "path"; readonly path: string };
@@ -46,13 +51,53 @@ export function stripFrontmatter(text: string): string {
 /** A line that is Markdown structure, not a sentence of prose: a table row, a fence, or an indented block. It is drawn as it is. */
 const structural = (line: string) => /^(\||```|~~~|\s)/.test(line);
 
+/** A block of plain prose, as `joinManuscript` reads it: no line opens like Markdown structure. */
+const proseBlock = (lines: readonly string[]) => !lines.some((line) => /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\||```|~~~|---+\s*$|\*\*\*+\s*$)/.test(line));
+
+/** The display lines of a document, and where each of the file's own lines lands among them. */
+export interface DisplayDoc {
+  readonly lines: string[];
+  /** File line number (1-based, frontmatter counted) to the index of the display line on which that file line's text ends. */
+  readonly anchors: ReadonlyMap<number, number>;
+}
+
 /**
  * The display lines of `text` at `width` columns: control characters stripped, frontmatter hidden, each run of
  * consecutive non-blank lines joined into one paragraph and wrapped on word breaks, a blank line between paragraphs.
- * Headings, lists, tables and fences keep their own lines (joinManuscript leaves them alone).
+ * Headings, lists, tables and fences keep their own lines (joinManuscript leaves them alone). Alongside, the anchors:
+ * a finding on line 12 of the file (checkFile's numbering) belongs under the display line where line 12's sentence
+ * ends, even though the sentence lines were joined and wrapped to get there.
  */
-export function displayLines(text: string, width: number): string[] {
-  const body = joinManuscript(stripFrontmatter(clean(text)).replace(/\t/g, "  "));
-  if (body === "") return [];
-  return body.split("\n").flatMap((line) => (line === "" || structural(line) ? [line] : wrapText(line, Math.max(1, width))));
+export function displayDoc(text: string, width: number): DisplayDoc {
+  const w = Math.max(1, width);
+  const source = clean(text).replace(/\t/g, "  ").split("\n");
+  const close = source[0]?.trim() === "---" ? source.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
+  const first = close < 0 ? 0 : close + 1;
+  const blocks: { n: number; text: string }[][] = [];
+  let run: { n: number; text: string }[] = [];
+  for (let i = first; i < source.length; i++) {
+    if (source[i]!.trim() === "") { if (run.length) blocks.push(run); run = []; } else run.push({ n: i + 1, text: source[i]! });
+  }
+  if (run.length) blocks.push(run);
+
+  const lines: string[] = [];
+  const anchors = new Map<number, number>();
+  blocks.forEach((block, b) => {
+    if (b > 0) lines.push("");
+    const texts = block.map((l) => l.text);
+    const wrapped = (t: string) => (structural(t) ? [t] : wrapText(t, w));
+    if (proseBlock(texts)) {
+      const paragraph = joinSentences(texts);
+      const start = lines.length;
+      lines.push(...(structural(paragraph) ? [paragraph] : wrapText(paragraph, w)));
+      // Greedy wrapping is prefix-stable: the rows a prefix of the paragraph takes end where that prefix ends.
+      block.forEach((l, k) => anchors.set(l.n, start + (structural(paragraph) ? 0 : wrapText(joinSentences(texts.slice(0, k + 1)), w).length - 1)));
+    } else {
+      block.forEach((l) => { lines.push(...wrapped(l.text)); anchors.set(l.n, lines.length - 1); });
+    }
+  });
+  return { lines, anchors };
 }
+
+/** The display lines of `text` at `width` columns (see `displayDoc`). */
+export const displayLines = (text: string, width: number): string[] => displayDoc(text, width).lines;

@@ -3,7 +3,7 @@ import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkFile, checkWork, isUnprovenanced, loadCheckRules } from "../src/check";
+import { checkFile, checkWork, isUnprovenanced, loadCheckRules, screenChecks } from "../src/check";
 
 /** Spawns the real bin, same pattern as `cli.test.ts`: exercises argv parsing and exit codes end to end. */
 const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
@@ -239,4 +239,12 @@ test("checkFile matches a flagged line that spans sentence lines", () => {
   const rules = { stockNames: [], flaggedLines: ["the ice trade has been in decline. Nobody argued."] };
   const hits = checkFile("one\nthe ice trade has been in decline.\nNobody argued.\n", "c.md", rules);
   expect(hits).toEqual([{ path: "c.md", line: 2, rule: "flagged-line", excerpt: "the ice trade has been in decline." }]);
+});
+
+test("screenChecks scans raw chapter text with the vault's rules, so a hit's line is a line of the file (AGT-1528)", () => {
+  const text = "---\nchapter: 1\n---\n\nThe well was dry.\nShe did not look up — not once.\n";
+  const scan = screenChecks(VAULT);
+  const hits = scan("chapters/01-x.md", text);
+  expect(hits).toEqual(checkFile(text, "chapters/01-x.md", loadCheckRules(VAULT)));
+  expect(hits.map((h) => [h.line, h.rule])).toEqual([[6, "em-dash"]]);
 });

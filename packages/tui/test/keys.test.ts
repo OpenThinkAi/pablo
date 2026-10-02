@@ -18,7 +18,7 @@ test("a, f, v, g are the prefixes; each state has the prefixes that have second 
   expect(prefixesOf(book("main"))).toEqual(["a", "v", "g"]);
   expect(prefixesOf(review("main"))).toEqual(["a", "f", "v", "g"]);
   expect(prefixesOf(book("content", true))).toEqual(["v"]);
-  expect(prefixRows(book("main"), "g").map((r) => r.id)).toEqual(["go.top", "go.end", "go.line"]);
+  expect(prefixRows(book("main"), "g").map((r) => r.id)).toEqual(["go.top", "go.end", "go.hit_next", "go.hit_prev", "go.line"]);
 });
 
 test("the keys that act follow the state: rows by region, review and an open content area", () => {
