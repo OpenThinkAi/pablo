@@ -293,6 +293,17 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       cutOrder: 0,
     },
     {
+      name: "direction",
+      heading: "# Direction for this chapter (from the author; follow it)",
+      text: inputs.direction?.trim() ?? "",
+      source: inputs.direction?.trim() ? "the author's direction" : undefined,
+      required: true,
+      keep: "head",
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    },
+    {
       name: "style",
       heading: "# Prose rules (binding)",
       text: concatSources(inputs.style),

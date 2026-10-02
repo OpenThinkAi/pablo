@@ -136,6 +136,8 @@ export interface DraftingInputs {
   readonly wordTarget: number;
   /** Minimum scenes to ask for. Default 3; a floor moves length more than words do. */
   readonly minScenes?: number | undefined;
+  /** The author's (or harness's) steer for this chapter beyond the beat row, e.g. "slower, stay on Cora" (AGT-1562). Its own slice; absent or blank means none. */
+  readonly direction?: string | undefined;
 }
 
 export interface AssembleOptions {

@@ -315,6 +315,7 @@ const WRITE_ARGS = z.object({
     .optional()
     .describe("Sampling temperature, 0 to 2 (defaults to the provider's config, then 0.8). 0 decodes greedily: the same pack gives the same text."),
   seed: z.number().int().nonnegative().optional().describe("Sampling seed, to reproduce a draw (default: the endpoint picks one)."),
+  direction: z.string().optional().describe("A steer for this chapter beyond its beat row, e.g. \"slower, stay on Cora\". Goes into the pack as its own slice and into the chapter's frontmatter as `direction:`."),
 });
 
 /**
@@ -378,8 +379,9 @@ async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext):
     force: args.force ?? false,
     temperature: args.temperature !== undefined ? String(args.temperature) : undefined,
     seed: args.seed !== undefined ? String(args.seed) : undefined,
+    direction: args.direction,
   };
-  const deps: RunWriteDeps = { stderr: ctx.stderr };
+  const deps: RunWriteDeps = { stderr: ctx.stderr, env: ctx.env };
 
   const { exitCode, text } = await withWriteLock(() =>
     captureConsoleLog(() => runWrite(writeArgs, resolved.vaultRoot, resolved.projectPath, deps)),
@@ -387,6 +389,44 @@ async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext):
 
   const body: unknown = text === "" ? { ok: exitCode === 0 } : JSON.parse(text);
   return { body, exitCode };
+}
+
+// ---------------------------------------------------------------------------
+// draft_chapter
+// ---------------------------------------------------------------------------
+
+const DRAFT_CHAPTER_ARGS = z.object({
+  project: projectField,
+  chapter: z.number().int().positive().describe("The chapter number to draft."),
+  direction: WRITE_ARGS.shape.direction,
+  words: WRITE_ARGS.shape.words,
+  scenes: WRITE_ARGS.shape.scenes,
+  force: WRITE_ARGS.shape.force,
+  temperature: WRITE_ARGS.shape.temperature,
+  seed: WRITE_ARGS.shape.seed,
+});
+
+/**
+ * AGT-1562: `write` for the harness. The same pipeline (preconditions, pack,
+ * local model, draft/chNN branch), with the harness's steer for the chapter as
+ * its own pack slice. The result names the branch, path and receipt; it never
+ * carries the prose, and the rule-check hits drop their excerpts for the same
+ * reason. The harness reads the chapter through `read` when it wants it.
+ */
+async function runDraftChapterVerb(args: z.infer<typeof DRAFT_CHAPTER_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const result = await runWriteVerb({ ...args, "dry-run": false }, ctx);
+  return { body: draftChapterBody(result.body), exitCode: result.exitCode };
+}
+
+/** `write`'s success body narrowed to what the harness is given: branch, path, receipt, no excerpts. A refusal body passes through. */
+export function draftChapterBody(body: unknown): unknown {
+  const written = body as Record<string, unknown>;
+  if (written["ok"] !== true) return body;
+  const check = Array.isArray(written["check"])
+    ? (written["check"] as { path: string; line: number; rule: string }[]).map(({ path, line, rule }) => ({ path, line, rule }))
+    : [];
+  const { ok, path, branch, worktree, commit, receipt, rituals, piece } = written;
+  return { ok, branch, path, worktree, commit, receipt, check, rituals, piece };
 }
 
 // ---------------------------------------------------------------------------
@@ -1163,6 +1203,13 @@ export const VERBS: readonly Verb[] = [
     description: "Draft one chapter on the configured local model: check preconditions, assemble the pack, send, write, receipt.",
     args: WRITE_ARGS,
     run: runWriteVerb,
+  },
+  {
+    name: "draft_chapter",
+    description:
+      "Draft chapter n on the local model (Gemma) from its beat, steered by an optional direction such as \"slower, stay on Cora\". The draft lands on a draft/chNN branch for the author to review. Returns the branch, path and receipt, never the prose; read the chapter to see it.",
+    args: DRAFT_CHAPTER_ARGS,
+    run: runDraftChapterVerb,
   },
   {
     name: "save",

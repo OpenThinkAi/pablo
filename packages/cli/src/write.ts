@@ -59,6 +59,8 @@ export interface WriteArgs {
   readonly temperature?: string | undefined;
   /** `write --seed N`: sampling seed, for a reproducible draw. Absent means the endpoint picks one. */
   readonly seed?: string | undefined;
+  /** `write --direction "<text>"` (AGT-1562): a steer for this chapter, its own pack slice, recorded in the frontmatter as `direction:`. */
+  readonly direction?: string | undefined;
 }
 
 /** A minimal `process.stderr`-shaped sink, so tests can capture progress without a real TTY. */
@@ -161,13 +163,16 @@ interface FrontmatterFields {
   readonly model: string;
   readonly generated: string;
   readonly promptHash: string;
+  /** The direction the draft was steered with, when one was given. */
+  readonly direction?: string | undefined;
 }
 
 /**
  * The hand-written frontmatter block, key order fixed: `chapter`, `title`,
  * `pov`, `story_date`, `status`, `words`, `model`, `generated`,
  * `prompt_hash` — the real vault's chapter 1 order (AC2), plus the
- * provenance keys `pablo check` requires.
+ * provenance keys `pablo check` requires, then `direction` when one steered
+ * the draft (AGT-1562).
  */
 function buildFrontmatter(fields: FrontmatterFields): string {
   return [
@@ -181,6 +186,7 @@ function buildFrontmatter(fields: FrontmatterFields): string {
     `model: ${yamlScalar(fields.model)}`,
     `generated: ${fields.generated}`,
     `prompt_hash: ${fields.promptHash}`,
+    ...(fields.direction === undefined ? [] : [`direction: ${yamlScalar(fields.direction)}`]),
     "---",
   ].join("\n");
 }
@@ -290,6 +296,9 @@ export async function runWrite(
     return 2;
   }
 
+  // One line: it goes in a frontmatter scalar. A blank direction is no direction.
+  const direction = args.direction?.replace(/\s+/g, " ").trim() || undefined;
+
   const markerResult = readMarker(projectPath);
   if (!markerResult.ok) {
     emitError(markerResult.message, undefined, markerResult.code, args.json);
@@ -307,6 +316,7 @@ export async function runWrite(
     words,
     scenes,
     marker: markerResult.marker,
+    direction,
   });
   if (!packResult.ok) {
     emitError(packResult.message, undefined, packResult.code, args.json);
@@ -465,6 +475,7 @@ export async function runWrite(
     model: draftAdapter.model,
     generated,
     promptHash: pack.hash,
+    direction,
   });
   // One sentence per line on disk (AGT-1531); the model only ever sees paragraphs.
   const fileContent = `${frontmatter}\n\n${splitManuscript(normalized)}\n`;
