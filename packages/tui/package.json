@@ -1,0 +1,23 @@
+{
+  "name": "@openthink/pablo-tui",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "pablo's full-terminal screen (Ink), a third front end beside the CLI and MCP.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": ["src"],
+  "dependencies": {
+    "@openthink/pablo-core": "workspace:*",
+    "ink": "^7.0.1",
+    "react": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "ink-testing-library": "^4.0.0"
+  }
+}

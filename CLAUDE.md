@@ -1,9 +1,11 @@
 # pablo — agent guide
 
-**pablo is a CLI that writes. It is not an app and has no screen.** The
-conversation about a book happens in whatever agent Matt already likes (Claude
-Code, Codex, pi); that agent drives pablo over the shell or `pablo mcp`. pablo
-is the *manager* of the writing project: it knows the vault, the framework a
+**pablo is a CLI that writes, with a full-terminal screen of its own** (decided
+2026-10-01, pm project `ai-terminal`, `--doc screen`; it supersedes the
+2026-09-06 "no screen" decision). Bare `pablo` inside a project opens the Ink
+screen in `packages/tui`; the CLI verbs and `pablo mcp` stay, so whatever agent
+Matt already likes (Claude Code, Codex, pi) can still drive pablo over the shell
+or MCP. pablo is the *manager* of the writing project: it knows the vault, the framework a
 format follows, the author's voice, version control, and publishing, and hands
 any agent a structured way in and out.
 
@@ -45,6 +47,10 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 — no CriticMarkup is ever written to a vault file), the
                 context-pack assembler, and the provider adapters
                 (OpenAI-compatible, Anthropic).
+packages/tui    @openthink/pablo-tui — the Ink 7 / React 19 screen, a third
+                front end on `verbs.ts` beside the CLI and MCP. Terminal and
+                React dependencies live here, never in core. Resize and
+                sanitising code is copied from prview, not shared with it.
 packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 dispatch, `--project` resolution, and (later) `pablo mcp`.
                 Any new dependency the CLI needs goes here; core stays
@@ -54,9 +60,10 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
 `packages/core/test/tty-free.test.ts` enforces the split — it walks
 `packages/core/src` and fails on any terminal import (`opentui`, `node:tty`,
 `ink`, `blessed`) or on any dependency at all in core's manifest. There is no
-terminal renderer in this repo any more; `packages/tui` (the opentui-based
-screen) was retired 2026-09-06 along with the CriticMarkup/selection design it
-implemented. See the design doc's `History` section for what carried over as
+opentui renderer in this repo any more: the first `packages/tui` (opentui-based)
+was retired 2026-09-06 along with the CriticMarkup/selection design it
+implemented, and the current `packages/tui` is the Ink screen rebuilt from
+2026-10-01 (AGT-1522). See the design doc's `History` section for what carried over as
 material (the pack assembler, the vault reader, the provider adapters, the
 config loader) versus what was cut outright (the screen, the CriticMarkup
 parser and renderer, span verbs). The **review queue concept** was cut with
