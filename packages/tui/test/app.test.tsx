@@ -1,6 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
-import { actionOf, App } from "../src/app";
+import { App } from "../src/app";
+import { resolve } from "../src/chord";
+import { keyStateOf } from "../src/keys";
 import { clean } from "../src/sanitize";
 import { initialState } from "../src/state";
 
@@ -13,7 +15,7 @@ test("the screen shows the project's title and format with the quit key", () => 
   const frame = app.lastFrame() ?? "";
   expect(frame).toContain("Ice House");
   expect(frame).toContain("novel");
-  expect(frame).toContain("q quit");
+  expect(frame).toMatch(/q\s+quit/);
 });
 
 test("below the minimum size a too-small notice replaces the layout", () => {
@@ -50,23 +52,49 @@ test("the keys reach the model: → enters the main pane, Tab is refused with no
   expect(app.lastFrame()).toContain("Ice House");
 });
 
-test("actionOf: the arrows act in the focused region, Tab moves focus, Esc backs out", () => {
+test("the key panel lists the keys that act, and a prefix swaps it for its second keys", async () => {
+  const app = render(<App title="Ice House" format="novel" size={{ cols: 80, rows: 24 }} />);
+  await sleep(20);
+  expect(app.lastFrame()).toMatch(/v\s+view…/);
+  app.stdin.write("v");
+  await sleep(30);
+  expect(app.lastFrame()).toMatch(/z\s+zen/);
+  expect(app.lastFrame()).toContain("v view");
+  app.stdin.write("\x1b");
+  await sleep(30);
+  expect(app.lastFrame()).toMatch(/v\s+view…/);
+});
+
+test("a command key reaches onCommand; an unbound key does nothing", async () => {
+  const seen: string[] = [];
+  const app = render(<App title="Ice House" format="novel" size={{ cols: 80, rows: 24 }} onCommand={(c) => seen.push(c.id)} />);
+  await sleep(20);
+  app.stdin.write("a");
+  await sleep(30);
+  app.stdin.write("p");
+  await sleep(30);
+  app.stdin.write("!");
+  await sleep(30);
+  expect(seen).toEqual(["ai.plan"]);
+});
+
+test("the arrows act in the focused region, Tab moves focus, Esc backs out", () => {
   const rail = initialState();
-  expect(actionOf("", { downArrow: true }, rail)).toEqual({ type: "rail.down" });
-  expect(actionOf("", { upArrow: true }, rail)).toEqual({ type: "rail.up" });
-  expect(actionOf("", { rightArrow: true }, rail)).toEqual({ type: "rail.expand" });
-  expect(actionOf("", { leftArrow: true }, rail)).toEqual({ type: "rail.collapse" });
-  expect(actionOf("", { tab: true }, rail)).toEqual({ type: "focus.content" });
-  expect(actionOf("", { escape: true }, rail)).toEqual({ type: "escape" });
-  expect(actionOf("x", {}, rail)).toBeNull();
+  const at = (s: typeof rail, token: string) => resolve(keyStateOf(s), s.pending, token);
+  expect(at(rail, "down")).toEqual([{ type: "rail.down" }]);
+  expect(at(rail, "right")).toEqual([{ type: "rail.expand" }]);
+  expect(at(rail, "left")).toEqual([{ type: "rail.collapse" }]);
+  expect(at(rail, "esc")).toEqual([{ type: "escape" }]);
+  expect(at(rail, "x")).toEqual([]);
+  expect(at(rail, "tab")).toEqual([]); // nothing in the content area to move into
   const main = { ...rail, pane: "main" as const, focus: "main" as const };
-  expect(actionOf("", { downArrow: true }, main)).toEqual({ type: "main.down" });
-  expect(actionOf("", { leftArrow: true }, main)).toEqual({ type: "main.to_rail" });
-  expect(actionOf("", { rightArrow: true }, main)).toBeNull();
-  const content = { ...rail, focus: "content" as const };
-  expect(actionOf("", { downArrow: true }, content)).toEqual({ type: "content.down" });
-  expect(actionOf("", { rightArrow: true }, content)).toBeNull();
-  expect(actionOf("", { tab: true }, content)).toEqual({ type: "focus.back" });
+  expect(at(main, "down")).toEqual([{ type: "main.down" }]);
+  expect(at(main, "left")).toEqual([{ type: "main.to_rail" }]);
+  expect(at(main, "right")).toEqual([]);
+  const content = { ...rail, focus: "content" as const, content: { title: "t", body: "b" } };
+  expect(at(content, "down")).toEqual([{ type: "content.down" }]);
+  expect(at(content, "tab")).toEqual([{ type: "focus.back" }]);
+  expect(at({ ...rail, content: content.content }, "tab")).toEqual([{ type: "focus.content" }]);
 });
 
 test("control characters in the title never reach the screen as escapes", () => {
