@@ -38,38 +38,47 @@ const SERVER_NAME = "pablo";
 const SERVER_VERSION = "0.0.0";
 
 /**
+ * Every tool `pablo mcp` serves, flattened from `verb.mcpTools ?? [verb]`. The
+ * harness (AGT-1552, `harness/tools.ts`) reads the same list, so a tool added
+ * to `VERBS` reaches Claude Code and pablo's own agent at once.
+ */
+export function mcpTools(): readonly McpToolSpec[] {
+  return VERBS.flatMap((verb): readonly McpToolSpec[] => verb.mcpTools ?? [verb]);
+}
+
+/**
  * Builds the `McpServer`, registering `verb.mcpTools ?? [verb]` for every
  * `VERBS` entry (AGT-1245 — see the file header). `ctx` defaults to the real
  * process (`process.cwd()`, `process.env`, `process.stderr`) but is
  * overridable so tests can point a spawned server's project resolution at a
  * fixture vault via `PABLO_VAULT` without touching the real environment.
+ *
+ * `tools` defaults to `mcpTools()`; the harness (AGT-1552) passes its own
+ * list, built from the same specs.
  */
-export function buildMcpServer(ctx: VerbContext): McpServer {
+export function buildMcpServer(ctx: VerbContext, tools: readonly McpToolSpec[] = mcpTools()): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
-  for (const verb of VERBS) {
-    const tools: readonly McpToolSpec[] = verb.mcpTools ?? [verb];
-    for (const tool of tools) {
-      server.registerTool(
-        tool.name,
-        {
-          title: tool.name,
-          description: tool.description,
-          inputSchema: tool.args.shape,
-        },
-        async (args) => {
-          try {
-            const outcome = await tool.run(args, ctx);
-            return { content: [{ type: "text" as const, text: JSON.stringify(outcome.body) }] };
-          } catch (error) {
-            // A genuine crash (not a refusal `run` returned as data) is the one
-            // case that becomes a tool error — AC3 only exempts refusals.
-            const message = error instanceof Error ? error.message : String(error);
-            return { content: [{ type: "text" as const, text: message }], isError: true };
-          }
-        },
-      );
-    }
+  for (const tool of tools) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.name,
+        description: tool.description,
+        inputSchema: tool.args.shape,
+      },
+      async (args) => {
+        try {
+          const outcome = await tool.run(args, ctx);
+          return { content: [{ type: "text" as const, text: JSON.stringify(outcome.body) }] };
+        } catch (error) {
+          // A genuine crash (not a refusal `run` returned as data) is the one
+          // case that becomes a tool error — AC3 only exempts refusals.
+          const message = error instanceof Error ? error.message : String(error);
+          return { content: [{ type: "text" as const, text: message }], isError: true };
+        }
+      },
+    );
   }
 
   return server;

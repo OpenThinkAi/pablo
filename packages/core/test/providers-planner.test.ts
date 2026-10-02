@@ -5,7 +5,7 @@
  */
 
 import { expect, test } from "bun:test";
-import { createPlanner, parseConfig, defaultConfig, ProviderResponseError, subscriptionEnv, claudeArgs } from "../src/index";
+import { claudeCredential, createPlanner, parseConfig, defaultConfig, ProviderResponseError, subscriptionEnv, claudeArgs } from "../src/index";
 import type { ClaudeRun, ClaudeRunner, Receipt } from "../src/index";
 
 const reply = (over: Record<string, unknown> = {}) =>
@@ -140,4 +140,12 @@ test("an is_error reply and an empty reply are named failures", async () => {
 test("the planner refuses to edit or extract", async () => {
   const planner = createPlanner(defaultConfig(), { claude: { runner: fakeRunner().runner } });
   await expect(planner.adapter.extractFacts({ text: "t", instruction: "i" })).rejects.toThrow(/never edits/);
+});
+
+test("claudeCredential is the planner's choice, shared with the harness", () => {
+  expect(claudeCredential(defaultConfig(), { env: { ANTHROPIC_API_KEY: "sk-shell" } })).toEqual({ route: "subscription" });
+  const keyed = claudeCredential(withKeyedAnthropic(), { env: { ANTHROPIC_API_KEY: "sk-test" } });
+  expect(keyed.route).toBe("api-key");
+  expect(keyed.route === "api-key" ? keyed.key : undefined).toBe("sk-test");
+  expect(keyed.route === "api-key" ? keyed.provider.id : undefined).toBe("anthropic");
 });

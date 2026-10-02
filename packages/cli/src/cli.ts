@@ -20,6 +20,7 @@ import { migrateLines } from "./migrate";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
+import { runAgent } from "./harness/agent";
 import { runMcp } from "./mcp";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
@@ -52,6 +53,7 @@ const P0_VERBS = [
   "prose",
   "review",
   "revise",
+  "agent",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -128,6 +130,10 @@ function helpText(): string {
     "                                            send one located passage to the local model;",
     "                                            returns {candidate, span, receipt} and writes",
     "                                            nothing — the file is never touched",
+    '  pablo agent --project <slug> "<message>"',
+    "                                            one headless harness session (Claude on",
+    "                                            the subscription, or the config's key);",
+    "                                            prints the transcript",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -645,6 +651,15 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         instruction: args.instruction,
       },
       { cwd, env: process.env },
+    );
+  }
+
+  // `agent` (AGT-1552) resolves its own project and marker (`harness/agent.ts`),
+  // the way an MCP verb does, so it is dispatched before the shared block too.
+  if (args.verb === "agent") {
+    return await runAgent(
+      { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json },
+      { cwd, env: process.env, stdout: process.stdout, stderr: process.stderr },
     );
   }
 

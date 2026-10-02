@@ -9,6 +9,7 @@
   },
   "files": ["src"],
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.287",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@openthink/pablo-core": "workspace:*",
     "@openthink/pablo-tui": "workspace:*",
