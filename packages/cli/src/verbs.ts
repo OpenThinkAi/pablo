@@ -58,7 +58,7 @@
  */
 
 import { z } from "zod";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { timelineAt } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
 import { checkWork } from "./check";
@@ -279,10 +279,20 @@ async function runTimelineVerb(args: z.infer<typeof TIMELINE_ARGS>, ctx: VerbCon
   if (!resolved.ok) return resolved.result;
 
   const path = join(resolved.projectPath, "bible", "timeline.md");
-  if (!existsSync(path)) {
-    return { body: { ok: false, code: 2, message: "pablo: bible/timeline.md does not exist" }, exitCode: 2 };
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return {
+      body: {
+        ok: false,
+        code: 2,
+        message: "pablo: bible/timeline.md does not exist; create it (a table with a four-digit Year column) to use the timeline gate",
+      },
+      exitCode: 2,
+    };
   }
-  const at = timelineAt(readFileSync(path, "utf8"), args.date, "bible/timeline.md");
+  const at = timelineAt(text, args.date, "bible/timeline.md");
   return { body: { date: at.date, exists: at.exists, notYet: at.notYet, source: at.source, text: at.text }, exitCode: 0 };
 }
 
