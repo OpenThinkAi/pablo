@@ -64,6 +64,7 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "rail.next_group", states: RAIL, key: "shift-down", secondary: "J", label: "group", description: "Move to the next group in the rail.", do: { type: "rail.next_group" } },
   { id: "rail.prev_group", states: RAIL, key: "shift-up", secondary: "K", label: "group", description: "Move to the previous group in the rail.", do: { type: "rail.prev_group" } },
   { id: "rail.expand", states: RAIL, key: "right", secondary: "l", label: "expand / enter", description: "Unfold the group under the cursor, step into it, or enter the main pane on a row that does not fold.", do: { type: "rail.expand" } },
+  { id: "rail.open", states: RAIL, key: "enter", label: "open", description: "Open the row under the cursor: a branch waiting for review opens as a review; any other row is entered like →.", do: { type: "rail.open" } },
   { id: "rail.collapse", states: RAIL, key: "left", secondary: "h", label: "collapse", description: "Fold the group under the cursor; on a row, go up to its group.", do: { type: "rail.collapse" } },
   { id: "rail.focus_content", states: RAIL, needs: "content", key: "tab", label: "content", description: "Move focus into the content area to scroll it.", do: { type: "focus.content" }, fixed: true },
 

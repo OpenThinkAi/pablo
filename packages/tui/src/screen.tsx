@@ -5,6 +5,7 @@ import { App } from "./app";
 import { bookRail, type BookStage } from "./book";
 import { loadEditor, loadKeymap } from "./key-config";
 import { KeysError } from "./keys";
+import type { BranchDiff } from "./review";
 import { loadDocument } from "./source";
 
 const ENTER_ALT = "\x1b[?1049h\x1b[H";
@@ -17,6 +18,10 @@ export interface ScreenOptions {
   readonly stages?: readonly BookStage[];
   /** The project directory; the main pane reads the selected stage's file from it. */
   readonly dir?: string;
+  /** Branches waiting for review: book mode lists them, Enter opens one (AGT-1538). */
+  readonly branches?: readonly string[];
+  /** A branch's changes against `main` as git's diff, for review mode. */
+  readonly diffOf?: (branch: string) => BranchDiff;
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -40,7 +45,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   try {
     const root = options.dir;
     const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} editor={loadEditor()} load={load} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

@@ -83,6 +83,18 @@ pattern: entering resets the view, leaving restores the pane and focus), extend 
 and give `escape` its place in the backing-out order. The rail, main pane, content and prefix actions then work in it
 unchanged, because they act on `viewOf(state)`.
 
+## Review mode
+
+Book mode lists the branches waiting for review (draft/, revise/, edit/, reader/ with commits `main` lacks) as rail rows
+`branch:<name>` under a `branches to review` group. Enter (`rail.open`, or → on the row) opens one: `review.open`. The
+CLI owns git (`branch.ts`: `waitingBranches`, `branchDiff`) and passes the screen `branches` and `diffOf`; this package
+only parses and lays out (`review.ts`, `stitch.ts`). The rail then lists the changes grouped by file (`file:<path>`,
+`edit:<n>`), and the main pane shows the edit under the cursor: removed and added sentences with the differing words
+marked, one line of context either side. `stitch` is the rules-only stitcher behind one function: adjacent changed
+sentences are one edit, a changed edit gets word marks, a moved paragraph (core's `detectMoves`) is one move. Esc closes the
+review back to the book where it was left. Accept, reject, edit and finish are commands the layer above has yet to handle.
+Every string from a branch (its name, the diff text) passes `clean()` before it is shown.
+
 ## Keys
 
 Keys are data (`keys.ts`), copied from prview's key map and free to drift from it. A row has an id, the states it acts

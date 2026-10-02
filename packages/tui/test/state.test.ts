@@ -47,7 +47,7 @@ test("reduce never mutates the state it is given", () => {
 test("every action type has a case: each applies to the initial state and to a loaded book without throwing", () => {
   const every: Record<ActionType, Action> = {
     "rail.loaded": { type: "rail.loaded", rows: ROWS }, "rail.down": { type: "rail.down" }, "rail.up": { type: "rail.up" },
-    "rail.next_group": { type: "rail.next_group" }, "rail.prev_group": { type: "rail.prev_group" }, "rail.expand": { type: "rail.expand" }, "rail.collapse": { type: "rail.collapse" },
+    "rail.next_group": { type: "rail.next_group" }, "rail.prev_group": { type: "rail.prev_group" }, "rail.expand": { type: "rail.expand" }, "rail.collapse": { type: "rail.collapse" }, "rail.open": { type: "rail.open" },
     "main.loaded": { type: "main.loaded", lines: 3 }, "main.down": { type: "main.down" }, "main.up": { type: "main.up" }, "main.page_down": { type: "main.page_down" }, "main.page_up": { type: "main.page_up" },
     "main.top": { type: "main.top" }, "main.end": { type: "main.end" }, "main.goto": { type: "main.goto", line: 2 }, "main.to_rail": { type: "main.to_rail" },
     "content.show": { type: "content.show", content: { title: "t", body: "b" } }, "content.close": { type: "content.close" }, "content.down": { type: "content.down" }, "content.up": { type: "content.up" },
@@ -362,4 +362,23 @@ test("settings: Esc and the review and prefix actions leave it alone; settings.s
   expect(then(idle, { type: "settings.close" })).toBe(idle);
   const saved = { overrides: { "rail.down": { primary: "n", secondary: "" } }, editor: "hx" };
   expect(then(open, { type: "settings.close", saved }).saved).toEqual(saved);
+});
+
+test("rail.open on a branch row of the book opens that branch as a review; elsewhere it is rail.expand", () => {
+  const rows = [...ROWS, { id: "branches", depth: 0, group: true }, { id: "branch:draft/ch03", depth: 1 }];
+  let s = then(initialState(), { type: "rail.loaded", rows });
+  // On a stage, Enter enters the main pane like →.
+  expect(then(s, { type: "rail.open" }).pane).toBe("main");
+  expect(then(s, { type: "rail.open" }).mode.kind).toBe("book");
+  while (at(s) !== "branch:draft/ch03") s = then(s, { type: "rail.down" });
+  const r = then(s, { type: "rail.open" });
+  expect(r.mode).toEqual({ kind: "review", branch: "draft/ch03" });
+  expect(viewOf(r).rail.rows).toEqual([]);
+  // Esc returns to the book on the same row.
+  const back = then(r, { type: "escape" });
+  expect(back.mode).toEqual({ kind: "book" });
+  expect(at(back)).toBe("branch:draft/ch03");
+  // Inside a review a row that happens to look like a branch row opens nothing.
+  const inside = then(r, { type: "rail.loaded", rows: [{ id: "branch:x", depth: 0 }] }, { type: "rail.open" });
+  expect(inside.mode).toEqual({ kind: "review", branch: "draft/ch03" });
 });

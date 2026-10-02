@@ -18,6 +18,9 @@
 // its own model (`settings`, below) instead of a rail and main pane; the settings logic is settings.ts, and reaches
 // here as whole values (`settings.set`), so this file stays free of imports.
 
+/** The id prefix of a rail row that names a branch waiting for review (`branch:draft/ch03`). */
+export const BRANCH_ROW = "branch:";
+
 export type Place = { kind: "book" } | { kind: "review"; branch: string };
 /** Settings (`\`) is a mode over a place: closing it returns to where it was opened, with that place's own rail and main pane. */
 export type Mode = Place | { kind: "settings"; from: Place };
@@ -98,6 +101,8 @@ export type Action =
   | { type: "rail.down" } | { type: "rail.up" }
   | { type: "rail.next_group" } | { type: "rail.prev_group" }
   | { type: "rail.expand" } | { type: "rail.collapse" }
+  // Enter: on a branch row (`branch:<name>`, a branch waiting for review) opens the review; elsewhere it is → (`rail.expand`)
+  | { type: "rail.open" }
   // ---- the main pane: a document's lines, one sentence each
   | { type: "main.loaded"; lines: number; doc?: string }
   | { type: "main.down" } | { type: "main.up" }
@@ -269,11 +274,15 @@ export function reduce(s: State, a: Action): State {
   switch (a.type) {
     case "rail.loaded": case "rail.down": case "rail.up": case "rail.next_group": case "rail.prev_group": case "rail.collapse":
       return withView({ ...view, rail: reduceRail(view.rail, a) });
-    case "rail.expand": {
-      // On a row that does not fold (a stage, a chapter, a change), → enters the main pane.
+    case "rail.open": case "rail.expand": {
       const row = railRow(view.rail);
+      // A branch row in the book opens that branch as a review; the book keeps its place for when the review closes.
+      if (row && !row.group && row.id.startsWith(BRANCH_ROW)) {
+        return s.mode.kind === "book" ? reduce(s, { type: "review.open", branch: row.id.slice(BRANCH_ROW.length) }) : s;
+      }
+      // On a row that does not fold (a stage, a chapter, a change), → enters the main pane.
       if (row && !row.group) return { ...s, pane: "main", focus: s.focus === "content" ? "content" : "main" };
-      return withView({ ...view, rail: reduceRail(view.rail, a) });
+      return withView({ ...view, rail: reduceRail(view.rail, { type: "rail.expand" }) });
     }
     case "main.loaded": case "main.down": case "main.up": case "main.page_down": case "main.page_up": case "main.top": case "main.end": case "main.goto":
       return withView({ ...view, main: reduceMain(view.main, a) });
