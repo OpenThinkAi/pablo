@@ -61,6 +61,7 @@ import { z } from "zod";
 import { resolve, sep } from "node:path";
 import { checkWork } from "./check";
 import { KNOWN_FORMATS } from "./formats";
+import { migrateLines } from "./migrate";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { findVault, resolveProject } from "./project";
@@ -428,6 +429,25 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     return { body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried }, exitCode: outcome.code };
   }
   return { body: { ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced }, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// migrate (AGT-1533)
+// ---------------------------------------------------------------------------
+
+const MIGRATE_ARGS = z.object({
+  sub: z.enum(["lines"]).describe("The migration to run: `lines` splits chapters to one sentence per line."),
+  project: projectField,
+  "dry-run": z.boolean().optional().default(false).describe("List the chapters that would change; write and commit nothing."),
+});
+
+async function runMigrateVerb(args: z.infer<typeof MIGRATE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+
+  const outcome = migrateLines(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] });
+  if (!outcome.ok) return { body: outcome, exitCode: outcome.code };
+  return { body: outcome, exitCode: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -1041,6 +1061,14 @@ export const VERBS: readonly Verb[] = [
     description: "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps.",
     args: CHECK_ARGS,
     run: runCheckVerb,
+  },
+  {
+    name: "migrate",
+    description:
+      "One-time migrations of a project. `lines` splits chapters/*.md to one sentence per line (frontmatter untouched) and commits exactly those files; idempotent, `dry-run` lists what would change.",
+    args: MIGRATE_ARGS,
+    run: runMigrateVerb,
+    positionalArgs: ["sub"],
   },
   {
     name: "voice",

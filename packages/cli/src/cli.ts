@@ -16,6 +16,7 @@
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runCheck } from "./check";
+import { migrateLines } from "./migrate";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
@@ -43,6 +44,7 @@ const P0_VERBS = [
   "write",
   "save",
   "check",
+  "migrate",
   "mcp",
   "voice",
   "prose",
@@ -84,6 +86,9 @@ function helpText(): string {
     "  pablo status --project <slug> --for \"chapter N\"",
     "                                            {ready, missing[]} for one chapter;",
     "                                            exit 0 if ready, 2 if not",
+    "  pablo migrate lines --project <slug> [--dry-run]",
+    "                                            one-time split of chapters/*.md to one",
+    "                                            sentence per line, committed on its own",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list                         every voice in the vault and the global dir",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
@@ -726,6 +731,39 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return vaultResult.code;
     }
     return runCheck(args, vaultResult.path, projectPath);
+  }
+
+  if (args.verb === "migrate") {
+    const [sub] = args.rest;
+    if (sub !== "lines") {
+      const message = `pablo: migrate: unknown migration "${sub ?? ""}" (expected lines)`;
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    if (projectPath === undefined) {
+      const message = "pablo: migrate lines requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const vaultResult = findVault(cwd);
+    if (!vaultResult.ok) {
+      emit(refusalResult(vaultResult), args.json);
+      return vaultResult.code;
+    }
+    const outcome = migrateLines(vaultResult.path, projectPath, { dryRun: args.dryRun });
+    if (!outcome.ok) {
+      emit({ ok: false, code: outcome.code, message: outcome.message }, args.json);
+      return outcome.code;
+    }
+    if (args.json) {
+      console.log(JSON.stringify(outcome));
+    } else {
+      const verb = outcome.dryRun ? "would change" : "changed";
+      console.log(`pablo: migrate lines: ${verb} ${outcome.changed.length} chapter(s)${outcome.committed ? " (committed)" : ""}`);
+      for (const f of outcome.changed) console.log(`  ${f}`);
+      if (outcome.notice) console.log(outcome.notice);
+    }
+    return EXIT_OK;
   }
 
   if (args.verb === "voice") {

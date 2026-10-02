@@ -36,9 +36,10 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the nine MCP verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the ten MCP verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "check",
+    "migrate",
     "prose",
     "resume",
     "review",
