@@ -15,6 +15,7 @@
 
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { bookStages } from "./book";
 import { runCheck } from "./check";
 import { migrateLines } from "./migrate";
 import { initAdopt, initNovel } from "./init";
@@ -589,11 +590,11 @@ function runVoice(args: ParsedArgs, cwd: string): number {
  * The project the screen opens on: the nearest ancestor of `cwd` (inclusive)
  * with a valid `pablo.json`, or undefined when `cwd` is not inside a project.
  */
-export function bareScreenTarget(cwd: string): { title: string; format: string } | undefined {
+export function bareScreenTarget(cwd: string): { title: string; format: string; dir: string } | undefined {
   let dir = resolve(cwd);
   for (;;) {
     const found = readMarker(dir);
-    if (found.ok) return { title: found.marker.title, format: found.marker.format };
+    if (found.ok) return { title: found.marker.title, format: found.marker.format, dir };
     const parent = dirname(dir);
     if (parent === dir) return undefined;
     dir = parent;
@@ -611,7 +612,9 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     const screen = bareScreenTarget(cwd);
     if (screen !== undefined && process.stdin.isTTY && process.stdout.isTTY) {
       const { runScreen } = await import("@openthink/pablo-tui");
-      return await runScreen(screen);
+      // The book's stages come from the same stage machine `pablo status` reads (AGT-1526).
+      const { dir, ...project } = screen;
+      return await runScreen({ ...project, stages: bookStages(readNovelState(dir)) });
     }
   }
 
