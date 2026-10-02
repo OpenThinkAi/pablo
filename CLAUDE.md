@@ -36,7 +36,8 @@ store.
 
 **No markup, ever.** CriticMarkup and any other inline shorthand were
 eliminated 2026-09-06. A chapter file is plain prose with frontmatter; edits
-are a view (`pablo edit`, a ui-leaf surface), not a notation in the file.
+and revisions live in the terminal screen (the 2026-10-01 screen design; the
+browser editor, `pablo edit`, was retired), not as a notation in the file.
 
 ## Layout
 
