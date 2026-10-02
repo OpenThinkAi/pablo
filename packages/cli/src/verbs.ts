@@ -64,6 +64,7 @@ import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
+import { readTool, searchTool } from "./harness-tools";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
@@ -1050,6 +1051,39 @@ async function runReviseVerb(args: z.infer<typeof REVISE_ARGS>, ctx: VerbContext
 }
 
 // ---------------------------------------------------------------------------
+// read / search (AGT-1554) — the harness's way to find what the work has
+// already established; the logic is `harness-tools.ts`.
+// ---------------------------------------------------------------------------
+
+const READ_ARGS = z.object({
+  project: projectField,
+  path: z
+    .string()
+    .describe(
+      'A file of the work, relative to it: a bible file ("bible/overview.md"), a chapter ("chapters/01-….md", returned joined into paragraphs), an outline, "continuity.md", or a research note ("research/…"). A directory lists its entries.',
+    ),
+});
+
+async function runReadVerb(args: z.infer<typeof READ_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const result = readTool(resolved.projectPath, args.path);
+  return { body: result, exitCode: result.ok ? 0 : result.code };
+}
+
+const SEARCH_ARGS = z.object({
+  project: projectField,
+  phrase: z.string().describe("A name, place, phrase or fact to find, matched case-insensitively across the bible, chapters, outline, continuity and research."),
+});
+
+async function runSearchVerb(args: z.infer<typeof SEARCH_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const result = searchTool(resolved.projectPath, args.phrase);
+  return { body: result, exitCode: result.ok ? 0 : result.code };
+}
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -1139,6 +1173,20 @@ export const VERBS: readonly Verb[] = [
       "Send one located passage of a manuscript to the local model and return a candidate: locate it (by quoted text or a start/end offset pair), assemble the pack with the project's own style and work rules, send once, and return {candidate, span, receipt} — never writes the file.",
     args: REVISE_ARGS,
     run: runReviseVerb,
+  },
+  {
+    name: "read",
+    description: "Read one file of the work: a bible file, chapter (joined into paragraphs), outline, continuity or research note. Refuses any path outside the work.",
+    args: READ_ARGS,
+    run: runReadVerb,
+    positionalArgs: ["path"],
+  },
+  {
+    name: "search",
+    description: "Find a phrase across the work's bible, chapters, outline, continuity and research; returns each match's file, line and sentence.",
+    args: SEARCH_ARGS,
+    run: runSearchVerb,
+    positionalArgs: ["phrase"],
   },
 ];
 

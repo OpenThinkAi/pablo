@@ -30,6 +30,7 @@ import { runProse } from "./prose";
 import { publishWork } from "./publish";
 import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
+import { readTool, searchTool } from "./harness-tools";
 import { runResumeVerb } from "./resume";
 import { runReview } from "./review-verbs";
 import { runSave } from "./save";
@@ -54,6 +55,8 @@ const P0_VERBS = [
   "review",
   "revise",
   "agent",
+  "read",
+  "search",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -842,6 +845,32 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       },
       reviseCtx,
     );
+  }
+
+  if (args.verb === "read" || args.verb === "search") {
+    const argument = args.verb === "read" ? args.rest[0] : args.rest.join(" ");
+    if (projectPath === undefined || !argument) {
+      const message =
+        projectPath === undefined
+          ? `pablo: ${args.verb} requires --project <slug>`
+          : args.verb === "read"
+            ? "pablo: read requires a <path> in the work"
+            : "pablo: search requires a <phrase>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    // The same pure functions the read/search verbs (and so `pablo mcp`) wrap;
+    // `read <path>` and `search <phrase...>` only supply the positional.
+    const result = args.verb === "read" ? readTool(projectPath, argument) : searchTool(projectPath, argument);
+    if (args.json) console.log(JSON.stringify(result));
+    else if (!result.ok) console.error(result.message);
+    else if ("text" in result) console.log(result.text);
+    else if ("entries" in result) console.log(result.entries.join("\n"));
+    else {
+      for (const match of result.matches) console.log(`${match.file}:${match.line}: ${match.sentence}`);
+      if (result.truncated) console.log("(more matches; narrow the phrase)");
+    }
+    return result.ok ? EXIT_OK : result.code;
   }
 
   const message = `pablo: "${args.verb}" not implemented yet`;
