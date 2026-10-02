@@ -453,8 +453,13 @@ test("the branches a tool result names are the session's branches: each once, in
     ...made("propose", "c", "Staged beats on plan/2026-10-01-ab12cd."),
     ...made("write", "d", "refused: could not make draft/ch09", true),
     ...made("read", "e", "edit/ch02 and reader/ch01 are not compose's"),
+    ...made("read", "f", "plan/a/../../etc/passwd and draft//x and draft/x..y and draft/ok.lock"),
   );
-  expect(s.compose.branches).toEqual(["plan/2026-10-01-ab12cd", "draft/ch03"]);
+  expect(s.compose.branches).toEqual(["plan/2026-10-01-ab12cd", "draft/ch03", "plan/a"]);
+  // The list is bounded.
+  const many = then(typed(initialState(), "go"), ...made("w", "m", Array.from({ length: 80 }, (_, i) => `draft/ch${i}`).join(" ")));
+  expect(many.compose.branches).toHaveLength(50);
+  expect(many.compose.branches.at(-1)).toBe("draft/ch79");
 });
 
 test("Tab picks a branch, Enter opens it in review, Esc returns to compose and then to where compose was opened from", () => {

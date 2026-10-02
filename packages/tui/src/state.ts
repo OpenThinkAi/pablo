@@ -422,8 +422,11 @@ export const openQuestion = (c: Compose): Extract<ComposeEntry, { kind: "questio
   c.entries.find((e): e is Extract<ComposeEntry, { kind: "question" }> => e.kind === "question" && e.answer === undefined);
 
 /** The branches a tool's result names: the kinds compose makes (`plan/`, `draft/`, `revise/`), each once, in order. */
-export const BRANCH_NAME = /\b(?:plan|draft|revise)\/[A-Za-z0-9][A-Za-z0-9._/-]*/g;
-const branchesIn = (text: string): string[] => [...text.matchAll(BRANCH_NAME)].map((m) => m[0].replace(/[._/-]+$/, ""));
+export const BRANCH_NAME = /\b(?:plan|draft|revise)(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+/g;
+/** Most branches kept; the result text is the model's, so the list is bounded and a name is a plain git ref (no `..`, no empty or dotted segment). */
+const MAX_BRANCHES = 50;
+const branchesIn = (text: string): string[] =>
+  [...text.matchAll(BRANCH_NAME)].map((m) => m[0].replace(/[._-]+$/, "")).filter((b) => !b.includes("..") && !b.split("/").some((seg) => seg.endsWith(".lock")));
 
 /** A session event applied to the conversation; a new line of it brings the view back to the newest. */
 function reduceEvent(c: Compose, e: ComposeEvent, at?: number): Compose {
@@ -437,7 +440,7 @@ function reduceEvent(c: Compose, e: ComposeEvent, at?: number): Compose {
     }
     case "tool_result": {
       const seen = e.isError ? [] : branchesIn(e.text).filter((b, i, all) => all.indexOf(b) === i && !c.branches.includes(b));
-      return { ...c, branches: [...c.branches, ...seen], activity: "thinking", entries: c.entries.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, result: { text: e.text, isError: e.isError }, ...(at === undefined ? {} : { endedAt: at }) } : x)) };
+      return { ...c, branches: [...c.branches, ...seen].slice(-MAX_BRANCHES), activity: "thinking", entries: c.entries.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, result: { text: e.text, isError: e.isError }, ...(at === undefined ? {} : { endedAt: at }) } : x)) };
     }
     case "result": {
       const errors = e.ok ? [] : [{ kind: "error" as const, text: e.errors.length ? e.errors.join("; ") : "the session ended without finishing" }];
