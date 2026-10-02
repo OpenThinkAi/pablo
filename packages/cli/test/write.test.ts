@@ -132,3 +132,15 @@ test("write --project no-marker refuses (exit 2) before ever looking at --chapte
 
   rmSync(vault, { recursive: true, force: true });
 });
+
+test("write --dry-run --direction shows the direction slice in the pack (AGT-1562)", () => {
+  const vault = tempVault();
+  const { stdout, exitCode } = runCli(
+    ["write", "--project", "ice-house", "--chapter", "2", "--dry-run", "--json", "--direction", "slower, stay on Cora"],
+    { PABLO_VAULT: vault },
+  );
+  expect(exitCode).toBe(0);
+  const names = (JSON.parse(stdout).slices as { name: string }[]).map((s) => s.name);
+  expect(names).toContain("direction");
+  rmSync(vault, { recursive: true, force: true });
+});

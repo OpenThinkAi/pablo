@@ -188,6 +188,8 @@ interface ParsedArgs {
   readonly temperature: string | undefined;
   /** `write --seed N`: sampling seed; validated by `runWrite`. */
   readonly seed: string | undefined;
+  /** `write --direction "<text>"` (AGT-1562): a steer for the chapter; its own pack slice. */
+  readonly direction: string | undefined;
   /** `voice new --global`: scaffold under the global voices directory instead of the vault. */
   readonly global: boolean;
   /** `voice flag --section <heading>`: which `## ` section to append the flagged line under (default "Flagged"). */
@@ -270,6 +272,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     force: values["force"] === true,
     temperature: typeof values["temperature"] === "string" ? values["temperature"] : undefined,
     seed: typeof values["seed"] === "string" ? values["seed"] : undefined,
+    direction: typeof values["direction"] === "string" ? values["direction"] : undefined,
     global: values["global"] === true,
     section: typeof values["section"] === "string" ? values["section"] : undefined,
     title: typeof values["title"] === "string" ? values["title"] : undefined,
