@@ -56,6 +56,8 @@ export interface BuildChapterPackOptions {
   readonly scenes?: number | undefined;
   /** The work's `pablo.json`, for `neverSend`. */
   readonly marker: Marker;
+  /** A steer for this chapter beyond the beat row (AGT-1562): its own `direction` slice in the pack. */
+  readonly direction?: string | undefined;
 }
 
 /**
@@ -82,7 +84,11 @@ export function buildChapterPack(
     castEndsAt: CAST_ENDS_AT,
   });
 
-  const filtered: DraftingInputs = { ...inputs, style: filterVoice(inputs.style) };
+  const filtered: DraftingInputs = {
+    ...inputs,
+    style: filterVoice(inputs.style),
+    ...(options.direction === undefined ? {} : { direction: options.direction }),
+  };
 
   const pack = assemblePack("drafting", filtered);
 

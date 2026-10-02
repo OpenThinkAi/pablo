@@ -132,3 +132,18 @@ test("--words and --scenes pass through to the pack's word target and minimum sc
 
   rmSync(vault, { recursive: true, force: true });
 });
+
+test("a direction becomes its own slice right after the chapter; none, no slice (AGT-1562)", () => {
+  const vault = tempVault();
+  const work = join(vault, "novels", "ice-house");
+  const marker = markerFor(work);
+  const plain = buildChapterPack(vault, work, 2, { marker });
+  const steered = buildChapterPack(vault, work, 2, { marker, direction: "slower, stay on Cora" });
+  if (!plain.ok || !steered.ok) throw new Error("pack refused");
+  expect(plain.pack.slices.map((s) => s.name)).not.toContain("direction");
+  const names = steered.pack.slices.map((s) => s.name);
+  expect(names.indexOf("direction")).toBe(names.indexOf("chapter") + 1);
+  expect(steered.pack.prompt).toContain("slower, stay on Cora");
+  expect(steered.pack.hash).not.toBe(plain.pack.hash);
+  rmSync(vault, { recursive: true, force: true });
+});

@@ -558,3 +558,36 @@ test("write saves one sentence per line, paragraphs blank-line separated, and th
   expect(prompts).toHaveLength(1);
   rmSync(vault, { recursive: true, force: true });
 });
+
+test("write --direction puts a direction slice in the pack and records direction: in the frontmatter (AGT-1562)", async () => {
+  const { vault, project } = tempVault();
+  const requests: CompletionRequest[] = [];
+  const direction = "slower, stay on Cora: no new scenes";
+  const code = await runWrite(
+    { chapter: "2", words: undefined, scenes: undefined, dryRun: false, json: true, force: false, direction },
+    vault,
+    project,
+    { adapter: fakeAdapter({ chunks: RAW_CHUNKS, onRequest: (r) => requests.push(r) }), env: ritualEnv(vault), stderr: progressSink().sink },
+  );
+  expect(code).toBe(0);
+  expect(requests[0]?.prompt).toContain("# Direction for this chapter");
+  expect(requests[0]?.prompt).toContain(direction);
+  const written = readFileSync(draftChapterFile(vault), "utf8");
+  expect(written).toContain(`direction: "${direction}"`);
+  // On the draft branch, not main.
+  expect(git(vault, "branch", "--list", "draft/ch02")).toContain("draft/ch02");
+});
+
+test("write without a direction adds no slice and no frontmatter key (AGT-1562)", async () => {
+  const { vault, project } = tempVault();
+  const requests: CompletionRequest[] = [];
+  const code = await runWrite(
+    { chapter: "2", words: undefined, scenes: undefined, dryRun: false, json: true, force: false, direction: "   " },
+    vault,
+    project,
+    { adapter: fakeAdapter({ chunks: RAW_CHUNKS, onRequest: (r) => requests.push(r) }), env: ritualEnv(vault), stderr: progressSink().sink },
+  );
+  expect(code).toBe(0);
+  expect(requests[0]?.prompt).not.toContain("Direction for this chapter");
+  expect(readFileSync(draftChapterFile(vault), "utf8")).not.toContain("direction:");
+});

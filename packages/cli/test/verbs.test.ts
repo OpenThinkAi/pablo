@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deriveCliOptions, parseForChapter, VERBS } from "../src/verbs";
+import { deriveCliOptions, draftChapterBody, parseForChapter, VERBS } from "../src/verbs";
 import type { VerbContext } from "../src/verbs";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
@@ -36,9 +36,10 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the fifteen verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the sixteen verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "check",
+    "draft_chapter",
     "merge",
     "migrate",
     "prose",
@@ -152,6 +153,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     end: { type: "string" }, // AGT-1264: revise --end
     target: { type: "string" }, // AGT-1534: publish --target
     date: { type: "string" }, // AGT-1555: timeline --date
+    direction: { type: "string" }, // AGT-1562: write --direction
   });
 });
 
@@ -907,4 +909,41 @@ test("merge is a verb with no MCP tool, and requires project and branch", () => 
   expect(merge.mcpTools).toEqual([]);
   expect(merge.args.safeParse({ project: "ice-house" }).success).toBe(false);
   expect(merge.args.safeParse({ project: "ice-house", branch: "draft/ch02" }).success).toBe(true);
+});
+
+test("draft_chapter requires a chapter, takes an optional direction, and refuses an unready chapter (AGT-1562)", async () => {
+  const tool = verb("draft_chapter");
+  expect(tool.args.safeParse({ project: "ice-house" }).success).toBe(false);
+  expect(tool.args.safeParse({ project: "ice-house", chapter: 2 }).success).toBe(true);
+  expect(tool.args.safeParse({ project: "ice-house", chapter: 2, direction: "slower, stay on Cora" }).success).toBe(true);
+  const vault = tempVault();
+  try {
+    const refused = await tool.run({ project: "ice-house", chapter: 9, direction: "slower" }, ctxFor(vault));
+    expect(refused.exitCode).toBe(2);
+    expect((refused.body as { ok: boolean }).ok).toBe(false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("draftChapterBody keeps the branch, path and receipt and drops prose-bearing fields (AGT-1562)", () => {
+  const body = draftChapterBody({
+    ok: true,
+    path: "chapters/02-black-ice.md",
+    branch: "draft/ch02",
+    worktree: "/tmp/w",
+    commit: "abc",
+    receipt: { prompt_hash: "h", words: 12 },
+    check: [{ path: "chapters/02-black-ice.md", line: 3, rule: "em-dash", excerpt: "the storm came up", detail: "x" }],
+    rituals: [],
+    piece: "p1",
+    text: "SHOULD NOT SURVIVE",
+  }) as Record<string, unknown>;
+  expect(body["branch"]).toBe("draft/ch02");
+  expect(body["path"]).toBe("chapters/02-black-ice.md");
+  expect(body["receipt"]).toEqual({ prompt_hash: "h", words: 12 });
+  expect(body["check"]).toEqual([{ path: "chapters/02-black-ice.md", line: 3, rule: "em-dash" }]);
+  expect(JSON.stringify(body)).not.toContain("SHOULD NOT SURVIVE");
+  expect(JSON.stringify(body)).not.toContain("the storm came up");
+  expect(draftChapterBody({ ok: false, code: 2, message: "no" })).toEqual({ ok: false, code: 2, message: "no" });
 });
