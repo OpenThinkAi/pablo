@@ -36,7 +36,7 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the thirteen MCP verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the fourteen MCP verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "check",
     "migrate",
@@ -49,6 +49,7 @@ test("VERBS exposes exactly the thirteen MCP verbs, each project-required verb r
     "save",
     "search",
     "status",
+    "timeline",
     "voice",
     "write",
   ]);
@@ -149,6 +150,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     start: { type: "string" }, // AGT-1264: revise --start (revise reuses `file`, already pinned above)
     end: { type: "string" }, // AGT-1264: revise --end
     target: { type: "string" }, // AGT-1534: publish --target
+    date: { type: "string" }, // AGT-1555: timeline --date
   });
 });
 
@@ -864,4 +866,36 @@ test("voice_exemplar mcpTool on a fresh voice keeps a piece verbatim", async () 
 
   rmSync(vault, { recursive: true, force: true });
   rmSync(configHome, { recursive: true, force: true });
+});
+
+test("timeline(date) returns rows at or before the date and marks later rows as not existing yet (AGT-1555)", async () => {
+  const vault = tempVault();
+  try {
+    const result = await verb("timeline").run({ project: "ice-house", date: "Winter 1901" }, ctxFor(vault));
+    const body = result.body as { exists: string[]; notYet: string[]; text: string; source: string };
+
+    expect(result.exitCode).toBe(0);
+    expect(body.source).toBe("bible/timeline.md");
+    expect(body.exists.some((row) => row.startsWith("- 1888:"))).toBe(true);
+    expect(body.exists.some((row) => row.startsWith("- 1901:"))).toBe(true);
+    expect(body.notYet.length).toBeGreaterThan(0);
+    expect(body.notYet.every((row) => Number(/^- (\d{4})/.exec(row)?.[1]) > 1901)).toBe(true);
+    expect(body.text).toContain("Does not exist yet at Winter 1901");
+  } finally {
+    rmSync(dirname(vault), { recursive: true, force: true });
+  }
+});
+
+test("timeline refuses a work with no bible/timeline.md, and an unknown project (AGT-1555)", async () => {
+  const vault = tempVault();
+  try {
+    rmSync(join(vault, "novels", "ice-house", "bible", "timeline.md"));
+    const missing = await verb("timeline").run({ project: "ice-house", date: "1901" }, ctxFor(vault));
+    expect(missing.exitCode).toBe(2);
+
+    const unknown = await verb("timeline").run({ project: "nope", date: "1901" }, ctxFor(vault));
+    expect(unknown.exitCode).not.toBe(0);
+  } finally {
+    rmSync(dirname(vault), { recursive: true, force: true });
+  }
 });
