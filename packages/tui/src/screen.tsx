@@ -21,6 +21,10 @@ export type WriteResult =
   | { readonly ok: false; readonly message: string; readonly missing: readonly string[] };
 export type Writer = (chapter: number, progress: (line: string) => void) => Promise<WriteResult>;
 
+/** What `a v` came to: lines saying where the sentences were written, or why they were not. */
+export type VoiceResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
+export type Voicer = (kind: "flag" | "exemplar", sentences: readonly string[]) => Promise<VoiceResult>;
+
 /** What a review's rejected edits come to as lines: removed ones by old line number, added ones by new (the stitcher's `removedLines` / `addedLines`). */
 export interface Rejected { readonly removed: readonly LineRef[]; readonly added: readonly LineRef[] }
 /** What finishing a review came to: lines for the content area (the merge and each after-write step), or why it did not finish. */
@@ -50,6 +54,8 @@ export interface ScreenOptions {
   readonly writer?: Writer;
   /** `a r`: revises the selected sentences and commits the taken candidate on a `revise/` branch (the CLI's `screenReviser`, passed in; AGT-1544). */
   readonly reviser?: Reviser;
+  /** `a v`: flags the selected sentences in the voice, or keeps them as an exemplar (the CLI's `screenVoicer`, passed in from cli.ts; AGT-1547). */
+  readonly voicer?: Voicer;
   /** The harness session behind the compose view; the cli builds it (the tui does not depend on the Agent SDK). */
   readonly composer?: Composer;
   /** `s` in a review: merges the accepted changes into `main`, runs the after-write steps and deletes the branch (the CLI's `screenFinisher`, passed in; AGT-1540). */
@@ -92,7 +98,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
         stdout.write(ENTER_ALT);
       }
     });
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

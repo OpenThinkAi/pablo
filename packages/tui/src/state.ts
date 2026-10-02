@@ -184,6 +184,8 @@ export interface State {
   readonly reviseSeq: number;
   /** Branches this session's writes made, so the book lists them as waiting for review. */
   readonly written: readonly string[];
+  /** `a v`: the selected sentences offered to the voice (flag or exemplar) while the offer is up; null otherwise. */
+  readonly voice: readonly string[] | null;
   /** The branch whose review is being finished (`s`) while the merge and the after-write steps run; one at a time. */
   readonly finishing: string | null;
   /** Branches this session finished (merged or discarded): the book no longer lists them, though its `branches` prop still does. */
@@ -260,6 +262,12 @@ export type Action =
   | { type: "review.mark"; mark: Mark }
   // `s`: finish the review (merge what was accepted, run the after-write steps); done closes the review with the
   // result shown in the content area, failed stays in the review with the reason shown
+  // `a v`: offer the selected sentences to the voice (none selected: a hint instead); `voice.start` once f or e is
+  // pressed, then done (where it was written) or failed (why not)
+  | { type: "voice.offer"; sentences: readonly string[] }
+  | { type: "voice.start"; kind: "flag" | "exemplar" }
+  | { type: "voice.done"; lines: readonly string[] }
+  | { type: "voice.failed"; message: string }
   | { type: "finish.start"; branch: string }
   | { type: "finish.done"; branch: string; lines: readonly string[] }
   | { type: "finish.failed"; message: string }
@@ -296,6 +304,7 @@ export type Dispatch = (action: Action) => void;
 
 /** A write streams a progress line every couple of seconds; the content area keeps the latest few, so the newest is always in view. */
 const PROGRESS_LINES = 5;
+const voiceContent = (title: string, body: string): Content => ({ title, body, kind: "voice" });
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
@@ -326,7 +335,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, revise: null, reviseSeq: 0, written: [], finishing: null, finished: [], editing: null, editSeq: 0, editBranch: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, revise: null, reviseSeq: 0, written: [], voice: null, finishing: null, finished: [], editing: null, editSeq: 0, editBranch: null,
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -545,7 +554,7 @@ export function reduce(s: State, a: Action): State {
       return { ...s, pane: "rail", focus: s.focus === "content" ? "content" : "rail" };
 
     case "content.show": return { ...s, content: a.content, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
-    case "content.close": return { ...s, content: null, full: false, focus: s.focus === "content" ? s.pane : s.focus, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "content.close": return { ...s, voice: null, content: null, full: false, focus: s.focus === "content" ? s.pane : s.focus, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "content.down": return { ...s, contentScroll: scrollBy(s.contentScroll, 1) };
     case "content.up": return { ...s, contentScroll: scrollBy(s.contentScroll, -1) };
     case "content.page_down": return { ...s, contentScroll: scrollBy(s.contentScroll, pageStep(s.contentScroll.visible)) };
@@ -640,6 +649,18 @@ export function reduce(s: State, a: Action): State {
       const { [row.id]: was, ...rest } = s.marks;
       return { ...s, marks: was === a.mark ? rest : { ...rest, [row.id]: a.mark } };
     }
+    case "voice.offer": {
+      const reset = { contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      if (a.sentences.length === 0) return { ...s, ...reset, voice: null, content: voiceContent("Voice", "Select the sentences first (⇧↓ / ⇧↑), then a v.") };
+      const body = [...a.sentences.map((t) => `“${t}”`), "", "f  flag it: a rejected tell, written to the voice's Flagged lines", "e  keep it: an exemplar of the voice", "Esc  cancel"].join("\n");
+      return { ...s, ...reset, voice: a.sentences, content: voiceContent(a.sentences.length === 1 ? "Add the sentence to the voice" : `Add the ${a.sentences.length} sentences to the voice`, body) };
+    }
+    case "voice.start":
+      return s.voice === null ? s : { ...s, voice: null, content: voiceContent(a.kind === "flag" ? "Flagging" : "Keeping as an exemplar", "writing…") };
+    case "voice.done":
+      return { ...s, voice: null, content: voiceContent("Added to the voice", a.lines.join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "voice.failed":
+      return { ...s, voice: null, content: voiceContent("Not added to the voice", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "finish.start":
       return s.finishing !== null || s.mode.kind !== "review" ? s : { ...s, finishing: a.branch, content: writeContent(`Finishing ${a.branch}`, "merging…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "finish.done": {
@@ -714,6 +735,7 @@ export function reduce(s: State, a: Action): State {
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });
       if (s.focus === "content") return reduce(s, { type: "focus.back" });
+      if (s.voice) return reduce(s, { type: "content.close" }); // a voice offer goes before the selection it was made on
       if (view.main.selection) return reduce(s, { type: "select.clear" });
       if (s.content) return reduce(s, { type: "content.close" });
       if (s.mode.kind === "review") return reduce(s, { type: "review.close" });

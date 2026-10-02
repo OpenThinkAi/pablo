@@ -28,7 +28,7 @@ import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow, type ReviewComment } from "./review";
 import type { EditSession, Finisher, Rejected } from "./screen";
-import type { Writer } from "./screen";
+import type { Voicer, Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
 import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Mark, type RailRow, type Revise, type State } from "./state";
@@ -62,6 +62,8 @@ export interface AppProps {
   readonly writer?: Writer;
   /** `a r`: revises the selected sentences and commits the taken candidate on a `revise/` branch (the CLI's `screenReviser`, passed in). */
   readonly reviser?: Reviser;
+  /** `a v`: writes the selected sentences into the voice as a flagged line or an exemplar (the CLI's `screenVoicer`, passed in). */
+  readonly voicer?: Voicer;
   /** `s` in a review: merges the accepted changes and runs the after-write steps (the CLI's `screenFinisher`, passed in). */
   readonly finisher?: Finisher;
   /** The critic's comments on a branch (the `critique` tool's survivors): review mode shows each under the edit it is on. */
@@ -91,7 +93,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, finisher, editSession, composer }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, voicer, finisher, editSession, composer }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -126,6 +128,8 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       return;
     }
     if (!token) return;
+    // With the voice offer up (`a v`), f flags and e keeps; every other key goes its way and Esc withdraws the offer.
+    if (state.voice !== null && state.content?.kind === "voice" && (token === "f" || token === "e")) return startVoice(token === "f" ? "flag" : "exemplar");
     for (const action of resolve(keyStateOf(state), state.pending, token, keymap)) {
       if (action.type !== "command") dispatch(action);
       else if (action.id === "quit") exit();
@@ -138,6 +142,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       }
       else if (action.id === "ai.write") startWrite();
       else if (action.id === "ai.revise") openRevise(selectedOf(viewOf(state).main, pane.sentences));
+      else if (action.id === "ai.voice") dispatch({ type: "voice.offer", sentences: selectedOf(viewOf(state).main, pane.sentences)?.sentences ?? [] });
       else if (action.id === "review.finish") startFinish();
       else if (action.id === "view.editor") startEdit();
       else if (action.id === "view.save") startSave();
@@ -204,6 +209,17 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     reviser.take({ ...requestOf(r), candidate: r.candidate, offered: r.offered, receipt: r.receipt, model: r.model }).then(
       (res) => dispatch(res.ok ? { type: "revise.taken", id: r.id, branch: res.branch, lines: res.lines } : { type: "revise.failed", id: r.id, message: res.message }),
       (e: unknown) => dispatch({ type: "revise.failed", id: r.id, message: e instanceof Error ? e.message : String(e) }),
+    );
+  }
+
+  // `f` / `e` on the voice offer: the voicer writes the selected sentences and says where.
+  function startVoice(kind: "flag" | "exemplar") {
+    const sentences = state.voice ?? [];
+    if (!voicer) return void dispatch({ type: "voice.failed", message: "The voice is not available here." });
+    dispatch({ type: "voice.start", kind });
+    voicer(kind, sentences).then(
+      (r) => dispatch(r.ok ? { type: "voice.done", lines: r.lines } : { type: "voice.failed", message: r.message }),
+      (e: unknown) => dispatch({ type: "voice.failed", message: e instanceof Error ? e.message : String(e) }),
     );
   }
 
