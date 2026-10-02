@@ -8,6 +8,8 @@ import { initialState } from "../src/state";
 
 afterEach(() => cleanup());
 
+/** A frame as plain text: Ink colours the dim labels. */
+const plain = (frame: string | undefined) => (frame ?? "").replace(/\x1b\[[0-9;]*m/g, "");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("the screen shows the project's title and format with the quit key", () => {
@@ -101,4 +103,56 @@ test("control characters in the title never reach the screen as escapes", () => 
   const app = render(<App title={"Ice\x1b]0;pwned\x07 House"} format="novel" size={{ cols: 80, rows: 24 }} />);
   expect(app.lastFrame()).not.toContain("\x1b]");
   expect(clean("a\x1b[2Jb")).toBe("ab");
+});
+
+const ROWS = [
+  { id: "premise", depth: 0 }, { id: "beats", depth: 0 }, { id: "chapters", depth: 0, group: true }, { id: "ch1", depth: 1 }, { id: "ch2", depth: 1 },
+];
+const book = { title: "Ice House", format: "novel", drafted: 1, total: 2, branch: "draft/ch02", comments: { continuity: 3 }, rows: ROWS, labels: { ch1: "1 The well" }, mainTitle: "chapters/01-the-well.md", lines: ["The well had been dry since June.", "She did not look up."] };
+
+test("the three parts: status area, rail and main pane, content area beside the key panel", async () => {
+  const app = render(<App {...book} size={{ cols: 120, rows: 32 }} />);
+  await sleep(30);
+  const frame = plain(app.lastFrame());
+  for (const want of ["Ice House", "novel", "ch 1 of 2 drafted", "branch draft/ch02", "▲ 3 continuity", "BOOK", "premise", "▾ chapters", "1 The well", "chapters/01-the-well.md", "The well had been dry", "CONTENT"]) {
+    expect(frame).toContain(want);
+  }
+  expect(frame.split("\n").length).toBeLessThanOrEqual(32);
+});
+
+test("resizing relayouts without a restart", async () => {
+  const app = render(<App {...book} size={{ cols: 120, rows: 32 }} />);
+  await sleep(30);
+  expect(app.lastFrame()).toContain("▾ chapters");
+  app.rerender(<App {...book} size={{ cols: 80, rows: 24 }} />);
+  await sleep(30);
+  const small = plain(app.lastFrame());
+  expect(small).toContain("The well had been dry");
+  expect(small).toContain("q quit");
+  expect(small.split("\n").length).toBeLessThanOrEqual(24);
+  app.rerender(<App {...book} size={{ cols: 40, rows: 10 }} />);
+  await sleep(30);
+  expect(app.lastFrame()).toContain("too small");
+  app.rerender(<App {...book} size={{ cols: 120, rows: 32 }} />);
+  await sleep(30);
+  expect(app.lastFrame()).toContain("▾ chapters");
+});
+
+test("at under 100 columns the rail is a narrow strip", async () => {
+  const app = render(<App {...book} size={{ cols: 80, rows: 24 }} />);
+  await sleep(30);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("BK");
+  expect(frame).not.toContain("BOOK");
+});
+
+test("the arrows move the rail's cursor through the loaded rows", async () => {
+  const app = render(<App {...book} size={{ cols: 120, rows: 32 }} />);
+  await sleep(30);
+  app.stdin.write("\x1b[B\x1b[B");
+  await sleep(30);
+  // The cursor is on `chapters`; → steps into it, → again enters the main pane.
+  app.stdin.write("\x1b[C\x1b[C\x1b[C");
+  await sleep(30);
+  expect(app.lastFrame()).toContain("book · main");
 });
