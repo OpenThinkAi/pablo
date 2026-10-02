@@ -54,6 +54,10 @@ packages/tui    @openthink/pablo-tui — the Ink 7 / React 19 screen, a third
                 front end on `verbs.ts` beside the CLI and MCP. Terminal and
                 React dependencies live here, never in core. Resize and
                 sanitising code is copied from prview, not shared with it.
+                Where the author is and what is open is a pure state model
+                (`src/state.ts`, no Ink or React); the Ink layer reads it and
+                dispatches actions, and `test/boundary.test.ts` holds it to
+                that. `packages/tui/README.md` says how to add a mode or action.
 packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 dispatch, `--project` resolution, and (later) `pablo mcp`.
                 Any new dependency the CLI needs goes here; core stays
