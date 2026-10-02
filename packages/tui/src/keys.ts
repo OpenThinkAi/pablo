@@ -85,8 +85,8 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "content.back", states: CONTENT, key: "tab", label: "back", description: "Move focus back out of the content area, to the pane where the cursor is.", do: { type: "focus.back" }, fixed: true },
 
   // ---- in a review: each change in the rail is accepted, rejected or edited; finishing merges the branch
-  { id: "review.accept", states: OUTSIDE, needs: "review", key: "y", label: "accept", description: "Accept the change under the cursor.", do: cmd("review.accept") },
-  { id: "review.reject", states: OUTSIDE, needs: "review", key: "n", label: "reject", description: "Reject the change under the cursor.", do: cmd("review.reject") },
+  { id: "review.accept", states: OUTSIDE, needs: "review", key: "y", label: "accept", description: "Accept the change under the cursor; again to clear it.", do: { type: "review.mark", mark: "accepted" } },
+  { id: "review.reject", states: OUTSIDE, needs: "review", key: "n", label: "reject", description: "Reject the change under the cursor; again to clear it.", do: { type: "review.mark", mark: "rejected" } },
   { id: "review.edit", states: OUTSIDE, needs: "review", key: "e", label: "edit", description: "Edit the change under the cursor.", do: cmd("review.edit") },
   { id: "review.finish", states: OUTSIDE, needs: "review", key: "s", label: "finish", description: "Finish the review: merge what was accepted.", do: cmd("review.finish") },
 

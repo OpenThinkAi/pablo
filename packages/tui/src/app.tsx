@@ -26,7 +26,7 @@ import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow } from "./review";
 import type { Writer } from "./screen";
-import { initialState, pendingText, placeOf, railRow, reduce, shownRows, viewOf, type RailRow, type State } from "./state";
+import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, shownRows, viewOf, type Mark, type RailRow, type State } from "./state";
 
 export interface AppProps {
   /** The project's marker fields the status area shows. */
@@ -177,7 +177,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const where = `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}` : "book"} · ${state.focus}`;
   const pending = pendingText(state.pending);
   const shownComments = hits.length ? { ...comments, check: hits.length } : comments;
-  const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments: shownComments }), size.cols - 4);
+  const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments: shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}) }), size.cols - 4);
   return (
     <Box flexDirection="column" width={size.cols} height={size.rows}>
       <Box flexDirection="column" borderStyle="single" paddingX={1} height={4}>
@@ -194,7 +194,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       </Box>
       {layout.full ? null : (
         <Box height={layout.middleH}>
-          {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} active={state.focus === "rail"} />}
+          {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} marks={state.marks} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
           <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />
         </Box>
@@ -212,14 +212,16 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
 
 type ViewT = ReturnType<typeof viewOf>;
 
-function Rail({ layout, view, labels, title, active }: { layout: Layout; view: ViewT; labels: Readonly<Record<string, string>>; title: string; active: boolean }) {
+function Rail({ layout, view, labels, title, marks, active }: { layout: Layout; view: ViewT; labels: Readonly<Record<string, string>>; title: string; marks: Readonly<Record<string, Mark>>; active: boolean }) {
   const shown = shownRows(view.rail).slice(view.rail.scroll, view.rail.scroll + layout.railRows);
   return (
     <Box flexDirection="column" width={layout.railW} height={layout.middleH}>
       <Text dimColor wrap="truncate">{layout.narrow ? ` ${title === "BOOK" ? "BK" : "CH"}` : ` ${title}`}</Text>
       {shown.map(({ row, index }) => {
         const label = clean(labels[row.id] ?? row.id);
-        const fold = row.group ? (view.rail.collapsed.has(row.id) ? "▸ " : "▾ ") : "  ";
+        // A change's decision stands where a group's fold mark does: ✓ accepted, ✗ rejected, blank while pending.
+        const mark = marks[row.id];
+        const fold = row.group ? (view.rail.collapsed.has(row.id) ? "▸ " : "▾ ") : mark === "accepted" ? "✓ " : mark === "rejected" ? "✗ " : "  ";
         const text = layout.narrow ? ` ${label}` : ` ${"  ".repeat(row.depth)}${fold}${label}`;
         const at = index === view.rail.cursor;
         return <Text key={row.id} wrap="truncate" inverse={at && active} bold={at}>{fit(text, layout.railW)}</Text>;

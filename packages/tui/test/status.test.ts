@@ -22,3 +22,9 @@ test("a narrow line drops whole fields in DROP_ORDER and keeps the progress", ()
   expect(DROP_ORDER).not.toContain("progress");
   expect(fieldWidth({ key: "branch", label: "branch", value: "main" })).toBe(11);
 });
+
+test("a review adds its counts as a field", () => {
+  const f = statusFields({ format: "novel", drafted: 1, total: 2, branch: "draft/ch01", comments: {}, review: { accepted: 2, rejected: 1, pending: 4 } });
+  expect(f.find((x) => x.key === "review")?.value).toBe("2 accepted · 1 rejected · 4 pending");
+  expect(statusFields({ format: "novel", drafted: 1, total: 2, branch: "main", comments: {} }).some((x) => x.key === "review")).toBe(false);
+});

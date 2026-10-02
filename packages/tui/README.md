@@ -103,7 +103,9 @@ only parses and lays out (`review.ts`, `stitch.ts`). The rail then lists the cha
 `edit:<n>`), and the main pane shows the edit under the cursor: removed and added sentences with the differing words
 marked, one line of context either side. `stitch` is the rules-only stitcher behind one function: adjacent changed
 sentences are one edit, a changed edit gets word marks, a moved paragraph (core's `detectMoves`) is one move. Esc closes the
-review back to the book where it was left. Accept, reject, edit and finish are commands the layer above has yet to handle.
+review back to the book where it was left. `y` accepts and `n` rejects the change under the rail's cursor (`review.mark`, a model action: `state.marks`, by change id, fresh on each
+open); the same key again clears the mark, the other one changes it. The rail shows ✓ or ✗ before a decided change and the status area
+counts accepted, rejected and pending (`reviewCounts`). Edit and finish are commands the layer above has yet to handle.
 Every string from a branch (its name, the diff text) passes `clean()` before it is shown.
 
 ## Writing from the screen

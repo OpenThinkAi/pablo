@@ -132,3 +132,21 @@ test("a branch name is cleaned wherever it is shown; an empty diff says so", asy
   expect(raw).not.toContain("\x1b]0;");
   expect(plain(raw)).toContain("No changes against main.");
 });
+
+test("y and n mark the change under the cursor; the rail and the status counts show it; pressing again changes it", async () => {
+  const app = mount();
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER, DOWN]) { app.stdin.write(k); await sleep(30); } // into the review, onto edit 0
+  let frame = plain(app.lastFrame());
+  expect(frame).toContain("0 accepted · 0 rejected · 2 pending");
+  app.stdin.write("y"); await sleep(30);
+  frame = plain(app.lastFrame());
+  expect(frame).toMatch(/✓ ~ She never looked up/);
+  expect(frame).toContain("1 accepted · 0 rejected · 1 pending");
+  app.stdin.write("n"); await sleep(30);
+  frame = plain(app.lastFrame());
+  expect(frame).toMatch(/✗ ~ She never looked up/);
+  expect(frame).toContain("0 accepted · 1 rejected · 1 pending");
+  app.stdin.write("n"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("0 accepted · 0 rejected · 2 pending");
+});
