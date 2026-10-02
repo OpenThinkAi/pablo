@@ -186,6 +186,14 @@ test("the rail's scroll follows the cursor among the shown rows once measured", 
 
 // ---------------------------------------------------------------- the main pane
 
+test("main.loaded with a document id: a different document starts at its top, the same one keeps the line", () => {
+  const s = after({ type: "main.loaded", lines: 20, doc: "ch1" }, { type: "measured", measure: { main: 4 } }, { type: "main.goto", line: 12 });
+  expect(viewOf(s).main).toMatchObject({ cursor: 11, doc: "ch1" });
+  expect(viewOf(then(s, { type: "main.loaded", lines: 25, doc: "ch1" })).main).toMatchObject({ cursor: 11, length: 25 });
+  expect(viewOf(then(s, { type: "main.loaded", lines: 9, doc: "ch2" })).main).toMatchObject({ cursor: 0, scroll: 0, length: 9, doc: "ch2" });
+  expect(viewOf(then(s, { type: "main.loaded", lines: 5 })).main).toMatchObject({ cursor: 4, doc: "ch1" }); // no id: a reload only
+});
+
 test("the main pane's cursor moves line by line, pages, jumps to the ends and to a line, within the document", () => {
   const s = after({ type: "main.loaded", lines: 10 }, { type: "measured", measure: { main: 4 } });
   const main = (x: State) => viewOf(x).main;

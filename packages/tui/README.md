@@ -20,6 +20,8 @@ src/layout.ts    the layout geometry, pure: region sizes at a terminal size, tex
 src/status.ts    the status area's fields (format, progress, branch, comment counts) and which drop when narrow
 src/resize.ts    the terminal size as state (below the model: plumbing, not where the author is)
 src/sanitize.ts  strips control characters from text that did not come from the keyboard
+src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
+src/source.ts    reads the file behind a rail row id from the project (the loader `App` is given as `load`)
 ```
 
 ## The layout
@@ -30,6 +32,15 @@ columns and rows (`layoutOf`), tested at 60x20 to 200x60 with no terminal. Under
 strip; `view.zen` hides it; `view.full` gives the bottom panel the screen. `app.tsx` reads the layout and, whenever
 the size or the content changes, dispatches `measured` so the model keeps every cursor in view; a resize relayouts
 without a restart. The key panel (AGT-1524) sits in the bottom panel at the width and height the layout gives it.
+
+## The main pane
+
+The main pane shows the file behind the rail's selected row (`document.ts` maps the id: `premise`, `bible`, `acts` and
+`beats`, `chapter:N`, or a project-relative path), frontmatter hidden and control characters stripped. Chapters are
+stored one sentence per line; the pane joins each run of non-blank lines into a paragraph (core `joinManuscript`) and
+wraps it to the pane, so a chapter reads the same before and after the split. `main.loaded` carries the document's id: a
+different document starts at its top, the same one keeps the line. `g g` / `g e` and the arrows move the cursor and the
+view follows it. A missing file shows as a notice ("Chapter 3 has no draft yet."), not an error.
 
 ## The state model
 

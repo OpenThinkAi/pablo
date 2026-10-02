@@ -5,6 +5,7 @@ import { App } from "./app";
 import { bookRail, type BookStage } from "./book";
 import { loadEditor, loadKeymap } from "./key-config";
 import { KeysError } from "./keys";
+import { loadDocument } from "./source";
 
 const ENTER_ALT = "\x1b[?1049h\x1b[H";
 const LEAVE_ALT = "\x1b[?1049l";
@@ -14,6 +15,8 @@ export interface ScreenOptions {
   readonly format: string;
   /** The novel stage machine's stages: the book mode rail (AGT-1526). */
   readonly stages?: readonly BookStage[];
+  /** The project directory; the main pane reads the selected stage's file from it. */
+  readonly dir?: string;
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -35,7 +38,9 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   const total = (options.stages ?? []).filter((s) => s.depth > 0).length;
   stdout.write(ENTER_ALT);
   try {
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} editor={loadEditor()} />, {
+    const root = options.dir;
+    const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} editor={loadEditor()} load={load} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

@@ -156,3 +156,27 @@ test("the arrows move the rail's cursor through the loaded rows", async () => {
   await sleep(30);
   expect(app.lastFrame()).toContain("book · main");
 });
+
+test("the main pane shows the file behind the selected row, and starts a new document at its top", async () => {
+  const docs: Record<string, { title: string; text: string }> = {
+    premise: { title: "bible/overview.md", text: "---\ntitle: x\n---\n\nA pond, a house, a family." },
+    ch1: { title: "chapters/01-the-well.md · draft", text: "The well had been dry since June.\nShe did not look up.\n\n" + Array.from({ length: 30 }, (_, i) => `Line ${i + 1}.\n`).join("\n") },
+  };
+  const app = render(<App {...book} lines={[]} mainTitle="" load={(id) => docs[id]} size={{ cols: 120, rows: 32 }} />);
+  await sleep(30);
+  expect(plain(app.lastFrame())).toContain("bible/overview.md");
+  expect(plain(app.lastFrame())).toContain("A pond, a house, a family.");
+  expect(plain(app.lastFrame())).not.toContain("title: x");
+  for (const key of ["\x1b[B", "\x1b[B", "\x1b[B"]) { app.stdin.write(key); await sleep(20); }
+  await sleep(30);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("chapters/01-the-well.md · draft");
+  expect(frame).toContain("The well had been dry since June. She did not look up.");
+  // → enters the main pane; g e goes to the end, the view scrolls with it; g g returns to the top.
+  app.stdin.write("\x1b[C"); await sleep(30);
+  app.stdin.write("g"); await sleep(20); app.stdin.write("e"); await sleep(40);
+  expect(plain(app.lastFrame())).toContain("Line 30.");
+  expect(plain(app.lastFrame())).not.toContain("She did not look up.");
+  app.stdin.write("g"); await sleep(20); app.stdin.write("g"); await sleep(40);
+  expect(plain(app.lastFrame())).toContain("She did not look up.");
+});
