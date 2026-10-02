@@ -197,6 +197,33 @@ test("runRituals ticks the outline, notes, updates the README, commits exactly t
   rmSync(project, { recursive: true, force: true });
 });
 
+test("README ritual replaces the same-day bullet on a re-write and appends on a new day (AGT-1273)", async () => {
+  const project = tempProject();
+  gitInitBase(project);
+  const chapterPath = writeChapterFile(project, 2, "black-ice");
+  const bulletCount = (): number =>
+    readFileSync(join(project, "README.md"), "utf8")
+      .split("\n")
+      .filter((l) => /chapter 2 drafted/.test(l)).length;
+
+  await runRituals(project, 2, chapterPath, baseOpts());
+  expect(bulletCount()).toBe(1);
+
+  // Same day, different word count/model: the bullet is replaced, not duplicated.
+  await runRituals(project, 2, chapterPath, baseOpts({ words: 77, model: "other-model" }));
+  const readme = readFileSync(join(project, "README.md"), "utf8");
+  expect(bulletCount()).toBe(1);
+  expect(readme).toContain("- 2026-09-06: chapter 2 drafted (77 words, other-model).");
+  expect(readme).not.toContain("(42 words, test-writer-model)");
+
+  // Next day: appended alongside.
+  await runRituals(project, 2, chapterPath, baseOpts({ now: () => new Date("2026-09-07T12:00:00.000Z") }));
+  expect(bulletCount()).toBe(2);
+  expect(readFileSync(join(project, "README.md"), "utf8")).toContain("- 2026-09-07: chapter 2 drafted (42 words, test-writer-model).");
+
+  rmSync(project, { recursive: true, force: true });
+});
+
 test("an unwritable state directory: the queue ritual fails, and nothing else is undone (AGT-1262 AC5)", async () => {
   const project = tempProject();
   gitInitBase(project);

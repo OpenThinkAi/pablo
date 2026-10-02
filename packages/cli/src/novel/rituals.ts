@@ -216,7 +216,10 @@ function readmeBullet(today: string, chapter: number, words: number, model: stri
 
 /**
  * Appends `readmeBullet` as the last bullet under `## Where things stand` in
- * `README.md` (before the next `## ` heading, or at end of file); a missing
+ * `README.md` (before the next `## ` heading, or at end of file) — unless
+ * that section already holds a bullet for this same chapter and day (AGT-1273,
+ * a `--force` re-write), which is replaced in place instead; a different day
+ * still appends. A missing
  * heading gets the heading appended along with the bullet; a missing
  * `README.md` gets a minimal one created.
  */
@@ -244,6 +247,17 @@ function tickReadme(workDir: string, chapter: number, today: string, words: numb
     if (/^##\s/.test(lines[i] ?? "")) {
       sectionEnd = i;
       break;
+    }
+  }
+
+  // Same day + same chapter: replace, so re-writes don't pile up bullets. The
+  // trailing space keeps chapter 1 from matching chapter 10's bullet.
+  const samePrefix = `- ${today}: chapter ${chapter} drafted `;
+  for (let i = headingIndex + 1; i < sectionEnd; i++) {
+    if ((lines[i] ?? "").startsWith(samePrefix)) {
+      lines[i] = bullet;
+      writeFileSync(path, lines.join("\n"), "utf8");
+      return { name: "readme", status: "ran", detail: `chapter ${chapter} bullet replaced` };
     }
   }
 
