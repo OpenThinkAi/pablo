@@ -72,7 +72,10 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 and WebFetch the only built-ins, pablo's MCP tools attached
                 in-process, the subscription by default with a config key
                 overriding. A tool added to `VERBS` reaches both `pablo mcp`
-                and the harness. `ask_author` (AGT-1560) is the exception: it needs a
+                and the harness. `pablo agent --tag-facts` (AGT-1570) is the one-time
+                catch-up: it tags every untagged bible and continuity fact on a
+                `plan/` branch through `record-fact.ts`'s writer, never a chapter.
+                `ask_author` (AGT-1560) is the exception: it needs a
                 front end, so a session gets it only when its spec carries an
                 `AskAuthor` (`pablo agent` reads answers from stdin). Tests
                 inject a fake `HarnessQuery`; nothing
