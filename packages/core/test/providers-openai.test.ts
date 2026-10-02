@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { EndpointHung, PREFERRED_OUTPUT, ProviderResponseError, createProviders, parseConfig } from "../src/index";
+import { EndpointHung, NoToolCallError, PREFERRED_OUTPUT, ProviderResponseError, createProviders, parseConfig } from "../src/index";
 import type { CompletionStats, Document, Intent, Providers } from "../src/index";
 import { startFakeEndpoint } from "./fake-endpoint";
 import type { FakeEndpoint, FakeEndpointOptions } from "./fake-endpoint";
@@ -317,4 +317,25 @@ test("a key is sent to a cloud provider and never invented for a local one", asy
 
   expect(fake.requests[0]?.authorization).toBe("Bearer not-a-real-key");
   expect(fake.requests[1]?.authorization).toBeNull();
+});
+
+test("a forced extract_facts call answered with an empty message is a NoToolCallError that names finish_reason and the answer", async () => {
+  const empty = endpoint({ toolRefusal: "" });
+  const failure = await providersAt(empty.url)
+    .adapter("local")
+    .extractFactsWithAnchors!({ text: "a paragraph", instruction: "facts" })
+    .catch((error: unknown) => error);
+  expect(failure).toBeInstanceOf(NoToolCallError);
+  expect((failure as NoToolCallError).finishReason).toBe("stop");
+  expect((failure as NoToolCallError).answer).toBe("");
+  expect((failure as Error).message).toContain("finish_reason: stop");
+  expect((failure as Error).message).toContain("answered with nothing");
+
+  const long = "word ".repeat(100);
+  const chatty = endpoint({ toolRefusal: long });
+  const said = await providersAt(chatty.url)
+    .adapter("local")
+    .extractFactsWithAnchors!({ text: "a paragraph", instruction: "facts" })
+    .catch((error: unknown) => error);
+  expect((said as NoToolCallError).answer.length).toBeLessThanOrEqual(201);
 });

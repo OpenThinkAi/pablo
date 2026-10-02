@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent, CompletionStats, ExtractedFact } from "@openthink/pablo-core";
+import { NoToolCallError } from "@openthink/pablo-core";
 import type { RunWriteDeps, WriteArgs } from "../src/write";
 import { runWrite } from "../src/write";
 import { applyFacts } from "../src/novel/continuity";
@@ -86,6 +87,7 @@ const FAKE_STATS: CompletionStats = {
 
 interface FakeAdapterOptions {
   readonly extractFactsWithAnchors?: Adapter["extractFactsWithAnchors"];
+  readonly extractFacts?: Adapter["extractFacts"];
 }
 
 /** A minimal fake `Adapter`: `complete` streams `RAW_CHUNKS`, `proposeEdit`/`extractFacts` are unused by this ritual and throw if called. */
@@ -101,9 +103,11 @@ function fakeAdapter(options: FakeAdapterOptions): Adapter {
     async proposeEdit(): Promise<never> {
       throw new Error("fakeAdapter: proposeEdit is not implemented");
     },
-    async extractFacts(): Promise<never> {
-      throw new Error("fakeAdapter: extractFacts is not implemented");
-    },
+    extractFacts:
+      options.extractFacts ??
+      (async (): Promise<never> => {
+        throw new Error("fakeAdapter: extractFacts is not implemented");
+      }),
   };
   if (options.extractFactsWithAnchors !== undefined) {
     return { ...adapter, extractFactsWithAnchors: options.extractFactsWithAnchors };
@@ -371,6 +375,106 @@ test("a fake adapter whose extractFactsWithAnchors never resolves: a short injec
   );
   expect(continuity?.status).toBe("failed");
   expect(continuity?.detail).toContain("timed out");
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// AGT-1271: no tool call -> one plain-text retry before the ritual fails
+// ---------------------------------------------------------------------------
+
+/** What the openai adapter throws for a forced call the model answered with an empty assistant message. */
+function emptyAnswer(): NoToolCallError {
+  return new NoToolCallError("http://127.0.0.1:8002/v1", "extract_facts", "stop", "");
+}
+
+test("an empty assistant message (no tool call) retries as plain text: ritual ran, facts filed, anchored and unanchored", async () => {
+  const { vault, project } = tempGitVault();
+  const asked: Array<{ output: string | undefined; instruction: string }> = [];
+
+  const deps: RunWriteDeps = {
+    adapter: fakeAdapter({
+      extractFactsWithAnchors: async () => {
+        throw emptyAnswer();
+      },
+      extractFacts: async (request) => {
+        asked.push({ output: request.output, instruction: request.instruction });
+        return [
+          "- The crew went out before first light. || A thin January put the crew out early.",
+          "2. Someone owns a dog.",
+          "",
+        ];
+      },
+    }),
+    env: RITUAL_ENV,
+  };
+
+  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  expect(outcome.result).toBe(0);
+  const body = JSON.parse(outcome.lines[0] as string);
+  const continuity = (body.rituals as Array<{ name: string; status: string; detail: string }>).find(
+    (r) => r.name === "continuity",
+  );
+  expect(continuity?.status).toBe("ran");
+  expect(continuity?.detail).toBe("placed 1, 1 to Check");
+
+  expect(asked).toHaveLength(1);
+  expect(asked[0]?.output).toBe("text");
+
+  const text = readFileSync(join(project, "continuity.md"), "utf8");
+  expect(text).toContain("- The crew went out before first light. [ch02]");
+  expect(text).toContain("- Someone owns a dog. [ch02, anchor not found]");
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test("when the plain-text retry also gets nothing, the ritual fails with the tool call's finish_reason and answer", async () => {
+  const { vault, project } = tempGitVault();
+  const before = readFileSync(join(project, "continuity.md"), "utf8");
+
+  const deps: RunWriteDeps = {
+    adapter: fakeAdapter({
+      extractFactsWithAnchors: async () => {
+        throw new NoToolCallError("http://127.0.0.1:8002/v1", "extract_facts", "length", "I will now list the facts");
+      },
+      extractFacts: async () => [],
+    }),
+    env: RITUAL_ENV,
+  };
+
+  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  const body = JSON.parse(outcome.lines[0] as string);
+  const continuity = (body.rituals as Array<{ name: string; status: string; detail: string }>).find(
+    (r) => r.name === "continuity",
+  );
+  expect(continuity?.status).toBe("failed");
+  expect(continuity?.detail).toContain("finish_reason: length");
+  expect(continuity?.detail).toContain("I will now list the facts");
+  expect(continuity?.detail).toContain("plain-text retry returned no facts");
+  expect(readFileSync(join(project, "continuity.md"), "utf8")).toBe(before);
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
+test("an error that is not a missing tool call does not trigger the plain-text retry", async () => {
+  const { vault, project } = tempGitVault();
+  let retried = false;
+
+  const deps: RunWriteDeps = {
+    adapter: fakeAdapter({
+      extractFactsWithAnchors: async () => {
+        throw new Error("HTTP 503");
+      },
+      extractFacts: async () => {
+        retried = true;
+        return ["x"];
+      },
+    }),
+    env: RITUAL_ENV,
+  };
+
+  await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  expect(retried).toBe(false);
 
   rmSync(vault, { recursive: true, force: true });
 });
