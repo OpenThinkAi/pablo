@@ -56,7 +56,11 @@ export function saveResearch(
 
   const retrieved = opts.retrieved ?? new Date().toISOString().slice(0, 10);
   const dir = (opts.dir ?? "").replace(/\/+$/, "");
+  if (dir && (dir.startsWith("/") || dir.split("/").includes(".."))) {
+    return { ok: false, notice: "pablo: save_research: dir must be a clean relative path" };
+  }
   const prefix = dir ? `${dir}/` : "";
+  const title = input.title.replace(/\s+/g, " ").trim();
 
   // Never silently replace an earlier note (on main or earlier in this session): suffix the slug.
   const roots = [session.repo, ...(session.worktree ? [session.worktree] : [])];
@@ -68,8 +72,8 @@ export function saveResearch(
 
   const written: BranchResult = planWrite(session, {
     path,
-    content: renderResearchNote({ ...input, sources }, retrieved),
-    message: `research: ${input.title.trim()}`,
+    content: renderResearchNote({ ...input, title, sources }, retrieved),
+    message: `research: ${title}`,
   });
   return written.ok ? { ok: true, path, ...(written.sha ? { sha: written.sha } : {}) } : written;
 }

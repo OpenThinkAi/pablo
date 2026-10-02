@@ -66,3 +66,13 @@ test("refuses a note with no sources, no title or no body, creating no branch", 
   expect(saveResearch(session, { title: "X", note: " ", sources: ["s"] }).ok).toBe(false);
   expect(sh(repo, "branch", "--list", "plan/*").trim()).toBe("");
 });
+
+test("a dir that escapes the repo is refused, and a multi-line title stays one commit subject", () => {
+  const { repo, session } = setup();
+  expect(saveResearch(session, { title: "X", note: "n", sources: ["s"] }, { dir: "../../etc" }).ok).toBe(false);
+  expect(saveResearch(session, { title: "X", note: "n", sources: ["s"] }, { dir: "/etc" }).ok).toBe(false);
+  expect(sh(repo, "branch", "--list", "plan/*").trim()).toBe("");
+  const r = saveResearch(session, { title: "Two\nLines", note: "n", sources: ["s"] });
+  expect(r.ok).toBe(true);
+  expect(sh(repo, "log", "-1", "--format=%B", "plan/2026-10-01-ab12").trim()).toBe("research: Two Lines");
+});
