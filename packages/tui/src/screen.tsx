@@ -4,6 +4,7 @@ import { render } from "ink";
 import { App } from "./app";
 import { bookRail, type BookStage } from "./book";
 import { loadEditor, loadKeymap } from "./key-config";
+import type { Composer } from "./compose";
 import { KeysError } from "./keys";
 import type { BranchDiff } from "./review";
 import type { CheckHit } from "./hits";
@@ -33,6 +34,8 @@ export interface ScreenOptions {
   readonly checks?: (file: string, text: string) => readonly CheckHit[];
   /** `a w`: writes a chapter (the CLI's `runWrite`, passed in from cli.ts) and says what came of it (AGT-1542). */
   readonly writer?: Writer;
+  /** The harness session behind the compose view; the cli builds it (the tui does not depend on the Agent SDK). */
+  readonly composer?: Composer;
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -56,7 +59,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   try {
     const root = options.dir;
     const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} {...(options.composer ? { composer: options.composer } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),
@@ -64,6 +67,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
     await app.waitUntilExit();
     app.clear();
   } finally {
+    options.composer?.close?.();
     stdout.write(LEAVE_ALT);
   }
   return 0;

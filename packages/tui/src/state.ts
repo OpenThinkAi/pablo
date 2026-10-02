@@ -7,7 +7,8 @@
 // folds), the main pane knows how many lines it has, the content area what it shows. The documents themselves are
 // props of the Ink layer, loaded from the vault, and only their shape (`rail.loaded`, `main.loaded`) reaches here.
 //
-//   mode     book (the stage machine in the rail, a document in the main pane) or review (a branch's changes)
+//   mode     book (the stage machine in the rail, a document in the main pane), review (a branch's changes) or compose
+//            (the full-screen conversation with pablo, which remembers the mode Esc returns to)
 //   pane     the rail or the main pane, where the cursor is
 //   focus    that pane, or the content area while Tab has moved focus into it
 //   content  the one thing the bottom panel shows, scrollable, closed by Esc
@@ -16,7 +17,10 @@
 //
 // Each mode keeps its own rail and main pane, so leaving a review returns to the book where it was left. Settings holds
 // its own model (`settings`, below) instead of a rail and main pane; the settings logic is settings.ts, and reaches
-// here as whole values (`settings.set`), so this file stays free of imports.
+// here as whole values (`settings.set`), so this file stays free of imports. The conversation (`compose`) belongs to
+// the screen, not to a mode's data: Esc leaves the view and the session, its entries and any reply still streaming in
+// carry on, and `a c` comes back to them. The session itself runs behind a seam the layer above passes in (compose.ts);
+// here are only its entries, the author's input and what is in flight.
 
 /** The id prefix of a rail row that names a branch waiting for review (`branch:draft/ch03`). */
 export const BRANCH_ROW = "branch:";
@@ -27,8 +31,8 @@ export const EDIT_ROW = "edit:";
 export type Mark = "accepted" | "rejected";
 
 export type Place = { kind: "book" } | { kind: "review"; branch: string };
-/** Settings (`\`) is a mode over a place: closing it returns to where it was opened, with that place's own rail and main pane. */
-export type Mode = Place | { kind: "settings"; from: Place };
+/** Settings (`\`) and compose (`a c`) are modes over a place: closing one returns to where it was opened, with that place's own rail and main pane. */
+export type Mode = Place | { kind: "settings"; from: Place } | { kind: "compose"; from: Place };
 export type PaneName = "rail" | "main";
 export type Focus = PaneName | "content";
 
@@ -77,8 +81,53 @@ export interface Content { readonly title: string; readonly body: string; /** Wh
 /** A prefix waiting for its second key; `digits` while a number is typed after it (`g 12`). */
 export interface Pending { readonly prefix: string; readonly digits?: string }
 
+/**
+ * One thing said in the conversation. `question` is the card `ask_author` stops the loop with (AGT-1560): shown in
+ * place, `answer` filled when the author replies. Entries are data, so a new kind is one more variant here and one
+ * more case in compose.ts's `composeLines`.
+ */
+export type ComposeEntry =
+  | { readonly kind: "author"; readonly text: string }
+  | { readonly kind: "pablo"; readonly text: string }
+  | { readonly kind: "tool"; readonly id: string; readonly tool: string; readonly input: unknown; readonly result?: { readonly text: string; readonly isError: boolean } }
+  | { readonly kind: "question"; readonly id: string; readonly question: string; readonly options?: readonly string[]; readonly why?: string; readonly answer?: string }
+  | { readonly kind: "error"; readonly text: string };
+
+/** What the session reports as a turn runs; the seam's stream (compose.ts `Composer`) yields these. */
+export type ComposeEvent =
+  | { readonly kind: "session"; readonly id: string }
+  | { readonly kind: "assistant"; readonly text: string }
+  | { readonly kind: "tool_call"; readonly id: string; readonly tool: string; readonly input: unknown }
+  | { readonly kind: "tool_result"; readonly id: string; readonly text: string; readonly isError: boolean }
+  | { readonly kind: "result"; readonly ok: boolean; readonly errors: readonly string[] }
+  /** `ask_author` has stopped the loop: the card is shown in place and the author's next line answers it. */
+  | { readonly kind: "question"; readonly id: string; readonly question: string; readonly options: readonly string[]; readonly why: string };
+
+/**
+ * The conversation: `entries`, the author's `input` line, whether a turn is `busy` and what it is doing (`activity`),
+ * the session's id once it has one (`sessionId`, for saved sessions, AGT-1565). `outbox` is the message the layer
+ * above must send, `sendSeq` counts sends so an effect fires once per message. `offset` is how many lines the view is
+ * scrolled up from the newest; `length` and `visible` come from the layout like every other scroll.
+ */
+export interface Compose {
+  readonly entries: readonly ComposeEntry[];
+  readonly input: string;
+  readonly busy: boolean;
+  readonly activity: string;
+  readonly sessionId: string | null;
+  readonly outbox: string | null;
+  readonly sendSeq: number;
+  /** The author's answer to a question card, for the layer above to hand to the session; `replySeq` counts them. */
+  readonly reply: { readonly id: string; readonly text: string } | null;
+  readonly replySeq: number;
+  readonly offset: number;
+  readonly length: number;
+  readonly visible: number;
+}
+
 export interface State {
   readonly mode: Mode;
+  readonly compose: Compose;
   readonly book: View;
   readonly review: View;
   /** The open review's decisions, by change id (`edit:<n>`); empty outside a review and fresh on each `review.open`. */
@@ -104,7 +153,11 @@ export interface State {
  * What the layout measured, dispatched whenever the terminal size or the content changes: rows each region can show,
  * and for the content area also how many lines its text wraps to at the width it has (the model never wraps text).
  */
-export interface Measure { readonly rail?: number; readonly main?: number; readonly content?: { readonly visible: number; readonly lines: number } }
+export interface Measure {
+  readonly rail?: number; readonly main?: number; readonly content?: { readonly visible: number; readonly lines: number };
+  /** The conversation's rows and how many lines its entries wrap to at its width. */
+  readonly compose?: { readonly visible: number; readonly lines: number };
+}
 
 export type Action =
   // ---- the rail: the moves skip a folded group's rows; → unfolds, steps into, or enters the main pane; ← folds or steps out
@@ -149,6 +202,15 @@ export type Action =
   | { type: "settings.open"; settings: SettingsModel }
   | { type: "settings.set"; settings: SettingsModel }
   | { type: "settings.close"; saved?: SavedSettings }
+  // ---- compose: the conversation with pablo (`a c` opens it, Esc leaves it with the session kept)
+  | { type: "compose.open" } | { type: "compose.close" }
+  | { type: "compose.type"; text: string } | { type: "compose.backspace" }
+  | { type: "compose.submit" }
+  | { type: "compose.event"; event: ComposeEvent }
+  | { type: "compose.add"; entry: ComposeEntry }
+  | { type: "compose.failed"; message: string }
+  | { type: "compose.done" }
+  | { type: "compose.up" } | { type: "compose.down" } | { type: "compose.page_up" } | { type: "compose.page_down" }
   // ---- Esc: back out of whatever is open, one thing at a time
   | { type: "escape" }
   // ---- the layout's measure of each region
@@ -163,17 +225,19 @@ const writeContent = (title: string, body: string): Content => ({ title, body, k
 
 const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor: 0, scroll: 0, visible: 0 }, main: { cursor: 0, scroll: 0, length: 0, visible: 0 } });
 
+export const initialCompose = (): Compose => ({ entries: [], input: "", busy: false, activity: "", sessionId: null, outbox: null, sendSeq: 0, reply: null, replySeq: 0, offset: 0, length: 0, visible: 0 });
+
 export const initialState = (): State => ({
-  mode: { kind: "book" }, book: emptyView(), review: emptyView(), marks: {},
+  mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
   pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, written: [],
 });
 
 // ---------------------------------------------------------------- reading the state
 
-/** The book or review the screen is over: the mode itself, or what settings was opened from. */
-export const placeOf = (s: State): Place => (s.mode.kind === "settings" ? s.mode.from : s.mode);
+/** The book or review the screen is over: the mode itself, or what settings or compose was opened from. */
+export const placeOf = (s: State): Place => (s.mode.kind === "settings" || s.mode.kind === "compose" ? s.mode.from : s.mode);
 
-/** The rail and main pane of the current mode (under settings, those of the place it was opened from). */
+/** The rail and main pane of the current mode (under settings or compose, those of the place it was opened from). */
 export const viewOf = (s: State): View => (placeOf(s).kind === "book" ? s.book : s.review);
 
 /** The rail's rows as drawn, in order, with their index in `rows`: a folded group's rows are left out. */
@@ -300,6 +364,32 @@ function reduceMain(main: Pane, a: Action): Pane {
   }
 }
 
+/** Scrolls the conversation `by` lines further back (negative: towards the newest), held within what there is. */
+const scrollCompose = (c: Compose, by: number): Compose => ({ ...c, offset: clamp(c.offset + by, 0, Math.max(0, c.length - (c.visible || c.length))) });
+
+/** The question card still waiting for an answer, if any. */
+const openQuestion = (c: Compose): Extract<ComposeEntry, { kind: "question" }> | undefined =>
+  c.entries.find((e): e is Extract<ComposeEntry, { kind: "question" }> => e.kind === "question" && e.answer === undefined);
+
+/** A session event applied to the conversation; a new line of it brings the view back to the newest. */
+function reduceEvent(c: Compose, e: ComposeEvent): Compose {
+  switch (e.kind) {
+    case "session": return { ...c, sessionId: e.id };
+    case "assistant": return { ...c, entries: [...c.entries, { kind: "pablo", text: e.text }], offset: 0 };
+    case "tool_call": return { ...c, entries: [...c.entries, { kind: "tool", id: e.id, tool: e.tool, input: e.input }], activity: `calling ${e.tool}`, offset: 0 };
+    case "question": {
+      const card: ComposeEntry = { kind: "question", id: e.id, question: e.question, options: e.options, why: e.why };
+      return { ...c, entries: [...c.entries, card], activity: "waiting for your answer", offset: 0 };
+    }
+    case "tool_result":
+      return { ...c, activity: "thinking", entries: c.entries.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, result: { text: e.text, isError: e.isError } } : x)) };
+    case "result": {
+      const errors = e.ok ? [] : [{ kind: "error" as const, text: e.errors.length ? e.errors.join("; ") : "the session ended without finishing" }];
+      return { ...c, entries: [...c.entries, ...errors], busy: false, activity: "", outbox: null, offset: 0 };
+    }
+  }
+}
+
 // ---------------------------------------------------------------- the reducer
 
 /** The state after `a`. Every action type has its case here; an action that cannot apply where the screen is leaves the state as it was. */
@@ -349,7 +439,7 @@ export function reduce(s: State, a: Action): State {
     case "view.full": return s.content ? { ...s, full: !s.full } : s;
 
     // A review opens on a branch with a fresh rail and main pane; the book keeps its place for when the review closes.
-    case "review.open": return s.mode.kind === "settings" ? s : { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null };
+    case "review.open": return s.mode.kind === "settings" || s.mode.kind === "compose" ? s : { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null };
     case "write.start":
       if (s.writing !== null) return s;
       return { ...s, writing: a.chapter, content: writeContent(`Writing chapter ${a.chapter}`, "starting…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
@@ -373,12 +463,40 @@ export function reduce(s: State, a: Action): State {
 
     // Settings opens over the book or review and closes back to it. Its keys never reach the chord (settings.ts reads
     // them, including Esc), so `escape` leaves it alone.
-    case "settings.open": return s.mode.kind === "settings" ? s : { ...s, mode: { kind: "settings", from: s.mode }, settings: a.settings, pending: null };
+    case "settings.open": return s.mode.kind === "settings" || s.mode.kind === "compose" ? s : { ...s, mode: { kind: "settings", from: s.mode }, settings: a.settings, pending: null };
     case "settings.set": return s.mode.kind === "settings" ? { ...s, settings: a.settings } : s;
     case "settings.close": return s.mode.kind === "settings" ? { ...s, mode: s.mode.from, settings: null, saved: a.saved ?? s.saved } : s;
 
+    case "compose.open": return s.mode.kind === "book" || s.mode.kind === "review" ? { ...s, mode: { kind: "compose", from: s.mode }, pending: null, compose: { ...s.compose, offset: 0 } } : s;
+    case "compose.close": return s.mode.kind === "compose" ? { ...s, mode: s.mode.from } : s;
+    case "compose.type": return s.mode.kind === "compose" ? { ...s, compose: { ...s.compose, input: s.compose.input + a.text } } : s;
+    case "compose.backspace": return s.mode.kind === "compose" ? { ...s, compose: { ...s.compose, input: [...s.compose.input].slice(0, -1).join("") } } : s;
+    case "compose.submit": {
+      const c = s.compose, text = c.input.trim();
+      if (s.mode.kind !== "compose" || !text) return s;
+      // A question card waiting: the line answers it (a number picks an option) instead of starting a turn.
+      const asking = openQuestion(c);
+      if (asking) {
+        const index = /^\d+$/.test(text) ? Number(text) : 0;
+        const answer = index >= 1 && index <= (asking.options?.length ?? 0) ? asking.options![index - 1]! : text;
+        const entries = c.entries.map((e) => (e === asking ? { ...asking, answer } : e));
+        return { ...s, compose: { ...c, entries, input: "", activity: "thinking", reply: { id: asking.id, text: answer }, replySeq: c.replySeq + 1, offset: 0 } };
+      }
+      if (c.busy) return s;
+      return { ...s, compose: { ...c, entries: [...c.entries, { kind: "author", text }], input: "", busy: true, activity: "thinking", outbox: text, sendSeq: c.sendSeq + 1, offset: 0 } };
+    }
+    case "compose.event": return { ...s, compose: reduceEvent(s.compose, a.event) };
+    case "compose.add": return { ...s, compose: { ...s.compose, entries: [...s.compose.entries, a.entry], offset: 0 } };
+    case "compose.failed": return { ...s, compose: { ...s.compose, entries: [...s.compose.entries, { kind: "error", text: a.message }], busy: false, activity: "", outbox: null, offset: 0 } };
+    case "compose.done": return { ...s, compose: { ...s.compose, busy: false, activity: "", outbox: null } };
+    case "compose.up": return { ...s, compose: scrollCompose(s.compose, 1) };
+    case "compose.down": return { ...s, compose: scrollCompose(s.compose, -1) };
+    case "compose.page_up": return { ...s, compose: scrollCompose(s.compose, pageStep(s.compose.visible)) };
+    case "compose.page_down": return { ...s, compose: scrollCompose(s.compose, -pageStep(s.compose.visible)) };
+
     case "escape":
       if (s.mode.kind === "settings") return s;
+      if (s.mode.kind === "compose") return reduce(s, { type: "compose.close" });
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });
       if (s.focus === "content") return reduce(s, { type: "focus.back" });
@@ -392,7 +510,8 @@ export function reduce(s: State, a: Action): State {
       const rail = m.rail === undefined ? view.rail : railTo({ ...view.rail, visible: m.rail }, view.rail.cursor);
       const main = m.main === undefined ? view.main : moveTo({ ...view.main, visible: m.main }, view.main.cursor);
       const content = m.content === undefined ? s.contentScroll : clampScroll({ scroll: s.contentScroll.scroll, visible: m.content.visible, length: m.content.lines }, s.contentScroll.scroll);
-      return { ...withView({ rail, main }), contentScroll: content };
+      const compose = m.compose === undefined ? s.compose : scrollCompose({ ...s.compose, length: m.compose.lines, visible: m.compose.visible }, 0);
+      return { ...withView({ rail, main }), contentScroll: content, compose };
     }
   }
 }
