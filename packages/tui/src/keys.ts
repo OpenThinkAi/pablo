@@ -71,6 +71,8 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   // ---- the main pane: a document's lines, one sentence each
   { id: "main.down", states: MAIN, key: "down", secondary: "j", label: "line", description: "Move down a sentence line.", do: { type: "main.down" } },
   { id: "main.up", states: MAIN, key: "up", secondary: "k", label: "line", description: "Move up a sentence line.", do: { type: "main.up" } },
+  { id: "main.select_down", states: MAIN, key: "shift-down", secondary: "J", label: "select", description: "Select the sentence under the cursor, then extend the selection down by a sentence; Esc clears it.", do: { type: "select.down" } },
+  { id: "main.select_up", states: MAIN, key: "shift-up", secondary: "K", label: "select", description: "Select the sentence under the cursor, then extend the selection up by a sentence; Esc clears it.", do: { type: "select.up" } },
   { id: "main.page_down", states: MAIN, key: "pgdn", secondary: "ctrl-d", label: "page", description: "Page down.", do: { type: "main.page_down" } },
   { id: "main.page_up", states: MAIN, key: "pgup", secondary: "ctrl-u", label: "page", description: "Page up.", do: { type: "main.page_up" } },
   { id: "main.open", states: MAIN, key: "right", secondary: "l", label: "open hit", description: "Open the check hit on this line (its rule and the pattern it flagged) in the content area.", do: cmd("check.open") },

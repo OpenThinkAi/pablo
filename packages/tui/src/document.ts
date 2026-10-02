@@ -11,7 +11,7 @@
 //   chapter:N            chapters/NN-*.md (`ch1`, `ch-1` and `chapter-1` are read the same)
 //   any other id         a path relative to the project, if it names a file in it
 
-import { joinSentences } from "@openthink/pablo-core";
+import { joinSentences, splitSentences } from "@openthink/pablo-core";
 import { wrapText } from "./layout";
 import { clean } from "./sanitize";
 
@@ -54,9 +54,21 @@ const structural = (line: string) => /^(\||```|~~~|\s)/.test(line);
 /** A block of plain prose, as `joinManuscript` reads it: no line opens like Markdown structure. */
 const proseBlock = (lines: readonly string[]) => !lines.some((line) => /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\||```|~~~|---+\s*$|\*\*\*+\s*$)/.test(line));
 
-/** The display lines of a document, and where each of the file's own lines lands among them. */
+/** A stretch of one display line that belongs to a sentence: `[start, end)` in the line's text, `sentence` an index into `DisplayDoc.sentences`. */
+export interface Mark { readonly start: number; readonly end: number; readonly sentence: number }
+/**
+ * A sentence of the document as the core splitter sees it (a prose paragraph, joined, split): the display lines it
+ * covers (`first`..`last`, inclusive) and the stored lines it came from (`from`..`to`, 0-based inclusive, counted in the
+ * file as stored, frontmatter included). A stored line holding two sentences is two sentences here, both pointing at it.
+ */
+export interface PaneSentence { readonly first: number; readonly last: number; readonly text: string; readonly stored: { readonly from: number; readonly to: number } }
+
+/** The display lines of a document, where each of the file's own lines lands among them, and its selectable sentences. */
 export interface DisplayDoc {
   readonly lines: string[];
+  /** Per display line, the sentences on it (empty for blank lines, headings, lists, tables and fences: only prose is sentences). */
+  readonly marks: readonly (readonly Mark[])[];
+  readonly sentences: readonly PaneSentence[];
   /** File line number (1-based, frontmatter counted) to the index of the display line on which that file line's text ends. */
   readonly anchors: ReadonlyMap<number, number>;
 }
@@ -81,22 +93,70 @@ export function displayDoc(text: string, width: number): DisplayDoc {
   if (run.length) blocks.push(run);
 
   const lines: string[] = [];
+  const marks: Mark[][] = [];
+  const sentences: PaneSentence[] = [];
   const anchors = new Map<number, number>();
   blocks.forEach((block, b) => {
     if (b > 0) lines.push("");
+    const mark = () => { while (marks.length < lines.length) marks.push([]); };
     const texts = block.map((l) => l.text);
     const wrapped = (t: string) => (structural(t) ? [t] : wrapText(t, w));
     if (proseBlock(texts)) {
       const paragraph = joinSentences(texts);
       const start = lines.length;
-      lines.push(...(structural(paragraph) ? [paragraph] : wrapText(paragraph, w)));
+      const wrappedLines = structural(paragraph) ? [paragraph] : wrapText(paragraph, w);
+      lines.push(...wrappedLines);
+      mark();
+      markSentences(block, paragraph, wrappedLines, start, marks, sentences);
       // Greedy wrapping is prefix-stable: the rows a prefix of the paragraph takes end where that prefix ends.
       block.forEach((l, k) => anchors.set(l.n, start + (structural(paragraph) ? 0 : wrapText(joinSentences(texts.slice(0, k + 1)), w).length - 1)));
     } else {
       block.forEach((l) => { lines.push(...wrapped(l.text)); anchors.set(l.n, lines.length - 1); });
     }
   });
-  return { lines, anchors };
+  while (marks.length < lines.length) marks.push([]);
+  return { lines, anchors, marks, sentences };
+}
+
+/**
+ * Marks the sentences of one prose paragraph on its wrapped display lines (the first of which is display line `start`)
+ * and maps each back to the stored lines it came from. A sentence is a run of words: the stored lines and the sentences
+ * are both word ranges of the joined paragraph, and wrapping only drops the spaces it breaks at.
+ */
+function markSentences(block: readonly { n: number; text: string }[], paragraph: string, wrapped: readonly string[], start: number, marks: Mark[][], out: PaneSentence[]): void {
+  const words = paragraph.split(" ");
+  const starts: number[] = [];
+  let pos = 0;
+  for (const word of words) { starts.push(pos); pos += word.length + 1; }
+  const charEnd = (i: number) => starts[i]! + words[i]!.length;
+  const count = (t: string) => t.split(" ").length;
+  const lineRanges: [number, number][] = [];
+  let used = 0;
+  for (const l of block) { const n = count(joinSentences([l.text])); lineRanges.push([used, used + n]); used += n; }
+  const spans: { from: number; to: number; text: string }[] = [];
+  used = 0;
+  for (const text of splitSentences(paragraph)) { const n = count(text); spans.push({ from: used, to: used + n, text }); used += n; }
+  const base = out.length;
+  const first = spans.map(() => -1), last = spans.map(() => -1);
+  let cursor = 0;
+  wrapped.forEach((text, n) => {
+    while (paragraph[cursor] === " ") cursor++;
+    const lineStart = cursor;
+    cursor += text.length;
+    spans.forEach((sp, k) => {
+      const s = starts[sp.from]!, e = charEnd(sp.to - 1);
+      if (s >= cursor || e <= lineStart) return;
+      marks[start + n]!.push({ start: Math.max(s, lineStart) - lineStart, end: Math.min(e, cursor) - lineStart, sentence: base + k });
+      if (first[k]! < 0) first[k] = start + n;
+      last[k] = start + n;
+    });
+  });
+  spans.forEach((sp, k) => {
+    const from = lineRanges.findIndex(([, b]) => b > sp.from);
+    let to = lineRanges.length - 1;
+    while (to > 0 && lineRanges[to]![0] >= sp.to) to--;
+    out.push({ first: first[k]!, last: last[k]!, text: sp.text, stored: { from: block[from]!.n - 1, to: block[to]!.n - 1 } });
+  });
 }
 
 /** The display lines of `text` at `width` columns (see `displayDoc`). */
