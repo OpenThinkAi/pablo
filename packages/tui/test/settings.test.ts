@@ -1,7 +1,7 @@
 // The settings screen's rules without a terminal, and its saves against a temporary config (never ~/.config/pablo).
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadKeymap } from "../src/key-config";
@@ -107,9 +107,8 @@ test("overridesOf lists only the rebound rows; an action put back to its default
 // ---------------------------------------------------------------- saving
 
 test("saving writes keys and editor to the config, keeps every other entry, and reads back through the startup loader", () => {
-  writeFileSync(join(dir, "seed.json"), "");
   const seed = { providers: { local: { endpoint: "http://127.0.0.1:8002/v1" } }, default: "local" };
-  require("node:fs").mkdirSync(join(dir, "pablo"));
+  mkdirSync(join(dir, "pablo"));
   writeFileSync(path, JSON.stringify(seed));
   let s = press(on(open(), "rail.down"), "enter", "x");
   s = press({ ...s, cursor: s.fields.length - 1 }, "enter", "h", "x", "enter");
@@ -141,7 +140,7 @@ test("saving creates the config when there is none; both bindings changed are wr
 });
 
 test("a save refuses a config that is not JSON or not an object, and writes nothing", () => {
-  require("node:fs").mkdirSync(join(dir, "pablo"));
+  mkdirSync(join(dir, "pablo"));
   writeFileSync(path, "{ nope");
   const s = press(on(open(), "rail.down"), "enter", "x");
   expect(() => saveSettings(s)).toThrow("not valid JSON");
@@ -155,7 +154,7 @@ test("a save refuses a config that is not JSON or not an object, and writes noth
 });
 
 test("a save replaces the file's `keys` with what the screen shows, so one changed underneath cannot leave a conflict", () => {
-  require("node:fs").mkdirSync(join(dir, "pablo"));
+  mkdirSync(join(dir, "pablo"));
   // The file now binds rail.up to "x"; the screen, opened earlier, binds rail.down to "x".
   writeFileSync(path, JSON.stringify({ keys: { "rail.up": "x" } }));
   const s = press(on(open(), "rail.down"), "enter", "x");
