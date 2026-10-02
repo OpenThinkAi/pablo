@@ -6,6 +6,9 @@
  * of them. With `--json` the transcript is one JSON object at the end
  * (`{ok, route, entries, result}`) instead of lines as they happen.
  *
+ * `ask_author` (AGT-1560) is answered from stdin: the question card is printed
+ * and one line is read back (a number picks an option).
+ *
  * Exit codes follow the CLI's contract: 0 when the session ends in a success
  * result, 2 for a refusal (no project, no marker, no message), 1 for anything
  * else (an error result, no result at all, or the SDK failing to start).
@@ -16,6 +19,7 @@ import type { KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { readMarker } from "../marker";
 import { findVault, resolveProject } from "../project";
 import type { ProgressSink, VerbContext } from "../verbs";
+import { lineReader, stdinAskAuthor } from "./ask-author";
 import { harnessAuth } from "./auth";
 import type { HarnessAuth } from "./auth";
 import { runHarness, sdkQuery } from "./session";
@@ -34,6 +38,8 @@ export interface AgentContext {
   readonly env: Record<string, string | undefined>;
   readonly stdout: ProgressSink;
   readonly stderr: ProgressSink;
+  /** Where `ask_author` answers are read from (AGT-1560); absent, the session has no `ask_author` tool. */
+  readonly stdin?: AsyncIterable<string | Uint8Array>;
 }
 
 /** Injected in tests: a fake session, and no real Keychain or config file. */
@@ -78,6 +84,8 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
     projectPath: project.path,
     auth,
     ctx: verbCtx,
+    // The card goes where the transcript goes; with --json stdout is one object, so it goes to stderr.
+    ...(ctx.stdin === undefined ? {} : { ask: stdinAskAuthor(lineReader(ctx.stdin), args.json ? ctx.stderr : ctx.stdout) }),
   };
 
   const entries: TranscriptEntry[] = [];

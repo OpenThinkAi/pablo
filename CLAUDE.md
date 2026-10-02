@@ -69,7 +69,10 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 and WebFetch the only built-ins, pablo's MCP tools attached
                 in-process, the subscription by default with a config key
                 overriding. A tool added to `VERBS` reaches both `pablo mcp`
-                and the harness. Tests inject a fake `HarnessQuery`; nothing
+                and the harness. `ask_author` (AGT-1560) is the exception: it needs a
+                front end, so a session gets it only when its spec carries an
+                `AskAuthor` (`pablo agent` reads answers from stdin). Tests
+                inject a fake `HarnessQuery`; nothing
                 in `bun test` starts Claude. Any new dependency the CLI needs
                 goes here; core stays dependency-free.
 ```
