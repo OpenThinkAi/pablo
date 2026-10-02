@@ -183,3 +183,50 @@ export function screenReviser(vaultRoot: string, projectPath: string, deps: Scre
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// `revise_passage` (AGT-1563): the harness's revise. Same two steps as `a r`, run back to back with no author to edit
+// the candidate in between: the passage is located and revised on the local model, and the candidate is committed on a
+// `revise/<id>` branch authored as the model. The result names the branch and the receipt; the candidate never goes back
+// to the harness (it reads the branch through `read` when it wants the prose).
+// ---------------------------------------------------------------------------
+
+export interface RevisePassageRequest {
+  readonly file: string;
+  readonly passage: string;
+  readonly instruction: string;
+}
+export type RevisePassageResult =
+  | { readonly ok: true; readonly branch: string; readonly path: string; readonly receipt: Record<string, unknown> }
+  | { readonly ok: false; readonly code: number; readonly message: string };
+
+export async function revisePassage(vaultRoot: string, projectPath: string, request: RevisePassageRequest, deps: ScreenReviserDeps = {}): Promise<RevisePassageResult> {
+  const env = deps.env ?? process.env;
+  const fail = (code: number, message: string): RevisePassageResult => ({ ok: false, code, message });
+  const full = insideDir(projectPath, request.file);
+  if (full === undefined) return fail(2, `pablo: revise_passage file must be inside the project (${request.file})`);
+  let raw: string;
+  try { raw = readFileSync(full, "utf8"); } catch { return fail(2, `pablo: cannot read ${request.file}`); }
+
+  const outcome = await withWriteLock(() => reviseCore(
+    { file: request.file, passage: request.passage, start: undefined, end: undefined, instruction: request.instruction, dryRun: false },
+    { vaultRoot, projectPath, env },
+    { adapter: deps.adapter, stderr: { write: () => {} } },
+  ));
+  const body = outcome.body;
+  if (!body.ok) return fail(outcome.exitCode || body.code, body.message);
+  if (!("candidate" in body)) return fail(1, "pablo: revise returned no candidate");
+
+  // The span is in the frontmatter-stripped body; the stored lines it covers are what `take` replaces.
+  const base = frontmatterLength(raw);
+  const start = base + body.span.start, end = base + body.span.end;
+  const stored = { from: raw.slice(0, start).split("\n").length - 1, to: raw.slice(0, end).split("\n").length - 1 };
+  const sentences = raw.slice(start, end).split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  const r = body.receipt;
+  const taken = await screenReviser(vaultRoot, projectPath, deps).take({
+    file: request.file, sentences, stored, instruction: request.instruction,
+    candidate: body.candidate, offered: body.candidate, receipt: r.prompt_hash, model: r.model,
+  });
+  if (!taken.ok) return fail(1, taken.message);
+  return { ok: true, branch: taken.branch, path: request.file, receipt: { ...r } };
+}

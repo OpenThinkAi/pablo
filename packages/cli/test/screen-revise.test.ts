@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { waitingBranches } from "../src/branch";
-import { locateSelection, replacementLines, screenReviser } from "../src/screen-revise";
+import { locateSelection, replacementLines, revisePassage, screenReviser } from "../src/screen-revise";
 
 /**
  * The screen's reviser (AGT-1544): `reviseCore` against a fake Adapter and `take` on a temp git copy of the fixture
@@ -185,4 +185,41 @@ test("take refuses, leaving no branch, when the candidate is empty or the chapte
   if (!stale.ok) expect(stale.message).toContain("no longer");
   expect(git(vault, "branch", "--list", "revise/*")).toBe("");
   expect(existsSync(join(env.PABLO_HOME, "worktrees", "ice-house", "revise", "abcdef0"))).toBe(false);
+});
+
+test("revisePassage runs revise and commits on revise/<id> as the model; the result names the branch and receipt, not the prose (AGT-1563)", async () => {
+  const { vault, project, env } = setup();
+  const mainBefore = git(vault, "rev-parse", "main");
+  const prompts: string[] = [];
+  const result = await revisePassage(vault, project,
+    { file: FILE, passage: "Odile heard it from the scale house doorway. She wrote the time in the green book.", instruction: "tighten it" },
+    { adapter: adapter("Odile heard the pond from the scale house. She wrote the time down first.", prompts), env });
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(prompts.length).toBe(1);
+  expect(result.branch).toMatch(/^revise\/[0-9a-f]{7}$/);
+  expect(result.path).toBe(FILE);
+  expect(result.receipt["model"]).toBe("test-reviser-model");
+  expect(JSON.stringify(result)).not.toContain("scale house. She wrote the time down first");
+  expect(git(vault, "rev-parse", "main")).toBe(mainBefore);
+  expect(readFileSync(join(project, FILE), "utf8")).toBe(`${HEAD}${BODY}\n`);
+  const onBranch = git(vault, "show", `${result.branch}:novels/ice-house/${FILE}`);
+  expect(onBranch).toContain("Odile heard the pond from the scale house.\nShe wrote the time down first.\n");
+  expect(onBranch).toContain("The pond rang under the horse before it rang under the saws.\n");
+  expect(git(vault, "log", "-1", "--format=%an", result.branch)).toBe("test-reviser-model");
+  expect(git(vault, "log", "-1", "--format=%B", result.branch)).toContain(`Receipt: ${String(result.receipt["prompt_hash"])}`);
+});
+
+test("revisePassage refuses a passage not in the file, an empty instruction and an outside file, leaving no branch (AGT-1563)", async () => {
+  const { vault, project, env } = setup();
+  const prompts: string[] = [];
+  const deps = { adapter: adapter("x", prompts), env };
+  const missing = await revisePassage(vault, project, { file: FILE, passage: "Not in the chapter at all.", instruction: "x" }, deps);
+  expect(missing.ok).toBe(false);
+  const empty = await revisePassage(vault, project, { file: FILE, passage: "Wilfred came up the ramp.", instruction: " " }, deps);
+  expect(empty.ok).toBe(false);
+  const out = await revisePassage(vault, project, { file: "../../../etc/passwd", passage: "x", instruction: "x" }, deps);
+  expect(out.ok).toBe(false);
+  expect(prompts).toEqual([]);
+  expect(git(vault, "branch", "--list", "revise/*")).toBe("");
 });
