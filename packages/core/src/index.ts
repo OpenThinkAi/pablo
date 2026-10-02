@@ -4,3 +4,4 @@ export * from "./markup";
 export * from "./pack";
 export * from "./providers";
 export * from "./diff";
+export { joinSentences, splitSentences } from "./sentences";

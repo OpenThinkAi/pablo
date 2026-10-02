@@ -45,8 +45,10 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 document model, the markup module (used by the provider
                 adapters' streaming/normalization path, not by any manuscript
                 — no CriticMarkup is ever written to a vault file), the
-                context-pack assembler, and the provider adapters
-                (OpenAI-compatible, Anthropic).
+                context-pack assembler, the provider adapters
+                (OpenAI-compatible, Anthropic), and the fiction sentence
+                splitter (`splitSentences`/`joinSentences`) behind
+                one-sentence-per-line manuscripts.
 packages/tui    @openthink/pablo-tui — the Ink 7 / React 19 screen, a third
                 front end on `verbs.ts` beside the CLI and MCP. Terminal and
                 React dependencies live here, never in core. Resize and
