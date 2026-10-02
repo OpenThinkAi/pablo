@@ -130,6 +130,16 @@ test("the previous chapter's tail is the last N words, without its frontmatter",
   expect(chapterTail(chapter, 3)).not.toContain("chapter: 1");
 });
 
+test("the previous chapter's tail joins sentence lines into paragraphs first, and keeps paragraph breaks (AGT-1532)", () => {
+  const split = "---\nchapter: 1\n---\n\nalpha beta.\ngamma delta.\n\nepsilon zeta.\neta theta.\n";
+  const paragraphs = "---\nchapter: 1\n---\n\nalpha beta. gamma delta.\n\nepsilon zeta. eta theta.\n";
+
+  expect(chapterTail(split, 99)).toBe("alpha beta. gamma delta.\n\nepsilon zeta. eta theta.");
+  expect(chapterTail(split, 3)).toBe("zeta. eta theta.");
+  expect(chapterTail(split, 5)).toBe("delta.\n\nepsilon zeta. eta theta.");
+  expect(chapterTail(paragraphs, 5)).toBe(chapterTail(split, 5));
+});
+
 test("reading the vault produces the drafting inputs for a chapter", () => {
   const inputs = readDraftingInputs({ vaultRoot: VAULT, workRoot: WORK, chapter: 2, wordTarget: 1800 });
 

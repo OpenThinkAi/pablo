@@ -22,7 +22,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter, ExtractedFact, Receipt } from "@openthink/pablo-core";
-import { NoToolCallError, estimateTokens, fileReceiptSink, hashPrompt } from "@openthink/pablo-core";
+import { NoToolCallError, estimateTokens, fileReceiptSink, hashPrompt, joinParagraphs } from "@openthink/pablo-core";
 import { insertUnderHeading } from "../markdown";
 import type { Ritual } from "./rituals";
 
@@ -239,9 +239,12 @@ function factsSummaryText(facts: readonly ExtractedFact[]): string {
 export async function runContinuity(
   workDir: string,
   chapter: number,
-  chapterBody: string,
+  chapterBodyAsStored: string,
   opts: ContinuityOptions,
 ): Promise<Ritual> {
+  // Chapters are stored one sentence per line (AGT-1532): the model reads
+  // ordinary paragraphs, and anchors are matched against the same text.
+  const chapterBody = joinParagraphs(chapterBodyAsStored);
   if (opts.adapter === undefined) {
     return { name: "continuity", status: "skipped", detail: "no extraction adapter" };
   }
