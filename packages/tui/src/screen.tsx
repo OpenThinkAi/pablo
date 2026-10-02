@@ -6,6 +6,7 @@ import { bookRail, type BookStage } from "./book";
 import { loadEditor, loadKeymap } from "./key-config";
 import { KeysError } from "./keys";
 import type { BranchDiff } from "./review";
+import type { CheckHit } from "./hits";
 import { loadDocument } from "./source";
 
 const ENTER_ALT = "\x1b[?1049h\x1b[H";
@@ -22,6 +23,8 @@ export interface ScreenOptions {
   readonly branches?: readonly string[];
   /** A branch's changes against `main` as git's diff, for review mode. */
   readonly diffOf?: (branch: string) => BranchDiff;
+  /** Scans a chapter's raw text for `check` hits (pablo-cli's checkFile, with the vault's rules): each shows as a box under its line. */
+  readonly checks?: (file: string, text: string) => readonly CheckHit[];
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -45,7 +48,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   try {
     const root = options.dir;
     const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

@@ -27,7 +27,7 @@ test("every row that acts in a state has an entry on its panel", () => {
 
 test("a pending prefix shows its second keys; a number being typed shows how to finish", () => {
   const main: KeyState = { state: "main", review: false, content: false };
-  expect(entriesOf(main, { prefix: "g" }).map((e) => `${e.keys} ${e.label}`)).toEqual(["g top", "e end", "0-9 line"]);
+  expect(entriesOf(main, { prefix: "g" }).map((e) => `${e.keys} ${e.label}`)).toEqual(["g top", "e end", "f next hit", "F previous hit", "0-9 line"]);
   expect(entriesOf(main, { prefix: "v" }).map((e) => e.label)).toEqual(["zen", "editor"]);
   expect(entriesOf(main, { prefix: "g", digits: "1" }).map((e) => e.keys)).toEqual(["0-9", "g Enter", "Esc"]);
   expect(panelTitle(main, { prefix: "g" })).toBe("g go to");

@@ -42,6 +42,17 @@ wraps it to the pane, so a chapter reads the same before and after the split. `m
 different document starts at its top, the same one keeps the line. `g g` / `g e` and the arrows move the cursor and the
 view follows it. A missing file shows as a notice ("Chapter 3 has no draft yet."), not an error.
 
+### Check hits and comment boxes
+
+Opening a chapter (a `MainDoc` with a `file`) runs the `checks` the CLI passes in (`screenChecks`, core-free `checkFile`
+with the vault's rules) over its raw text. `hits.ts` `mainRows` lays each hit's box under the display line its file line
+ends on (`document.ts` `displayDoc` anchors: sentence lines are joined and wrapped, so the file's line numbers are
+mapped, not assumed). A box is three ordinary rows of the pane (`comment-box.ts` `commentBox`), so the pane windows and
+moves over them like any line; the cursor can rest on them. `→` on a hit's line or box opens its rule and flagged pattern
+in the content area (`hitDetail`); `g f` / `g F` jump to the next / previous box, wrapping. Those keys are commands the
+app handles itself (`check.open`, `check.next`, `check.prev`) and use the model's existing `main.goto`, so the model
+gained no action. `comment-box.ts` knows nothing about checks: review mode's critic comments reuse it.
+
 ## The state model
 
 `state.ts` is pure: no Ink, no React, no imports at all. It holds where the author is and what is open, and nothing

@@ -412,6 +412,16 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string): Ch
   return { ok: true, code: 0, hits, unprovenanced };
 }
 
+/**
+ * The scanner the screen runs when a chapter opens (AGT-1528): `checkFile` with the vault's rules, loaded once on
+ * the first chapter. Takes the file's raw text, so a hit's line is a line of the file and the screen can put its
+ * box under the sentence it is about.
+ */
+export function screenChecks(vaultRoot: string): (file: string, text: string) => Hit[] {
+  let rules: CheckRules | undefined;
+  return (file, text) => checkFile(text, file, (rules ??= loadCheckRules(vaultRoot)));
+}
+
 /** `pablo check`'s own argument slice — kept local so `check.ts` does not import `cli.ts` (which imports `check.ts`). */
 export interface CheckArgs {
   readonly json: boolean;

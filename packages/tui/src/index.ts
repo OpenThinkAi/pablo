@@ -5,3 +5,4 @@ export type { ScreenOptions } from "./screen";
 export { bookRail, missingContent, MARKS } from "./book";
 export type { BookRail, BookStage, StageStatus } from "./book";
 export type { BranchDiff } from "./review";
+export type { CheckHit } from "./hits";
