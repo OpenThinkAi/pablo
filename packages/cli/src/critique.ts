@@ -22,6 +22,9 @@
  * branch's head commit, so review mode can show them as line comments and drops them once the branch moves on. The model is the planner
  * role (Claude), never the local writer, and nothing under `research/` or
  * `notes/` is put in a prompt.
+ *
+ * Known v1 gap, not an oversight: there is no per-comment dismiss, so a false positive that survives the refute pass
+ * stays until the branch moves (the saved comments are keyed to its head) or the critique is run again.
  */
 
 import { execFileSync } from "node:child_process";
@@ -29,7 +32,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync,
 import { join, relative } from "node:path";
 import { parseDiff, readStyle, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
-import { branchDiff, branchKind, repoRoot } from "./branch";
+import { BRANCH_KINDS, branchDiff, branchKind, repoRoot } from "./branch";
 
 export const CRITIQUE_KINDS = ["continuity", "timeline", "tells"] as const;
 export type CritiqueKind = (typeof CRITIQUE_KINDS)[number];
@@ -291,7 +294,7 @@ export interface CritiqueOptions {
 export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueResult> {
   const repo = repoRoot(opts.projectPath);
   if (repo === undefined) return { ok: false, kind: "refused", notice: `pablo: critique: ${opts.projectPath} is not inside a git repository` };
-  if (!branchKind(opts.branch)) return { ok: false, kind: "refused", notice: `pablo: critique: "${opts.branch}" is not a change branch` };
+  if (!branchKind(opts.branch)) return { ok: false, kind: "refused", notice: `pablo: critique: "${opts.branch}" is not a change branch; use one that starts with ${BRANCH_KINDS.map((k) => `${k}/`).join(", ")}` };
   const diff = branchDiff(repo, opts.branch);
   if (!diff.ok) return { ok: false, kind: "error", notice: diff.notice };
 
@@ -325,7 +328,7 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
       say(`pablo: critique: examining ${file.path}`);
       const found = parseCandidates(await opts.ask(candidatePrompt(file.path, lines, changed, date, { ...ref, timeline })), changed);
       raised += found.length;
-      if (found.length > 0) say(`pablo: critique: ${found.length} candidate${found.length === 1 ? "" : "s"} in ${file.path}, re-checking`);
+      if (found.length > 0) say(`pablo: critique: ${found.length} comment${found.length === 1 ? "" : "s"} raised in ${file.path}, re-checking`);
       for (const c of found) {
         const verdict = applyRefute(await opts.ask(refutePrompt(c, file.path, lines, ref.continuity)), shownLabels(lines, c.line, ref.continuity));
         if (!verdict.kept) {

@@ -177,6 +177,7 @@ test("a branch that is not a change branch, and one with no chapter changes, are
   };
   const bad = await critiqueBranch({ vaultRoot: repo, projectPath: work, branch: "main", ask });
   expect(bad).toMatchObject({ ok: false, kind: "refused" });
+  expect(bad.ok === false && bad.notice).toContain("draft/, revise/");
   execFileSync("git", ["-C", repo, "branch", "revise/empty", "main"]);
   const none = await critiqueBranch({ vaultRoot: repo, projectPath: work, branch: "revise/empty", ask });
   expect(none).toMatchObject({ ok: true, comments: [], raised: 0 });
@@ -246,7 +247,7 @@ test("the run says what it is doing as it goes, and a model call is bounded by a
   expect(lines).toEqual([
     "pablo: critique: draft/ch02: 1 changed chapter to examine",
     "pablo: critique: examining novels/ice-house/chapters/02-thaw.md",
-    "pablo: critique: 1 candidate in novels/ice-house/chapters/02-thaw.md, re-checking",
+    "pablo: critique: 1 comment raised in novels/ice-house/chapters/02-thaw.md, re-checking",
     "pablo: critique: 1 comment kept, 0 withdrawn",
   ]);
 
