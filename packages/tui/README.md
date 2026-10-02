@@ -14,9 +14,20 @@ src/key-panel.tsx  the key panel as a component the layout places
 src/key-config.ts  `keys` in ~/.config/pablo/config.json, laid over the defaults
 src/app.tsx      the Ink root: reads the state, draws it, dispatches actions from keys
 src/screen.tsx   mounts the app in the alternate screen and restores the terminal
+src/layout.ts    the layout geometry, pure: region sizes at a terminal size, text wrapping, the `measured` payload
+src/status.ts    the status area's fields (format, progress, branch, comment counts) and which drop when narrow
 src/resize.ts    the terminal size as state (below the model: plumbing, not where the author is)
 src/sanitize.ts  strips control characters from text that did not come from the keyboard
 ```
+
+## The layout
+
+Top to bottom: the status area (title, then fields), the middle (the rail and the main pane), the bottom panel (the
+content area beside the key panel) and a one-row footer. `layout.ts` computes every region's size from the terminal's
+columns and rows (`layoutOf`), tested at 60x20 to 200x60 with no terminal. Under 100 columns the rail is a narrow
+strip; `view.zen` hides it; `view.full` gives the bottom panel the screen. `app.tsx` reads the layout and, whenever
+the size or the content changes, dispatches `measured` so the model keeps every cursor in view; a resize relayouts
+without a restart. The key panel (AGT-1524) sits in the bottom panel at the width and height the layout gives it.
 
 ## The state model
 
