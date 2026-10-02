@@ -96,6 +96,10 @@ export const composeLines = (entries: readonly ComposeEntry[], width: number): C
 
 /** The heading row, the activity row and the input box (border, one line, border) around the conversation's lines. */
 const HEADING_H = 1, ACTIVITY_H = 1, INPUT_H = 3;
+/** The branches the session made are listed under the conversation: a heading and up to this many rows. */
+export const BRANCH_ROWS = 3;
+/** Rows the branch list takes for `count` branches: none when there are none. */
+export const branchesH = (count: number): number => (count === 0 ? 0 : 1 + Math.min(count, BRANCH_ROWS));
 
 export interface ComposeLayout {
   /** Rows the conversation's lines show, and how wide they are. */
@@ -104,8 +108,8 @@ export interface ComposeLayout {
   readonly inputInner: number;
 }
 
-export function composeLayout(cols: number, rows: number): ComposeLayout {
-  return { rows: Math.max(1, rows - STATUS_H - FOOTER_H - HEADING_H - ACTIVITY_H - INPUT_H), inner: Math.max(1, cols - 2), inputInner: Math.max(1, cols - 6) };
+export function composeLayout(cols: number, rows: number, branches = 0): ComposeLayout {
+  return { rows: Math.max(1, rows - STATUS_H - FOOTER_H - HEADING_H - ACTIVITY_H - INPUT_H - branchesH(branches)), inner: Math.max(1, cols - 2), inputInner: Math.max(1, cols - 6) };
 }
 
 /** What the layout tells the model about the conversation at this size. */
@@ -119,6 +123,13 @@ export function visibleLines(lines: readonly ComposeLine[], rows: number, offset
   return lines.slice(Math.max(0, end - rows), end);
 }
 
+/** The branch rows on screen: at most `BRANCH_ROWS`, scrolled so the cursor (or the newest, with none) is in view. */
+export function visibleBranches(branches: readonly string[], pick: number | null): { readonly name: string; readonly index: number }[] {
+  const at = pick ?? branches.length - 1;
+  const start = Math.max(0, Math.min(at - BRANCH_ROWS + 1, branches.length - BRANCH_ROWS));
+  return branches.slice(start, start + BRANCH_ROWS).map((name, i) => ({ name, index: start + i }));
+}
+
 /** The tail of the input that fits `width` with room for the cursor. */
 export const inputTail = (input: string, width: number): string => [...clean(input)].slice(-Math.max(1, width - 1)).join("");
 
@@ -127,10 +138,21 @@ export const inputTail = (input: string, width: number): string => [...clean(inp
 /**
  * A keypress in the compose view as an action, or null. Typing goes into the input (a paste arrives as one chunk,
  * its line breaks made spaces: the box is one line); Enter sends; the arrows and paging scroll the conversation; Esc
- * leaves. The prefix keys and `q` are text here, not commands.
+ * leaves. Tab moves the keys to the branches the session made (Enter opens one in review, Esc comes back to the input). The prefix keys and `q` are text here, not commands.
  */
-export function composeAction(input: string, key: InkKey): Action | null {
+export function composeAction(input: string, key: InkKey, picking = false): Action | null {
   const token = tokenOf(input, key);
+  if (token === "tab") return { type: "compose.pick" };
+  // With the keys in the branch list: the arrows move, Enter opens the branch in review, nothing is typed.
+  if (picking) {
+    switch (token) {
+      case "esc": return { type: "escape" };
+      case "enter": return { type: "compose.open_branch" };
+      case "up": return { type: "compose.pick_move", by: -1 };
+      case "down": return { type: "compose.pick_move", by: 1 };
+      default: return null;
+    }
+  }
   switch (token) {
     case "esc": return { type: "escape" };
     case "enter": return { type: "compose.submit" };

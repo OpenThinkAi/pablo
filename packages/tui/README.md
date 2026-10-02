@@ -89,6 +89,17 @@ event, is drawn in place, and the author's next line answers it (a number picks 
 to `Composer.answer`, and the turn's stream carries on. A new entry kind is a variant and a case in `composeLines`;
 `compose.add` appends one from outside the stream.
 
+### Links to review (AGT-1569)
+
+Compose produces branches; review accepts them. The branches a tool result names (`plan/`, `draft/` or `revise/` names,
+read off successful `tool_result` events in the reducer: `Compose.branches`, each once, in order) are listed under the
+conversation, up to three rows (`branchesH` takes them from the conversation's rows). Tab moves the keys into the list
+(`compose.pick`, the newest picked; nothing is typed there), the arrows move, Enter (`compose.open_branch`) opens the
+branch in review mode, and Tab or Esc return to the input. The review it opens carries `back` (the place compose was
+opened from), so Esc there (`review.close`) returns to compose with its conversation, session and branch list as they
+were, and a second Esc goes on to the book. `review.open` itself stays a no-op while compose is open: compose hands
+off through `compose.open_branch`.
+
 ## The state model
 
 `state.ts` is pure: no Ink, no React, no imports at all. It holds where the author is and what is open, and nothing

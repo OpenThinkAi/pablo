@@ -4,7 +4,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
 import { App } from "../src/app";
-import { activityNow, composeAction, composeLayout, composeLines, composeMeasure, inputTail, visibleLines } from "../src/compose";
+import { activityNow, composeAction, composeLayout, composeLines, composeMeasure, inputTail, visibleBranches, visibleLines } from "../src/compose";
 import type { Composer } from "../src/compose";
 import { activityOf, spanOf } from "../src/activity";
 import { initialState, reduce, viewOf } from "../src/state";
@@ -127,7 +127,13 @@ test("composeAction: typing, a paste, Enter, Backspace, scrolling and Esc; modif
   expect(composeAction("", { escape: true })).toEqual({ type: "escape" });
   expect(composeAction("c", { ctrl: true })).toBeNull();
   expect(composeAction("[1;2B", {})).toBeNull();
-  expect(composeAction("", { tab: true })).toBeNull();
+  expect(composeAction("", { tab: true })).toEqual({ type: "compose.pick" });
+  // In the branch list nothing is typed: the arrows move, Enter opens, Esc leaves the list.
+  expect(composeAction("a", {}, true)).toBeNull();
+  expect(composeAction("", { upArrow: true }, true)).toEqual({ type: "compose.pick_move", by: -1 });
+  expect(composeAction("", { downArrow: true }, true)).toEqual({ type: "compose.pick_move", by: 1 });
+  expect(composeAction("\r", { return: true }, true)).toEqual({ type: "compose.open_branch" });
+  expect(composeAction("", { escape: true }, true)).toEqual({ type: "escape" });
 });
 
 test("the geometry: the conversation takes what the status area, activity line, input box and footer leave", () => {
@@ -423,4 +429,105 @@ test("a composer that cannot take answers says so instead of leaving the turn wa
   app.stdin.write("\r");
   await sleep(60);
   expect(plain(app.lastFrame())).toContain("cannot take answers");
+});
+
+// ---------------------------------------------------------------- links to review (AGT-1569)
+
+const DIFF = `diff --git a/chapters/03-the-well.md b/chapters/03-the-well.md
+index 1111111..2222222 100644
+--- a/chapters/03-the-well.md
++++ b/chapters/03-the-well.md
+@@ -1,2 +1,2 @@
+ The well had been dry since June.
+-She did not look up when the door opened.
++She never looked up when the door opened.
+`;
+const made = (tool: string, id: string, text: string, isError = false): Action[] => [
+  ev({ kind: "tool_call", id, tool, input: {} }), ev({ kind: "tool_result", id, text, isError }),
+];
+
+test("the branches a tool result names are the session's branches: each once, in order, errors and other branches left out", () => {
+  const s = then(typed(initialState(), "go"),
+    ...made("propose", "a", "Staged acts on plan/2026-10-01-ab12cd."),
+    ...made("draft_chapter", "b", "Wrote chapter 3 on draft/ch03 (71s)."),
+    ...made("propose", "c", "Staged beats on plan/2026-10-01-ab12cd."),
+    ...made("write", "d", "refused: could not make draft/ch09", true),
+    ...made("read", "e", "edit/ch02 and reader/ch01 are not compose's"),
+    ...made("read", "f", "plan/a/../../etc/passwd and draft//x and draft/x..y and draft/ok.lock"),
+  );
+  expect(s.compose.branches).toEqual(["plan/2026-10-01-ab12cd", "draft/ch03", "plan/a"]);
+  // The list is bounded.
+  const many = then(typed(initialState(), "go"), ...made("w", "m", Array.from({ length: 80 }, (_, i) => `draft/ch${i}`).join(" ")));
+  expect(many.compose.branches).toHaveLength(50);
+  expect(many.compose.branches.at(-1)).toBe("draft/ch79");
+});
+
+test("Tab picks a branch, Enter opens it in review, Esc returns to compose and then to where compose was opened from", () => {
+  let s = then(typed(initialState(), "go"), ...made("w", "a", "on draft/ch03"), ...made("w", "b", "on revise/ch03-2"));
+  expect(then(s, { type: "compose.open_branch" }).mode.kind).toBe("compose"); // nothing picked: nothing opens
+  s = then(s, { type: "compose.pick" });
+  expect(s.compose.pick).toBe(1); // the newest
+  s = then(s, { type: "compose.pick_move", by: -1 }, { type: "compose.pick_move", by: -5 });
+  expect(s.compose.pick).toBe(0);
+  const opened = then(s, { type: "compose.open_branch" });
+  expect(opened.mode).toEqual({ kind: "review", branch: "draft/ch03", back: { kind: "book" } });
+  expect(opened.compose.pick).toBeNull();
+  expect(opened.compose.entries).toEqual(s.compose.entries);
+  const back = then(opened, { type: "escape" });
+  expect(back.mode).toEqual({ kind: "compose", from: { kind: "book" } });
+  expect(back.compose.branches).toEqual(["draft/ch03", "revise/ch03-2"]);
+  expect(then(back, { type: "escape" }).mode).toEqual({ kind: "book" });
+  // Esc in the list leaves the list first, not compose.
+  const picking = then(s, { type: "escape" });
+  expect(picking.mode.kind).toBe("compose");
+  expect(picking.compose.pick).toBeNull();
+});
+
+test("the branch list takes rows from the conversation, up to three, and none when there are none", () => {
+  expect(composeLayout(80, 24, 0).rows).toBe(composeLayout(80, 24).rows);
+  expect(composeLayout(80, 24, 1).rows).toBe(composeLayout(80, 24).rows - 2);
+  expect(composeLayout(80, 24, 9).rows).toBe(composeLayout(80, 24).rows - 4);
+  const names = ["a/1", "a/2", "a/3", "a/4", "a/5"];
+  expect(visibleBranches(names, null).map((b) => b.name)).toEqual(["a/3", "a/4", "a/5"]);
+  expect(visibleBranches(names, 0).map((b) => b.name)).toEqual(["a/1", "a/2", "a/3"]);
+  expect(visibleBranches(names, 3).map((b) => b.index)).toEqual([1, 2, 3]);
+});
+
+test("on screen: the session's branch is listed in compose; Tab, Enter opens it in review; Esc returns to compose with the conversation intact", async () => {
+  const branchTurn = (): ComposeEvent[] => [
+    { kind: "assistant", text: "Drafting." },
+    { kind: "tool_call", id: "t1", tool: "draft_chapter", input: { chapter: 3 } },
+    { kind: "tool_result", id: "t1", text: "Wrote chapter 3 on draft/ch03.", isError: false },
+    { kind: "result", ok: true, errors: [] },
+  ];
+  const composer = fakeComposer(branchTurn);
+  const app = render(<App {...props} composer={composer} diffOf={() => ({ ok: true, text: DIFF })} />);
+  await sleep(20);
+  await keys(app, "ac");
+  await keys(app, "draft it");
+  app.stdin.write("\r");
+  await sleep(80);
+  let frame = plain(app.lastFrame());
+  expect(frame).toContain("PABLO'S CHANGES (1)");
+  expect(frame).toContain("  draft/ch03");
+  expect(frame.split("\n").length).toBeLessThanOrEqual(SIZE.rows);
+  app.stdin.write("\t");
+  await sleep(30);
+  expect(plain(app.lastFrame())).toContain("Enter reviews");
+  app.stdin.write("\r");
+  await sleep(60);
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("CHANGES");
+  expect(frame).toContain("review draft/ch03 · Esc back to compose");
+  expect(frame).not.toContain("COMPOSE");
+  app.stdin.write("\x1b");
+  await sleep(40);
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("COMPOSE");
+  expect(frame).toContain("Wrote chapter 3 on draft/ch03.".slice(0, 20)); // the conversation is as it was
+  expect(frame).toContain("› draft it");
+  expect(composer.sent).toEqual(["draft it"]);
+  app.stdin.write("\x1b");
+  await sleep(40);
+  expect(plain(app.lastFrame())).toContain("BOOK");
 });

@@ -30,7 +30,8 @@ export const EDIT_ROW = "edit:";
 /** The author's decision on a change; a change with none is still pending. */
 export type Mark = "accepted" | "rejected";
 
-export type Place = { kind: "book" } | { kind: "review"; branch: string };
+/** A review opened from the compose view carries `back`, the place compose was opened from: Esc returns to compose, not the book. */
+export type Place = { kind: "book" } | { kind: "review"; branch: string; back?: Place };
 /** Settings (`\`) and compose (`a c`) are modes over a place: closing one returns to where it was opened, with that place's own rail and main pane. */
 export type Mode = Place | { kind: "settings"; from: Place } | { kind: "compose"; from: Place };
 export type PaneName = "rail" | "main";
@@ -131,6 +132,10 @@ export interface Compose {
   readonly offset: number;
   readonly length: number;
   readonly visible: number;
+  /** The branches the session's tools report making (`plan/`, `draft/`, `revise/` names in their results), oldest first. */
+  readonly branches: readonly string[];
+  /** The branch list's cursor while Tab has moved the keys into it (Enter opens that branch in review); null while typing. */
+  readonly pick: number | null;
 }
 
 export interface State {
@@ -229,6 +234,8 @@ export type Action =
   | { type: "compose.add"; entry: ComposeEntry }
   | { type: "compose.failed"; message: string }
   | { type: "compose.done" }
+  // Tab moves between the input and the branches the session made; Up/Down move in the list, Enter opens the branch in review.
+  | { type: "compose.pick" } | { type: "compose.pick_move"; by: number } | { type: "compose.open_branch" }
   | { type: "compose.up" } | { type: "compose.down" } | { type: "compose.page_up" } | { type: "compose.page_down" }
   // ---- Esc: back out of whatever is open, one thing at a time
   | { type: "escape" }
@@ -244,7 +251,7 @@ const writeContent = (title: string, body: string): Content => ({ title, body, k
 
 const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor: 0, scroll: 0, visible: 0 }, main: { cursor: 0, scroll: 0, length: 0, visible: 0, sentences: [], selection: null } });
 
-export const initialCompose = (): Compose => ({ entries: [], input: "", busy: false, activity: "", sessionId: null, outbox: null, sendSeq: 0, reply: null, replySeq: 0, offset: 0, length: 0, visible: 0 });
+export const initialCompose = (): Compose => ({ entries: [], input: "", busy: false, activity: "", sessionId: null, outbox: null, sendSeq: 0, reply: null, replySeq: 0, offset: 0, length: 0, visible: 0, branches: [], pick: null });
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
@@ -414,6 +421,13 @@ const scrollCompose = (c: Compose, by: number): Compose => ({ ...c, offset: clam
 export const openQuestion = (c: Compose): Extract<ComposeEntry, { kind: "question" }> | undefined =>
   c.entries.find((e): e is Extract<ComposeEntry, { kind: "question" }> => e.kind === "question" && e.answer === undefined);
 
+/** The branches a tool's result names: the kinds compose makes (`plan/`, `draft/`, `revise/`), each once, in order. */
+export const BRANCH_NAME = /\b(?:plan|draft|revise)(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+/g;
+/** Most branches kept; the result text is the model's, so the list is bounded and a name is a plain git ref (no `..`, no empty or dotted segment). */
+const MAX_BRANCHES = 50;
+const branchesIn = (text: string): string[] =>
+  [...text.matchAll(BRANCH_NAME)].map((m) => m[0].replace(/[._-]+$/, "")).filter((b) => !b.includes("..") && !b.split("/").some((seg) => seg.endsWith(".lock")));
+
 /** A session event applied to the conversation; a new line of it brings the view back to the newest. */
 function reduceEvent(c: Compose, e: ComposeEvent, at?: number): Compose {
   switch (e.kind) {
@@ -424,8 +438,10 @@ function reduceEvent(c: Compose, e: ComposeEvent, at?: number): Compose {
       const card: ComposeEntry = { kind: "question", id: e.id, question: e.question, options: e.options, why: e.why };
       return { ...c, entries: [...c.entries, card], activity: "waiting for your answer", offset: 0 };
     }
-    case "tool_result":
-      return { ...c, activity: "thinking", entries: c.entries.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, result: { text: e.text, isError: e.isError }, ...(at === undefined ? {} : { endedAt: at }) } : x)) };
+    case "tool_result": {
+      const seen = e.isError ? [] : branchesIn(e.text).filter((b, i, all) => all.indexOf(b) === i && !c.branches.includes(b));
+      return { ...c, branches: [...c.branches, ...seen].slice(-MAX_BRANCHES), activity: "thinking", entries: c.entries.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, result: { text: e.text, isError: e.isError }, ...(at === undefined ? {} : { endedAt: at }) } : x)) };
+    }
     case "result": {
       const errors = e.ok ? [] : [{ kind: "error" as const, text: e.errors.length ? e.errors.join("; ") : "the session ended without finishing" }];
       return { ...c, entries: [...c.entries, ...errors], busy: false, activity: "", outbox: null, offset: 0 };
@@ -511,7 +527,7 @@ export function reduce(s: State, a: Action): State {
     }
     case "finish.failed":
       return { ...s, finishing: null, content: writeContent("Not finished", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
-    case "review.close": return s.mode.kind === "review" ? { ...s, mode: { kind: "book" }, marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null } : s;
+    case "review.close": return s.mode.kind === "review" ? { ...s, mode: s.mode.back ? { kind: "compose", from: s.mode.back } : { kind: "book" }, marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null } : s;
 
     // Settings opens over the book or review and closes back to it. Its keys never reach the chord (settings.ts reads
     // them, including Esc), so `escape` leaves it alone.
@@ -541,6 +557,13 @@ export function reduce(s: State, a: Action): State {
     case "compose.add": return { ...s, compose: { ...s.compose, entries: [...s.compose.entries, a.entry], offset: 0 } };
     case "compose.failed": return { ...s, compose: { ...s.compose, entries: [...s.compose.entries, { kind: "error", text: a.message }], busy: false, activity: "", outbox: null, offset: 0 } };
     case "compose.done": return { ...s, compose: { ...s.compose, busy: false, activity: "", outbox: null } };
+    case "compose.pick": return s.mode.kind === "compose" && s.compose.branches.length > 0 ? { ...s, compose: { ...s.compose, pick: s.compose.pick === null ? s.compose.branches.length - 1 : null } } : s;
+    case "compose.pick_move": return s.compose.pick === null ? s : { ...s, compose: { ...s.compose, pick: clamp(s.compose.pick + a.by, 0, s.compose.branches.length - 1) } };
+    // The picked branch opens in review; Esc there returns to compose (`back` is where compose was opened from).
+    case "compose.open_branch": {
+      const branch = s.mode.kind === "compose" && s.compose.pick !== null ? s.compose.branches[s.compose.pick] : undefined;
+      return s.mode.kind === "compose" && branch !== undefined ? { ...s, mode: { kind: "review", branch, back: s.mode.from }, review: emptyView(), marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null, compose: { ...s.compose, pick: null } } : s;
+    }
     case "compose.up": return { ...s, compose: scrollCompose(s.compose, 1) };
     case "compose.down": return { ...s, compose: scrollCompose(s.compose, -1) };
     case "compose.page_up": return { ...s, compose: scrollCompose(s.compose, pageStep(s.compose.visible)) };
@@ -548,7 +571,7 @@ export function reduce(s: State, a: Action): State {
 
     case "escape":
       if (s.mode.kind === "settings") return s;
-      if (s.mode.kind === "compose") return reduce(s, { type: "compose.close" });
+      if (s.mode.kind === "compose") return s.compose.pick !== null ? reduce(s, { type: "compose.pick" }) : reduce(s, { type: "compose.close" });
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });
       if (s.focus === "content") return reduce(s, { type: "focus.back" });

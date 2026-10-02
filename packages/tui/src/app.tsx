@@ -95,7 +95,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   useInput((input, key) => {
     // In the compose view keys are text; only the arrows, Enter and Esc mean anything else.
     if (state.mode.kind === "compose") {
-      const action = composeAction(input, key);
+      const action = composeAction(input, key, state.compose.pick !== null);
       if (action) dispatch(action);
       return;
     }
@@ -201,11 +201,11 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   useEffect(() => {
     dispatch({ type: "measured", measure: measureOf(layout, contentBody) });
   }, [layout.railRows, layout.mainRows, layout.contentRows, layout.contentInner, contentBody]);
-  const compLayout = composeLayout(size.cols, size.rows);
+  const compLayout = composeLayout(size.cols, size.rows, state.compose.branches.length);
   const entries = state.compose.entries;
   useEffect(() => {
     dispatch({ type: "measured", measure: composeMeasure(compLayout, entries) });
-  }, [compLayout.rows, compLayout.inner, entries]);
+  }, [compLayout.rows, compLayout.inner, entries, state.compose.branches.length]);
   // One message, one effect: `sendSeq` changes only when the author sends. The stream is read to its end whatever
   // view is open, so leaving the compose view mid-reply loses nothing; closing the screen stops it.
   const { sendSeq, outbox } = state.compose;
@@ -244,7 +244,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
 
   const view = viewOf(state);
   const working = state.compose.busy ? ` · pablo: ${clean(activityNow(state.compose)) || "working"}` : "";
-  const where = state.mode.kind === "compose" ? `compose · Esc back to the book${working}` : `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}` : "book"} · ${state.focus}${working}`;
+  const where = state.mode.kind === "compose" ? `compose · Esc back to the book${working}` : `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}${state.mode.back ? " · Esc back to compose" : ""}` : "book"} · ${state.focus}${working}`;
   const pending = pendingText(state.pending);
   const shownComments = hits.length ? { ...comments, check: hits.length } : comments;
   const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments: shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}) }), size.cols - 4);
