@@ -37,6 +37,27 @@ export type Mode = Place | { kind: "settings"; from: Place } | { kind: "compose"
 export type PaneName = "rail" | "main";
 export type Focus = PaneName | "content";
 
+/**
+ * `a r` (AGT-1544): revising the selected sentences. `ask` types the instruction; `running` waits for the model (the
+ * candidate so far streams in); `edit` is the candidate, editable before Take; `taking` is the commit on a revise
+ * branch. `text` is the buffer being typed in (the instruction, then the candidate) and `cursor` a code-point index in it.
+ */
+export interface Revise {
+  readonly id: number;
+  readonly phase: "ask" | "running" | "edit" | "taking";
+  readonly file: string;
+  readonly sentences: readonly string[];
+  readonly stored: { readonly from: number; readonly to: number };
+  readonly instruction: string;
+  readonly candidate: string;
+  /** The candidate as the model gave it, to tell whether the author edited it. */
+  readonly offered: string;
+  readonly receipt: string;
+  readonly model: string;
+  readonly cursor: number;
+  readonly note: string;
+}
+
 /** A row of the rail: a stage, a chapter, a change. A `group` row folds the deeper rows after it until the next row at its depth or above. */
 export interface RailRow { readonly id: string; readonly depth: number; readonly group?: boolean }
 
@@ -158,6 +179,9 @@ export interface State {
   readonly saved: SavedSettings | null;
   /** The chapter being written (`a w`) while the writer runs; one at a time. */
   readonly writing: number | null;
+  /** The revise in progress (`a r`), and the count that numbers them so a late answer to a cancelled one is ignored. */
+  readonly revise: Revise | null;
+  readonly reviseSeq: number;
   /** Branches this session's writes made, so the book lists them as waiting for review. */
   readonly written: readonly string[];
   /** The branch whose review is being finished (`s`) while the merge and the after-write steps run; one at a time. */
@@ -218,6 +242,16 @@ export type Action =
   | { type: "review.close" }
   // `a w`: start writing a chapter, stream the writer's progress into the content area, then open the review on the new
   // branch with the receipt shown, or show the refusal and its missing reasons
+  // `a r`: ask for an instruction, run the revise, edit the candidate, take it onto a `revise/` branch (opens its review).
+  | { type: "revise.open"; file: string; sentences: readonly string[]; stored: { readonly from: number; readonly to: number } }
+  | { type: "revise.type"; text: string } | { type: "revise.backspace" } | { type: "revise.left" } | { type: "revise.right" }
+  | { type: "revise.run" }
+  | { type: "revise.partial"; id: number; text: string }
+  | { type: "revise.done"; id: number; candidate: string; receipt: string; model: string }
+  | { type: "revise.take" }
+  | { type: "revise.taken"; id: number; branch: string; lines: readonly string[] }
+  | { type: "revise.failed"; id: number; message: string }
+  | { type: "revise.cancel" }
   | { type: "write.start"; chapter: number }
   | { type: "write.progress"; line: string }
   | { type: "write.done"; branch: string; lines: readonly string[] }
@@ -264,13 +298,35 @@ export type Dispatch = (action: Action) => void;
 const PROGRESS_LINES = 5;
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 
+const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
+const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
+const preview = (sentences: readonly string[]): string => { const t = sentences.join(" "); return t.length > 240 ? `${t.slice(0, 237)}...` : t; };
+
+/** What the content area shows for a revise: the buffer being typed in (with its cursor), or the candidate so far, and how to go on. */
+export function reviseContent(r: Revise): Content {
+  const n = r.sentences.length;
+  const sel = `${n} sentence${n === 1 ? "" : "s"}: ${preview(r.sentences)}`;
+  const note = r.note ? `\n\n${r.note}` : "";
+  switch (r.phase) {
+    case "ask": return { kind: "revise", title: "Revise: what should change? Enter runs, Esc cancels", body: `${sel}\n\n${withCursor(r.instruction, r.cursor)}${note}` };
+    case "running": return { kind: "revise", title: "Revising... Esc cancels", body: `${sel}\n\n${r.instruction}\n\n${r.candidate || "waiting for the model..."}` };
+    case "edit": return { kind: "revise", title: "Candidate: edit it, Enter takes it, Esc discards", body: `${withCursor(r.candidate, r.cursor)}\n\n--- was ---\n${r.sentences.join(" ")}\n\n--- asked ---\n${r.instruction}${note}` };
+    case "taking": return { kind: "revise", title: "Taking the candidate...", body: r.candidate };
+  }
+}
+/** Puts the revise on the state with the content area showing it; the candidate gets the whole screen, the instruction the bottom panel. */
+const showRevise = (s: State, r: Revise, reset: boolean): State => ({
+  ...s, revise: r, content: reviseContent(r), full: r.phase === "edit" || r.phase === "running" || r.phase === "taking",
+  ...(reset ? { contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } } : {}),
+});
+
 const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor: 0, scroll: 0, visible: 0 }, main: { cursor: 0, scroll: 0, length: 0, visible: 0, sentences: [], selection: null } });
 
 export const initialCompose = (): Compose => ({ entries: [], input: "", busy: false, activity: "", sessionId: null, outbox: null, sendSeq: 0, reply: null, replySeq: 0, offset: 0, length: 0, visible: 0, branches: [], pick: null });
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, written: [], finishing: null, finished: [], editing: null, editSeq: 0, editBranch: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, revise: null, reviseSeq: 0, written: [], finishing: null, finished: [], editing: null, editSeq: 0, editBranch: null,
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -514,8 +570,59 @@ export function reduce(s: State, a: Action): State {
 
     // A review opens on a branch with a fresh rail and main pane; the book keeps its place for when the review closes.
     case "review.open": return s.mode.kind === "settings" || s.mode.kind === "compose" ? s : { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null };
+    case "revise.open": {
+      // Revising needs the book (a document's sentences), and one revise or write at a time.
+      if (s.mode.kind !== "book" || s.revise !== null || s.writing !== null || s.editing !== null || s.finishing !== null) return s;
+      const id = s.reviseSeq + 1;
+      return showRevise({ ...s, reviseSeq: id, pending: null, focus: s.pane }, { id, phase: "ask", file: a.file, sentences: a.sentences, stored: a.stored, instruction: "", candidate: "", offered: "", receipt: "", model: "", cursor: 0, note: "" }, true);
+    }
+    case "revise.type": case "revise.backspace": case "revise.left": case "revise.right": {
+      const r = s.revise;
+      if (r === null || (r.phase !== "ask" && r.phase !== "edit")) return s;
+      const key = r.phase === "ask" ? "instruction" : "candidate";
+      const text = r[key];
+      const len = [...text].length;
+      if (a.type === "revise.left") return showRevise(s, { ...r, cursor: Math.max(0, r.cursor - 1) }, false);
+      if (a.type === "revise.right") return showRevise(s, { ...r, cursor: Math.min(len, r.cursor + 1) }, false);
+      if (a.type === "revise.backspace") return r.cursor === 0 ? s : showRevise(s, { ...r, [key]: splice(text, r.cursor - 1, 1, ""), cursor: r.cursor - 1, note: "" }, false);
+      return showRevise(s, { ...r, [key]: splice(text, r.cursor, 0, a.text), cursor: r.cursor + [...a.text].length, note: "" }, false);
+    }
+    case "revise.run": {
+      const r = s.revise;
+      if (r === null || r.phase !== "ask") return s;
+      if (r.instruction.trim() === "") return showRevise(s, { ...r, note: "Say what should change first." }, false);
+      return showRevise(s, { ...r, phase: "running", candidate: "", note: "" }, true);
+    }
+    case "revise.partial":
+      return s.revise?.id === a.id && s.revise.phase === "running" ? showRevise(s, { ...s.revise, candidate: a.text }, false) : s;
+    case "revise.done":
+      return s.revise?.id === a.id && s.revise.phase === "running" ? showRevise(s, { ...s.revise, phase: "edit", candidate: a.candidate, offered: a.candidate, receipt: a.receipt, model: a.model, cursor: [...a.candidate].length, note: "" }, true) : s;
+    case "revise.take": {
+      const r = s.revise;
+      if (r === null || r.phase !== "edit") return s;
+      if (r.candidate.trim() === "") return showRevise(s, { ...r, note: "The candidate is empty; Esc discards it." }, false);
+      return showRevise(s, { ...r, phase: "taking", note: "" }, true);
+    }
+    case "revise.failed": {
+      const r = s.revise;
+      if (r === null || r.id !== a.id) return s;
+      // A failed run goes back to the instruction (kept, to retry or change); a failed take back to the candidate.
+      const phase = r.phase === "taking" ? "edit" : "ask";
+      return showRevise(s, { ...r, phase, note: a.message, cursor: [...(phase === "edit" ? r.candidate : r.instruction)].length }, true);
+    }
+    case "revise.cancel": {
+      // The commit of a take is not interrupted.
+      if (s.revise === null || s.revise.phase === "taking") return s;
+      return { ...s, revise: null, content: null, full: false, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    }
+    case "revise.taken": {
+      if (s.revise?.id !== a.id) return s;
+      const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
+      const next = reduce({ ...s, revise: null, full: false, written }, { type: "review.open", branch: a.branch });
+      return next.mode.kind === "review" ? { ...next, content: writeContent(`Revised on ${a.branch}`, a.lines.join("\n")) } : next;
+    }
     case "write.start":
-      if (s.writing !== null) return s;
+      if (s.writing !== null || s.revise !== null) return s;
       return { ...s, writing: a.chapter, content: writeContent(`Writing chapter ${a.chapter}`, "starting…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "write.progress":
       return s.writing === null || s.content?.kind !== "write" ? s : { ...s, content: { ...s.content, body: s.content.body === "starting…" ? a.line : `${s.content.body}\n${a.line}`.split("\n").slice(-PROGRESS_LINES).join("\n") } };
@@ -543,7 +650,7 @@ export function reduce(s: State, a: Action): State {
     case "finish.failed":
       return { ...s, finishing: null, content: writeContent("Not finished", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "edit.start":
-      if (s.editing !== null || s.finishing !== null || s.mode.kind !== "book") return s;
+      if (s.editing !== null || s.finishing !== null || s.revise !== null || s.mode.kind !== "book") return s;
       return { ...s, editing: { file: a.file, line: a.line }, editSeq: s.editSeq + 1, content: writeContent(`Editing ${a.file}`, `line ${a.line}`), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "edit.done": {
       if (s.editing === null) return s;
@@ -602,6 +709,7 @@ export function reduce(s: State, a: Action): State {
 
     case "escape":
       if (s.mode.kind === "settings") return s;
+      if (s.revise) return reduce(s, { type: "revise.cancel" });
       if (s.mode.kind === "compose") return s.compose.pick !== null ? reduce(s, { type: "compose.pick" }) : reduce(s, { type: "compose.close" });
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });

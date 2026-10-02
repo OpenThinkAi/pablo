@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { normalizeOutput, normalizeProposal } from "../src/index";
+import { normalizeCandidate, normalizeOutput, normalizeProposal } from "../src/index";
 import type { Intent, Proposal } from "../src/index";
 
 /**
@@ -87,4 +87,17 @@ test("every variant of a proposal is normalized on its way to the review surface
   expect(normalized.span).toEqual(proposal.span);
   expect(normalized.model).toBe(proposal.model);
   expect(proposal.variants[0]).toBe("A—B");
+});
+
+test("normalizeCandidate unwraps a whole-answer quote pair and the stray punctuation it leaves", () => {
+  expect(normalizeCandidate('"He walked away without looking back."')).toBe("He walked away without looking back.");
+  expect(normalizeCandidate('"He walked away without looking back".')).toBe("He walked away without looking back");
+  expect(normalizeCandidate("\u201cHe left.\u201d")).toBe("He left.");
+});
+
+test("normalizeCandidate leaves genuine dialogue and plain text alone", () => {
+  const dialogue = '"Go," she said. "Now."';
+  expect(normalizeCandidate(dialogue)).toBe(dialogue);
+  expect(normalizeCandidate("He left.")).toBe("He left.");
+  expect(normalizeCandidate('"')).toBe('"');
 });

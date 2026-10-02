@@ -20,8 +20,10 @@ import {
   EndpointHung,
   fileReceiptSink,
   isWithin,
+  joinManuscript,
   loadConfig,
   locatePassage,
+  normalizeCandidate,
   normalizeOutput,
   packTimeoutMs,
   ProviderConfigError,
@@ -163,6 +165,11 @@ function sanitizeInstruction(raw: string): string {
 /** Strips a leading YAML frontmatter block, same regex `chapterTail`/`prose.ts`'s `stripDraftFrontmatter` use — but keeps the body untrimmed, so the offsets `--start`/`--end` name stay exactly the ones a caller would compute against this same slice. */
 const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\s*/;
 
+/** How many characters of `raw` the frontmatter takes (the offset a body offset is counted from). */
+export function frontmatterLength(raw: string): number {
+  return FRONTMATTER_RE.exec(raw)?.[0].length ?? 0;
+}
+
 function stripFrontmatter(text: string): string {
   const match = FRONTMATTER_RE.exec(text);
   return match === null ? text : text.slice(match[0].length);
@@ -270,12 +277,13 @@ export type AssembleReviseResult =
 function buildRevisePack(vaultRoot: string, projectPath: string, body: string, span: Span, instruction: string): Pack {
   const passage = body.slice(span.start, span.end);
   const { before, after } = neighbourParagraphs(body, span);
+  // Chapters are stored one sentence per line; the model sees paragraphs, never the splits.
   return assemblePack("revise", {
     style: readStyle(vaultRoot),
     workRules: readWorkRules(vaultRoot, projectPath),
-    before,
-    passage,
-    after,
+    before: joinManuscript(before),
+    passage: joinManuscript(passage),
+    after: joinManuscript(after),
     instruction: sanitizeInstruction(instruction),
   });
 }
@@ -467,7 +475,8 @@ async function sendRevise(pack: Pack, span: Span, ctx: ReviseCoreContext, deps: 
 
   stderr.write("\n");
 
-  const normalized = normalizeOutput(text);
+  // A model that wraps its whole answer in quotes gets them taken off (the old editor's normalizeCandidate).
+  const normalized = normalizeCandidate(normalizeOutput(text));
   if (normalized === "" || stats === undefined) {
     return refuse(2, "pablo: the model returned an empty answer; nothing revised");
   }

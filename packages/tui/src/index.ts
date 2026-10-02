@@ -8,3 +8,4 @@ export type { BranchDiff } from "./review";
 export type { CheckHit } from "./hits";
 export type { Composer } from "./compose";
 export type { ComposeEvent } from "./state";
+export type { ReviseRequest, ReviseResult, Reviser, TakeRequest, TakeResult } from "./revise";
