@@ -36,9 +36,10 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the sixteen verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the seventeen verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "check",
+    "critique",
     "draft_chapter",
     "merge",
     "migrate",
@@ -115,6 +116,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     target: { type: "string" }, // AGT-1534: publish --target
     date: { type: "string" }, // AGT-1555: timeline --date
     direction: { type: "string" }, // AGT-1562: write --direction
+    branch: { type: "string" }, // AGT-1564: critique --branch
   });
 });
 

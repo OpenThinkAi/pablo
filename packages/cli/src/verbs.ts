@@ -59,10 +59,11 @@
 
 import { z } from "zod";
 import { readFileSync } from "node:fs";
-import { timelineAt } from "@openthink/pablo-core";
+import { createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
 import { waitingForReview } from "./branch";
 import { checkWork } from "./check";
+import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
 import { mergeDraftInProject } from "./novel/merge";
@@ -294,6 +295,39 @@ async function runTimelineVerb(args: z.infer<typeof TIMELINE_ARGS>, ctx: VerbCon
   }
   const at = timelineAt(text, args.date, "bible/timeline.md");
   return { body: { date: at.date, exists: at.exists, notYet: at.notYet, source: at.source, text: at.text }, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// critique
+// ---------------------------------------------------------------------------
+
+const CRITIQUE_ARGS = z.object({
+  project: projectField,
+  branch: z.string().describe('A change branch to critique, e.g. "draft/ch03" or "revise/ch02-tighten": its changes against main.'),
+});
+
+/**
+ * AGT-1564: continuity, timeline and voice comments on a branch's changes, each re-checked by a refute call; only
+ * survivors come back, as line comments, and are saved under the work's `.pablo/critique/` for review mode. The book
+ * is not changed and no branch is made.
+ */
+async function runCritiqueVerb(args: z.infer<typeof CRITIQUE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+
+  let ask = critiqueModel.ask;
+  if (ask === undefined) {
+    try {
+      ask = adapterAsk(createPlanner(loadConfig({ env: ctx.env }), { keys: { env: ctx.env }, claude: { env: ctx.env } }).adapter);
+    } catch (error) {
+      return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
+    }
+  }
+  const result = await critiqueBranch({ vaultRoot: resolved.vaultRoot, projectPath: resolved.projectPath, branch: args.branch, ask, progress: (line) => ctx.stderr.write(`${line}\n`) });
+  if (result.ok) return { body: result, exitCode: 0 };
+  // A refusal (not a change branch, not in a repo) is exit 2; a run that failed (git, the model, the save) is exit 1.
+  const code = result.kind === "refused" ? 2 : 1;
+  return { body: { ok: false, code, message: result.notice }, exitCode: code };
 }
 
 // ---------------------------------------------------------------------------
@@ -1079,6 +1113,13 @@ export const VERBS: readonly Verb[] = [
       "What exists yet at a story date: the work's timeline rows at or before the date, and the rows after it marked as not existing yet (do not mention or foreshadow). The same story-time gate the drafting pack uses.",
     args: TIMELINE_ARGS,
     run: runTimelineVerb,
+  },
+  {
+    name: "critique",
+    description:
+      "Critique a change branch: line comments for continuity contradictions (against continuity.md and the bible), things mentioned before their story date (the timeline gate), and voice tells (the style guide). Each comment is re-checked with more of the text and only survivors come back; they show as line comments in review mode. Changes nothing in the book.",
+    args: CRITIQUE_ARGS,
+    run: runCritiqueVerb,
   },
   {
     name: "write",

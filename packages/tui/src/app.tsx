@@ -25,7 +25,7 @@ import { clean } from "./sanitize";
 import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
-import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow } from "./review";
+import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow, type ReviewComment } from "./review";
 import type { Finisher, Rejected } from "./screen";
 import type { Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
@@ -61,6 +61,8 @@ export interface AppProps {
   readonly writer?: Writer;
   /** `s` in a review: merges the accepted changes and runs the after-write steps (the CLI's `screenFinisher`, passed in). */
   readonly finisher?: Finisher;
+  /** The critic's comments on a branch (the `critique` tool's survivors): review mode shows each under the edit it is on. */
+  readonly commentsOf?: (branch: string) => readonly ReviewComment[];
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
   readonly keymap?: Keymap;
   /** The editor command the config sets ("" for none); what the settings screen opens with. */
@@ -84,7 +86,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, finisher, composer }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, finisher, composer }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -164,7 +166,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const reviewBranch = place.kind === "review" ? place.branch : undefined;
   const waiting = useMemo(() => [...branches, ...state.written.filter((b) => !branches.includes(b))].filter((b) => !state.finished.includes(b)), [branches, state.written, state.finished]);
   const extra = useMemo(() => branchRows(waiting), [waiting]);
-  const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch))), [reviewBranch, diffOf]);
+  const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch), commentsOf?.(reviewBranch))), [reviewBranch, diffOf, commentsOf]);
   const bookAll = useMemo(() => [...bookRows, ...extra.rows], [bookRows, extra]);
   const rows = review ? review.rows : bookAll;
   const labels = useMemo(() => (review ? review.labels : { ...bookLabels, ...extra.labels }), [review, bookLabels, extra]);
@@ -247,7 +249,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const where = state.mode.kind === "compose" ? `compose · Esc back to the book${working}` : `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}${state.mode.back ? " · Esc back to compose" : ""}` : "book"} · ${state.focus}${working}`;
   const pending = pendingText(state.pending);
   const shownComments = hits.length ? { ...comments, check: hits.length } : comments;
-  const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments: shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}) }), size.cols - 4);
+  const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments: review ? { ...shownComments, ...review.counts } : shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}) }), size.cols - 4);
   return (
     <Box flexDirection="column" width={size.cols} height={size.rows}>
       <Box flexDirection="column" borderStyle="single" paddingX={1} height={4}>
@@ -305,7 +307,7 @@ const SIGN_COLOR = { "-": "red", "+": "green", "~": "cyan", " ": undefined } as 
 
 /** One line of a change: its sign, then its words, the ones that differ standing out. The sign and the colour say removed or added. */
 function DiffLine({ row, width, at }: { row: DiffRow; width: number; at: boolean }) {
-  const color = SIGN_COLOR[row.sign];
+  const color = row.box ? "yellow" : SIGN_COLOR[row.sign];
   const sign = row.cont ? " " : row.sign === "~" ? "\u21c4" : row.sign;
   return (
     <Text wrap="truncate" {...(color ? { color } : { dimColor: true })}>

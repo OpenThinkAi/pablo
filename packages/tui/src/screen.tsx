@@ -7,7 +7,7 @@ import { bookRail, type BookStage } from "./book";
 import { loadEditor, loadKeymap } from "./key-config";
 import type { Composer } from "./compose";
 import { KeysError } from "./keys";
-import type { BranchDiff } from "./review";
+import type { BranchDiff, ReviewComment } from "./review";
 import type { CheckHit } from "./hits";
 import { loadDocument } from "./source";
 
@@ -45,6 +45,8 @@ export interface ScreenOptions {
   readonly composer?: Composer;
   /** `s` in a review: merges the accepted changes into `main`, runs the after-write steps and deletes the branch (the CLI's `screenFinisher`, passed in; AGT-1540). */
   readonly finisher?: Finisher;
+  /** The critic's saved comments on a branch, shown under the edits they are on (AGT-1564). */
+  readonly commentsOf?: (branch: string) => readonly ReviewComment[];
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -68,7 +70,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   try {
     const root = options.dir;
     const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} finisher={options.finisher} {...(options.composer ? { composer: options.composer } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} finisher={options.finisher} {...(options.composer ? { composer: options.composer } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),
