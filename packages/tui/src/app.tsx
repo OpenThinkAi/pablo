@@ -99,10 +99,10 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   }, [stageId, reasons]);
   // The main pane shows the file behind the rail's row, wrapped to its width; a different row starts at the top.
   const rowId = railRow(viewOf(state).rail)?.id;
-  const doc = useMemo(() => (rowId !== undefined ? load?.(rowId) : undefined), [rowId, load, rows]);
+  const doc = useMemo(() => (rowId !== undefined ? load?.(rowId) : undefined), [rowId, load]);
   const shownTitle = doc ? doc.title : mainTitle;
   const shownLines = useMemo(() => (doc ? displayLines(doc.text, layout.mainInner) : lines), [doc, lines, layout.mainInner]);
-  useEffect(() => { dispatch({ type: "main.loaded", lines: shownLines.length, ...(doc && rowId !== undefined ? { doc: rowId } : {}) }); }, [shownLines]);
+  useEffect(() => { dispatch({ type: "main.loaded", lines: shownLines.length, ...(doc && rowId !== undefined ? { doc: rowId } : {}) }); }, [shownLines, doc, rowId]);
   useEffect(() => {
     dispatch({ type: "measured", measure: measureOf(layout, contentBody) });
   }, [layout.railRows, layout.mainRows, layout.contentRows, layout.contentInner, contentBody]);

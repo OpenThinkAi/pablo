@@ -40,8 +40,8 @@ test("headings and tables keep their own lines; control characters never reach t
 });
 
 test("row ids name their files", () => {
-  expect(sourceOf("premise")).toEqual({ kind: "files", files: ["bible/overview.md"] });
-  expect(sourceOf("beats")).toEqual({ kind: "files", files: ["outline/chapters.md"] });
+  expect(sourceOf("premise")).toEqual({ kind: "file", file: "bible/overview.md" });
+  expect(sourceOf("beats")).toEqual({ kind: "file", file: "outline/chapters.md" });
   expect(sourceOf("chapter:3")).toEqual({ kind: "chapter", number: 3 });
   expect(sourceOf("ch2")).toEqual({ kind: "chapter", number: 2 });
   expect(sourceOf("chapter-12")).toEqual({ kind: "chapter", number: 12 });

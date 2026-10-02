@@ -30,7 +30,11 @@ export interface RailRow { readonly id: string; readonly depth: number; readonly
 /** A scrolling region: `scroll` is the first visible line, `length` how many there are, `visible` how many fit (0 until measured). */
 export interface Scroll { readonly scroll: number; readonly length: number; readonly visible: number }
 /** A region with a cursor, kept in view as it moves. */
-export interface Pane extends Scroll { readonly cursor: number; /** The document the main pane shows, once one is loaded: a different one starts at its top. */ readonly doc?: string }
+export interface Pane extends Scroll {
+  readonly cursor: number;
+  /** The document the main pane shows, once one is loaded: a different one starts at its top. */
+  readonly doc?: string;
+}
 /** The rail: `cursor` indexes `rows`; a folded group's rows are skipped by the moves and left out of the scroll. */
 export interface Rail { readonly rows: readonly RailRow[]; readonly collapsed: ReadonlySet<string>; readonly cursor: number; readonly scroll: number; readonly visible: number }
 export interface View { readonly rail: Rail; readonly main: Pane }

@@ -18,8 +18,8 @@ import { clean } from "./sanitize";
 /** A document for the main pane: a heading for it, and its text with the frontmatter already removed or never present. */
 export interface MainDoc { readonly title: string; readonly text: string }
 
-/** Where a row id's text lives, relative to the project; `files` more than one is read in order. Undefined for no file. */
-export type Source = { readonly kind: "files"; readonly files: readonly string[] } | { readonly kind: "chapter"; readonly number: number } | { readonly kind: "bible" } | { readonly kind: "path"; readonly path: string };
+/** Where a row id's text lives, relative to the project: one file, a chapter by number, the bible's files, or any path. */
+export type Source = { readonly kind: "file"; readonly file: string } | { readonly kind: "chapter"; readonly number: number } | { readonly kind: "bible" } | { readonly kind: "path"; readonly path: string };
 
 const CHAPTER_ID = /^(?:chapter|ch)[:\- ]?(\d+)$/i;
 
@@ -28,8 +28,8 @@ export function sourceOf(id: string): Source {
   const chapter = CHAPTER_ID.exec(id);
   if (chapter) return { kind: "chapter", number: Number(chapter[1]) };
   switch (id) {
-    case "premise": return { kind: "files", files: ["bible/overview.md"] };
-    case "acts": case "beats": case "chapters": return { kind: "files", files: ["outline/chapters.md"] };
+    case "premise": return { kind: "file", file: "bible/overview.md" };
+    case "acts": case "beats": case "chapters": return { kind: "file", file: "outline/chapters.md" };
     case "bible": return { kind: "bible" };
     default: return { kind: "path", path: id };
   }

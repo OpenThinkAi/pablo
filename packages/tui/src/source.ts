@@ -29,8 +29,8 @@ export function loadDocument(root: string, id: string): MainDoc | undefined {
       const status = /^---\r?\n(?:[^\n]*\r?\n)*?status:[ \t]*([^\r\n]+)/.exec(text)?.[1]?.trim();
       return { title: `chapters/${file}${status ? ` · ${status}` : ""}`, text };
     }
-    case "files": {
-      const file = source.files[0]!;
+    case "file": {
+      const file = source.file;
       return { title: file, text: read(join(root, file)) ?? `${file} does not exist yet.` };
     }
     case "bible": {
