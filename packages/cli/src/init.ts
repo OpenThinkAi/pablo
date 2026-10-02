@@ -40,6 +40,8 @@ export interface InitOk {
   readonly title: string;
   readonly committed: boolean;
   readonly notice?: string;
+  /** Adopt only: the human line (AGT-1275). Absent for a scaffold, which prints "created <path>". */
+  readonly adoptedLine?: string;
 }
 
 export type InitResult = InitOk | Refusal;
@@ -286,6 +288,7 @@ export function initAdopt(vault: string, projectDir: string, slug: string): Init
     slug,
     title,
     committed: false,
+    adoptedLine: `pablo: adopted ${projectDir} (wrote pablo.json${gitignoreChanged ? "; added .pablo/ to .gitignore" : ""})`,
     notice: `pablo: adopt does not commit; commit pablo.json${gitignoreChanged ? " and .gitignore" : ""} yourself`,
   };
 }

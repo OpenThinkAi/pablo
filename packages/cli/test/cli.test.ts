@@ -271,6 +271,23 @@ test("init --adopt --project no-marker writes only the marker and does not commi
   rmSync(vault, { recursive: true, force: true });
 });
 
+test("init --adopt reports what it wrote; scaffold keeps \"created\" (AGT-1275)", () => {
+  const vault = tempVault();
+
+  const adopt = runCli(["init", "--adopt", "--project", "no-marker"], { PABLO_VAULT: vault });
+  expect(adopt.exitCode).toBe(0);
+  const adoptLine = adopt.stdout.split("\n")[0] ?? "";
+  expect(adoptLine).toBe(`pablo: adopted ${join(vault, "novels", "no-marker")} (wrote pablo.json; added .pablo/ to .gitignore)`);
+  expect(adopt.stdout).not.toContain("created");
+
+  const scaffold = runCli(["init", "novel", "salt-road", "The Salt Road"], { PABLO_VAULT: vault });
+  expect(scaffold.exitCode).toBe(0);
+  expect(scaffold.stdout).toContain(`pablo: created ${join(vault, "novels", "salt-road")}`);
+  expect(scaffold.stdout).not.toContain("adopted");
+
+  rmSync(vault, { recursive: true, force: true });
+});
+
 // `write`'s own scenarios (AC1-AC5, chapter parsing, the neverSend refusal,
 // dry-run's two output shapes) are in write.test.ts and pack.test.ts; this
 // confirms only that cli.ts's dispatch actually reaches runWrite end to end.
