@@ -3,3 +3,4 @@ export { isWithin, locatePassage, selectionText } from "./document";
 export * from "./markup";
 export * from "./pack";
 export * from "./providers";
+export * from "./diff";
