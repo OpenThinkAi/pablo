@@ -14,6 +14,7 @@ src/key-panel.tsx  the key panel as a component the layout places
 src/key-config.ts  `keys` in ~/.config/pablo/config.json, laid over the defaults
 src/settings.ts  the settings screen's rules (`\`): capture a key, refuse a conflict, type the editor command, save the config
 src/settings-view.tsx  the settings screen as a component
+src/revise.ts    `a r`: the `Reviser` seam the cli passes in, and a keypress while a revise is open as an action
 src/compose.ts   the compose view's pure parts: the `Composer` seam, the conversation as lines, geometry, its keys
 src/compose-view.tsx  the compose view as a component (full screen)
 src/app.tsx      the Ink root: reads the state, draws it, dispatches actions from keys
@@ -56,7 +57,7 @@ into rows, so a box inside a wrapped sentence is within its span but not part of
 only `selection` (anchor and head, as indexes) and each sentence's row span (`main.loaded` carries them); `selection.ts`
 turns that into the highlighted pieces of each line (blue behind the words, a `▌` in the margin) and into what a
 command receives: `onCommand(command, selected)` gets the sentences' text and the stored lines they span (0-based,
-inclusive, counted in the file as stored), which is what `a r` (revise) and `a v` (voice) will act on. Plain moves keep
+inclusive, counted in the file as stored), which is what `a r` (revise, below) and `a v` (voice) act on. Plain moves keep
 the selection; `Esc` clears it before it backs out of anything else; a different document, or one whose sentence count
 changes, drops it. In a review the pane shows changes, not sentences, so nothing is selectable there.
 
@@ -173,6 +174,28 @@ Every string from a branch (its name, the diff text) passes `clean()` before it 
 the latest few), and the end is `write.done` (the branch and the receipt lines: the review opens on that `draft/` branch,
 the receipt stays up until Esc, and the branch is added to the branches waiting) or `write.failed` (the refusal and its
 missing reasons, in book mode). One write runs at a time; off a chapter row `a w` says to select one.
+
+## Revising from the screen
+
+`a r` (`ai.revise`, handled in `app.tsx`) revises the sentences `⇧↓` selected (AGT-1544). It needs a chapter open, a
+selection and the `reviser` prop (cli.ts builds it from `screen-revise.ts`; this package never imports the CLI);
+otherwise the content area says what is missing. The flow is a `revise` slice of the model with four phases:
+
+1. `ask`: the content area asks what should change and the typed text is the instruction (keys are text while a revise is
+   open: `q` and the prefixes are letters; `←` `→` move the cursor, Backspace deletes). Enter is `revise.run`; Esc cancels.
+2. `running`: the `reviser.revise` call runs the CLI's `reviseCore` over the selected stored lines and the candidate so
+   far streams in (`revise.partial`). A failure returns to `ask` with the instruction kept and the reason shown.
+3. `edit`: the candidate (`revise.done`) fills the content area, which takes the whole screen, with a cursor; typing,
+   Backspace and `←` `→` edit it, Ctrl-N puts in a paragraph break, and the original and the instruction show below it.
+   Esc discards it. Nothing is written yet.
+4. Enter is Take (`revise.take`): `reviser.take` makes `revise/<short-id>` (the first seven characters of the receipt hash;
+   `-v2` on a clash), replaces the selected lines in the chapter with the candidate split one sentence per line, and
+   commits as the model with its receipt (as the project's author, with "(edited)" in the subject, when the candidate
+   was changed). `revise.taken` opens review mode on the branch, as a write does, and lists it as waiting.
+
+A reply that arrives for a cancelled revise is ignored (each one has an `id`). One revise or write runs at a time.
+The CLI strips a model's whole-answer quote wrapping (`normalizeCandidate`, core) and joins sentence lines before the
+model sees them; a selection that stops mid-line keeps the rest of that line around the candidate.
 
 ## Keys
 

@@ -53,3 +53,26 @@ export function normalizeProposal(proposal: Proposal): Proposal {
   const [first, ...rest] = proposal.variants.map(normalizeOutput);
   return { ...proposal, variants: [first ?? "", ...rest] };
 }
+
+/**
+ * Undoes a model wrapping its whole revise answer in quotation marks, and the doubled terminal punctuation the
+ * wrapping tends to leave (`"He left."` plus a stray `.`). Unwraps only when the WHOLE answer is one matching pair
+ * with no further quote of that family inside: a passage that opens and closes on dialogue but quotes something
+ * within itself is returned untouched. String surgery, never a judgement about which quotes are real (it was the
+ * editor's `normalizeCandidate`, AGT-1521, moved here so the screen and the CLI share it).
+ */
+export function normalizeCandidate(raw: string): string {
+  const text = raw.trim();
+  if (text.length < 2) return text;
+  const open = text.charAt(0);
+  const straight = open === '"';
+  if (!straight && open !== "\u201c") return text;
+  const tail = /[.!?]*$/.exec(text)?.[0] ?? "";
+  const body = text.slice(0, text.length - tail.length);
+  if (body.length < 2) return text;
+  const close = body.charAt(body.length - 1);
+  if (close !== (straight ? '"' : "\u201d")) return text;
+  const inner = body.slice(1, -1);
+  const quoted = straight ? inner.includes('"') : inner.includes("\u201c") || inner.includes("\u201d");
+  return quoted ? text : inner;
+}

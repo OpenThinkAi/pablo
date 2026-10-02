@@ -35,7 +35,7 @@ export {
   thousands,
   UNMEASURED_PROMPT_TOKENS_PER_SECOND,
 } from "./render";
-export { normalizeOutput, normalizeProposal } from "./normalize";
+export { normalizeCandidate, normalizeOutput, normalizeProposal } from "./normalize";
 export type {
   Receipt,
   ReceiptMeasurement,

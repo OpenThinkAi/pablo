@@ -6,6 +6,7 @@ import { App } from "./app";
 import { bookRail, type BookStage } from "./book";
 import { loadEditor, loadKeymap } from "./key-config";
 import type { Composer } from "./compose";
+import type { Reviser } from "./revise";
 import { KeysError } from "./keys";
 import type { BranchDiff, ReviewComment } from "./review";
 import type { CheckHit } from "./hits";
@@ -47,6 +48,8 @@ export interface ScreenOptions {
   readonly checks?: (file: string, text: string) => readonly CheckHit[];
   /** `a w`: writes a chapter (the CLI's `runWrite`, passed in from cli.ts) and says what came of it (AGT-1542). */
   readonly writer?: Writer;
+  /** `a r`: revises the selected sentences and commits the taken candidate on a `revise/` branch (the CLI's `screenReviser`, passed in; AGT-1544). */
+  readonly reviser?: Reviser;
   /** The harness session behind the compose view; the cli builds it (the tui does not depend on the Agent SDK). */
   readonly composer?: Composer;
   /** `s` in a review: merges the accepted changes into `main`, runs the after-write steps and deletes the branch (the CLI's `screenFinisher`, passed in; AGT-1540). */
@@ -89,7 +92,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
         stdout.write(ENTER_ALT);
       }
     });
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} finisher={options.finisher} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

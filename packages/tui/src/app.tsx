@@ -21,6 +21,7 @@ import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
 import { fileLineAt, type MainDoc } from "./document";
 import { hitAt, hitDetail, mainPane, nextHitRow, textRows, type CheckHit, type MainRow } from "./hits";
 import { piecesOf, selectedOf, type Selected } from "./selection";
+import { reviseAction, type Reviser } from "./revise";
 import { clean } from "./sanitize";
 import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
@@ -30,7 +31,7 @@ import type { EditSession, Finisher, Rejected } from "./screen";
 import type { Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
-import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Mark, type RailRow, type State } from "./state";
+import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Mark, type RailRow, type Revise, type State } from "./state";
 
 export interface AppProps {
   /** The project's marker fields the status area shows. */
@@ -59,6 +60,8 @@ export interface AppProps {
   readonly diffOf?: (branch: string) => BranchDiff;
   /** `a w`: writes a chapter and says what came of it (the CLI's `runWrite`, passed in; this package cannot import it). */
   readonly writer?: Writer;
+  /** `a r`: revises the selected sentences and commits the taken candidate on a `revise/` branch (the CLI's `screenReviser`, passed in). */
+  readonly reviser?: Reviser;
   /** `s` in a review: merges the accepted changes and runs the after-write steps (the CLI's `screenFinisher`, passed in). */
   readonly finisher?: Finisher;
   /** The critic's comments on a branch (the `critique` tool's survivors): review mode shows each under the edit it is on. */
@@ -88,7 +91,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, finisher, editSession, composer }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, finisher, editSession, composer }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -102,6 +105,16 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     if (state.mode.kind === "compose") {
       const action = composeAction(input, key, state.compose.pick !== null);
       if (action) dispatch(action);
+      return;
+    }
+    // While a revise is open its keys are text: the instruction, then the candidate.
+    if (state.revise) {
+      const action = reviseAction(state.revise, input, key);
+      if (action) {
+        dispatch(action);
+        if (action.type === "revise.run") startRevise(state.revise);
+        else if (action.type === "revise.take") startTake(state.revise);
+      }
       return;
     }
     const token = tokenOf(input, key);
@@ -124,6 +137,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
         if (to !== undefined) { dispatch({ type: "main.goto", line: to + 3 }); dispatch({ type: "main.goto", line: to + 1 }); }
       }
       else if (action.id === "ai.write") startWrite();
+      else if (action.id === "ai.revise") openRevise(selectedOf(viewOf(state).main, pane.sentences));
       else if (action.id === "review.finish") startFinish();
       else if (action.id === "view.editor") startEdit();
       else if (action.id === "view.save") startSave();
@@ -165,6 +179,31 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     writer(Number(chapter), (line) => dispatch({ type: "write.progress", line })).then(
       (r) => dispatch(r.ok ? { type: "write.done", branch: r.branch, lines: r.lines } : { type: "write.failed", message: r.message, missing: r.missing }),
       (e: unknown) => dispatch({ type: "write.failed", message: e instanceof Error ? e.message : String(e), missing: [] }),
+    );
+  }
+
+  // `a r` on selected sentences: asks for the instruction in the content area; Enter runs it, the candidate streams in.
+  function openRevise(selected: Selected | null) {
+    const none = (body: string) => dispatch({ type: "content.show", content: { title: "Revise", body, kind: "revise" } });
+    if (state.mode.kind !== "book" || state.revise !== null || state.writing !== null || state.editing !== null || state.finishing !== null) return;
+    if (!reviser) return none("Revising is not available here.");
+    if (!doc?.file) return none("Open a chapter and select sentences first (Shift+Down in the main pane).");
+    if (!selected) return none("Select the sentences to revise first: Shift+Down / Shift+Up in the main pane.");
+    dispatch({ type: "revise.open", file: doc.file, sentences: selected.sentences, stored: selected.stored });
+  }
+  const requestOf = (r: Revise) => ({ file: r.file, sentences: r.sentences, stored: r.stored, instruction: r.instruction });
+  function startRevise(r: Revise) {
+    if (r.phase !== "ask" || r.instruction.trim() === "" || !reviser) return;
+    reviser.revise(requestOf(r), (text) => dispatch({ type: "revise.partial", id: r.id, text })).then(
+      (res) => dispatch(res.ok ? { type: "revise.done", id: r.id, candidate: res.candidate, receipt: res.receipt, model: res.model } : { type: "revise.failed", id: r.id, message: res.message }),
+      (e: unknown) => dispatch({ type: "revise.failed", id: r.id, message: e instanceof Error ? e.message : String(e) }),
+    );
+  }
+  function startTake(r: Revise) {
+    if (r.phase !== "edit" || r.candidate.trim() === "" || !reviser) return;
+    reviser.take({ ...requestOf(r), candidate: r.candidate, offered: r.offered, receipt: r.receipt, model: r.model }).then(
+      (res) => dispatch(res.ok ? { type: "revise.taken", id: r.id, branch: res.branch, lines: res.lines } : { type: "revise.failed", id: r.id, message: res.message }),
+      (e: unknown) => dispatch({ type: "revise.failed", id: r.id, message: e instanceof Error ? e.message : String(e) }),
     );
   }
 
