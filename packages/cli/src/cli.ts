@@ -43,6 +43,7 @@ import type { ReviseCoreContext } from "./revise";
 import { readTool, searchTool } from "./harness-tools";
 import { runResumeVerb } from "./resume";
 import { runSave } from "./save";
+import { screenEditor } from "./edit-session";
 import { screenFinisher } from "./review-finish";
 import { screenWriter } from "./screen-write";
 import { deriveCliOptions, parseForChapter } from "./verbs";
@@ -661,6 +662,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         composer: screenComposer(screen.dir, cwd),
         // `s` in a review merges the accepted changes and runs the after-write steps (AGT-1540).
         finisher: screenFinisher(screen.dir),
+        // `v e` edits on an `edit/` branch in its own worktree; `v s` saves it through the finisher above (AGT-1545).
+        editSession: screenEditor(screen.dir),
         ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch), commentsOf: (branch: string) => loadCritique(screen.dir, branch) } : {}),
       });
     }

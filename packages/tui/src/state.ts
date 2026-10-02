@@ -164,6 +164,12 @@ export interface State {
   readonly finishing: string | null;
   /** Branches this session finished (merged or discarded): the book no longer lists them, though its `branches` prop still does. */
   readonly finished: readonly string[];
+  /** `v e` while the editor is open (the screen hands the terminal over): the file and line it was opened at; one at a time. */
+  readonly editing: { readonly file: string; readonly line: number } | null;
+  /** Counts the editor openings, so the layer above runs one editor session per opening. */
+  readonly editSeq: number;
+  /** The `edit/<id>` branch holding Matt's own edits, committed and waiting for Save (`v s`); at most one per work. */
+  readonly editBranch: string | null;
 }
 
 /**
@@ -223,6 +229,15 @@ export type Action =
   | { type: "finish.start"; branch: string }
   | { type: "finish.done"; branch: string; lines: readonly string[] }
   | { type: "finish.failed"; message: string }
+  // `v e`: the editor opens on a file at a line, then the change it left is on an `edit/` branch (done, `branch` null
+  // when nothing changed) or the editor could not run (failed). `v s` saves: the branch merges into `main` through the
+  // review finish path; done clears the edit branch, failed keeps it for another try.
+  | { type: "edit.start"; file: string; line: number }
+  | { type: "edit.done"; branch: string | null; lines: readonly string[] }
+  | { type: "edit.failed"; message: string }
+  | { type: "save.start"; branch: string }
+  | { type: "save.done"; branch: string; lines: readonly string[] }
+  | { type: "save.failed"; message: string }
   | { type: "settings.open"; settings: SettingsModel }
   | { type: "settings.set"; settings: SettingsModel }
   | { type: "settings.close"; saved?: SavedSettings }
@@ -255,7 +270,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, written: [], finishing: null, finished: [],
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, written: [], finishing: null, finished: [], editing: null, editSeq: 0, editBranch: null,
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -522,11 +537,27 @@ export function reduce(s: State, a: Action): State {
       return s.finishing !== null || s.mode.kind !== "review" ? s : { ...s, finishing: a.branch, content: writeContent(`Finishing ${a.branch}`, "merging…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "finish.done": {
       if (s.finishing === null) return s;
-      const closed = reduce({ ...s, finishing: null, finished: s.finished.includes(a.branch) ? s.finished : [...s.finished, a.branch] }, { type: "review.close" });
+      const closed = reduce({ ...s, finishing: null, editBranch: s.editBranch === a.branch ? null : s.editBranch, finished: s.finished.includes(a.branch) ? s.finished : [...s.finished, a.branch] }, { type: "review.close" });
       return { ...closed, content: writeContent(`Finished ${a.branch}`, a.lines.join("\n")), contentScroll: { ...closed.contentScroll, scroll: 0, length: 0 } };
     }
     case "finish.failed":
       return { ...s, finishing: null, content: writeContent("Not finished", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "edit.start":
+      if (s.editing !== null || s.finishing !== null || s.mode.kind !== "book") return s;
+      return { ...s, editing: { file: a.file, line: a.line }, editSeq: s.editSeq + 1, content: writeContent(`Editing ${a.file}`, `line ${a.line}`), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "edit.done": {
+      if (s.editing === null) return s;
+      const written = a.branch === null || s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
+      return { ...s, editing: null, written, editBranch: a.branch ?? s.editBranch, content: writeContent(a.branch === null ? "No change" : `Edited on ${a.branch}`, a.lines.join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    }
+    case "edit.failed":
+      return { ...s, editing: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "save.start":
+      return s.finishing !== null || s.editing !== null || s.mode.kind !== "book" ? s : { ...s, finishing: a.branch, content: writeContent(`Saving ${a.branch}`, "merging…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "save.done":
+      return s.finishing === null ? s : { ...s, finishing: null, editBranch: s.editBranch === a.branch ? null : s.editBranch, finished: s.finished.includes(a.branch) ? s.finished : [...s.finished, a.branch], content: writeContent(`Saved ${a.branch}`, a.lines.join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "save.failed":
+      return { ...s, finishing: s.finishing !== null && s.finishing === s.editBranch ? null : s.finishing, content: writeContent("Not saved", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "review.close": return s.mode.kind === "review" ? { ...s, mode: s.mode.back ? { kind: "compose", from: s.mode.back } : { kind: "book" }, marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null } : s;
 
     // Settings opens over the book or review and closes back to it. Its keys never reach the chord (settings.ts reads

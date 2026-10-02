@@ -207,3 +207,15 @@ produce the next value are in `settings.ts`, so `state.ts` stays import-free.
 Add a row to `DEFAULT_ACTIONS` with its `do`; the panel, the chord and the overrides pick it up. Add its action first
 if it is a model action (above). A row that needs a command gets one in the layer that owns the work, handled from
 `onCommand`; until it is built the key is bound and does nothing. Keep a test in `test/keys.test.ts` and `test/chord.test.ts`.
+
+## Editing (`v e`) and saving (`v s`)
+
+`v e` in the main pane opens the editor on the file behind the pane at the cursor's line (`fileLineAt` in `document.ts`:
+the file line whose sentence ends on the cursor's display row, frontmatter counted). The screen cannot import the CLI, so
+`runScreen` takes an `editSession` (the CLI's `screenEditor`, `packages/cli/src/edit-session.ts`) and wraps it: the
+alternate screen is left while it runs and entered again after, and `useInput` is inactive while `state.editing` is set,
+so the editor gets every key. The session makes (or reuses: one per work) an `edit/<short-id>` branch with its own
+worktree, runs the editor there, and commits what it left as the author. The branch then waits in the book like any other.
+`v s` saves it: the same `finisher` a review's `s` uses, with nothing rejected, so the merge into `main` and the
+after-write steps are the ones every branch gets. A document that is not one file (the bible, a missing chapter) has no
+`editable` path and `v e` says so.

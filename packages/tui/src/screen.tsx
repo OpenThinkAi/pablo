@@ -26,6 +26,12 @@ export interface Rejected { readonly removed: readonly LineRef[]; readonly added
 export type FinishResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
 export type Finisher = (branch: string, rejected: Rejected) => Promise<FinishResult>;
 
+/** What `v e` hands the editor session: a project-relative file, the line to open it at, and the editor command the settings name ("" for none). */
+export interface EditRequest { readonly file: string; readonly line: number; readonly editor: string }
+/** What the editor session came to: the `edit/` branch the change is on (null when nothing changed) with lines for the content area, or why it could not run. */
+export type EditResult = { readonly ok: true; readonly branch: string | null; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
+export type EditSession = (request: EditRequest) => Promise<EditResult>;
+
 export interface ScreenOptions {
   readonly title: string;
   readonly format: string;
@@ -47,6 +53,8 @@ export interface ScreenOptions {
   readonly finisher?: Finisher;
   /** The critic's saved comments on a branch, shown under the edits they are on (AGT-1564). */
   readonly commentsOf?: (branch: string) => readonly ReviewComment[];
+  /** `v e`: opens the editor on a file at a line on the work's `edit/` branch and commits what it left as the author (the CLI's `screenEditor`, passed in; AGT-1545). The screen gives up the terminal while it runs. */
+  readonly editSession?: EditSession;
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -70,7 +78,18 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   try {
     const root = options.dir;
     const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} finisher={options.finisher} {...(options.composer ? { composer: options.composer } : {})} />, {
+    // The editor takes the whole terminal: the alternate screen is left while it runs and entered again after.
+    const editSession: EditSession | undefined = options.editSession && (async (request) => {
+      stdout.write(LEAVE_ALT);
+      try {
+        return await options.editSession!(request);
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) };
+      } finally {
+        stdout.write(ENTER_ALT);
+      }
+    });
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} finisher={options.finisher} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

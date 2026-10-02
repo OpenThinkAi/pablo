@@ -18,7 +18,7 @@ import { missingContent, type BookRail } from "./book";
 import { KeyPanel } from "./key-panel";
 import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
-import type { MainDoc } from "./document";
+import { fileLineAt, type MainDoc } from "./document";
 import { hitAt, hitDetail, mainPane, nextHitRow, textRows, type CheckHit, type MainRow } from "./hits";
 import { piecesOf, selectedOf, type Selected } from "./selection";
 import { clean } from "./sanitize";
@@ -26,7 +26,7 @@ import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow, type ReviewComment } from "./review";
-import type { Finisher, Rejected } from "./screen";
+import type { EditSession, Finisher, Rejected } from "./screen";
 import type { Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
@@ -63,6 +63,8 @@ export interface AppProps {
   readonly finisher?: Finisher;
   /** The critic's comments on a branch (the `critique` tool's survivors): review mode shows each under the edit it is on. */
   readonly commentsOf?: (branch: string) => readonly ReviewComment[];
+  /** `v e`: opens the editor on the cursor's file and line on an `edit/` branch (the CLI's `screenEditor`, passed in). */
+  readonly editSession?: EditSession;
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
   readonly keymap?: Keymap;
   /** The editor command the config sets ("" for none); what the settings screen opens with. */
@@ -86,7 +88,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, finisher, composer }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, finisher, editSession, composer }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -94,6 +96,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const keymap = state.saved ? effectiveKeys(state.saved.overrides) : given;
   const editor = state.saved ? state.saved.editor : givenEditor;
   const layout = layoutOf(size.cols, size.rows, { zen: state.zen, full: state.full });
+  // While the editor has the terminal, this screen reads no keys: the editor's go to the editor.
   useInput((input, key) => {
     // In the compose view keys are text; only the arrows, Enter and Esc mean anything else.
     if (state.mode.kind === "compose") {
@@ -122,9 +125,34 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       }
       else if (action.id === "ai.write") startWrite();
       else if (action.id === "review.finish") startFinish();
+      else if (action.id === "view.editor") startEdit();
+      else if (action.id === "view.save") startSave();
       else onCommand?.(action, selectedOf(viewOf(state).main, pane.sentences) ?? undefined);
     }
-  });
+  }, { isActive: state.editing === null });
+
+  // `v e`: the file behind the main pane, at the line under the cursor. The session runs from the effect below, once the
+  // screen has stopped reading keys.
+  function startEdit() {
+    if (state.editing !== null || state.finishing !== null) return;
+    const file = doc?.editable;
+    if (!editSession) return void dispatch({ type: "edit.failed", message: "Editing is not available here." });
+    if (state.mode.kind !== "book" || !doc || file === undefined) return void dispatch({ type: "edit.failed", message: state.mode.kind !== "book" ? "Edit from the book, not a review." : "Select a chapter or file to edit." });
+    dispatch({ type: "edit.start", file, line: fileLineAt(doc.text, layout.mainInner, paneRows, viewOf(state).main.cursor) });
+  }
+
+  // `v s`: the open edit branch merges into `main` through the same finisher a review's `s` uses, with nothing rejected.
+  function startSave() {
+    if (state.mode.kind !== "book" || state.finishing !== null || state.editing !== null) return;
+    const open = state.editBranch;
+    if (open === null) return void dispatch({ type: "save.failed", message: "There are no edits to save." });
+    if (!finisher) return void dispatch({ type: "save.failed", message: "Saving is not available here." });
+    dispatch({ type: "save.start", branch: open });
+    finisher(open, { removed: [], added: [] }).then(
+      (r) => dispatch(r.ok ? { type: "save.done", branch: open, lines: r.lines } : { type: "save.failed", message: r.message }),
+      (e: unknown) => dispatch({ type: "save.failed", message: e instanceof Error ? e.message : String(e) }),
+    );
+  }
 
   // `a w` on a chapter row: the writer runs in the background, its progress lines and its end arrive as actions.
   function startWrite() {
@@ -183,7 +211,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   // chapter is scanned for `check` hits as it opens, and each hit is a box under its line. In a review the pane shows
   // the change under the cursor instead: its removed and added sentences.
   const rowId = railRow(viewOf(state).rail)?.id;
-  const doc = useMemo(() => (rowId !== undefined && !review ? load?.(rowId) : undefined), [rowId, load, review]);
+  const doc = useMemo(() => (rowId !== undefined && !review ? load?.(rowId) : undefined), [rowId, load, review, state.finished]);
   const hits = useMemo(() => (doc?.file !== undefined && checks ? checks(doc.file, doc.text) : NO_HITS), [doc, checks]);
   const shownTitle = doc ? doc.title : mainTitle;
   // A document's sentences are selectable (their spans are in these rows); lines handed in as plain text are not.
@@ -233,6 +261,17 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     if (composer?.answer) composer.answer(reply.id, reply.text);
     else dispatch({ type: "compose.failed", message: "this session cannot take answers to questions" });
   }, [replySeq]);
+
+  // One editor session per `edit.start`: `editSeq` changes only then. The screen has stopped reading keys by now (the
+  // render that set `editing` cleaned up its input effect first).
+  const { editSeq, editing } = state;
+  useEffect(() => {
+    if (editing === null || !editSession) return;
+    editSession({ file: editing.file, line: editing.line, editor }).then(
+      (r) => dispatch(r.ok ? { type: "edit.done", branch: r.branch, lines: r.lines } : { type: "edit.failed", message: r.message }),
+      (e: unknown) => dispatch({ type: "edit.failed", message: e instanceof Error ? e.message : String(e) }),
+    );
+  }, [editSeq]);
 
   if (tooSmall(size)) {
     return (
