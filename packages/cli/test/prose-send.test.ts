@@ -657,3 +657,23 @@ test("an empty answer refuses (exit 2) and writes no --out file (AC5)", async ()
   expect(outcome.body).toMatchObject({ ok: false, code: 2 });
   expect(existsSync(outPath)).toBe(false);
 });
+
+test("prose --out saves one sentence per line while stdout text and the model's view stay paragraphs (AGT-1531)", async () => {
+  const { vault, env, brief } = tempVaultEnv();
+  const out = join(tempDir("pablo-prose-lines-"), "piece.md");
+  const chunks = ["The scale house opens at six. It closes at four.\n\n", "We thank you. Please plan around it."];
+  const outcome = await proseCore(
+    sendArgs({ brief, out }),
+    { cwd: vault, env },
+    { ...progressSink().deps, adapter: fakeAdapter({ chunks }) },
+  );
+  expect(outcome.exitCode).toBe(0);
+  const body = outcome.body as ProseSendBody;
+  expect(body.text).toBe(
+    "The scale house opens at six. It closes at four.\n\nWe thank you. Please plan around it.",
+  );
+  const saved = readFileSync(out, "utf8");
+  expect(saved.endsWith(
+    "The scale house opens at six.\nIt closes at four.\n\nWe thank you.\nPlease plan around it.\n",
+  )).toBe(true);
+});

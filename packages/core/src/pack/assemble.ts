@@ -15,6 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { selectionText } from "../document";
+import { joinManuscript } from "../sentences";
 import {
   CRITICMARKUP_EDIT_CLOSING,
   PROSE_CLOSING,
@@ -178,7 +179,7 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
     {
       name: "before",
       heading: "# The manuscript just before the selection",
-      text: before,
+      text: joinManuscript(before),
       source: inputs.document.path,
       required: false,
       keep: "tail",
@@ -189,7 +190,7 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
     {
       name: "after",
       heading: "# The manuscript just after the selection",
-      text: after,
+      text: joinManuscript(after),
       source: inputs.document.path,
       required: false,
       keep: "head",
@@ -200,7 +201,7 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
     {
       name: "passage",
       heading: "# The passage",
-      text: passage,
+      text: joinManuscript(passage),
       source: `${inputs.document.path} [${inputs.span.start}, ${inputs.span.end})`,
       required: true,
       keep: "head",
@@ -371,7 +372,7 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
     {
       name: "previousTail",
       heading: "# The end of the previous chapter (continue from here)",
-      text: inputs.previousTail?.text.trim() ?? "",
+      text: joinManuscript(inputs.previousTail?.text ?? ""),
       source: inputs.previousTail?.path,
       required: false,
       keep: "tail",
@@ -449,7 +450,7 @@ function proseSpecs(inputs: ProseInputs): BuiltSpecs {
   const contextSpecs: SliceSpec[] = inputs.context.map((source, index) => ({
     name: `context-${index}`,
     heading: `# Context: ${sourceLabel([source]) ?? "untitled"}`,
-    text: source.text.trim(),
+    text: joinManuscript(source.text),
     source: source.path,
     required: false,
     keep: "head",
@@ -518,7 +519,7 @@ function proseSpecs(inputs: ProseInputs): BuiltSpecs {
     {
       name: "draft",
       heading: "# The previous text (revise this)",
-      text: inputs.draft?.text.trim() ?? "",
+      text: joinManuscript(inputs.draft?.text ?? ""),
       source: inputs.draft?.path,
       required: false,
       keep: "head",
@@ -596,7 +597,7 @@ function reviseSpecs(inputs: ReviseInputs): BuiltSpecs {
     {
       name: "before",
       heading: "# The manuscript just before the passage",
-      text: inputs.before.trim(),
+      text: joinManuscript(inputs.before),
       source: undefined,
       required: false,
       keep: "tail",
@@ -607,7 +608,7 @@ function reviseSpecs(inputs: ReviseInputs): BuiltSpecs {
     {
       name: "passage",
       heading: "# The passage to rewrite",
-      text: inputs.passage,
+      text: joinManuscript(inputs.passage),
       source: undefined,
       required: true,
       keep: "head",
@@ -618,7 +619,7 @@ function reviseSpecs(inputs: ReviseInputs): BuiltSpecs {
     {
       name: "after",
       heading: "# The manuscript just after the passage",
-      text: inputs.after.trim(),
+      text: joinManuscript(inputs.after),
       source: undefined,
       required: false,
       keep: "head",

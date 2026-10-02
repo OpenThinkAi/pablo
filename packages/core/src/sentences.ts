@@ -311,3 +311,43 @@ export function joinParagraphs(text: string): string {
   flush();
   return paragraphs.join("\n\n");
 }
+
+/** Splits a text into paragraphs on blank lines, dropping empty ones. */
+function paragraphsOf(text: string): string[] {
+  return text
+    .split(/\n[ \t]*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph !== "");
+}
+
+/**
+ * Whether a block is plain prose. A block with any line that opens like
+ * markdown structure (heading, list item, quote, table row, fence, rule) is
+ * left alone, so joining never glues a table or a bullet list into one line.
+ */
+function isProseBlock(block: string): boolean {
+  return !block.split("\n").some((line) => /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\||```|~~~|---+\s*$|\*\*\*+\s*$)/.test(line));
+}
+
+/**
+ * Splits a whole text into the saved form: each paragraph one sentence per
+ * line, paragraphs separated by one blank line. Blocks that are not plain
+ * prose (see {@link isProseBlock}) pass through unchanged.
+ */
+export function splitManuscript(text: string): string {
+  return paragraphsOf(text)
+    .map((block) => (isProseBlock(block) ? splitSentences(block).join("\n") : block))
+    .join("\n\n");
+}
+
+/**
+ * The inverse, for everything sent to a model: sentence lines rejoin into
+ * paragraphs, paragraphs stay separated by one blank line. Lossless for text
+ * {@link splitManuscript} produced, and a no-op on text that is already one
+ * paragraph per line.
+ */
+export function joinManuscript(text: string): string {
+  return paragraphsOf(text)
+    .map((block) => (isProseBlock(block) ? joinSentences(block.split("\n")) : block))
+    .join("\n\n");
+}

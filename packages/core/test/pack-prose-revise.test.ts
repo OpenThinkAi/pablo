@@ -97,3 +97,27 @@ test("budget: the draft is the first slice to truncate after exemplars, before r
   // instruction and closing are non-reducible: never touched by the budget.
   expect(pack.slices.find((slice) => slice.name === "instruction")?.text).toBe(INSTRUCTION);
 });
+
+test("a --draft saved one sentence per line is joined back into paragraphs before sending (AGT-1531)", () => {
+  const split: TextSource = {
+    path: "prev.md",
+    text: "The dock opens at seven.\nIt shuts at four.\n\nNobody minds.\nNobody ever has.\n",
+  };
+  const pack = assemblePack("prose", inputs({ draft: split, instruction: INSTRUCTION }));
+  const draftSlice = pack.slices.find((slice) => slice.name === "draft");
+  expect(draftSlice?.text).toBe("The dock opens at seven. It shuts at four.\n\nNobody minds. Nobody ever has.");
+  // The hash is of what is sent: the same as a pack built from the joined text.
+  const joined: TextSource = { path: "prev.md", text: draftSlice?.text ?? "" };
+  expect(pack.hash).toBe(assemblePack("prose", inputs({ draft: joined, instruction: INSTRUCTION })).hash);
+  expect(pack.prompt).not.toContain("seven.\nIt");
+});
+
+test("context sources are joined too, but structured markdown blocks are left alone (AGT-1531)", () => {
+  const context: TextSource = {
+    path: "bible/notes.md",
+    text: "She ran.\nHe followed.\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |",
+  };
+  const pack = assemblePack("prose", inputs({ context: [context] }));
+  const slice = pack.slices.find((s) => s.name === "context-0");
+  expect(slice?.text).toBe("She ran. He followed.\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |");
+});

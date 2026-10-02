@@ -50,6 +50,9 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 (OpenAI-compatible, Anthropic), and the fiction sentence
                 splitter (`splitSentences`/`joinSentences`) behind
                 one-sentence-per-line manuscripts.
+                `write` and `prose` save through `splitManuscript`; pack
+                assembly joins manuscript slices with `joinManuscript`, so the
+                model never sees the splits (AGT-1531).
 packages/tui    @openthink/pablo-tui — the Ink 7 / React 19 screen, a third
                 front end on `verbs.ts` beside the CLI and MCP. Terminal and
                 React dependencies live here, never in core. Resize and
