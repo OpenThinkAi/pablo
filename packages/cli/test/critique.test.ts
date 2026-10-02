@@ -262,3 +262,13 @@ test("the run says what it is doing as it goes, and a model call is bounded by a
   expect(seen?.timeoutMs).toBe(1234);
   expect(seen?.signal).toBeInstanceOf(AbortSignal);
 });
+
+test("a model call that times out names the duration and a next step", async () => {
+  const adapter = {
+    // eslint-disable-next-line require-yield
+    async *complete() {
+      throw new DOMException("The operation timed out", "TimeoutError");
+    },
+  } as unknown as Adapter;
+  await expect(adapterAsk(adapter, 5000)("p")).rejects.toThrow("did not respond in 5s; is the configured provider running?");
+});

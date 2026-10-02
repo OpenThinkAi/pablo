@@ -65,7 +65,13 @@ export const ASK_TIMEOUT_MS = 300_000;
 export function adapterAsk(adapter: Adapter, timeoutMs: number = ASK_TIMEOUT_MS): Ask {
   return async (prompt) => {
     let text = "";
-    for await (const event of adapter.complete({ prompt, timeoutMs, signal: AbortSignal.timeout(timeoutMs) })) if (event.type === "token") text += event.text;
+    try {
+      for await (const event of adapter.complete({ prompt, timeoutMs, signal: AbortSignal.timeout(timeoutMs) })) if (event.type === "token") text += event.text;
+    } catch (error) {
+      const name = (error as Error).name;
+      if (name === "TimeoutError" || name === "AbortError") throw new Error(`the model did not respond in ${Math.round(timeoutMs / 1000)}s; is the configured provider running?`);
+      throw error;
+    }
     return text;
   };
 }
