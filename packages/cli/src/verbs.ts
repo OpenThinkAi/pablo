@@ -307,7 +307,7 @@ const CRITIQUE_ARGS = z.object({
   branch: z.string().describe('A change branch to critique, e.g. "draft/ch03" or "revise/ch02-tighten": its changes against main.'),
 });
 
-/** The model the critic asks. Real runs use the planner role (Claude); tests replace it, so none calls a real model. */
+/** The model the critic asks. Real runs use the planner role (Claude); this is a test-only injection point, so no test calls a real model. */
 export const critiqueModel: { ask?: Ask } = {};
 
 /**
@@ -328,7 +328,10 @@ async function runCritiqueVerb(args: z.infer<typeof CRITIQUE_ARGS>, ctx: VerbCon
     }
   }
   const result = await critiqueBranch({ vaultRoot: resolved.vaultRoot, projectPath: resolved.projectPath, branch: args.branch, ask });
-  return result.ok ? { body: result, exitCode: 0 } : { body: { ok: false, code: 2, message: result.notice }, exitCode: 2 };
+  if (result.ok) return { body: result, exitCode: 0 };
+  // A refusal (not a change branch, not in a repo) is exit 2; a run that failed (git, the model, the save) is exit 1.
+  const code = result.kind === "refused" ? 2 : 1;
+  return { body: { ok: false, code, message: result.notice }, exitCode: code };
 }
 
 // ---------------------------------------------------------------------------

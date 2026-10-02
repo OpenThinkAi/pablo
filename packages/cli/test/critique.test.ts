@@ -175,7 +175,7 @@ test("a branch that is not a change branch, and one with no chapter changes, are
     throw new Error("no model call expected");
   };
   const bad = await critiqueBranch({ vaultRoot: repo, projectPath: work, branch: "main", ask });
-  expect(bad).toMatchObject({ ok: false });
+  expect(bad).toMatchObject({ ok: false, kind: "refused" });
   execFileSync("git", ["-C", repo, "branch", "revise/empty", "main"]);
   const none = await critiqueBranch({ vaultRoot: repo, projectPath: work, branch: "revise/empty", ask });
   expect(none).toMatchObject({ ok: true, comments: [], raised: 0 });
@@ -191,7 +191,7 @@ test("a failing model call is a returned notice, not a throw", async () => {
       throw new Error("claude exited 1");
     },
   });
-  expect(result).toEqual({ ok: false, notice: "pablo: critique failed: claude exited 1" });
+  expect(result).toEqual({ ok: false, kind: "error", notice: "pablo: critique failed: claude exited 1" });
 });
 
 test("critique is a verb, reaches the harness's tools, and runs through the injected model", async () => {
@@ -209,6 +209,13 @@ test("critique is a verb, reaches the harness's tools, and runs through the inje
   const refused = await verb.run({ project: "ice-house", branch: "main" }, ctx);
   expect(refused.exitCode).toBe(2);
   expect((await verb.run({ project: "nope", branch: "draft/ch02" }, ctx)).exitCode).toBe(2);
+  // A model failure is a run that failed, not a precondition: exit 1.
+  critiqueModel.ask = async () => {
+    throw new Error("claude exited 1");
+  };
+  const failed = await verb.run({ project: "ice-house", branch: "draft/ch02" }, ctx);
+  expect(failed.exitCode).toBe(1);
+  expect(failed.body).toMatchObject({ ok: false, code: 1 });
 });
 
 test("survivors are saved for review mode, keyed to the branch's head: a moved branch's comments are not shown", async () => {

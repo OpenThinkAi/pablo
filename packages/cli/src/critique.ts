@@ -29,7 +29,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync,
 import { join, relative } from "node:path";
 import { parseDiff, readStyle, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
-import { branchDiff, repoRoot } from "./branch";
+import { branchDiff, branchKind, repoRoot } from "./branch";
 
 export const CRITIQUE_KINDS = ["continuity", "timeline", "tells"] as const;
 export type CritiqueKind = (typeof CRITIQUE_KINDS)[number];
@@ -49,7 +49,8 @@ export interface CritiqueComment {
 
 export type CritiqueResult =
   | { readonly ok: true; readonly branch: string; readonly comments: readonly CritiqueComment[]; readonly raised: number; readonly withdrawn: number }
-  | { readonly ok: false; readonly notice: string };
+  /** `refused` is a precondition the caller can fix (exit 2); `error` is a run that failed (exit 1). */
+  | { readonly ok: false; readonly kind: "refused" | "error"; readonly notice: string };
 
 /** The model seam: a prompt in, the reply text out. Tests inject a fake; the real one is `adapterAsk`. */
 export type Ask = (prompt: string) => Promise<string>;
@@ -284,9 +285,10 @@ export interface CritiqueOptions {
 /** Critiques `branch`'s changes to the work's chapters. A failed model call is a returned notice, as in the branch layer. */
 export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueResult> {
   const repo = repoRoot(opts.projectPath);
-  if (repo === undefined) return { ok: false, notice: `pablo: critique: ${opts.projectPath} is not inside a git repository` };
+  if (repo === undefined) return { ok: false, kind: "refused", notice: `pablo: critique: ${opts.projectPath} is not inside a git repository` };
+  if (!branchKind(opts.branch)) return { ok: false, kind: "refused", notice: `pablo: critique: "${opts.branch}" is not a change branch` };
   const diff = branchDiff(repo, opts.branch);
-  if (!diff.ok) return diff;
+  if (!diff.ok) return { ok: false, kind: "error", notice: diff.notice };
 
   const prefix = `${relative(repo, opts.projectPath).split("\\").join("/")}/chapters/`;
   const files = parseDiff(diff.text).filter((f) => f.status !== "deleted" && !f.binary && f.path.startsWith(prefix) && f.path.endsWith(".md"));
@@ -325,12 +327,12 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
       }
     }
   } catch (error) {
-    return { ok: false, notice: `pablo: critique failed: ${(error as Error).message}` };
+    return { ok: false, kind: "error", notice: `pablo: critique failed: ${(error as Error).message}` };
   }
   try {
     saveCritique(opts.projectPath, opts.branch, comments);
   } catch (error) {
-    return { ok: false, notice: `pablo: critique: could not save the comments: ${(error as Error).message}` };
+    return { ok: false, kind: "error", notice: `pablo: critique: could not save the comments: ${(error as Error).message}` };
   }
   return { ok: true, branch: opts.branch, comments, raised, withdrawn };
 }
@@ -360,6 +362,7 @@ function headOf(repo: string, branch: string): string | undefined {
 export function saveCritique(projectPath: string, branch: string, comments: readonly CritiqueComment[]): void {
   const repo = repoRoot(projectPath);
   const head = repo === undefined ? undefined : headOf(repo, branch);
+  // No head to key the comments to (the repo or branch vanished mid-run): nothing can be saved, and loadCritique would drop it anyway.
   if (head === undefined) return;
   const path = critiquePath(projectPath, branch);
   mkdirSync(join(path, ".."), { recursive: true });
@@ -372,6 +375,7 @@ export function saveCritique(projectPath: string, branch: string, comments: read
 /** The saved survivors for `branch`, or none when there is no critique, it is unreadable, or the branch has moved since. */
 export function loadCritique(projectPath: string, branch: string): readonly CritiqueComment[] {
   try {
+    // Partial validation on purpose: review mode reads only file, line, kind and claim, so only those are checked.
     const saved = JSON.parse(readFileSync(critiquePath(projectPath, branch), "utf8")) as Partial<SavedCritique>;
     const repo = repoRoot(projectPath);
     if (repo === undefined || saved.head !== headOf(repo, branch) || !Array.isArray(saved.comments)) return [];
