@@ -19,8 +19,8 @@ import { dirname, join } from "node:path";
 
 type Env = Record<string, string | undefined>;
 
-/** The four kinds of change branch, by prefix. */
-export const BRANCH_KINDS = ["draft", "revise", "edit", "reader"] as const;
+/** The kinds of change branch, by prefix. `plan/` is a compose session's planning writes (AGT-1557). */
+export const BRANCH_KINDS = ["draft", "revise", "edit", "reader", "plan"] as const;
 export type BranchKind = (typeof BRANCH_KINDS)[number];
 
 export interface Author {
@@ -77,7 +77,7 @@ function validate(slug: string, branch: string): string | undefined {
 
 /**
  * Creates `branch` from `main` and checks it out as a worktree under
- * `worktreePath(slug, branch)`. Refuses a name outside the four kinds, a
+ * `worktreePath(slug, branch)`. Refuses a name outside the branch kinds, a
  * branch that already exists, and a missing `main`.
  */
 export function createBranch(repo: string, slug: string, branch: string, env: Env = process.env): BranchResult {
@@ -142,7 +142,7 @@ export function listBranches(repo: string): { ok: true; branches: BranchList } |
   } catch (err) {
     return { ok: false, notice: `pablo: git branch list failed: ${errMessage(err)}` };
   }
-  const branches: BranchList = { draft: [], revise: [], edit: [], reader: [] };
+  const branches: BranchList = { draft: [], revise: [], edit: [], reader: [], plan: [] };
   for (const name of out.split("\n").filter(Boolean).sort()) {
     const kind = branchKind(name);
     if (kind) branches[kind].push(name);

@@ -73,7 +73,7 @@ test("commitAs with nothing to commit returns a notice", () => {
 
 test("listBranches groups by kind and omits main", () => {
   const { repo, env } = setup();
-  for (const b of ["draft/ch02", "draft/ch01", "revise/x1", "edit/y2", "reader/ann-2026-10-01"]) {
+  for (const b of ["draft/ch02", "draft/ch01", "revise/x1", "edit/y2", "reader/ann-2026-10-01", "plan/2026-10-01-ab12"]) {
     createBranch(repo, "valley", b, env);
   }
   sh(repo, "branch", "scratch");
@@ -85,6 +85,7 @@ test("listBranches groups by kind and omits main", () => {
       revise: ["revise/x1"],
       edit: ["edit/y2"],
       reader: ["reader/ann-2026-10-01"],
+      plan: ["plan/2026-10-01-ab12"],
     },
   });
 });
