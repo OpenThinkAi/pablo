@@ -39,11 +39,19 @@ export type Focus = PaneName | "content";
 /** A row of the rail: a stage, a chapter, a change. A `group` row folds the deeper rows after it until the next row at its depth or above. */
 export interface RailRow { readonly id: string; readonly depth: number; readonly group?: boolean }
 
+/** The lines a sentence covers, first to last (both inclusive; a wrapped sentence covers several, and two sentences may share a line). */
+export interface LineSpan { readonly first: number; readonly last: number }
+export interface Selection { readonly anchor: number; readonly head: number }
+
 /** A scrolling region: `scroll` is the first visible line, `length` how many there are, `visible` how many fit (0 until measured). */
 export interface Scroll { readonly scroll: number; readonly length: number; readonly visible: number }
 /** A region with a cursor, kept in view as it moves. */
 export interface Pane extends Scroll {
   readonly cursor: number;
+  /** Where each sentence of the document sits among the lines (inclusive), in order; empty when the pane's lines are not a document. */
+  readonly sentences: readonly LineSpan[];
+  /** The selected sentences, by index into `sentences`: `head` is the end the arrows move, `anchor` where it began. */
+  readonly selection: Selection | null;
   /** The document the main pane shows, once one is loaded: a different one starts at its top. */
   readonly doc?: string;
 }
@@ -172,12 +180,14 @@ export type Action =
   // Enter: on a branch row (`branch:<name>`, a branch waiting for review) opens the review; elsewhere it is → (`rail.expand`)
   | { type: "rail.open" }
   // ---- the main pane: a document's lines, one sentence each
-  | { type: "main.loaded"; lines: number; doc?: string }
+  | { type: "main.loaded"; lines: number; doc?: string; sentences?: readonly LineSpan[] }
   | { type: "main.down" } | { type: "main.up" }
   | { type: "main.page_down" } | { type: "main.page_up" }
   | { type: "main.top" } | { type: "main.end" }
   | { type: "main.goto"; line: number }
   | { type: "main.to_rail" }
+  // ---- selecting sentences: ⇧↓ / ⇧↑ extend by a whole sentence (the first press takes the one under the cursor), Esc clears
+  | { type: "select.down" } | { type: "select.up" } | { type: "select.clear" }
   // ---- the content area
   | { type: "content.show"; content: Content }
   | { type: "content.close" }
@@ -232,7 +242,7 @@ export type Dispatch = (action: Action) => void;
 const PROGRESS_LINES = 5;
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 
-const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor: 0, scroll: 0, visible: 0 }, main: { cursor: 0, scroll: 0, length: 0, visible: 0 } });
+const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor: 0, scroll: 0, visible: 0 }, main: { cursor: 0, scroll: 0, length: 0, visible: 0, sentences: [], selection: null } });
 
 export const initialCompose = (): Compose => ({ entries: [], input: "", busy: false, activity: "", sessionId: null, outbox: null, sendSeq: 0, reply: null, replySeq: 0, offset: 0, length: 0, visible: 0 });
 
@@ -260,6 +270,10 @@ export function shownRows(rail: Rail): { row: RailRow; index: number }[] {
   });
   return out;
 }
+
+/** The selected sentences as a range of indexes, first to last inclusive; null with nothing selected. */
+export const selectedRange = (main: Pane): { first: number; last: number } | null =>
+  main.selection ? { first: Math.min(main.selection.anchor, main.selection.head), last: Math.max(main.selection.anchor, main.selection.head) } : null;
 
 /** The row under the rail's cursor, or undefined with no rows loaded. */
 export const railRow = (rail: Rail): RailRow | undefined => rail.rows[rail.cursor];
@@ -357,11 +371,15 @@ function reduceRail(rail: Rail, a: Action): Rail {
 function reduceMain(main: Pane, a: Action): Pane {
   switch (a.type) {
     // A different document (by id) starts at its top; the same one, rewrapped or reloaded, keeps the author's line.
+    // The selection survives a rewrap of the same document (the same sentences, new lines); any other change drops it.
     case "main.loaded": {
       const fresh = a.doc !== undefined && a.doc !== main.doc;
+      const sentences = a.sentences ?? [];
+      const keep = !fresh && sentences.length === main.sentences.length;
       const base = fresh ? { ...main, cursor: 0, scroll: 0 } : main;
-      return moveTo({ ...base, length: a.lines, ...(a.doc !== undefined ? { doc: a.doc } : {}) }, base.cursor);
+      return moveTo({ ...base, length: a.lines, sentences, selection: keep ? main.selection : null, ...(a.doc !== undefined ? { doc: a.doc } : {}) }, base.cursor);
     }
+    // Moving the cursor on its own leaves the selection (the author is looking around; Esc clears it); only ⇧ extends it.
     case "main.down": return moveTo(main, main.cursor + 1);
     case "main.up": return moveTo(main, main.cursor - 1);
     case "main.page_down": return moveTo(main, main.cursor + pageStep(main.visible));
@@ -369,6 +387,22 @@ function reduceMain(main: Pane, a: Action): Pane {
     case "main.top": return moveTo(main, 0);
     case "main.end": return moveTo(main, main.length - 1);
     case "main.goto": return moveTo(main, a.line - 1);
+    case "select.clear": return main.selection ? { ...main, selection: null } : main;
+    case "select.down": case "select.up": {
+      const n = main.sentences.length;
+      if (n === 0) return main;
+      // No selection yet: it starts on the sentence under the cursor (the first one that reaches it), and ⇧ moves the head from there.
+      let start: Selection;
+      if (main.selection) start = main.selection;
+      else {
+        const at = main.sentences.findIndex((x) => x.last >= main.cursor);
+        const i = at < 0 ? n - 1 : at;
+        start = { anchor: i, head: i };
+      }
+      const head = main.selection ? clamp(start.head + (a.type === "select.down" ? 1 : -1), 0, n - 1) : start.head;
+      // The cursor goes to the head so it stays in view.
+      return { ...moveTo(main, main.sentences[head]!.first), selection: { anchor: start.anchor, head } };
+    }
     default: return main;
   }
 }
@@ -418,7 +452,7 @@ export function reduce(s: State, a: Action): State {
       if (row && !row.group) return { ...s, pane: "main", focus: s.focus === "content" ? "content" : "main" };
       return withView({ ...view, rail: reduceRail(view.rail, { type: "rail.expand" }) });
     }
-    case "main.loaded": case "main.down": case "main.up": case "main.page_down": case "main.page_up": case "main.top": case "main.end": case "main.goto":
+    case "main.loaded": case "main.down": case "main.up": case "main.page_down": case "main.page_up": case "main.top": case "main.end": case "main.goto": case "select.down": case "select.up": case "select.clear":
       return withView({ ...view, main: reduceMain(view.main, a) });
     case "main.to_rail":
       return { ...s, pane: "rail", focus: s.focus === "content" ? "content" : "rail" };
@@ -518,6 +552,7 @@ export function reduce(s: State, a: Action): State {
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });
       if (s.focus === "content") return reduce(s, { type: "focus.back" });
+      if (view.main.selection) return reduce(s, { type: "select.clear" });
       if (s.content) return reduce(s, { type: "content.close" });
       if (s.mode.kind === "review") return reduce(s, { type: "review.close" });
       return s;

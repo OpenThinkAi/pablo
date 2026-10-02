@@ -4,7 +4,7 @@
 // screen reads. The box itself is comment-box.ts, shared with review mode.
 
 import { commentBox, type BoxPart, type Comment } from "./comment-box";
-import { displayDoc } from "./document";
+import { displayDoc, type Mark, type PaneSentence } from "./document";
 
 /** One `check` finding. `line` counts from 1 in the file, frontmatter included (checkFile's numbering). */
 export interface CheckHit {
@@ -46,7 +46,7 @@ export function hitDetail(hit: CheckHit): { title: string; body: string } {
 
 /** A row of the main pane: a line of the document, or one of the three rows of a hit's box (`hit` indexes the hits given). */
 export type MainRow =
-  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "text"; readonly text: string; /** The sentences on this line, when it is prose (document.ts); a box row is never one. */ readonly marks?: readonly Mark[] }
   | { readonly kind: "box"; readonly hit: number; readonly part: BoxPart; readonly text: string; readonly head?: string; readonly tag?: string; readonly color: string };
 
 export const textRows = (lines: readonly string[]): MainRow[] => lines.map((text) => ({ kind: "text", text }));
@@ -59,9 +59,15 @@ const INDENT = 2;
  * does not show (the frontmatter, a blank line) goes under the nearest line before it, or the first line. Hits on
  * one line stack in the order given.
  */
-export function mainRows(text: string, width: number, hits: readonly CheckHit[]): MainRow[] {
-  const { lines, anchors } = displayDoc(text, width);
-  if (hits.length === 0) return textRows(lines);
+export const mainRows = (text: string, width: number, hits: readonly CheckHit[]): MainRow[] => mainPane(text, width, hits).rows;
+
+/** The rows (`mainRows`) and the document's sentences with their spans in those rows, so a box between two lines of a sentence is inside its span, never a sentence of its own. */
+export function mainPane(text: string, width: number, hits: readonly CheckHit[]): { rows: MainRow[]; sentences: PaneSentence[] } {
+  const { lines, anchors, marks, sentences } = displayDoc(text, width);
+  const textRow: number[] = [];
+  const withMarks = (line: string, row: number): MainRow => ({ kind: "text", text: line, ...(marks[row]?.length ? { marks: marks[row]! } : {}) });
+  const respan = (): PaneSentence[] => sentences.map((x) => ({ ...x, first: textRow[x.first]!, last: textRow[x.last]! }));
+  if (hits.length === 0) { const rows = lines.map(withMarks); rows.forEach((_, i) => textRow.push(i)); return { rows, sentences: respan() }; }
   const anchored = [...anchors.keys()].sort((a, b) => a - b);
   const under = new Map<number, number[]>();
   hits.forEach((hit, i) => {
@@ -71,7 +77,8 @@ export function mainRows(text: string, width: number, hits: readonly CheckHit[])
   });
   const rows: MainRow[] = [];
   lines.forEach((line, row) => {
-    rows.push({ kind: "text", text: line });
+    textRow[row] = rows.length;
+    rows.push(withMarks(line, row));
     for (const i of under.get(row) ?? []) {
       const c = hitComment(hits[i]!);
       for (const b of commentBox(c, Math.max(5, width - INDENT))) {
@@ -79,7 +86,7 @@ export function mainRows(text: string, width: number, hits: readonly CheckHit[])
       }
     }
   });
-  return rows;
+  return { rows, sentences: respan() };
 }
 
 /** The index of the hit the cursor is on: on one of its box rows, or on the line it sits under. */

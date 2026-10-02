@@ -44,6 +44,22 @@ wraps it to the pane, so a chapter reads the same before and after the split. `m
 different document starts at its top, the same one keeps the line. `g g` / `g e` and the arrows move the cursor and the
 view follows it. A missing file shows as a notice ("Chapter 3 has no draft yet."), not an error.
 
+### Selecting sentences
+
+`⇧↓` / `⇧↑` in the main pane select by whole sentence: the first press takes the sentence under the cursor, each
+further one moves the selection's head by a sentence (back toward the anchor shrinks it), and the cursor follows the
+head. The sentences are the core splitter's over each prose paragraph, found once, in `document.ts` `displayDoc`
+(which also does the wrapping and the check anchors, so there is one display mapping): each sentence carries the display
+lines it covers and the stored lines it came from, and each display line its sentence marks. Headings, lists, tables and
+fences are drawn but never selected, and a check box is never a sentence (`hits.ts` `mainPane` re-spans the sentences
+into rows, so a box inside a wrapped sentence is within its span but not part of the selection's text). The model holds
+only `selection` (anchor and head, as indexes) and each sentence's row span (`main.loaded` carries them); `selection.ts`
+turns that into the highlighted pieces of each line (blue behind the words, a `▌` in the margin) and into what a
+command receives: `onCommand(command, selected)` gets the sentences' text and the stored lines they span (0-based,
+inclusive, counted in the file as stored), which is what `a r` (revise) and `a v` (voice) will act on. Plain moves keep
+the selection; `Esc` clears it before it backs out of anything else; a different document, or one whose sentence count
+changes, drops it. In a review the pane shows changes, not sentences, so nothing is selectable there.
+
 ### Check hits and comment boxes
 
 Opening a chapter (a `MainDoc` with a `file`) runs the `checks` the CLI passes in (`screenChecks`, core-free `checkFile`

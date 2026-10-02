@@ -19,7 +19,8 @@ import { KeyPanel } from "./key-panel";
 import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
 import type { MainDoc } from "./document";
-import { hitAt, hitDetail, mainRows, nextHitRow, textRows, type CheckHit, type MainRow } from "./hits";
+import { hitAt, hitDetail, mainPane, nextHitRow, textRows, type CheckHit, type MainRow } from "./hits";
+import { piecesOf, selectedOf, type Selected } from "./selection";
 import { clean } from "./sanitize";
 import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
@@ -29,7 +30,7 @@ import type { Finisher, Rejected } from "./screen";
 import type { Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
-import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, shownRows, viewOf, type Mark, type RailRow, type State } from "./state";
+import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Mark, type RailRow, type State } from "./state";
 
 export interface AppProps {
   /** The project's marker fields the status area shows. */
@@ -69,7 +70,7 @@ export interface AppProps {
   /** The harness session the compose view talks to (`a c`); absent, the view opens and says there is none. */
   readonly composer?: Composer;
   /** A command a key caused (`ai.plan`, ...); `quit` and `settings` are handled here and never reach it. */
-  readonly onCommand?: (command: Command) => void;
+  readonly onCommand?: (command: Command, selected?: Selected) => void;
   /** Tests pass a fixed size; the real screen measures the terminal. */
   readonly size?: Size;
 }
@@ -79,6 +80,7 @@ const NO_LINES: readonly string[] = [];
 const NO_LABELS: Readonly<Record<string, string>> = {};
 const NO_BRANCHES: readonly string[] = [];
 const NO_HITS: readonly CheckHit[] = [];
+const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
@@ -118,7 +120,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       }
       else if (action.id === "ai.write") startWrite();
       else if (action.id === "review.finish") startFinish();
-      else onCommand?.(action);
+      else onCommand?.(action, selectedOf(viewOf(state).main, pane.sentences) ?? undefined);
     }
   });
 
@@ -182,7 +184,9 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const doc = useMemo(() => (rowId !== undefined && !review ? load?.(rowId) : undefined), [rowId, load, review]);
   const hits = useMemo(() => (doc?.file !== undefined && checks ? checks(doc.file, doc.text) : NO_HITS), [doc, checks]);
   const shownTitle = doc ? doc.title : mainTitle;
-  const paneRows = useMemo<readonly MainRow[]>(() => (doc ? mainRows(doc.text, layout.mainInner, hits) : textRows(lines)), [doc, hits, lines, layout.mainInner]);
+  // A document's sentences are selectable (their spans are in these rows); lines handed in as plain text are not.
+  const pane = useMemo(() => (doc ? mainPane(doc.text, layout.mainInner, hits) : { rows: textRows(lines), sentences: [] }), [doc, hits, lines, layout.mainInner]);
+  const paneRows: readonly MainRow[] = pane.rows;
   const changes = useMemo(() => (review ? reviewLines(review, rowId, layout.mainInner - 2) : undefined), [review, rowId, layout.mainInner]);
   const mainLength = changes ? changes.rows.length : paneRows.length;
   // `→` on a hit (its box, or the line above it) opens its rule and flagged pattern in the content area.
@@ -192,7 +196,8 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   };
   // A hit's detail belongs to the document it was opened in: opening another takes it down.
   useEffect(() => { if (state.content?.kind === "check") dispatch({ type: "content.close" }); }, [rowId]);
-  useEffect(() => { dispatch({ type: "main.loaded", lines: mainLength, ...(changes && rowId !== undefined ? { doc: `${reviewBranch}\0${rowId}` } : doc && rowId !== undefined ? { doc: rowId } : {}) }); }, [mainLength, doc, rowId, changes === undefined]);
+  const mainSentences = changes ? NO_SENTENCES : pane.sentences;
+  useEffect(() => { dispatch({ type: "main.loaded", lines: mainLength, sentences: mainSentences, ...(changes && rowId !== undefined ? { doc: `${reviewBranch}\0${rowId}` } : doc && rowId !== undefined ? { doc: rowId } : {}) }); }, [mainLength, mainSentences, doc, rowId, changes === undefined]);
   useEffect(() => {
     dispatch({ type: "measured", measure: measureOf(layout, contentBody) });
   }, [layout.railRows, layout.mainRows, layout.contentRows, layout.contentInner, contentBody]);
@@ -320,16 +325,27 @@ function Main({ layout, view, title, rows, changes, active }: { layout: Layout; 
       </Box>
     );
   }
+  // The selected sentences are drawn in blue behind their words, and a bar in the margin marks every line that holds
+  // part of one, so the selection shows on a terminal without colour too.
+  const range = selectedRange(view.main);
   return (
-    <Box flexDirection="column" width={layout.mainW} height={layout.middleH} paddingLeft={1}>
-      <Text dimColor wrap="truncate">{fit(title, layout.mainInner)}</Text>
+    <Box flexDirection="column" width={layout.mainW} height={layout.middleH}>
+      <Text dimColor wrap="truncate">{` ${fit(title, layout.mainInner)}`}</Text>
       {rows.slice(scroll, scroll + layout.mainRows).map((row, i) => {
         const at = active && scroll + i === cursor;
-        if (row.kind === "text") return <Text key={scroll + i} wrap="truncate" inverse={at}>{fit(row.text, layout.mainInner) || " "}</Text>;
+        if (row.kind === "text") {
+          const pieces = piecesOf({ ...row, text: fit(row.text, layout.mainInner) }, range);
+          return (
+            <Text key={scroll + i} wrap="truncate" inverse={at}>
+              <Text color="blue">{pieces.some((p) => p.selected) ? "▌" : " "}</Text>
+              {pieces.map((p, k) => <Text key={k} backgroundColor={p.selected ? "blue" : undefined} color={p.selected ? "white" : undefined}>{p.text || " "}</Text>)}
+            </Text>
+          );
+        }
         // A hit's box under its line: the header in the top border, its tag dimmed.
         return (
           <Text key={scroll + i} wrap="truncate" color={row.color} inverse={at}>
-            {row.head !== undefined ? <>{row.head}{row.tag ? <Text dimColor>{row.tag}</Text> : null}{row.text.slice(row.head.length + (row.tag?.length ?? 0))}</> : row.text}
+            {" "}{row.head !== undefined ? <>{row.head}{row.tag ? <Text dimColor>{row.tag}</Text> : null}{row.text.slice(row.head.length + (row.tag?.length ?? 0))}</> : row.text}
           </Text>
         );
       })}

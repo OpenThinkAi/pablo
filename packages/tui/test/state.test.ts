@@ -63,6 +63,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "compose.submit": { type: "compose.submit" }, "compose.event": { type: "compose.event", event: { kind: "assistant", text: "hello" } },
     "compose.add": { type: "compose.add", entry: { kind: "question", id: "q1", question: "Which way?" } }, "compose.failed": { type: "compose.failed", message: "no" }, "compose.done": { type: "compose.done" },
     "compose.up": { type: "compose.up" }, "compose.down": { type: "compose.down" }, "compose.page_up": { type: "compose.page_up" }, "compose.page_down": { type: "compose.page_down" },
+    "select.down": { type: "select.down" }, "select.up": { type: "select.up" }, "select.clear": { type: "select.clear" },
     escape: { type: "escape" }, measured: { type: "measured", measure: { rail: 4, main: 4, content: { visible: 2, lines: 3 } } },
   };
   for (const a of Object.values(every)) {
@@ -203,15 +204,15 @@ test("main.loaded with a document id: a different document starts at its top, th
 test("the main pane's cursor moves line by line, pages, jumps to the ends and to a line, within the document", () => {
   const s = after({ type: "main.loaded", lines: 10 }, { type: "measured", measure: { main: 4 } });
   const main = (x: State) => viewOf(x).main;
-  expect(main(s)).toEqual({ cursor: 0, scroll: 0, length: 10, visible: 4 });
+  expect(main(s)).toEqual({ cursor: 0, scroll: 0, length: 10, visible: 4, sentences: [], selection: null });
   expect(main(then(s, { type: "main.up" })).cursor).toBe(0);
   expect(main(then(s, { type: "main.down" })).cursor).toBe(1);
-  expect(main(then(s, { type: "main.end" }))).toEqual({ cursor: 9, scroll: 6, length: 10, visible: 4 });
+  expect(main(then(s, { type: "main.end" }))).toEqual({ cursor: 9, scroll: 6, length: 10, visible: 4, sentences: [], selection: null });
   expect(main(then(s, { type: "main.end" }, { type: "main.down" })).cursor).toBe(9);
-  expect(main(then(s, { type: "main.end" }, { type: "main.top" }))).toEqual({ cursor: 0, scroll: 0, length: 10, visible: 4 });
+  expect(main(then(s, { type: "main.end" }, { type: "main.top" }))).toEqual({ cursor: 0, scroll: 0, length: 10, visible: 4, sentences: [], selection: null });
   // A page is the window less one line; past the end it stops at the last line.
-  expect(main(then(s, { type: "main.page_down" }))).toEqual({ cursor: 3, scroll: 0, length: 10, visible: 4 });
-  expect(main(then(s, { type: "main.page_down" }, { type: "main.page_down" }))).toEqual({ cursor: 6, scroll: 3, length: 10, visible: 4 });
+  expect(main(then(s, { type: "main.page_down" }))).toEqual({ cursor: 3, scroll: 0, length: 10, visible: 4, sentences: [], selection: null });
+  expect(main(then(s, { type: "main.page_down" }, { type: "main.page_down" }))).toEqual({ cursor: 6, scroll: 3, length: 10, visible: 4, sentences: [], selection: null });
   expect(main(then(s, { type: "main.page_down" }, { type: "main.page_down" }, { type: "main.page_down" }, { type: "main.page_down" })).cursor).toBe(9);
   expect(main(then(s, { type: "main.end" }, { type: "main.page_up" })).cursor).toBe(6);
   // Lines count from 1; out of range lands on the nearest end.
@@ -220,15 +221,15 @@ test("the main pane's cursor moves line by line, pages, jumps to the ends and to
   expect(main(then(s, { type: "main.goto", line: 99 })).cursor).toBe(9);
   // Unmeasured, a page is one line and nothing scrolls.
   const u = after({ type: "main.loaded", lines: 10 }, { type: "main.page_down" }, { type: "main.page_down" });
-  expect(main(u)).toEqual({ cursor: 2, scroll: 0, length: 10, visible: 0 });
+  expect(main(u)).toEqual({ cursor: 2, scroll: 0, length: 10, visible: 0, sentences: [], selection: null });
   // An empty document has nowhere to go.
-  expect(main(after({ type: "main.down" }, { type: "main.end" }))).toEqual({ cursor: 0, scroll: 0, length: 0, visible: 0 });
+  expect(main(after({ type: "main.down" }, { type: "main.end" }))).toEqual({ cursor: 0, scroll: 0, length: 0, visible: 0, sentences: [], selection: null });
 });
 
 test("main.loaded with fewer lines pulls the cursor back inside; the scroll follows", () => {
   const s = after({ type: "main.loaded", lines: 10 }, { type: "measured", measure: { main: 4 } }, { type: "main.end" });
   const shorter = then(s, { type: "main.loaded", lines: 3 });
-  expect(viewOf(shorter).main).toEqual({ cursor: 2, scroll: 0, length: 3, visible: 4 });
+  expect(viewOf(shorter).main).toEqual({ cursor: 2, scroll: 0, length: 3, visible: 4, sentences: [], selection: null });
 });
 
 // ---------------------------------------------------------------- the content area and focus
