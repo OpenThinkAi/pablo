@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Ritual, RitualOptions } from "../src/novel/rituals";
-import { runRituals } from "../src/novel/rituals";
+import { runAfterMerge, runQueueRitual } from "../src/novel/rituals";
 import { readEvents } from "../src/review";
 import type { QueuedEvent } from "../src/review";
 
 /**
- * `runRituals` (AGT-1231) exercised directly against a throwaway copy of the
+ * `runAfterMerge` (AGT-1231; the merge-path steps since AGT-1536) exercised directly against a throwaway copy of the
  * `ice-house` fixture novel — never `~/writing`. `write-send.test.ts` covers
- * the integration (`runWrite` calling this after the file is written); these
+ * the integration (`mergeDraft` calling this once a draft is on main); these
  * tests cover the five rituals' own edge cases without paying for a fake
  * model stream each time.
  */
@@ -21,8 +21,8 @@ const FIXTURE_PROJECT = fileURLToPath(new URL("./fixtures/vault/novels/ice-house
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
 
 /**
- * AGT-1262: `runRituals` now appends a `queued` event to
- * `stateReviewPath(env)` unconditionally — a test whose `env` carries no
+ * AGT-1262: `runQueueRitual` appends a `queued` event to
+ * `stateReviewPath(env)` — a test whose `env` carries no
  * `XDG_STATE_HOME` would append to the author's real
  * `~/.local/state/pablo/review.jsonl`. Every temp dir this creates is
  * removed by the module-level `afterEach` cleanup below, the same discipline
@@ -69,7 +69,7 @@ function lastCommitPaths(dir: string): string[] {
     .sort();
 }
 
-/** Stands in for what `write.ts` already wrote before calling `runRituals`. */
+/** Stands in for the chapter a merged draft already put on main. */
 function writeChapterFile(project: string, chapter: number, slug: string): string {
   const name = `${String(chapter).padStart(2, "0")}-${slug}.md`;
   const abs = join(project, "chapters", name);
@@ -132,19 +132,18 @@ function baseOpts(overrides: Partial<RitualOptions> = {}): RitualOptions {
     now: () => new Date("2026-09-06T12:00:00.000Z"),
     env: { PATH: NO_THINK_PATH, XDG_STATE_HOME: tempStateHome() },
     thinkTimeoutMs: 2000,
-    queue: { id: "20260906-ice-house-abcd", title: "Black Ice", vault: "/tmp/pablo-rituals-fixture-vault", promptHash: "deadbeef" },
     ...overrides,
   };
 }
 
-test("runRituals ticks the outline, notes, updates the README, commits exactly the touched paths, and skips think off PATH", async () => {
+test("runAfterMerge ticks the outline, notes, updates the README, commits exactly the touched paths, and skips think off PATH", async () => {
   const project = tempProject();
   gitInitBase(project);
   const chapterPath = writeChapterFile(project, 2, "black-ice");
 
   const opts = baseOpts();
-  const rituals = await runRituals(project, 2, chapterPath, opts);
-  expect(rituals).toHaveLength(7);
+  const rituals = await runAfterMerge(project, 2, chapterPath, opts);
+  expect(rituals).toHaveLength(6);
 
   const ritualsByName = byName(rituals);
   expect(ritualsByName["outline"]?.status).toBe("ran");
@@ -153,23 +152,9 @@ test("runRituals ticks the outline, notes, updates the README, commits exactly t
   expect(ritualsByName["continuity"]?.status).toBe("skipped");
   expect(ritualsByName["continuity"]?.detail).toBe("no extraction adapter");
   expect(ritualsByName["git"]?.status).toBe("ran");
-  expect(ritualsByName["queue"]?.status).toBe("ran");
+  expect(ritualsByName["queue"]).toBeUndefined(); // the queue append stays at write time (AGT-1536)
   expect(ritualsByName["think"]?.status).toBe("skipped");
   expect(ritualsByName["think"]?.detail).toBe("think not on PATH");
-
-  // AGT-1262: the queued event landed in the state dir's review.jsonl, text-free.
-  const queued = queuedEvents(opts.env?.["XDG_STATE_HOME"] as string);
-  expect(queued).toHaveLength(1);
-  expect(queued[0]).toMatchObject({
-    kind: "chapter",
-    id: opts.queue.id,
-    title: opts.queue.title,
-    path: chapterPath,
-    vault: opts.queue.vault,
-    project: "ice-house",
-    words: 42,
-    prompt_hash: opts.queue.promptHash,
-  });
 
   // Outline: row 2 ticked, row 3 (and every other row) byte-for-byte untouched.
   expect(outlineStatus(project, 2)).toBe("draft");
@@ -206,29 +191,56 @@ test("README ritual replaces the same-day bullet on a re-write and appends on a 
       .split("\n")
       .filter((l) => /chapter 2 drafted/.test(l)).length;
 
-  await runRituals(project, 2, chapterPath, baseOpts());
+  await runAfterMerge(project, 2, chapterPath, baseOpts());
   expect(bulletCount()).toBe(1);
 
   // Same day, different word count/model: the bullet is replaced, not duplicated.
-  await runRituals(project, 2, chapterPath, baseOpts({ words: 77, model: "other-model" }));
+  await runAfterMerge(project, 2, chapterPath, baseOpts({ words: 77, model: "other-model" }));
   const readme = readFileSync(join(project, "README.md"), "utf8");
   expect(bulletCount()).toBe(1);
   expect(readme).toContain("- 2026-09-06: chapter 2 drafted (77 words, other-model).");
   expect(readme).not.toContain("(42 words, test-writer-model)");
 
   // Next day: appended alongside.
-  await runRituals(project, 2, chapterPath, baseOpts({ now: () => new Date("2026-09-07T12:00:00.000Z") }));
+  await runAfterMerge(project, 2, chapterPath, baseOpts({ now: () => new Date("2026-09-07T12:00:00.000Z") }));
   expect(bulletCount()).toBe(2);
   expect(readFileSync(join(project, "README.md"), "utf8")).toContain("- 2026-09-07: chapter 2 drafted (42 words, test-writer-model).");
 
   rmSync(project, { recursive: true, force: true });
 });
 
-test("an unwritable state directory: the queue ritual fails, and nothing else is undone (AGT-1262 AC5)", async () => {
-  const project = tempProject();
-  gitInitBase(project);
-  const chapterPath = writeChapterFile(project, 2, "black-ice");
+const QUEUE_INPUT = {
+  id: "20260906-ice-house-abcd",
+  slug: "ice-house",
+  words: 42,
+  title: "Black Ice",
+  vault: "/tmp/pablo-rituals-fixture-vault",
+  promptHash: "deadbeef",
+};
 
+test("runQueueRitual appends a text-free queued event for the path the chapter will have on main (AGT-1262, AGT-1536)", () => {
+  const stateHome = tempStateHome();
+  const ritual = runQueueRitual("/vault/novels/ice-house/chapters/02-black-ice.md", 2, QUEUE_INPUT, {
+    env: { PATH: NO_THINK_PATH, XDG_STATE_HOME: stateHome },
+    now: () => new Date("2026-09-06T12:00:00.000Z"),
+  });
+  expect(ritual.name).toBe("queue");
+  expect(ritual.status).toBe("ran");
+  const queued = queuedEvents(stateHome);
+  expect(queued).toHaveLength(1);
+  expect(queued[0]).toMatchObject({
+    kind: "chapter",
+    id: QUEUE_INPUT.id,
+    title: "Black Ice",
+    path: "/vault/novels/ice-house/chapters/02-black-ice.md",
+    vault: QUEUE_INPUT.vault,
+    project: "ice-house",
+    words: 42,
+    prompt_hash: "deadbeef",
+  });
+});
+
+test("an unwritable state directory: the queue ritual fails without throwing (AGT-1262 AC5)", () => {
   // Make `<stateHome>/pablo` itself unwritable so `appendEvent`'s `mkdirSync`
   // (of `review.jsonl`'s own, not-yet-existing parent) fails with EACCES.
   const stateHome = tempStateHome();
@@ -237,25 +249,20 @@ test("an unwritable state directory: the queue ritual fails, and nothing else is
   chmodSync(pabloDir, 0o500);
 
   try {
-    const rituals = await runRituals(project, 2, chapterPath, baseOpts({ env: { PATH: NO_THINK_PATH, XDG_STATE_HOME: stateHome } }));
-    const ritualsByName = byName(rituals);
-
-    expect(ritualsByName["queue"]?.status).toBe("failed");
-    expect(ritualsByName["outline"]?.status).toBe("ran");
-    expect(ritualsByName["git"]?.status).toBe("ran");
-    expect(existsSync(chapterPath)).toBe(true);
+    const ritual = runQueueRitual("/vault/chapters/02-black-ice.md", 2, QUEUE_INPUT, {
+      env: { PATH: NO_THINK_PATH, XDG_STATE_HOME: stateHome },
+    });
+    expect(ritual.status).toBe("failed");
   } finally {
     chmodSync(pabloDir, 0o700);
   }
-
-  rmSync(project, { recursive: true, force: true });
 });
 
 test("a non-git temp copy: the git ritual fails but nothing else is undone, and the chapter file survives", async () => {
   const project = tempProject();
   const chapterPath = writeChapterFile(project, 2, "black-ice");
 
-  const rituals = await runRituals(project, 2, chapterPath, baseOpts());
+  const rituals = await runAfterMerge(project, 2, chapterPath, baseOpts());
   const ritualsByName = byName(rituals);
 
   expect(ritualsByName["outline"]?.status).toBe("ran");
@@ -279,7 +286,7 @@ test("an outline row already marked draft is skipped, idempotently", async () =>
   runGit(project, ["add", "."]);
   runGit(project, ["commit", "-q", "-m", "pre-drafted"]);
 
-  const rituals = await runRituals(project, 2, chapterPath, baseOpts());
+  const rituals = await runAfterMerge(project, 2, chapterPath, baseOpts());
   const outline = rituals.find((r) => r.name === "outline");
 
   expect(outline?.status).toBe("skipped");
@@ -295,7 +302,7 @@ test("a fake think script that exits 0 is 'ran'", async () => {
   const chapterPath = writeChapterFile(project, 2, "black-ice");
   const thinkDir = fakeThinkPath("#!/bin/sh\nexit 0\n");
 
-  const rituals = await runRituals(project, 2, chapterPath, baseOpts({ env: { PATH: thinkDir, XDG_STATE_HOME: tempStateHome() } }));
+  const rituals = await runAfterMerge(project, 2, chapterPath, baseOpts({ env: { PATH: thinkDir, XDG_STATE_HOME: tempStateHome() } }));
   const think = rituals.find((r) => r.name === "think");
 
   expect(think?.status).toBe("ran");
@@ -311,7 +318,7 @@ test("a fake think script that exits 3 is 'failed' with 'exited 3'", async () =>
   const chapterPath = writeChapterFile(project, 2, "black-ice");
   const thinkDir = fakeThinkPath("#!/bin/sh\nexit 3\n");
 
-  const rituals = await runRituals(project, 2, chapterPath, baseOpts({ env: { PATH: thinkDir, XDG_STATE_HOME: tempStateHome() } }));
+  const rituals = await runAfterMerge(project, 2, chapterPath, baseOpts({ env: { PATH: thinkDir, XDG_STATE_HOME: tempStateHome() } }));
   const think = rituals.find((r) => r.name === "think");
 
   expect(think?.status).toBe("failed");
@@ -327,7 +334,7 @@ test("a fake think script that sleeps past a short injected timeout is 'failed' 
   const chapterPath = writeChapterFile(project, 2, "black-ice");
   const thinkDir = fakeThinkPath("#!/bin/sh\nsleep 5\n");
 
-  const rituals = await runRituals(project, 2, chapterPath, baseOpts({ env: { PATH: thinkDir, XDG_STATE_HOME: tempStateHome() }, thinkTimeoutMs: 150 }));
+  const rituals = await runAfterMerge(project, 2, chapterPath, baseOpts({ env: { PATH: thinkDir, XDG_STATE_HOME: tempStateHome() }, thinkTimeoutMs: 150 }));
   const think = rituals.find((r) => r.name === "think");
 
   expect(think?.status).toBe("failed");
@@ -337,13 +344,13 @@ test("a fake think script that sleeps past a short injected timeout is 'failed' 
   rmSync(project, { recursive: true, force: true });
 });
 
-test("calling runRituals twice on the same day appends to the note file instead of duplicating it", async () => {
+test("calling runAfterMerge twice on the same day appends to the note file instead of duplicating it", async () => {
   const project = tempProject();
   gitInitBase(project);
   const chapterPath = writeChapterFile(project, 2, "black-ice");
 
-  await runRituals(project, 2, chapterPath, baseOpts());
-  await runRituals(project, 2, chapterPath, baseOpts({ receiptLine: "read 1300 tokens in 0.5s, wrote 50 in 1.5s", words: 50 }));
+  await runAfterMerge(project, 2, chapterPath, baseOpts());
+  await runAfterMerge(project, 2, chapterPath, baseOpts({ receiptLine: "read 1300 tokens in 0.5s, wrote 50 in 1.5s", words: 50 }));
 
   const noteFiles = readdirSync(join(project, "notes")).filter((f) => f.startsWith("2026-09-06-chapter-02"));
   expect(noteFiles).toHaveLength(1);

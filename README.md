@@ -59,7 +59,7 @@ including an unresolvable project), `1` error.
 | `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, title, stages, last, open, next, brief?, notices?}` |
 | `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object; exit 0 |
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
-| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--temperature T] [--seed N] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, runs the post-write check (AGT-1237), then runs the after-write rituals (AGT-1231). Sends a sampling temperature (`--temperature`, else the provider's `temperature` in config, else 0.8; AGT-1272) so a re-run differs; temperature and seed are in the receipt, never in `prompt_hash` | `{ok, path, receipt, check[], rituals[]}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
+| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--temperature T] [--seed N] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, runs the post-write check (AGT-1237), then commits the chapter on `draft/chNN` in a worktree (AGT-1536); the after-write rituals (AGT-1231) run when that branch is merged. Sends a sampling temperature (`--temperature`, else the provider's `temperature` in config, else 0.8; AGT-1272) so a re-run differs; temperature and seed are in the receipt, never in `prompt_hash` | `{ok, path, branch, worktree, commit, receipt, check[], rituals[], piece}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
 | `pablo migrate lines --project <slug> [--dry-run]` | one-time split of `chapters/*.md` to one sentence per line (frontmatter untouched), committed as its own commit holding only those files; a second run changes nothing; `--dry-run` lists the files it would change (AGT-1533) | `{ok, dryRun, changed[], committed, notice?}` |
@@ -188,16 +188,24 @@ check (`check.ts`'s `checkFile`) runs over the normalized body and its hits are
 returned as `check[]` — a hit never changes the exit code, which is `0` throughout
 this whole path once the file is written.
 
-Once the file is on disk (AGT-1231, `novel/rituals.ts`'s `runRituals`), six
-after-write rituals run in order — outline tick (the chapter's row in
+The chapter is written into a worktree and committed on its own branch,
+`draft/chNN` (`draft/chNN-v2`, `-v3`, ... for a re-draft while an earlier one is
+unmerged), authored as the model with the `prompt_hash` as its `Receipt:` line;
+`main` is never touched and the receipt names the branch (`branch`, `worktree`,
+`commit` in the JSON; "on branch draft/chNN" in prose). The project must be in a
+git repository. The only after-write step left at write time is the review-queue
+append (`queue`, AGT-1262), so `rituals[]` holds just that.
+
+The rest (AGT-1231, `novel/rituals.ts`'s `runAfterMerge`) run when the draft is
+merged to `main` (`novel/merge.ts`'s `mergeDraft`) — six rituals in order:
+outline tick (the chapter's row in
 `outline/chapters.md` moves to `draft`), a dated note under `notes/`, a bullet
 under the work's `README.md` "Where things stand", continuity extraction
 (AGT-1232), a git commit of exactly those touched paths (never `git add -A`),
 and `think -C writing sync` — each independently wrapped so a failure (no git
 repo, `think` missing, a malformed outline row, extraction failing or timing
 out) is a notice on the returned `rituals[]`, never an exception, and never
-undoes the chapter write; they run only on this live path, never on
-`--dry-run` and never after a refusal.
+undoes the merge. A conflicting merge runs none of them and leaves `main` as it was.
 
 Continuity extraction (`novel/continuity.ts`'s `runContinuity`) sends the new
 chapter's body to the routed extraction adapter's `extractFactsWithAnchors`
