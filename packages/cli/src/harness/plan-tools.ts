@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { PlanSession } from "../plan";
 import { propose } from "../propose";
 import { recordFact } from "../record-fact";
+import { saveResearchTool } from "./save-research";
 import type { McpToolSpec, VerbResult } from "../verbs";
 
 const REFUSED = 2;
@@ -74,5 +75,5 @@ export function recordFactTool(session: PlanSession, workPath: string): McpToolS
 
 /** The plan-branch tools for one session. */
 export function planTools(session: PlanSession, workPath: string): readonly McpToolSpec[] {
-  return [proposeTool(session, workPath), recordFactTool(session, workPath)];
+  return [proposeTool(session, workPath), recordFactTool(session, workPath), saveResearchTool(session, workPath)];
 }
