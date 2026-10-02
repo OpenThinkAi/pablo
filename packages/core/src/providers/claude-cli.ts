@@ -132,22 +132,7 @@ export interface ClaudeCliAdapterOptions {
 interface ClaudeReply {
   readonly is_error?: unknown;
   readonly result?: unknown;
-  readonly model?: unknown;
-  readonly modelUsage?: unknown;
   readonly usage?: { input_tokens?: unknown; output_tokens?: unknown };
-}
-
-/** The model id in a `claude -p --output-format json` reply: `model`, else the `modelUsage` key that wrote the most. */
-export function claudeModelId(reply: ClaudeReply): string | undefined {
-  if (typeof reply.model === "string" && reply.model !== "") return reply.model;
-  const usage = reply.modelUsage;
-  if (typeof usage !== "object" || usage === null) return undefined;
-  const entries = usage as Record<string, { outputTokens?: unknown } | undefined>;
-  const written = (id: string): number => {
-    const tokens = entries[id]?.outputTokens;
-    return typeof tokens === "number" ? tokens : 0;
-  };
-  return Object.keys(entries).sort((a, b) => written(b) - written(a))[0];
 }
 
 const count = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
@@ -175,7 +160,7 @@ export function createClaudeCliAdapter(options: ClaudeCliAdapterOptions = {}): A
       });
     } catch (error) {
       if (signal.aborted && !(error instanceof ProviderConfigError)) {
-        throw new ProviderResponseError(CLAUDE_CLI_ID, "no answer before the timeout");
+        throw new ProviderResponseError(CLAUDE_CLI_ID, `no answer in ${Math.round((request.timeoutMs ?? options.timeoutMs ?? DEFAULT_CLAUDE_TIMEOUT_MS) / 1000)}s`);
       }
       throw error;
     }
@@ -188,7 +173,7 @@ export function createClaudeCliAdapter(options: ClaudeCliAdapterOptions = {}): A
       throw new ProviderResponseError(CLAUDE_CLI_ID, `no JSON from \`claude -p\` (exit ${result.exitCode}): ${detail}`);
     }
     if (reply.is_error === true || result.exitCode !== 0) {
-      throw new ProviderResponseError(CLAUDE_CLI_ID, `an error: ${String(reply.result ?? result.stderr).slice(0, 300)}`);
+      throw new ProviderResponseError(CLAUDE_CLI_ID, `claude said: ${String(reply.result ?? result.stderr).slice(0, 300)}`);
     }
 
     const text = typeof reply.result === "string" ? reply.result : "";
