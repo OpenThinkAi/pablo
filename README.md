@@ -66,7 +66,7 @@ including an unresolvable project), `1` error.
 | `pablo publish --project <slug> --target draft` | the compiler (AGT-1534): every `chapters/NN-*.md` in order into one markdown file at `<work>/.pablo/out/<slug>-draft.md` — frontmatter stripped, sentence lines joined into paragraphs, straight quotes and apostrophes curled. `review`/`final` are refused (not implemented); pandoc formats are deferred | `{ok, target, where, chapters, words}`; `{ok: false, code: 2, message}` on refusal |
 | `pablo write --dry-run` (also `prose`/`revise --dry-run`) | any write or revise, assembled and priced, nothing sent; a standalone `pablo dry-run` verb is not implemented | the pack, slice by slice |
 | `pablo mcp` | serve all of the above as MCP tools, same schemas | |
-| `pablo agent --project <slug> "<message>"` | one headless harness session (AGT-1552): Claude through the Agent SDK with pablo's system prompt, WebSearch/WebFetch and pablo's MCP tools only; Matt's subscription unless an Anthropic key resolves from pablo's config; prints the transcript as it arrives; the agent's `ask_author(question, options?, why)` prints a question card and reads the answer from stdin (a number picks an option) | transcript lines; `--json` gives `{ok, route, entries[], result}`; exit `0` on a success result, `2` refused, `1` failed |
+| `pablo agent --project <slug> "<message>"` | one headless harness session (AGT-1552): Claude through the Agent SDK with pablo's system prompt (role, the work's `policy`, its `QWEN.md`), WebSearch/WebFetch and pablo's MCP tools only; Matt's subscription unless an Anthropic key resolves from pablo's config; prints the transcript as it arrives; the agent's `ask_author(question, options?, why)` prints a question card and reads the answer from stdin (a number picks an option) | transcript lines; `--json` gives `{ok, route, entries[], result}`; exit `0` on a success result, `2` refused, `1` failed |
 | *later* `revise`, `voice`, `share`, `notes` | P1/P2 — the voice loop, sharing | |
 
 `check` scans `chapters/*.md` (or one `--file`, work-relative or absolute inside the
@@ -296,6 +296,14 @@ the loader; it rejects an unknown `format` or a missing required key, naming it.
 | `voice` | no | `["../../style", "QWEN.md"]` |
 | `neverSend` | no | `["research/", "notes/"]` |
 | `publish` | no | `{}` |
+| `policy` | no | — (a minimal default judgement policy) |
+
+`policy` names the judgement policy the harness (`pablo agent`) loads into its system
+prompt: when to research, invent, ask the author or proceed. pablo ships
+`historical-fiction` (`packages/cli/policies/historical-fiction.md`); a name it does
+not ship is refused. The harness's prompt is pablo's role, then that policy, then the
+work's `QWEN.md`; a section of `QWEN.md` fenced `<!-- writer-only -->` …
+`<!-- /writer-only -->` is left out of it (it stays in the writer's pack).
 
 A directory with no `pablo.json` at all is a refusal naming
 `pablo init --adopt --project <slug>` as the fix.

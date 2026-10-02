@@ -4,7 +4,8 @@
  * "Runtime").
  *
  * `harnessOptions` is the whole configuration, built as data so a test can pin
- * it: pablo's system prompt in place of Claude Code's, WebSearch and WebFetch
+ * it: pablo's system prompt in place of Claude Code's (role, the work's
+ * judgement policy and its `QWEN.md` rules, `prompt.ts`), WebSearch and WebFetch
  * the only built-ins, pablo's tools attached in-process as the `pablo` MCP
  * server, no settings, CLAUDE.md, user MCP servers or plugins loaded from disk,
  * and `dontAsk` so a tool off the allowed list is refused rather than prompted
@@ -36,6 +37,7 @@ export const sdkQuery: HarnessQuery = async function* (params) {
 };
 
 export interface HarnessSpec {
+  /** The work, with its policy and rules: `loadPromptWork` reads them. */
   readonly work: PromptWork;
   /** The work's directory; the session's cwd. */
   readonly projectPath: string;

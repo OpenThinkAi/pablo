@@ -16,6 +16,13 @@
  * | `voice`     | no       | `["../../style", "QWEN.md"]`     |
  * | `neverSend` | no       | `["research/", "notes/"]`        |
  * | `publish`   | no       | `{}`                              |
+ * | `policy`    | no       | —  (the harness's minimal default judgement policy) |
+ *
+ * `policy` names a judgement policy pablo ships under `packages/cli/policies/`
+ * (e.g. `"historical-fiction"`); the harness loads it into its system prompt
+ * (AGT-1553). A value that is not a plain name (lowercase letters, digits and
+ * hyphens) is refused here; a well-formed name pablo does not ship is refused
+ * when the harness loads it.
  *
  * A missing required key is refused by name (`message` names the exact key);
  * an unknown `format` is refused by name too. A directory with no `pablo.json`
@@ -35,6 +42,9 @@ export const DEFAULT_VOICE: readonly string[] = ["../../style", "QWEN.md"];
 export const DEFAULT_NEVER_SEND: readonly string[] = ["research/", "notes/"];
 export const DEFAULT_PUBLISH: Readonly<Record<string, unknown>> = {};
 
+/** What a `policy` value may look like: a file name under `policies/`, never a path. */
+export const POLICY_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 /** The typed shape of `pablo.json`. */
 export interface Marker {
   readonly format: Format;
@@ -44,6 +54,8 @@ export interface Marker {
   readonly voice: readonly string[];
   readonly neverSend: readonly string[];
   readonly publish: Readonly<Record<string, unknown>>;
+  /** The judgement policy's name; absent means the harness's minimal default. */
+  readonly policy?: string;
 }
 
 export interface MarkerFound {
@@ -103,6 +115,14 @@ export function readMarker(workDir: string): MarkerResult {
     );
   }
 
+  const policy = data["policy"];
+  if (policy !== undefined && (typeof policy !== "string" || !POLICY_NAME.test(policy))) {
+    return refuse(
+      `pablo: ${path} has an invalid "policy" (${JSON.stringify(policy)}); it names a policy pablo ships, e.g. "historical-fiction"`,
+      [path],
+    );
+  }
+
   const marker: Marker = {
     format: format as Format,
     title: data["title"] as string,
@@ -114,6 +134,7 @@ export function readMarker(workDir: string): MarkerResult {
       typeof data["publish"] === "object" && data["publish"] !== null && !Array.isArray(data["publish"])
         ? (data["publish"] as Record<string, unknown>)
         : DEFAULT_PUBLISH,
+    ...(policy === undefined ? {} : { policy }),
   };
 
   return { ok: true, marker };
