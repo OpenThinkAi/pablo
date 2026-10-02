@@ -110,11 +110,11 @@ export function screenReviser(vaultRoot: string, projectPath: string, deps: Scre
       if (located === undefined) return { ok: false, message: "The chapter has changed since it was opened; reopen it and select again." };
       const base = frontmatterLength(raw);
       if (located.start < base) return { ok: false, message: "Select sentences of the chapter's text, not its frontmatter." };
-      const lines: string[] = [];
       const outcome = await withWriteLock(() => reviseCore(
-        { file: request.file, passage: undefined, start: located.start - base, end: located.end - base, instruction: request.instruction, dryRun: false },
+        { file: request.file, passage: undefined, start: located.start - base, end: located.end - base, instruction: request.instruction, dryRun: false /* send the pack to the model; the file is never written either way */ },
         { vaultRoot, projectPath, env },
-        { adapter: deps.adapter, stderr: { write: (text) => { for (const line of text.split("\n")) if (line.trim() !== "") lines.push(line); } }, onCandidate: partial },
+        // The progress lines go nowhere: the screen shows the candidate as it streams (`onCandidate`) and the receipt at the end.
+        { adapter: deps.adapter, stderr: { write: () => {} }, onCandidate: partial },
       ));
       const body = outcome.body;
       if (!body.ok) return { ok: false, message: body.message };
@@ -148,7 +148,9 @@ export function screenReviser(vaultRoot: string, projectPath: string, deps: Scre
 
       const projectInRepo = relative(realpathSync(repo), realpathSync(projectPath));
       const inRepo = join(projectInRepo, request.file);
-      const worktreeFile = join(created.path as string, inRepo);
+      // `path` is always a string when `ok`: createBranch sets it before returning { ok: true }.
+      const worktreePath = created.path as string;
+      const worktreeFile = join(worktreePath, inRepo);
       let raw: string;
       try { raw = readFileSync(worktreeFile, "utf8"); } catch { discard(); return { ok: false, message: NO_FILE }; }
       // The branch is cut from `main`'s committed text; those lines must be what the revise was run on.
@@ -167,7 +169,7 @@ export function screenReviser(vaultRoot: string, projectPath: string, deps: Scre
       const edited = candidate !== request.offered.trim();
       const instruction = request.instruction.replace(/\s+/g, " ").trim();
       const author = edited ? marker.marker.author : request.model;
-      const committed = commitAs(created.path as string, {
+      const committed = commitAs(worktreePath, {
         message: `${slug}: revise ${request.file}${edited ? " (edited)" : ""}\n\n${instruction}`,
         author: { name: author, email: `${slugify(author) || "author"}@pablo.local` },
         receipt: request.receipt,
