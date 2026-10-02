@@ -71,19 +71,64 @@ export async function mergeDraft(
   const removed = deleteBranch(repo, opts.slug, branch, { env });
   if (!removed.ok) notices.push(removed.notice);
 
+  const rituals = await ritualsFor(projectPath, chapter, branch, opts, notices);
+  return { ok: true, sha, chapter, rituals, notices };
+}
+
+/** The after-write steps for one chapter on the merged tree; a missing chapter file is a notice, not a failure. */
+async function ritualsFor(projectPath: string, chapter: number, branch: string, opts: MergeDraftOptions, notices: string[]): Promise<Ritual[]> {
   const chapterPath = findChapterFile(projectPath, chapter);
   if (chapterPath === undefined) {
     notices.push(`pablo: merge: no chapters/${String(chapter).padStart(2, "0")}-*.md on main after merging ${branch}`);
-    return { ok: true, sha, chapter, rituals: [], notices };
+    return [];
   }
   const text = readFileSync(chapterPath, "utf8");
-  const rituals = await runAfterMerge(projectPath, chapter, chapterPath, {
+  return runAfterMerge(projectPath, chapter, chapterPath, {
     ...opts,
     words: Number(frontmatterField(text, "words")) || 0,
     model: frontmatterField(text, "model") ?? "unknown",
     receiptLine: `merged ${branch}`,
   });
-  return { ok: true, sha, chapter, rituals, notices };
+}
+
+export type MergeChangesResult =
+  | { readonly ok: true; readonly sha: string; readonly chapters: readonly number[]; readonly rituals: Ritual[]; readonly notices: string[] }
+  | { readonly ok: false; readonly notice: string };
+
+/** The chapter numbers of `chapters/NN-*.md` files `branch` changes against `main`. */
+function chaptersTouched(repo: string, branch: string): number[] {
+  const out = Bun.spawnSync(["git", "-C", repo, "diff", "--name-only", `main...${branch}`, "--"], { stdout: "pipe", stderr: "pipe" });
+  const found = new Set<number>();
+  for (const line of out.stdout.toString("utf8").split("\n")) {
+    const m = line.match(/(?:^|\/)chapters\/(\d+)-[^/]*\.md$/);
+    if (m) found.add(Number(m[1]));
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+/**
+ * `mergeDraft` for any change branch (finishing a review, AGT-1540): a draft branch is merged exactly as
+ * `mergeDraft` does; a revise/edit/reader/plan branch is merged the same way and the after-write steps run for each
+ * chapter it changes (none for a branch that touches no chapter). Same failure rules: a failed merge runs nothing and
+ * leaves `main` and the branch as they were; removing the merged branch is a notice at worst.
+ */
+export async function mergeChanges(projectPath: string, branch: string, opts: MergeDraftOptions): Promise<MergeChangesResult> {
+  const repo = repoRoot(projectPath);
+  if (repo === undefined) return { ok: false, notice: `pablo: merge: ${projectPath} is not in a git repository` };
+  const draft = draftChapter(branch);
+  if (draft !== undefined) {
+    const merged = await mergeDraft(projectPath, branch, opts);
+    return merged.ok ? { ok: true, sha: merged.sha, chapters: [merged.chapter], rituals: merged.rituals, notices: merged.notices } : merged;
+  }
+  const chapters = chaptersTouched(repo, branch);
+  const merged = mergeBranch(repo, branch, opts.env ?? process.env);
+  if (!merged.ok) return merged;
+  const notices: string[] = [];
+  const removed = deleteBranch(repo, opts.slug, branch, { env: opts.env ?? process.env });
+  if (!removed.ok) notices.push(removed.notice);
+  const rituals: Ritual[] = [];
+  for (const chapter of chapters) rituals.push(...(await ritualsFor(projectPath, chapter, branch, opts, notices)));
+  return { ok: true, sha: merged.sha as string, chapters, rituals, notices };
 }
 
 /** The intent continuity extraction routes under (AGT-1232): `extraction` routes local, same as drafting. */

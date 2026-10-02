@@ -43,6 +43,7 @@ import { readTool, searchTool } from "./harness-tools";
 import { runResumeVerb } from "./resume";
 import { runReview } from "./review-verbs";
 import { runSave } from "./save";
+import { screenFinisher } from "./review-finish";
 import { screenWriter } from "./screen-write";
 import { deriveCliOptions, parseForChapter } from "./verbs";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
@@ -679,6 +680,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         ...(vault.ok ? { writer: screenWriter(vault.path, screen.dir) } : {}),
         // The compose view's session is built when the first message is sent (AGT-1566).
         composer: screenComposer(screen.dir, cwd),
+        // `s` in a review merges the accepted changes and runs the after-write steps (AGT-1540).
+        finisher: screenFinisher(screen.dir),
         ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch) } : {}),
       });
     }

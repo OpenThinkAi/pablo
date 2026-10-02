@@ -1,7 +1,7 @@
 // Public surface of the screen package. The CLI imports this lazily, only when bare `pablo` opens the screen.
 
 export { runScreen } from "./screen";
-export type { ScreenOptions, WriteResult, Writer } from "./screen";
+export type { FinishResult, Finisher, Rejected, ScreenOptions, WriteResult, Writer } from "./screen";
 export { bookRail, missingContent, MARKS } from "./book";
 export type { BookRail, BookStage, StageStatus } from "./book";
 export type { BranchDiff } from "./review";
