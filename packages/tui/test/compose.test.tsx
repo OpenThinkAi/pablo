@@ -508,7 +508,7 @@ test("on screen: the session's branch is listed in compose; Tab, Enter opens it 
   app.stdin.write("\r");
   await sleep(80);
   let frame = plain(app.lastFrame());
-  expect(frame).toContain("BRANCHES (1)");
+  expect(frame).toContain("PABLO'S CHANGES (1)");
   expect(frame).toContain("  draft/ch03");
   expect(frame.split("\n").length).toBeLessThanOrEqual(SIZE.rows);
   app.stdin.write("\t");

@@ -28,7 +28,7 @@ export function ComposeView({ compose, size }: { compose: Compose; size: Size })
       </Box>
       {compose.branches.length === 0 ? null : (
         <Box flexDirection="column">
-          <Text dimColor wrap="truncate">{compose.pick === null ? `BRANCHES (${compose.branches.length}) · Tab to pick one, Enter reviews it` : "BRANCHES · ↑↓ pick, Enter reviews, Esc back to the input"}</Text>
+          <Text dimColor wrap="truncate">{compose.pick === null ? `PABLO'S CHANGES (${compose.branches.length}) · Tab to pick one, Enter reviews it` : "PABLO'S CHANGES · ↑↓ pick, Enter reviews, Esc back to the input"}</Text>
           {visibleBranches(compose.branches, compose.pick).map(({ name, index }) => (
             <Text key={name} wrap="truncate" inverse={index === compose.pick}>{`  ${clean(name)}`}</Text>
           ))}
