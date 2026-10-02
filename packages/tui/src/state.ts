@@ -30,7 +30,7 @@ export interface RailRow { readonly id: string; readonly depth: number; readonly
 /** A scrolling region: `scroll` is the first visible line, `length` how many there are, `visible` how many fit (0 until measured). */
 export interface Scroll { readonly scroll: number; readonly length: number; readonly visible: number }
 /** A region with a cursor, kept in view as it moves. */
-export interface Pane extends Scroll { readonly cursor: number }
+export interface Pane extends Scroll { readonly cursor: number; /** The document the main pane shows, once one is loaded: a different one starts at its top. */ readonly doc?: string }
 /** The rail: `cursor` indexes `rows`; a folded group's rows are skipped by the moves and left out of the scroll. */
 export interface Rail { readonly rows: readonly RailRow[]; readonly collapsed: ReadonlySet<string>; readonly cursor: number; readonly scroll: number; readonly visible: number }
 export interface View { readonly rail: Rail; readonly main: Pane }
@@ -95,7 +95,7 @@ export type Action =
   | { type: "rail.next_group" } | { type: "rail.prev_group" }
   | { type: "rail.expand" } | { type: "rail.collapse" }
   // ---- the main pane: a document's lines, one sentence each
-  | { type: "main.loaded"; lines: number }
+  | { type: "main.loaded"; lines: number; doc?: string }
   | { type: "main.down" } | { type: "main.up" }
   | { type: "main.page_down" } | { type: "main.page_up" }
   | { type: "main.top" } | { type: "main.end" }
@@ -239,7 +239,12 @@ function reduceRail(rail: Rail, a: Action): Rail {
 
 function reduceMain(main: Pane, a: Action): Pane {
   switch (a.type) {
-    case "main.loaded": return moveTo({ ...main, length: a.lines }, main.cursor);
+    // A different document (by id) starts at its top; the same one, rewrapped or reloaded, keeps the author's line.
+    case "main.loaded": {
+      const fresh = a.doc !== undefined && a.doc !== main.doc;
+      const base = fresh ? { ...main, cursor: 0, scroll: 0 } : main;
+      return moveTo({ ...base, length: a.lines, ...(a.doc !== undefined ? { doc: a.doc } : {}) }, base.cursor);
+    }
     case "main.down": return moveTo(main, main.cursor + 1);
     case "main.up": return moveTo(main, main.cursor - 1);
     case "main.page_down": return moveTo(main, main.cursor + pageStep(main.visible));

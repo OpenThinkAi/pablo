@@ -8,7 +8,7 @@
 // to that). Every key is resolved through the key rows (keys.ts, chord.ts) into the model's actions, or into a command
 // for the layer above; `q` is the app's own command and quits.
 
-import { useEffect, useReducer } from "react";
+import { useEffect, useMemo, useReducer } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { configPath } from "@openthink/pablo-core";
 import { tooSmall, useTerminalSize, MIN_COLS, MIN_ROWS } from "./resize";
@@ -18,11 +18,12 @@ import { missingContent, type BookRail } from "./book";
 import { KeyPanel } from "./key-panel";
 import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
+import { displayLines, type MainDoc } from "./document";
 import { clean } from "./sanitize";
 import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
-import { initialState, pendingText, reduce, shownRows, viewOf, type RailRow, type State } from "./state";
+import { initialState, pendingText, railRow, reduce, shownRows, viewOf, type RailRow, type State } from "./state";
 
 export interface AppProps {
   /** The project's marker fields the status area shows. */
@@ -38,7 +39,9 @@ export interface AppProps {
   readonly labels?: Readonly<Record<string, string>>;
   /** Book mode's stages laid out (book.ts): rows, labels and the missing reasons; overrides `rows`/`labels` when given. */
   readonly book?: BookRail;
-  /** The main pane's heading and its document, one sentence per line. */
+  /** The document behind a rail row id (document.ts), shown in the main pane for the row under the rail's cursor. */
+  readonly load?: (id: string) => MainDoc | undefined;
+  /** The main pane's heading and its document when no row names one (no `load`, or it has nothing for the row). */
   readonly mainTitle?: string;
   readonly lines?: readonly string[];
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
@@ -58,7 +61,7 @@ const NO_LINES: readonly string[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows = book?.rows ?? NO_ROWS, labels = book?.labels ?? {}, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows = book?.rows ?? NO_ROWS, labels = book?.labels ?? {}, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -94,7 +97,12 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     if (reasons) dispatch({ type: "content.show", content: missingContent(labels[stageId!]?.replace(/^\S+ /, "") ?? stageId!, reasons) });
     else if (state.content?.kind === "missing") dispatch({ type: "content.close" });
   }, [stageId, reasons]);
-  useEffect(() => { dispatch({ type: "main.loaded", lines: lines.length }); }, [lines]);
+  // The main pane shows the file behind the rail's row, wrapped to its width; a different row starts at the top.
+  const rowId = railRow(viewOf(state).rail)?.id;
+  const doc = useMemo(() => (rowId !== undefined ? load?.(rowId) : undefined), [rowId, load, rows]);
+  const shownTitle = doc ? doc.title : mainTitle;
+  const shownLines = useMemo(() => (doc ? displayLines(doc.text, layout.mainInner) : lines), [doc, lines, layout.mainInner]);
+  useEffect(() => { dispatch({ type: "main.loaded", lines: shownLines.length, ...(doc && rowId !== undefined ? { doc: rowId } : {}) }); }, [shownLines]);
   useEffect(() => {
     dispatch({ type: "measured", measure: measureOf(layout, contentBody) });
   }, [layout.railRows, layout.mainRows, layout.contentRows, layout.contentInner, contentBody]);
@@ -131,7 +139,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
         <Box height={layout.middleH}>
           {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
-          <Main layout={layout} view={view} title={mainTitle} lines={lines} active={state.focus === "main"} />
+          <Main layout={layout} view={view} title={shownTitle} lines={shownLines} active={state.focus === "main"} />
         </Box>
       )}
       <Box height={layout.bottomH}>
