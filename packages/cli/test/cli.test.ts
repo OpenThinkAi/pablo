@@ -147,26 +147,18 @@ test("init novel onto an existing slug exits 2", () => {
 
 test("status --project ice-house --json exits 0 with the novel machine's state", () => {
   const vault = tempVault();
-  // AGT-1263: an isolated, empty XDG_STATE_HOME so `review` reads "none" from
-  // a queue that provably doesn't exist, never from whatever the machine
-  // running this test happens to have queued.
-  const stateHome = mkdtempSync(join(tmpdir(), "pablo-cli-test-state-"));
-
-  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--json"], {
-    PABLO_VAULT: vault,
-    XDG_STATE_HOME: stateHome,
-  });
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--json"], { PABLO_VAULT: vault });
 
   expect(exitCode).toBe(0);
   const body = JSON.parse(stdout);
   expect(body.premise).toBe(true);
   expect(body.beats).toHaveLength(4);
   expect(body.chapters).toEqual([
-    { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut", review: "none" },
+    { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut" },
   ]);
+  expect(body.waiting).toEqual([]); // the temp vault is no git repository: no branches to wait on
 
   rmSync(vault, { recursive: true, force: true });
-  rmSync(stateHome, { recursive: true, force: true });
 });
 
 test("status --project ice-house (no --json) prints one prose line per stage", () => {
@@ -183,69 +175,58 @@ test("status --project ice-house (no --json) prints one prose line per stage", (
   rmSync(vault, { recursive: true, force: true });
 });
 
-test('status --project ice-house --for "chapter 2" --json exits 0 with ready:true and review:"none" (chapter 2 was never written or queued)', () => {
+test('status --project ice-house --for "chapter 2" --json exits 0 with ready:true', () => {
   const vault = tempVault();
-  const stateHome = mkdtempSync(join(tmpdir(), "pablo-cli-test-state-"));
 
-  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "chapter 2", "--json"], {
-    PABLO_VAULT: vault,
-    XDG_STATE_HOME: stateHome,
-  });
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "chapter 2", "--json"], { PABLO_VAULT: vault });
 
   expect(exitCode).toBe(0);
-  expect(JSON.parse(stdout)).toEqual({ ready: true, missing: [], review: "none" });
+  expect(JSON.parse(stdout)).toEqual({ ready: true, missing: [] });
 
   rmSync(vault, { recursive: true, force: true });
-  rmSync(stateHome, { recursive: true, force: true });
 });
 
-test('status --project ice-house --for "chapter 3" --json exits 2 with ready:false, the exact missing strings, and review:"none"', () => {
+test('status --project ice-house --for "chapter 3" --json exits 2 with ready:false and the exact missing strings', () => {
   const vault = tempVault();
-  const stateHome = mkdtempSync(join(tmpdir(), "pablo-cli-test-state-"));
 
-  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "chapter 3", "--json"], {
-    PABLO_VAULT: vault,
-    XDG_STATE_HOME: stateHome,
-  });
+  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "chapter 3", "--json"], { PABLO_VAULT: vault });
 
   expect(exitCode).toBe(2);
   expect(JSON.parse(stdout)).toEqual({
     ready: false,
     missing: ["chapter 2 is not written", "Mrs. Frayne still has a [pick] in bible/characters/family-tree.md"],
-    review: "none",
   });
 
   rmSync(vault, { recursive: true, force: true });
-  rmSync(stateHome, { recursive: true, force: true });
 });
 
-test('status --project ice-house --for "chapter 1" --json carries the seeded review value for that chapter', () => {
+test("status reports the branches waiting for review, in JSON and in prose", () => {
   const vault = tempVault();
-  const stateHome = mkdtempSync(join(tmpdir(), "pablo-cli-test-state-"));
-  const chapterPath = join(vault, "novels", "ice-house", "chapters", "01-the-last-full-cut.md");
-  const queued = {
-    type: "queued",
-    id: "20260907-chapter-one-aaaa",
-    at: "2026-09-07T10:00:00.000Z",
-    kind: "chapter",
-    title: "The Last Full Cut",
-    path: chapterPath,
-    words: 900,
-    prompt_hash: "deadbeef",
-  };
-  mkdirSync(join(stateHome, "pablo"), { recursive: true });
-  writeFileSync(join(stateHome, "pablo", "review.jsonl"), `${JSON.stringify(queued)}\n`, "utf8");
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", "-C", vault, "-c", "user.name=Test", "-c", "user.email=t@t.example", ...args], { stdout: "pipe", stderr: "pipe" });
+  git("init", "-q", "-b", "main");
+  git("add", "-A");
+  git("commit", "-qm", "seed");
+  git("checkout", "-q", "-b", "draft/ch02");
+  writeFileSync(join(vault, "novels", "ice-house", "chapters", "01-the-last-full-cut.md"), "Changed.\n");
+  git("commit", "-qam", "draft");
+  git("checkout", "-q", "main");
 
-  const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--for", "chapter 1", "--json"], {
-    PABLO_VAULT: vault,
-    XDG_STATE_HOME: stateHome,
-  });
+  const json = runCli(["status", "--project", "ice-house", "--json"], { PABLO_VAULT: vault });
+  expect(json.exitCode).toBe(0);
+  expect(JSON.parse(json.stdout).waiting).toEqual(["draft/ch02"]);
 
-  expect(exitCode).toBe(0);
-  expect(JSON.parse(stdout)).toEqual({ ready: true, missing: [], review: "pending" });
+  const prose = runCli(["status", "--project", "ice-house"], { PABLO_VAULT: vault });
+  expect(prose.stdout).toContain("waiting for review: 1 (draft/ch02)");
 
   rmSync(vault, { recursive: true, force: true });
-  rmSync(stateHome, { recursive: true, force: true });
+});
+
+test("there is no `review` verb any more", () => {
+  const { stderr, exitCode } = runCli(["review", "list"]);
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("unknown");
+  expect(runCli(["--help"]).stdout).not.toContain("pablo review");
 });
 
 test('status --project ice-house --for "ch 3" (no --json) prints the not-ready line and each missing item indented', () => {

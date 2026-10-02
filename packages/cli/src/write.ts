@@ -34,9 +34,6 @@ import type { Hit } from "./check";
 import { readMarker } from "./marker";
 import { buildChapterPack, DEFAULT_WORD_TARGET } from "./novel/pack";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
-import { runQueueRitual } from "./novel/rituals";
-import type { Ritual } from "./novel/rituals";
-import { mintPieceId } from "./review";
 
 /**
  * Exit codes: the contract every ticket builds on, defined once in `cli.ts`
@@ -72,11 +69,11 @@ export interface ProgressSink {
 export interface RunWriteDeps {
   /** Overrides the provider registry's adapter entirely — the only way tests avoid the network. */
   readonly adapter?: Adapter | undefined;
-  /** Overrides the clock used for the frontmatter's `generated` timestamp and the rituals' "today" (AGT-1231). */
+  /** Overrides the clock used for the frontmatter's `generated` timestamp. */
   readonly now?: (() => Date) | undefined;
   /** Overrides where streaming progress is written. Defaults to `process.stderr`. */
   readonly stderr?: ProgressSink | undefined;
-  /** Overrides `process.env` for the branch worktree location (`PABLO_HOME`) and the review queue's state directory. */
+  /** Overrides `process.env` for the branch worktree location (`PABLO_HOME`). */
   readonly env?: Record<string, string | undefined> | undefined;
 }
 
@@ -235,12 +232,10 @@ function emitWriteSuccess(
   path: string,
   receipt: WriteReceiptSummary,
   hits: readonly Hit[],
-  rituals: readonly Ritual[],
-  piece: string,
   branch: DraftBranch,
 ): void {
   if (json) {
-    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, rituals, piece }));
+    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits }));
     return;
   }
   console.log(`wrote ${path} (${receipt.words} words) on branch ${branch.name}`);
@@ -253,11 +248,6 @@ function emitWriteSuccess(
     console.log(`sampled at temperature ${receipt.temperature}${receipt.seed === undefined ? "" : `, seed ${receipt.seed}`}`);
   }
   for (const hit of hits) console.log(formatHitLine(hit));
-  for (const ritual of rituals) console.log(`ritual ${ritual.name}: ${ritual.status} — ${ritual.detail}`);
-  // AGT-1262 AC4: the review queue's piece id, so the agent driving `write`
-  // can hand it straight to `pablo review wait <id>` without re-parsing the
-  // rituals line.
-  console.log(`piece ${piece}`);
 }
 
 /**
@@ -503,9 +493,7 @@ export async function runWrite(
   // The draft is committed as the model that wrote it, with the prompt hash as
   // its receipt. The after-write steps (outline tick, note, README,
   // continuity, think sync) are not run here: they run when the branch is
-  // merged (`novel/merge.ts`). AGT-1262: the piece id is minted here so it
-  // reaches the output even if the queue append fails; the queue event names
-  // the path the chapter will have on main.
+  // merged (`novel/merge.ts`).
   const committed = commitAs(worktree, {
     message: `${markerResult.marker.slug}: draft chapter ${chapter}`,
     author: { name: draftAdapter.model, email: `${slugify(draftAdapter.model) || "model"}@pablo.local` },
@@ -518,23 +506,6 @@ export async function runWrite(
   }
   const branch: DraftBranch = { name: branchName, worktree, sha: committed.sha as string };
 
-  const pieceId = mintPieceId(now(), markerResult.marker.slug);
-  const rituals = [
-    runQueueRitual(
-      filePath,
-      chapter,
-      {
-        id: pieceId,
-        slug: markerResult.marker.slug,
-        words: wordCount,
-        title: packResult.inputs.beat.title,
-        vault: vaultRoot,
-        promptHash: pack.hash,
-      },
-      { env: deps.env, now },
-    ),
-  ];
-
-  emitWriteSuccess(args.json, workRelativePath, receipt, hits, rituals, pieceId, branch);
+  emitWriteSuccess(args.json, workRelativePath, receipt, hits, branch);
   return 0;
 }

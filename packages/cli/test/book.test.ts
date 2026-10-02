@@ -16,10 +16,9 @@ function work(name: string): string {
   cpSync(FIXTURE, dir, { recursive: true });
   return dir;
 }
-const env = () => ({ ...process.env, XDG_STATE_HOME: join(root, "state") });
 
 test("the stages follow the machine: premise, bible, acts, beats, then each chapter drafted, ready or missing", () => {
-  const state = readNovelState(work("a"), env());
+  const state = readNovelState(work("a"));
   const stages = bookStages(state);
   expect(stages.slice(0, 5).map((s) => [s.id, s.status])).toEqual([
     ["premise", "ready"], ["bible", "ready"], ["acts", "ready"], ["beats", "ready"], ["chapters", "ready"],
@@ -32,7 +31,7 @@ test("the stages follow the machine: premise, bible, acts, beats, then each chap
 });
 
 test("a chapter's missing reasons are the ones status gives, not a second reading", () => {
-  const state = readNovelState(work("b"), env());
+  const state = readNovelState(work("b"));
   const stages = bookStages(state);
   for (const n of [3, 4]) {
     expect(stages.find((s) => s.id === `chapter:${n}`)?.missing).toEqual(chapterPreconditions(state, n).missing);
@@ -43,7 +42,7 @@ test("a work with no premise, acts or beats shows those stages missing with why"
   const dir = work("c");
   unlinkSync(join(dir, "outline", "chapters.md"));
   unlinkSync(join(dir, "bible", "overview.md"));
-  const stages = bookStages(readNovelState(dir, env()));
+  const stages = bookStages(readNovelState(dir));
   const by = (id: string) => stages.find((s) => s.id === id)!;
   expect(by("premise")).toMatchObject({ status: "missing", missing: ["bible/overview.md has no text under ## Logline"] });
   expect(by("acts").status).toBe("missing");

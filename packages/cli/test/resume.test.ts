@@ -141,3 +141,25 @@ test("a temp copy of the fixture with no git repo has last.commit absent", async
 
   rmSync(work, { recursive: true, force: true });
 });
+
+test("resume reports the branches waiting for review, in the result and the prose (AGT-1541)", async () => {
+  const work = tempWork();
+  runGit(work, ["init", "-q", "-b", "main"]);
+  runGit(work, ["-c", "user.email=test@example.com", "-c", "user.name=Test", "add", "-A"]);
+  runGit(work, ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-q", "-m", "seed fixture"]);
+
+  const none = await buildResume(work, "ice-house", { env: { PATH: NO_THINK_PATH } });
+  expect(none.waiting).toEqual([]);
+  expect(formatResumeProse(none)).not.toContain("waiting for review");
+
+  runGit(work, ["checkout", "-q", "-b", "draft/ch02"]);
+  writeFileSync(join(work, "chapters", "01-the-last-full-cut.md"), "Changed.\n", "utf8");
+  runGit(work, ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-qam", "draft"]);
+  runGit(work, ["checkout", "-q", "main"]);
+
+  const waiting = await buildResume(work, "ice-house", { env: { PATH: NO_THINK_PATH } });
+  expect(waiting.waiting).toEqual(["draft/ch02"]);
+  expect(formatResumeProse(waiting)).toContain("waiting for review: draft/ch02");
+
+  rmSync(work, { recursive: true, force: true });
+});

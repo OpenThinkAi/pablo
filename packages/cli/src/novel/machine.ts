@@ -14,9 +14,6 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { gateTimeline, parseBeatRows, section } from "@openthink/pablo-core";
 import type { BeatRow } from "@openthink/pablo-core";
-import { stateReviewPath } from "../paths";
-import { readEvents, reviewStateFor } from "../review";
-import type { ReviewEvent, ReviewState } from "../review";
 
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
 export interface BibleFile {
@@ -43,7 +40,6 @@ export interface ChapterFile {
   readonly file: string;
   readonly status: string | undefined;
   readonly title: string | undefined;
-  readonly review: ReviewState;
 }
 
 export interface NovelState {
@@ -157,7 +153,7 @@ export function parseFrontmatter(text: string): Record<string, string> {
   return fields;
 }
 
-function readChapters(workDir: string, events: ReviewEvent[]): ChapterFile[] {
+function readChapters(workDir: string): ChapterFile[] {
   const dir = join(workDir, "chapters");
   if (!existsSync(dir)) return [];
 
@@ -172,7 +168,6 @@ function readChapters(workDir: string, events: ReviewEvent[]): ChapterFile[] {
       file: relLabel(workDir, path),
       status: fields["status"],
       title: fields["title"],
-      review: reviewStateFor(events, path),
     });
   }
   return chapters;
@@ -195,15 +190,8 @@ function containsPhrase(haystack: string, phrase: string): boolean {
  * missing file is not an error anywhere here — an absent `bible/overview.md`
  * just makes `premise` false, an absent `chapters/` makes `chapters` empty —
  * because `status` exists to report what is missing, not to throw on it.
- *
- * `env` resolves the review queue (`stateReviewPath`, AGT-1263) each chapter
- * is checked against; it defaults to `process.env` so every existing caller
- * (the real CLI) is unaffected, and a test points it at a temp
- * `XDG_STATE_HOME` instead of ever touching the author's real queue. A
- * missing or malformed queue file degrades to every chapter reading `review:
- * "none"` — `readEvents` already tolerates both, so this never throws.
  */
-export function readNovelState(workDir: string, env: Record<string, string | undefined> = process.env): NovelState {
+export function readNovelState(workDir: string): NovelState {
   const overviewText = read(join(workDir, "bible", "overview.md"));
   const premise = overviewText !== undefined && hasLogline(overviewText);
 
@@ -240,14 +228,12 @@ export function readNovelState(workDir: string, env: Record<string, string | und
   const outlineText = read(outlinePath) ?? "";
   const outlineLabel = relLabel(workDir, outlinePath);
 
-  const events = readEvents(stateReviewPath(env));
-
   return {
     premise,
     bible: { files, picks, timelineText },
     acts: parseActs(outlineText),
     beats: parseBeatRows(outlineText, outlineLabel),
-    chapters: readChapters(workDir, events),
+    chapters: readChapters(workDir),
   };
 }
 
