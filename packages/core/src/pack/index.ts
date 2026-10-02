@@ -46,7 +46,7 @@ export type {
 } from "./receipts";
 export { withReceipts } from "./receipts";
 export { fileReceiptSink, RECEIPTS_RELATIVE_PATH, receiptsPath } from "./receipt-log";
-export type { ReadDraftingOptions } from "./vault";
+export type { ReadDraftingOptions, TimelineAt } from "./vault";
 export {
   chapterTail,
   DEFAULT_TAIL_WORDS,
@@ -58,6 +58,7 @@ export {
   readDraftingInputs,
   readStyle,
   readTextSource,
+  timelineAt,
   readWorkRules,
   section,
 } from "./vault";
