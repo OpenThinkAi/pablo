@@ -11,9 +11,9 @@ export interface Field { readonly key: "format" | "progress" | "branch" | "comme
 export const DROP_ORDER: readonly Field["key"][] = ["branch", "comments", "format", "review"];
 export const GAP = "   ";
 
-/** What a comment is about: a continuity contradiction, a voice tell, a `check` hit. Kinds, not severities. */
-export type CommentKind = "continuity" | "tells" | "check";
-const KINDS: readonly CommentKind[] = ["continuity", "tells", "check"];
+/** What a comment is about: a continuity contradiction, a thing mentioned before its date, a voice tell, a `check` hit. Kinds, not severities. */
+export type CommentKind = "continuity" | "timeline" | "tells" | "check";
+const KINDS: readonly CommentKind[] = ["continuity", "timeline", "tells", "check"];
 
 export interface StatusInput {
   readonly format: string;

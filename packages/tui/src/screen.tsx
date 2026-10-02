@@ -7,7 +7,7 @@ import { bookRail, type BookStage } from "./book";
 import { loadEditor, loadKeymap } from "./key-config";
 import type { Composer } from "./compose";
 import { KeysError } from "./keys";
-import type { BranchDiff } from "./review";
+import type { BranchDiff, ReviewComment } from "./review";
 import type { CheckHit } from "./hits";
 import { loadDocument } from "./source";
 
@@ -43,8 +43,13 @@ export interface ScreenOptions {
   readonly writer?: Writer;
   /** The harness session behind the compose view; the cli builds it (the tui does not depend on the Agent SDK). */
   readonly composer?: Composer;
+<<<<<<< HEAD
   /** `s` in a review: merges the accepted changes into `main`, runs the after-write steps and deletes the branch (the CLI's `screenFinisher`, passed in; AGT-1540). */
   readonly finisher?: Finisher;
+=======
+  /** The critic's saved comments on a branch, shown under the edits they are on (AGT-1564). */
+  readonly commentsOf?: (branch: string) => readonly ReviewComment[];
+>>>>>>> b8d0554 (critique(branch): continuity, timeline and voice comments, each re-checked (AGT-1564))
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -68,7 +73,11 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   try {
     const root = options.dir;
     const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
+<<<<<<< HEAD
     const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} finisher={options.finisher} {...(options.composer ? { composer: options.composer } : {})} />, {
+=======
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} {...(options.composer ? { composer: options.composer } : {})} />, {
+>>>>>>> b8d0554 (critique(branch): continuity, timeline and voice comments, each re-checked (AGT-1564))
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

@@ -18,6 +18,7 @@ import { parseArgs } from "node:util";
 import { bookStages } from "./book";
 import { branchDiff, repoRoot, waitingBranches, waitingForReview } from "./branch";
 import { runCheck, screenChecks } from "./check";
+import { loadCritique } from "./critique";
 import { migrateLines } from "./migrate";
 import { mergeDraftInProject } from "./novel/merge";
 import { initAdopt, initNovel } from "./init";
@@ -660,7 +661,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         composer: screenComposer(screen.dir, cwd),
         // `s` in a review merges the accepted changes and runs the after-write steps (AGT-1540).
         finisher: screenFinisher(screen.dir),
-        ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch) } : {}),
+        ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch), commentsOf: (branch: string) => loadCritique(screen.dir, branch) } : {}),
       });
     }
   }

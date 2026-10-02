@@ -10,6 +10,7 @@
 import { parseDiff } from "@openthink/pablo-core";
 import { clean } from "./sanitize";
 import { stitch, type Edit, type EditLine, type Seg } from "./stitch";
+import type { CommentKind } from "./status";
 import { BRANCH_ROW, type RailRow } from "./state";
 
 /** What the CLI hands over for a branch: git's diff of it against `main`, or why there is none. */
@@ -29,10 +30,26 @@ export function branchRows(branches: readonly string[]): { rows: RailRow[]; labe
   return { rows, labels };
 }
 
+/**
+ * A critic comment (the CLI's `critique` tool, AGT-1564) as review mode needs it: the file and line it is on, what
+ * kind it is and what it says. `file` is the diff's path (relative to the repo), `line` counts in the new text.
+ * A structural type, so this package never imports the CLI.
+ */
+export interface ReviewComment {
+  readonly file: string;
+  readonly line: number;
+  readonly kind: CommentKind;
+  readonly claim: string;
+}
+
 export interface Review {
   readonly rows: readonly RailRow[];
   readonly labels: Readonly<Record<string, string>>;
   readonly edits: ReadonlyMap<string, Edit>;
+  /** The critic's comments by the edit (`edit:<n>`) whose changed lines they are on. */
+  readonly comments: ReadonlyMap<string, readonly ReviewComment[]>;
+  /** The comments' counts by kind, for the status area. */
+  readonly counts: Readonly<Partial<Record<CommentKind, number>>>;
   /** What the main pane says when there is nothing to show: no changes, or git's reason for none. */
   readonly notice?: string;
 }
@@ -50,12 +67,13 @@ function labelOf(e: Edit): string {
 }
 
 /** The review of a branch's diff: the diff text is cleaned of control characters before it is parsed, tabs widened. */
-export function loadReview(diff: BranchDiff | undefined): Review {
-  if (!diff) return { rows: [], labels: {}, edits: new Map(), notice: "The changes could not be read." };
-  if (!diff.ok) return { rows: [], labels: {}, edits: new Map(), notice: clean(diff.notice) };
+export function loadReview(diff: BranchDiff | undefined, comments: readonly ReviewComment[] = []): Review {
+  const none = { rows: [], labels: {}, edits: new Map(), comments: new Map(), counts: {} };
+  if (!diff) return { ...none, notice: "The changes could not be read." };
+  if (!diff.ok) return { ...none, notice: clean(diff.notice) };
   const files = parseDiff(clean(diff.text).replace(/\t/g, "  "));
   const edits = stitch(files);
-  if (edits.length === 0) return { rows: [], labels: {}, edits: new Map(), notice: "No changes against main." };
+  if (edits.length === 0) return { ...none, notice: "No changes against main." };
   const rows: RailRow[] = [];
   const labels: Record<string, string> = {};
   const byId = new Map<string, Edit>();
@@ -69,11 +87,20 @@ export function loadReview(diff: BranchDiff | undefined): Review {
       byId.set(e.id, e);
     }
   }
-  return { rows, labels, edits: byId };
+  // A comment belongs to the edit whose added lines include its line; one on no edit's lines is not shown.
+  const placed = new Map<string, ReviewComment[]>();
+  const counts: Partial<Record<CommentKind, number>> = {};
+  for (const c of comments) {
+    const e = edits.find((x) => x.path === c.file && x.kind !== "remove" && c.line >= x.line && c.line < x.line + Math.max(1, x.added));
+    if (!e) continue;
+    placed.set(e.id, [...(placed.get(e.id) ?? []), c]);
+    counts[c.kind] = (counts[c.kind] ?? 0) + 1;
+  }
+  return { rows, labels, edits: byId, comments: placed, counts };
 }
 
 /** A line of the main pane: a sign column and the words, wrapped to the pane (`cont` rows continue the one above). */
-export interface DiffRow extends EditLine { readonly cont?: true }
+export interface DiffRow extends EditLine { readonly cont?: true; readonly box?: true }
 
 /** Wraps one edit line to `width` columns of text on word breaks, keeping each word's highlight. */
 export function wrapLine(row: EditLine, width: number): DiffRow[] {
@@ -111,5 +138,26 @@ export function reviewLines(review: Review, rowId: string | undefined, width: nu
     return { title: rowId?.startsWith("file:") ? rowId.slice(5) : "changes", rows: notice ? wrapLine({ sign: " ", segs: [{ text: notice, hl: false }] }, width) : [] };
   }
   const where = edit.kind === "move" && edit.from ? `moved from ${edit.from.path}:${edit.from.line} to line ${edit.line}` : `line ${edit.line} · ${edit.kind}`;
-  return { title: `${edit.path} · ${where}`, rows: edit.rows.flatMap((r) => wrapLine(r, width)) };
+  const rows: DiffRow[] = edit.rows.flatMap((r) => wrapLine(r, width));
+  for (const c of review.comments.get(edit.id) ?? []) rows.push(...commentRows(c, width));
+  return { title: `${edit.path} · ${where}`, rows };
+}
+
+const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, Math.max(0, n - 1)).join("")}…`);
+
+/**
+ * A comment as a box under its edit, in three plain rows (a top border carrying the kind and line, the claim wrapped
+ * onto as many rows as it needs, a bottom border) so the pane scrolls over them like any other row. Text is cleaned:
+ * a comment is a model's words.
+ */
+export function commentRows(c: ReviewComment, width: number): DiffRow[] {
+  const w = Math.max(8, width);
+  const row = (text: string): DiffRow => ({ sign: " ", segs: [{ text, hl: false }], box: true });
+  const head = cut(`▲ ${c.kind} · line ${c.line}`, w - 5);
+  const body = wrapLine({ sign: " ", segs: [{ text: clean(c.claim).replace(/\s+/g, " ").trim(), hl: false }] }, w - 4);
+  return [
+    row(`╭ ${head} ${"─".repeat(Math.max(0, w - [...head].length - 4))}╮`),
+    ...body.map((b) => row(`│ ${b.segs.map((s) => s.text).join("").padEnd(w - 4)} │`)),
+    row(`╰${"─".repeat(w - 2)}╯`),
+  ];
 }

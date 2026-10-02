@@ -3,8 +3,13 @@ import { detectMoves, parseDiff } from "@openthink/pablo-core";
 import { cleanup, render } from "ink-testing-library";
 import { App } from "../src/app";
 import { bookRail, type BookStage } from "../src/book";
+<<<<<<< HEAD
 import { branchRows, loadReview, reviewLines, wrapLine } from "../src/review";
 import type { FinishResult, Finisher, Rejected } from "../src/screen";
+=======
+import { branchRows, commentRows, loadReview, reviewLines, wrapLine } from "../src/review";
+import type { ReviewComment } from "../src/review";
+>>>>>>> b8d0554 (critique(branch): continuity, timeline and voice comments, each re-checked (AGT-1564))
 import { markWords, stitch } from "../src/stitch";
 
 afterEach(() => cleanup());
@@ -163,6 +168,7 @@ test("loadReview renders through core's stitcher: a moved paragraph is one row, 
   expect(split.labels["edit:0"]).toBe("+ (paragraph break)");
 });
 
+<<<<<<< HEAD
 /** A finisher the test records: it resolves with `result` and notes what the screen handed it. */
 const finishing = (result: FinishResult = { ok: true, lines: ["merged draft/ch03 into main (abc1234)", "outline: ran"] }) => {
   const calls: { branch: string; rejected: Rejected }[] = [];
@@ -213,4 +219,47 @@ test("a failed finish stays in the review with the reason", async () => {
   expect(frame).toContain("Not finished");
   expect(frame).toContain("git merge failed: conflict");
   expect(frame).toContain("review draft/ch03");
+=======
+const COMMENTS: ReviewComment[] = [
+  { file: "chapters/03-the-well.md", line: 3, kind: "continuity", claim: "Edwin died in chapter 1; he cannot sit at the table.\x1b[2J" },
+  { file: "chapters/03-the-well.md", line: 22, kind: "tells", claim: "stock intensifier" },
+  { file: "chapters/03-the-well.md", line: 15, kind: "timeline", claim: "on no edit's lines" },
+  { file: "chapters/09-else.md", line: 3, kind: "tells", claim: "other file" },
+];
+
+test("critic comments attach to the edit whose added lines they are on, with counts by kind (AGT-1564)", () => {
+  const r = loadReview({ ok: true, text: DIFF }, COMMENTS);
+  expect([...r.comments.keys()]).toEqual(["edit:0", "edit:1"]);
+  expect(r.counts).toEqual({ continuity: 1, tells: 1 });
+  const rows = reviewLines(r, "edit:0", 50).rows;
+  const boxes = rows.filter((x) => x.box).map((x) => x.segs.map((s) => s.text).join(""));
+  expect(boxes[0]).toStartWith("╭ ▲ continuity · line 3");
+  expect(boxes.join("\n")).toContain("Edwin died in chapter 1");
+  expect(boxes.join("\n")).not.toContain("\x1b");
+  expect(boxes.at(-1)).toStartWith("╰");
+  // The diff rows come first, the box after them.
+  expect(rows.findIndex((x) => x.box)).toBe(rows.filter((x) => !x.box).length);
+  expect(reviewLines(loadReview({ ok: true, text: DIFF }), "edit:0", 50).rows.some((x) => x.box)).toBe(false);
+});
+
+test("commentRows: every row is the same width, and a long claim wraps inside the box", () => {
+  const rows = commentRows({ file: "a.md", line: 4, kind: "timeline", claim: "word ".repeat(30) }, 30).map((x) => x.segs[0]!.text);
+  expect(rows.length).toBeGreaterThan(3);
+  expect(new Set(rows.map((x) => [...x].length))).toEqual(new Set([30]));
+});
+
+test("review mode shows the saved comments as boxes under the edit, and the status counts them", async () => {
+  const app = render(
+    <App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["draft/ch03"]} diffOf={() => ({ ok: true, text: DIFF })} commentsOf={() => COMMENTS} size={{ cols: 110, rows: 32 }} />,
+  );
+  await sleep(30);
+  app.stdin.write(DOWN); await sleep(20);
+  app.stdin.write(DOWN); await sleep(20);
+  app.stdin.write(ENTER); await sleep(40);
+  app.stdin.write(DOWN); await sleep(20);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("▲ continuity · line 3");
+  expect(frame).toContain("Edwin died in chapter 1");
+  expect(frame).toContain("1 continuity");
+>>>>>>> b8d0554 (critique(branch): continuity, timeline and voice comments, each re-checked (AGT-1564))
 });
