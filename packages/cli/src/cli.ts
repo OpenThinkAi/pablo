@@ -37,6 +37,7 @@ import { readTool, searchTool } from "./harness-tools";
 import { runResumeVerb } from "./resume";
 import { runReview } from "./review-verbs";
 import { runSave } from "./save";
+import { screenWriter } from "./screen-write";
 import { deriveCliOptions, parseForChapter } from "./verbs";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
@@ -646,6 +647,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         stages: bookStages(readNovelState(screen.dir)),
         // A chapter opened there is scanned with `check`'s rules from the vault, each hit a box under its line (AGT-1528).
         ...(vault.ok ? { checks: screenChecks(vault.path) } : {}),
+        // `a w` writes the selected chapter through the same `runWrite` the verb uses (AGT-1542).
+        ...(vault.ok ? { writer: screenWriter(vault.path, screen.dir) } : {}),
         ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch) } : {}),
       });
     }

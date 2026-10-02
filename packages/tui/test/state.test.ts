@@ -37,7 +37,7 @@ test("reduce never mutates the state it is given", () => {
   const frozen = JSON.stringify(s);
   const actions: Action[] = [
     { type: "rail.down" }, { type: "rail.collapse" }, { type: "main.loaded", lines: 5 }, { type: "main.down" }, { type: "content.show", content: { title: "t", body: "b" } },
-    { type: "focus.content" }, { type: "prefix.press", prefix: "g" }, { type: "prefix.digit", digit: "3" }, { type: "view.zen" }, { type: "review.open", branch: "draft/ch01" }, { type: "escape" },
+    { type: "focus.content" }, { type: "prefix.press", prefix: "g" }, { type: "prefix.digit", digit: "3" }, { type: "view.zen" }, { type: "review.open", branch: "draft/ch01" }, { type: "write.start", chapter: 1 }, { type: "write.progress", line: "x" }, { type: "write.done", branch: "draft/ch01", lines: ["r"] }, { type: "write.failed", message: "m", missing: [] }, { type: "escape" },
     { type: "measured", measure: { rail: 3, main: 3, content: { visible: 2, lines: 9 } } },
   ];
   for (const a of actions) reduce(s, a);
@@ -57,6 +57,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "view.zen": { type: "view.zen" }, "view.full": { type: "view.full" },
     "review.open": { type: "review.open", branch: "draft/ch02" }, "review.close": { type: "review.close" },
     "settings.open": { type: "settings.open", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.set": { type: "settings.set", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.close": { type: "settings.close" },
+    "write.start": { type: "write.start", chapter: 2 }, "write.progress": { type: "write.progress", line: "x" }, "write.done": { type: "write.done", branch: "draft/ch02", lines: ["ok"] }, "write.failed": { type: "write.failed", message: "no", missing: ["a"] },
     escape: { type: "escape" }, measured: { type: "measured", measure: { rail: 4, main: 4, content: { visible: 2, lines: 3 } } },
   };
   for (const a of Object.values(every)) {
