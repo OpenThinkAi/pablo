@@ -15,7 +15,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
 
@@ -158,8 +158,13 @@ export function publishWork(workDir: string, slug: string, title: string, target
 
   const compiled = compileDraft(title, chapters);
   const outDir = join(workDir, ".pablo", "out");
-  mkdirSync(outDir, { recursive: true });
   const where = join(outDir, `${slug}-draft.md`);
+  // The slug comes from pablo.json, which readMarker only checks is non-empty: a
+  // traversal slug must not turn this write into one outside the work.
+  if (!where.startsWith(outDir + sep)) {
+    return refuse(`pablo: publish: marker slug "${slug}" would write outside ${outDir}`);
+  }
+  mkdirSync(outDir, { recursive: true });
   writeFileSync(where, compiled, "utf8");
   const words = compiled.split(/\s+/).filter((word) => word !== "").length;
   return { ok: true, code: 0, target: "draft", where, chapters: chapters.length, words };

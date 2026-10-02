@@ -82,6 +82,9 @@ test("publishWork writes one file under .pablo/out and refuses other targets", (
     if (!refused.ok) expect(refused.code).toBe(2);
   }
 
+  expect(publishWork(work, "../../../escape", "The Ice House", "draft").ok).toBe(false);
+  expect(existsSync(join(vault, "novels", "escape-draft.md"))).toBe(false);
+
   const empty = join(vault, "novels", "empty");
   mkdirSync(empty, { recursive: true });
   expect(publishWork(empty, "empty", "Empty", "draft").ok).toBe(false);
