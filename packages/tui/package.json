@@ -1,7 +1,26 @@
 {
   "name": "@openthink/pablo-tui",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "MIT",
+  "homepage": "https://github.com/OpenThinkAi/pablo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenThinkAi/pablo.git",
+    "directory": "packages/tui"
+  },
+  "keywords": [
+    "pablo",
+    "writing",
+    "cli",
+    "ai",
+    "bun"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "pablo's full-terminal screen (Ink), a third front end beside the CLI and MCP.",
   "exports": {
@@ -10,7 +29,10 @@
       "default": "./src/index.ts"
     }
   },
-  "files": ["src"],
+  "files": [
+    "src",
+    "README.md"
+  ],
   "dependencies": {
     "@openthink/pablo-core": "workspace:*",
     "ink": "^7.0.1",

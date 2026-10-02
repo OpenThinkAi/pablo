@@ -1,13 +1,35 @@
 {
   "name": "@openthink/pablo",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "MIT",
+  "homepage": "https://github.com/OpenThinkAi/pablo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenThinkAi/pablo.git",
+    "directory": "packages/cli"
+  },
+  "keywords": [
+    "pablo",
+    "writing",
+    "cli",
+    "ai",
+    "bun"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
-  "description": "pablo — the CLI that writes: the manager for writing projects, driven by whatever agent you like.",
+  "description": "pablo \u2014 the CLI that writes: the manager for writing projects, driven by whatever agent you like.",
   "bin": {
     "pablo": "./src/cli.ts"
   },
-  "files": ["src", "policies"],
+  "files": [
+    "src",
+    "policies"
+  ],
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.287",
     "@modelcontextprotocol/sdk": "1.30.0",

@@ -25,7 +25,7 @@ export interface HarnessAuth {
 }
 
 /** Identifies pablo in the User-Agent the SDK sends. Mirrors `packages/cli/package.json`'s version. */
-export const CLIENT_APP = "pablo/0.0.0";
+export const CLIENT_APP = "pablo/0.1.0";
 
 export function harnessAuth(
   config: PabloConfig,
