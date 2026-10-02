@@ -150,3 +150,14 @@ test("y and n mark the change under the cursor; the rail and the status counts s
   app.stdin.write("n"); await sleep(30);
   expect(plain(app.lastFrame())).toContain("0 accepted · 0 rejected · 2 pending");
 });
+
+test("loadReview renders through core's stitcher: a moved paragraph is one row, a paragraph split is labelled as one", () => {
+  const moved = loadReview({
+    ok: true,
+    text: "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1,6 +1,6 @@\n+The harbor was quiet.\n+\n Mid.\n Mid two.\n-\n-The harbor was quiet.\n",
+  });
+  expect(moved.rows.map((x) => x.id)).toEqual(["file:a.md", "edit:0"]);
+  expect(moved.labels["edit:0"]).toBe("⇄ The harbor was quiet.");
+  const split = loadReview({ ok: true, text: "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1,2 +1,3 @@\n One.\n+\n Two.\n" });
+  expect(split.labels["edit:0"]).toBe("+ (paragraph break)");
+});

@@ -23,7 +23,7 @@ export type Move = {
 type Block = { path: string; start: number; lines: string[] };
 
 /** Maximal runs of same-sign, non-blank changed lines, within one hunk. */
-function blocks(files: FileDiff[], sign: "+" | "-"): Block[] {
+function blocks(files: readonly FileDiff[], sign: "+" | "-"): Block[] {
   const out: Block[] = [];
   for (const f of files)
     for (const h of f.hunks) {
@@ -43,7 +43,7 @@ function blocks(files: FileDiff[], sign: "+" | "-"): Block[] {
 }
 
 /** Pairs each removed paragraph with an identical added one, first-come, in diff order. */
-export function detectMoves(files: FileDiff[]): Move[] {
+export function detectMoves(files: readonly FileDiff[]): Move[] {
   const added = new Map<string, Block[]>();
   for (const b of blocks(files, "+")) {
     const key = b.lines.join("\n");

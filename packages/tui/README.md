@@ -99,10 +99,13 @@ unchanged, because they act on `viewOf(state)`.
 Book mode lists the branches waiting for review (draft/, revise/, edit/, reader/ with commits `main` lacks) as rail rows
 `branch:<name>` under a `branches to review` group. Enter (`rail.open`, or → on the row) opens one: `review.open`. The
 CLI owns git (`branch.ts`: `waitingBranches`, `branchDiff`) and passes the screen `branches` and `diffOf`; this package
-only parses and lays out (`review.ts`, `stitch.ts`). The rail then lists the changes grouped by file (`file:<path>`,
+only parses and lays out (`review.ts`). The rail then lists the changes grouped by file (`file:<path>`,
 `edit:<n>`), and the main pane shows the edit under the cursor: removed and added sentences with the differing words
-marked, one line of context either side. `stitch` is the rules-only stitcher behind one function: adjacent changed
-sentences are one edit, a changed edit gets word marks, a moved paragraph (core's `detectMoves`) is one move. Esc closes the
+marked, one line of context either side. The edits come from core's stitcher (`packages/core/src/diff/stitch.ts`,
+re-exported by `stitch.ts`): rules behind one `Stitcher` interface, so a learned grouping can replace them later.
+Adjacent changed sentences are one edit, a changed edit gets word marks (a mostly new sentence is shown whole), a moved
+paragraph is one move (touched on the way, its changed sentences marked), and every changed line belongs to exactly one
+edit (`removedLines`/`addedLines`), which is what accepting or rejecting an edit acts on. Esc closes the
 review back to the book where it was left. `y` accepts and `n` rejects the change under the rail's cursor (`review.mark`, a model action: `state.marks`, by change id, fresh on each
 open); the same key again clears the mark, the other one changes it. The rail shows ✓ or ✗ before a decided change and the status area
 counts accepted, rejected and pending (`reviewCounts`). Edit and finish are commands the layer above has yet to handle.
