@@ -89,7 +89,7 @@ export interface Pending { readonly prefix: string; readonly digits?: string }
 export type ComposeEntry =
   | { readonly kind: "author"; readonly text: string }
   | { readonly kind: "pablo"; readonly text: string }
-  | { readonly kind: "tool"; readonly id: string; readonly tool: string; readonly input: unknown; readonly result?: { readonly text: string; readonly isError: boolean } }
+  | { readonly kind: "tool"; readonly id: string; readonly tool: string; readonly input: unknown; readonly result?: { readonly text: string; readonly isError: boolean }; /** When the call began and ended (ms), for the activity line's duration (AGT-1567). */ readonly startedAt?: number; readonly endedAt?: number }
   | { readonly kind: "question"; readonly id: string; readonly question: string; readonly options?: readonly string[]; readonly why?: string; readonly answer?: string }
   | { readonly kind: "error"; readonly text: string };
 
@@ -215,7 +215,7 @@ export type Action =
   | { type: "compose.open" } | { type: "compose.close" }
   | { type: "compose.type"; text: string } | { type: "compose.backspace" }
   | { type: "compose.submit" }
-  | { type: "compose.event"; event: ComposeEvent }
+  | { type: "compose.event"; event: ComposeEvent; /** When the layer above saw it (ms); the reducer reads no clock, so tool durations come from this. */ at?: number }
   | { type: "compose.add"; entry: ComposeEntry }
   | { type: "compose.failed"; message: string }
   | { type: "compose.done" }
@@ -381,17 +381,17 @@ const openQuestion = (c: Compose): Extract<ComposeEntry, { kind: "question" }> |
   c.entries.find((e): e is Extract<ComposeEntry, { kind: "question" }> => e.kind === "question" && e.answer === undefined);
 
 /** A session event applied to the conversation; a new line of it brings the view back to the newest. */
-function reduceEvent(c: Compose, e: ComposeEvent): Compose {
+function reduceEvent(c: Compose, e: ComposeEvent, at?: number): Compose {
   switch (e.kind) {
     case "session": return { ...c, sessionId: e.id };
     case "assistant": return { ...c, entries: [...c.entries, { kind: "pablo", text: e.text }], offset: 0 };
-    case "tool_call": return { ...c, entries: [...c.entries, { kind: "tool", id: e.id, tool: e.tool, input: e.input }], activity: `calling ${e.tool}`, offset: 0 };
+    case "tool_call": return { ...c, entries: [...c.entries, { kind: "tool", id: e.id, tool: e.tool, input: e.input, ...(at === undefined ? {} : { startedAt: at }) }], activity: `calling ${e.tool}`, offset: 0 };
     case "question": {
       const card: ComposeEntry = { kind: "question", id: e.id, question: e.question, options: e.options, why: e.why };
       return { ...c, entries: [...c.entries, card], activity: "waiting for your answer", offset: 0 };
     }
     case "tool_result":
-      return { ...c, activity: "thinking", entries: c.entries.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, result: { text: e.text, isError: e.isError } } : x)) };
+      return { ...c, activity: "thinking", entries: c.entries.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, result: { text: e.text, isError: e.isError }, ...(at === undefined ? {} : { endedAt: at }) } : x)) };
     case "result": {
       const errors = e.ok ? [] : [{ kind: "error" as const, text: e.errors.length ? e.errors.join("; ") : "the session ended without finishing" }];
       return { ...c, entries: [...c.entries, ...errors], busy: false, activity: "", outbox: null, offset: 0 };
@@ -503,7 +503,7 @@ export function reduce(s: State, a: Action): State {
       if (c.busy) return s;
       return { ...s, compose: { ...c, entries: [...c.entries, { kind: "author", text }], input: "", busy: true, activity: "thinking", outbox: text, sendSeq: c.sendSeq + 1, offset: 0 } };
     }
-    case "compose.event": return { ...s, compose: reduceEvent(s.compose, a.event) };
+    case "compose.event": return { ...s, compose: reduceEvent(s.compose, a.event, a.at) };
     case "compose.add": return { ...s, compose: { ...s.compose, entries: [...s.compose.entries, a.entry], offset: 0 } };
     case "compose.failed": return { ...s, compose: { ...s.compose, entries: [...s.compose.entries, { kind: "error", text: a.message }], busy: false, activity: "", outbox: null, offset: 0 } };
     case "compose.done": return { ...s, compose: { ...s.compose, busy: false, activity: "", outbox: null } };

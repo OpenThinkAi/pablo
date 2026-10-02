@@ -6,6 +6,7 @@
 // passes a `Composer` to `runScreen`, the way it passes the project. A turn is `send(message)`: a stream of
 // `ComposeEvent`s ending at the turn's result. Tests give the screen a fake `Composer`; nothing here starts a session.
 
+import { activityOf, spanOf } from "./activity";
 import { tokenOf, type InkKey } from "./chord";
 import { STATUS_H, FOOTER_H, wrapText } from "./layout";
 import { clean } from "./sanitize";
@@ -46,8 +47,8 @@ export function entryLines(entry: ComposeEntry, width: number): ComposeLine[] {
     case "pablo": return [...hanging(entry.text, width, "", "pablo"), { text: "", style: "blank" }];
     case "error": return [...hanging(entry.text, width, "✗ ", "error"), { text: "", style: "blank" }];
     case "tool": {
-      const input = entry.input === undefined || entry.input === null ? "" : ` ${JSON.stringify(entry.input)}`;
-      const lines: ComposeLine[] = [{ text: cut(`  → ${flat(entry.tool)}${flat(input) ? ` ${flat(input)}` : ""}`, width), style: "tool" }];
+      const took = entry.startedAt !== undefined && entry.endedAt !== undefined ? ` (${spanOf(entry.endedAt - entry.startedAt)})` : "";
+      const lines: ComposeLine[] = [{ text: cut(`  → ${flat(activityOf(entry.tool, entry.input))}${took}`, width), style: "tool" }];
       if (entry.result) lines.push({ text: cut(`  ${entry.result.isError ? "✗" : "←"} ${flat(entry.result.text).slice(0, PREVIEW)}`, width), style: entry.result.isError ? "error" : "result" });
       return lines;
     }
@@ -59,6 +60,16 @@ export function entryLines(entry: ComposeEntry, width: number): ComposeLine[] {
       return [...lines, { text: "", style: "blank" }];
     }
   }
+}
+
+/** What the activity row and the status line say while a turn runs: the tool still out, in words, else the model's own activity. */
+export function activityNow(compose: { readonly entries: readonly ComposeEntry[]; readonly activity: string }): string {
+  for (let i = compose.entries.length - 1; i >= 0; i--) {
+    const e = compose.entries[i]!;
+    if (e.kind === "tool" && !e.result) return activityOf(e.tool, e.input);
+    if (e.kind !== "tool") break;
+  }
+  return compose.activity;
 }
 
 export const composeLines = (entries: readonly ComposeEntry[], width: number): ComposeLine[] => entries.flatMap((e) => entryLines(e, width));

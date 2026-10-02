@@ -4,8 +4,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
 import { App } from "../src/app";
-import { composeAction, composeLayout, composeLines, composeMeasure, inputTail, visibleLines } from "../src/compose";
+import { activityNow, composeAction, composeLayout, composeLines, composeMeasure, inputTail, visibleLines } from "../src/compose";
 import type { Composer } from "../src/compose";
+import { activityOf, spanOf } from "../src/activity";
 import { initialState, reduce, viewOf } from "../src/state";
 import type { Action, ComposeEvent, State } from "../src/state";
 
@@ -50,6 +51,7 @@ test("session events build the conversation: the id, pablo's text, a tool call w
     ev({ kind: "tool_call", id: "t1", tool: "resume", input: { project: "ice-house" } }),
   );
   expect(s.compose.activity).toBe("calling resume");
+  expect(activityNow(s.compose)).toBe("checking where the book stands");
   s = then(s, ev({ kind: "tool_result", id: "t1", text: "bible done", isError: false }), ev({ kind: "result", ok: true, errors: [] }));
   expect(s.compose).toMatchObject({ sessionId: "sess-1", busy: false, outbox: null, activity: "" });
   expect(s.compose.entries.map((e) => e.kind)).toEqual(["author", "pablo", "tool"]);
@@ -185,7 +187,7 @@ test("typing and Enter send a message and the reply streams into the conversatio
   expect(composer.sent).toEqual(["q hello"]);
   expect(frame).toContain("› q hello");
   expect(frame).toContain("You said: q hello");
-  expect(frame).toContain("→ resume");
+  expect(frame).toMatch(/→ checking where the book stands \(\d+ms\)/);
   expect(frame).toContain("← bible done, acts next");
   expect(frame).toContain("The bible is in; acts come next.");
   expect(frame).toContain("session abcdef12");
@@ -330,4 +332,61 @@ test("the screen shows the card in place, the author answers it there, and the c
   expect(answers).toEqual([["q1", "yes"]]);
   expect(frame).toContain("→ yes");
   expect(frame).toContain("Then chapter 4 is a confession.");
+});
+
+// ---------------------------------------------------------------- the activity line (AGT-1567)
+
+test("activityOf words a tool call: research, reading, drafting a chapter on Gemma; an unknown tool keeps its name", () => {
+  expect(activityOf("WebSearch", { query: "1919 grape prices" })).toBe("researching 1919 grape prices");
+  expect(activityOf("draft_chapter", { chapter: 3 })).toBe("drafting chapter 3 on Gemma");
+  expect(activityOf("write", { chapter: "4" })).toBe("drafting chapter 4 on Gemma");
+  expect(activityOf("revise", { file: "chapters/07-the-flood.md" })).toBe("revising chapter 7 on Gemma");
+  expect(activityOf("read", { path: "bible/overview.md" })).toBe("reading bible/overview.md");
+  expect(activityOf("search", { phrase: "Cora" })).toBe("searching for Cora");
+  expect(activityOf("read", undefined)).toBe("reading the work");
+  expect(activityOf("mystery", {})).toBe("calling mystery");
+});
+
+test("spanOf shows milliseconds, seconds and minutes", () => {
+  expect([spanOf(340), spanOf(71_000), spanOf(125_000)]).toEqual(["340ms", "71s", "2m 05s"]);
+});
+
+const toolLine = (s: State) => composeLines(s.compose.entries, 80).find((l) => l.style === "tool")!.text;
+
+test("a tool line carries its duration once it ends, not before", () => {
+  let s = then(typed(initialState(), "go"), { type: "compose.submit" });
+  s = then(s, { type: "compose.event", at: 1000, event: { kind: "tool_call", id: "t1", tool: "draft_chapter", input: { chapter: 3 } } });
+  expect(activityNow(s.compose)).toBe("drafting chapter 3 on Gemma");
+  expect(toolLine(s)).toBe("  → drafting chapter 3 on Gemma");
+  s = then(s, { type: "compose.event", at: 72_000, event: { kind: "tool_result", id: "t1", text: "ok", isError: false } });
+  expect(toolLine(s)).toBe("  → drafting chapter 3 on Gemma (71s)");
+  expect(activityNow(s.compose)).toBe("thinking");
+  // Without a clock the line has no duration rather than a wrong one.
+  const bare = then(typed(initialState(), "go"), { type: "compose.submit" }, ev({ kind: "tool_call", id: "t", tool: "check", input: {} }), ev({ kind: "tool_result", id: "t", text: "", isError: false }));
+  expect(toolLine(bare)).toBe("  → checking the prose");
+});
+
+test("the screen shows what pablo is doing while a tool runs, then the line with its duration", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const composer: Composer = {
+    async *send() {
+      yield { kind: "tool_call", id: "t1", tool: "WebSearch", input: { query: "1919 grape prices" } };
+      await gate;
+      yield { kind: "tool_result", id: "t1", text: "found", isError: false };
+      yield { kind: "result", ok: true, errors: [] };
+    },
+  };
+  const app = render(<App {...props} composer={composer} />);
+  await sleep(20);
+  await keys(app, "ac");
+  await keys(app, "go");
+  app.stdin.write("\r");
+  await sleep(40);
+  expect(plain(app.lastFrame())).toContain("● researching 1919 grape prices…");
+  release();
+  await sleep(40);
+  const frame = plain(app.lastFrame());
+  expect(frame).toMatch(/→ researching 1919 grape prices \(\d+ms\)/);
+  expect(frame).not.toContain("●");
 });
