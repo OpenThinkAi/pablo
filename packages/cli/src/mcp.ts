@@ -34,8 +34,8 @@ import { VERBS } from "./verbs";
 import type { McpToolSpec, VerbContext } from "./verbs";
 
 const SERVER_NAME = "pablo";
-/** Mirrors `packages/cli/package.json`'s `version` — bump both together once pablo is published. */
-const SERVER_VERSION = "0.0.0";
+/** Mirrors `packages/cli/package.json`'s `version` — bump both together on every release. */
+const SERVER_VERSION = "0.1.0";
 
 /**
  * Every tool `pablo mcp` serves, flattened from `verb.mcpTools ?? [verb]`. The

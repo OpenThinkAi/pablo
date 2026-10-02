@@ -1,7 +1,26 @@
 {
   "name": "@openthink/pablo-core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "MIT",
+  "homepage": "https://github.com/OpenThinkAi/pablo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenThinkAi/pablo.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "pablo",
+    "writing",
+    "cli",
+    "ai",
+    "bun"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "TTY-free core of pablo: the document and span model the renderer consumes.",
   "exports": {
@@ -10,5 +29,7 @@
       "default": "./src/index.ts"
     }
   },
-  "files": ["src"]
+  "files": [
+    "src"
+  ]
 }

@@ -29,7 +29,19 @@ P0 in progress: the repo reshape and CLI skeleton landed 2026-09-06; `init` and 
 2026-09-06. `packages/tui` (the earlier terminal-renderer design) is retired; see
 `CLAUDE.md`'s `Layout` section and the design doc's `History` for what carried over.
 
-## Install / run
+## Install
+
+pablo runs on [Bun](https://bun.sh) (>= 1.1):
+
+```sh
+bun add -g @openthink/pablo      # or: npm install -g @openthink/pablo
+pablo --help
+```
+
+Upgrade with `bun add -g @openthink/pablo@latest`. The cli pulls in
+`@openthink/pablo-core` and `@openthink/pablo-tui` as ordinary dependencies.
+
+## Develop
 
 ```sh
 bun install
@@ -43,6 +55,25 @@ bun run pablo --help          # or: bun run packages/cli/src/cli.ts --help
 the document model, the markup module the provider adapters use for
 normalization, the context-pack assembler, and the OpenAI-compatible and
 Anthropic adapters.
+
+### Releasing
+
+The three packages (`@openthink/pablo-core`, `@openthink/pablo-tui`, `@openthink/pablo`)
+release in lockstep at one version. To cut a release:
+
+1. Bump `version` in all three `packages/*/package.json`, plus the two mirrors
+   in `packages/cli/src/mcp.ts` (`SERVER_VERSION`) and
+   `packages/cli/src/harness/auth.ts` (`CLIENT_APP`). Run `bun install` so
+   `bun.lock` records the new workspace versions.
+2. Land it on `main` through the stamp flow.
+3. Run the `release` workflow from the GitHub Actions tab (workflow_dispatch,
+   `main` only). It typechecks and tests, then publishes core, tui, cli in that
+   order via npm Trusted Publishing (OIDC, with provenance; no `NPM_TOKEN`),
+   skipping any package whose version is already on npm. A `v<version>` tag
+   triggers it too, if tags are mirrored (see `.stamp/mirror.yml`).
+
+Each package must have this repo's `release.yml` configured as its Trusted
+Publisher on npmjs.com before its first automated publish.
 
 ## Commands
 
