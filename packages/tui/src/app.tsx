@@ -43,9 +43,9 @@ export interface AppProps {
   readonly book?: BookRail;
   /** The document behind a rail row id (document.ts), shown in the main pane for the row under the rail's cursor. */
   readonly load?: (id: string) => MainDoc | undefined;
-  /** The main pane's heading and its document when no row names one (no `load`, or it has nothing for the row). */
   /** Scans a document's raw text for `check` hits, shown as boxes under their lines; run when a chapter (a doc with a `file`) is opened. */
   readonly checks?: (file: string, text: string) => readonly CheckHit[];
+  /** The main pane's heading and its document when no row names one (no `load`, or it has nothing for the row). */
   readonly mainTitle?: string;
   readonly lines?: readonly string[];
   /** Branches waiting for review (draft/, revise/, edit/, reader/): book mode lists them; Enter opens one as a review. */
