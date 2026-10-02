@@ -4,6 +4,7 @@ import { cleanup, render } from "ink-testing-library";
 import { App } from "../src/app";
 import { bookRail, type BookStage } from "../src/book";
 import { branchRows, loadReview, reviewLines, wrapLine } from "../src/review";
+import type { FinishResult, Finisher, Rejected } from "../src/screen";
 import { markWords, stitch } from "../src/stitch";
 
 afterEach(() => cleanup());
@@ -160,4 +161,56 @@ test("loadReview renders through core's stitcher: a moved paragraph is one row, 
   expect(moved.labels["edit:0"]).toBe("⇄ The harbor was quiet.");
   const split = loadReview({ ok: true, text: "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1,2 +1,3 @@\n One.\n+\n Two.\n" });
   expect(split.labels["edit:0"]).toBe("+ (paragraph break)");
+});
+
+/** A finisher the test records: it resolves with `result` and notes what the screen handed it. */
+const finishing = (result: FinishResult = { ok: true, lines: ["merged draft/ch03 into main (abc1234)", "outline: ran"] }) => {
+  const calls: { branch: string; rejected: Rejected }[] = [];
+  const finisher: Finisher = async (branch, rejected) => { calls.push({ branch, rejected }); return result; };
+  return { finisher, calls };
+};
+const mountFinish = (finisher: Finisher) =>
+  render(<App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["draft/ch03"]} diffOf={() => ({ ok: true, text: DIFF })} finisher={finisher} size={{ cols: 110, rows: 32 }} />);
+
+test("s refuses while a change has no decision; nothing reaches the finisher", async () => {
+  const f = finishing();
+  const app = mountFinish(f.finisher);
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER, DOWN, "y", "s"]) { app.stdin.write(k); await sleep(30); }
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("Not finished");
+  expect(frame).toContain("1 change has no decision yet");
+  expect(frame).toContain("review draft/ch03");
+  expect(f.calls).toEqual([]);
+});
+
+test("s hands the finisher the lines of the rejected edits only, then closes the review and retires the branch", async () => {
+  const f = finishing();
+  const app = mountFinish(f.finisher);
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER, DOWN, "n", DOWN, "y", "s"]) { app.stdin.write(k); await sleep(30); }
+  await sleep(40);
+  expect(f.calls).toHaveLength(1);
+  expect(f.calls[0]!.branch).toBe("draft/ch03");
+  // Edit 0 (rejected) owns old lines 2-3 and new lines 2-4; edit 1 (accepted) owns neither list.
+  expect(f.calls[0]!.rejected.removed.map((r) => r.line)).toEqual([2, 3]);
+  expect(f.calls[0]!.rejected.added.map((r) => r.line)).toEqual([2, 3, 4]);
+  expect(f.calls[0]!.rejected.removed.every((r) => r.path === "chapters/03-the-well.md")).toBe(true);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("book ·");
+  expect(frame).toContain("Finished draft/ch03");
+  expect(frame).toContain("outline: ran");
+  expect(frame).not.toContain("branches to review");
+});
+
+test("a failed finish stays in the review with the reason", async () => {
+  const f = finishing({ ok: false, message: "pablo: git merge failed: conflict" });
+  const app = mountFinish(f.finisher);
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER, DOWN, "y", DOWN, "y", "s"]) { app.stdin.write(k); await sleep(30); }
+  await sleep(40);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("Not finished");
+  expect(frame).toContain("git merge failed: conflict");
+  expect(frame).toContain("review draft/ch03");
 });

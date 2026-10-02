@@ -1,6 +1,7 @@
 // Mounts the app in the terminal's alternate screen and restores the terminal on the way out, however it ends.
 
 import { render } from "ink";
+import type { LineRef } from "@openthink/pablo-core";
 import { App } from "./app";
 import { bookRail, type BookStage } from "./book";
 import { loadEditor, loadKeymap } from "./key-config";
@@ -19,6 +20,12 @@ export type WriteResult =
   | { readonly ok: false; readonly message: string; readonly missing: readonly string[] };
 export type Writer = (chapter: number, progress: (line: string) => void) => Promise<WriteResult>;
 
+/** What a review's rejected edits come to as lines: removed ones by old line number, added ones by new (the stitcher's `removedLines` / `addedLines`). */
+export interface Rejected { readonly removed: readonly LineRef[]; readonly added: readonly LineRef[] }
+/** What finishing a review came to: lines for the content area (the merge and each after-write step), or why it did not finish. */
+export type FinishResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
+export type Finisher = (branch: string, rejected: Rejected) => Promise<FinishResult>;
+
 export interface ScreenOptions {
   readonly title: string;
   readonly format: string;
@@ -36,6 +43,8 @@ export interface ScreenOptions {
   readonly writer?: Writer;
   /** The harness session behind the compose view; the cli builds it (the tui does not depend on the Agent SDK). */
   readonly composer?: Composer;
+  /** `s` in a review: merges the accepted changes into `main`, runs the after-write steps and deletes the branch (the CLI's `screenFinisher`, passed in; AGT-1540). */
+  readonly finisher?: Finisher;
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -59,7 +68,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   try {
     const root = options.dir;
     const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} {...(options.composer ? { composer: options.composer } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} finisher={options.finisher} {...(options.composer ? { composer: options.composer } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

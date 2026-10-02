@@ -147,6 +147,10 @@ export interface State {
   readonly writing: number | null;
   /** Branches this session's writes made, so the book lists them as waiting for review. */
   readonly written: readonly string[];
+  /** The branch whose review is being finished (`s`) while the merge and the after-write steps run; one at a time. */
+  readonly finishing: string | null;
+  /** Branches this session finished (merged or discarded): the book no longer lists them, though its `branches` prop still does. */
+  readonly finished: readonly string[];
 }
 
 /**
@@ -199,6 +203,11 @@ export type Action =
   | { type: "write.failed"; message: string; missing: readonly string[] }
   // y / n on the change under the rail's cursor: sets the mark; the same mark again clears it, the other one changes it
   | { type: "review.mark"; mark: Mark }
+  // `s`: finish the review (merge what was accepted, run the after-write steps); done closes the review with the
+  // result shown in the content area, failed stays in the review with the reason shown
+  | { type: "finish.start"; branch: string }
+  | { type: "finish.done"; branch: string; lines: readonly string[] }
+  | { type: "finish.failed"; message: string }
   | { type: "settings.open"; settings: SettingsModel }
   | { type: "settings.set"; settings: SettingsModel }
   | { type: "settings.close"; saved?: SavedSettings }
@@ -229,7 +238,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, written: [],
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, written: [], finishing: null, finished: [],
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -459,6 +468,15 @@ export function reduce(s: State, a: Action): State {
       const { [row.id]: was, ...rest } = s.marks;
       return { ...s, marks: was === a.mark ? rest : { ...rest, [row.id]: a.mark } };
     }
+    case "finish.start":
+      return s.finishing !== null || s.mode.kind !== "review" ? s : { ...s, finishing: a.branch, content: writeContent(`Finishing ${a.branch}`, "merging…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "finish.done": {
+      if (s.finishing === null) return s;
+      const closed = reduce({ ...s, finishing: null, finished: s.finished.includes(a.branch) ? s.finished : [...s.finished, a.branch] }, { type: "review.close" });
+      return { ...closed, content: writeContent(`Finished ${a.branch}`, a.lines.join("\n")), contentScroll: { ...closed.contentScroll, scroll: 0, length: 0 } };
+    }
+    case "finish.failed":
+      return { ...s, finishing: null, content: writeContent("Not finished", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "review.close": return s.mode.kind === "review" ? { ...s, mode: { kind: "book" }, marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null } : s;
 
     // Settings opens over the book or review and closes back to it. Its keys never reach the chord (settings.ts reads

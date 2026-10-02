@@ -128,7 +128,14 @@ paragraph is one move (touched on the way, its changed sentences marked), and ev
 edit (`removedLines`/`addedLines`), which is what accepting or rejecting an edit acts on. Esc closes the
 review back to the book where it was left. `y` accepts and `n` rejects the change under the rail's cursor (`review.mark`, a model action: `state.marks`, by change id, fresh on each
 open); the same key again clears the mark, the other one changes it. The rail shows ✓ or ✗ before a decided change and the status area
-counts accepted, rejected and pending (`reviewCounts`). Edit and finish are commands the layer above has yet to handle.
+counts accepted, rejected and pending (`reviewCounts`). `s` finishes (`review.finish`, handled in `app.tsx`): it refuses while a change has no decision (`finish.failed`, "n changes
+have no decision yet"), otherwise calls the `finisher` prop with the branch and the lines the rejected edits own
+(`removed` by old line number, `added` by new: the stitcher's `removedLines`/`addedLines`, never edit ids). cli.ts builds
+the finisher (`review-finish.ts`: a commit on the branch reverts the rejected lines, then the branch merges through
+`mergeChanges`, the after-write steps run, the branch and its worktree are deleted); everything rejected discards the
+branch with no merge. `finish.start` shows "Finishing…", `finish.done` closes the review with the merge and each step in
+the content area and drops the branch from the book, `finish.failed` stays in the review with the reason. Edit is a
+command the layer above has yet to handle.
 Every string from a branch (its name, the diff text) passes `clean()` before it is shown.
 
 ## Writing from the screen
