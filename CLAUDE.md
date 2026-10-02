@@ -22,7 +22,7 @@ Two invariants:
    agent can steer the author there instead of guessing.
 
 **The canonical design doc is the pm project `ai-terminal`'s design doc:
-`pm project show ai-terminal`** (named docs: `--doc prose`, `--doc review-tray`;
+`pm project show ai-terminal`** (named docs: `--doc prose`, `--doc screen`;
 the vault's `projects/ai-terminal/*.md` are a frozen pre-AGT-1407 snapshot — don't
 read or edit them). It holds the session model, the project layout, the full
 verb table, the stage machines, the voice model, and the binding-decisions
@@ -97,16 +97,11 @@ implemented, and the current `packages/tui` is the Ink screen rebuilt from
 2026-10-01 (AGT-1522). See the design doc's `History` section for what carried over as
 material (the pack assembler, the vault reader, the provider adapters, the
 config loader) versus what was cut outright (the screen, the CriticMarkup
-parser and renderer, span verbs). The **review queue concept** was cut with
-that design (it was CriticMarkup/span-based) but reintroduced 2026-09-07 as a
-text-free append-only JSONL log (`packages/cli/src/review.ts`, AGT-1255) per
-the pm named doc `review-tray` (`pm project show ai-terminal --doc review-tray`;
-an extension of the design doc, not a
-revert of the 2026-09-06 cut). The **menu-bar tray** that doc describes (daemon,
-Swift helper, launchd agent) was retired 2026-10-01 (AGT-1520): the
-`pm project show ai-terminal --doc screen` decisions supersede it, and a
-full-terminal screen replaces it. The review queue itself stays until the
-branch-based review lands.
+parser and renderer, span verbs). The **review queue** (a JSONL log, `pablo review`, AGT-1255..1263) and the **menu-bar tray**
+that watched it were both retired 2026-10-01 (AGT-1520, AGT-1541): the
+`pm project show ai-terminal --doc screen` decisions supersede them. Every manuscript
+change is a git branch, the screen's review mode is where the author decides, and
+`pablo status` / `pablo resume` report the branches waiting for review.
 
 ## The project
 

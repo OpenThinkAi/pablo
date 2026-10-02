@@ -16,7 +16,7 @@
 import { basename, dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
-import { branchDiff, repoRoot, waitingBranches } from "./branch";
+import { branchDiff, repoRoot, waitingBranches, waitingForReview } from "./branch";
 import { runCheck, screenChecks } from "./check";
 import { migrateLines } from "./migrate";
 import { mergeDraftInProject } from "./novel/merge";
@@ -41,7 +41,6 @@ import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
 import { readTool, searchTool } from "./harness-tools";
 import { runResumeVerb } from "./resume";
-import { runReview } from "./review-verbs";
 import { runSave } from "./save";
 import { screenFinisher } from "./review-finish";
 import { screenWriter } from "./screen-write";
@@ -64,7 +63,6 @@ const P0_VERBS = [
   "mcp",
   "voice",
   "prose",
-  "review",
   "revise",
   "agent",
   "read",
@@ -133,16 +131,6 @@ function helpText(): string {
     "                                            no --project, no vault required;",
     "                                            --draft + --instruction revise a previous",
     "                                            piece instead of starting fresh",
-    "  pablo review list [--all] [--json]       pending pieces (or, with --all, decided too)",
-    "  pablo review show <id> [--json]          one piece's record, decision, and edits",
-    "  pablo review approve <id> [--unread]     record an approval (--unread: read: false)",
-    '  pablo review reject <id> [--reason "<text>"]',
-    "                                            record a rejection",
-    "  pablo review wait <id> [--timeout <seconds>]",
-    "                                            block until a decision exists (default 3600s);",
-    "                                            exit 0 approved, 2 rejected, 1 timeout, 2 unknown",
-    "                                            (rejected and unknown share exit 2 — use --json's",
-    "                                            \"status\" to tell them apart in a script)",
     "  pablo revise --project <slug> --file F",
     '              (--passage "<quoted text>" | --start N --end N)',
     '              --instruction "<text>" [--json] [--dry-run]',
@@ -218,14 +206,6 @@ interface ParsedArgs {
   readonly draft: string | undefined;
   /** `prose --instruction "<text>"` / `revise --instruction "<text>"`: what to change. */
   readonly instruction: string | undefined;
-  /** `review list --all` (AGT-1261): include decided pieces, with their decision. */
-  readonly all: boolean;
-  /** `review approve --unread` (AGT-1261): record the approval as unread (`read: false`). */
-  readonly unread: boolean;
-  /** `review reject --reason "<text>"` (AGT-1261): why, recorded on the decision. */
-  readonly reason: string | undefined;
-  /** `review wait --timeout <seconds>` (AGT-1261); `runReview` defaults this to 3600 when absent. */
-  readonly timeout: string | undefined;
   /** `revise --passage "<quoted text>"` (AGT-1264): located with `locatePassage`. Alternative to `--start`/`--end`. */
   readonly passage: string | undefined;
   /** `revise --start <n>` (AGT-1264): a UTF-16 offset into the frontmatter-stripped body. Requires `--end`. */
@@ -291,10 +271,6 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     out: typeof values["out"] === "string" ? values["out"] : undefined,
     draft: typeof values["draft"] === "string" ? values["draft"] : undefined,
     instruction: typeof values["instruction"] === "string" ? values["instruction"] : undefined,
-    all: values["all"] === true,
-    unread: values["unread"] === true,
-    reason: typeof values["reason"] === "string" ? values["reason"] : undefined,
-    timeout: typeof values["timeout"] === "string" ? values["timeout"] : undefined,
     passage: typeof values["passage"] === "string" ? values["passage"] : undefined,
     start: typeof values["start"] === "string" ? values["start"] : undefined,
     end: typeof values["end"] === "string" ? values["end"] : undefined,
@@ -407,7 +383,7 @@ function runInit(args: ParsedArgs, cwd: string): number {
  * checked — an absent `places.md` shouldn't read as "1 file" the way a
  * present one does.
  */
-function proseState(state: NovelState): string {
+function proseState(state: NovelState, waiting: readonly string[]): string {
   const lines: string[] = [];
   lines.push(`premise: ${state.premise ? "ok" : "missing"}`);
 
@@ -430,13 +406,15 @@ function proseState(state: NovelState): string {
   }
   const counts = [...statusCounts.entries()].map(([status, count]) => `${status}: ${count}`).join(", ");
   lines.push(`chapters: ${state.chapters.length} written${counts ? ` (${counts})` : ""}`);
+  lines.push(waiting.length === 0 ? "waiting for review: none" : `waiting for review: ${waiting.length} (${waiting.join(", ")})`);
 
   return lines.join("\n");
 }
 
 /**
  * `pablo status --project <slug> [--for "chapter N"]`. With no `--for`, the
- * novel machine's state (JSON: the state object; prose: `proseState`). With
+ * novel machine's state plus the branches waiting for review (JSON: the state
+ * object with `waiting`; prose: `proseState`). With
  * `--for`, one chapter's preconditions — JSON body is `{ready, missing}`
  * (no `ok`/`code` wrapper: a refused precondition is data here, not a
  * framework-resolution failure), and the exit code carries readiness: 0 when
@@ -454,20 +432,20 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
     }
 
     const result = chapterPreconditions(state, chapter);
-    const review = state.chapters.find((c) => c.number === chapter)?.review ?? "none";
     if (args.json) {
-      console.log(JSON.stringify({ ready: result.ready, missing: result.missing, review }));
+      console.log(JSON.stringify({ ready: result.ready, missing: result.missing }));
     } else {
-      console.log(`chapter ${chapter}: ${result.ready ? "ready" : "not ready"} (review: ${review})`);
+      console.log(`chapter ${chapter}: ${result.ready ? "ready" : "not ready"}`);
       for (const item of result.missing) console.log(`  ${item}`);
     }
     return result.ready ? EXIT_OK : EXIT_REFUSED;
   }
 
+  const waiting = waitingForReview(projectPath);
   if (args.json) {
-    console.log(JSON.stringify(state));
+    console.log(JSON.stringify({ ...state, waiting }));
   } else {
-    console.log(proseState(state));
+    console.log(proseState(state, waiting));
   }
   return EXIT_OK;
 }
@@ -735,29 +713,6 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     return await runAgent(
       { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json, tagFacts: args.tagFacts, new: args.new },
       { cwd, env: process.env, stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
-    );
-  }
-
-  // `review` (AGT-1261), like `prose`, has no `--project` at all — the queue
-  // is one global file, not per-vault — so it is dispatched here too, before
-  // the shared `--project`/marker resolution block below ever runs.
-  if (args.verb === "review") {
-    const [action, id] = args.rest;
-    const parsedTimeout = args.timeout !== undefined ? Number(args.timeout) : undefined;
-    return await runReview(
-      {
-        action,
-        id,
-        all: args.all,
-        unread: args.unread,
-        reason: args.reason,
-        // A non-numeric --timeout falls back to runReview's own default
-        // (3600) rather than becoming NaN, which would never satisfy
-        // waitForDecision's timeout comparison and spin forever.
-        timeoutSeconds: parsedTimeout !== undefined && Number.isFinite(parsedTimeout) ? parsedTimeout : undefined,
-        json: args.json,
-      },
-      process.env,
     );
   }
 

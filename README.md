@@ -56,10 +56,10 @@ including an unresolvable project), `1` error.
 |---|---|---|
 | `pablo init <format> <slug> "<Title>"` | scaffold from `<vault>/templates/<format>`, write the marker, commit | `{ok, path, format, slug, title, committed, notice?}` |
 | `pablo init --adopt --project <slug>` | write only the marker into a work that already exists, touching nothing else; never commits | same shape, `committed: false` |
-| `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, title, stages, last, open, next, brief?, notices?}` |
-| `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object; exit 0 |
+| `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, title, stages, waiting[], last, open, next, brief?, notices?}` |
+| `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object plus `waiting[]`, the branches waiting for review (AGT-1541); exit 0 |
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
-| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--temperature T] [--seed N] [--direction "..."] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, runs the post-write check (AGT-1237), then commits the chapter on `draft/chNN` in a worktree (AGT-1536); the after-write rituals (AGT-1231) run when that branch is merged. Sends a sampling temperature (`--temperature`, else the provider's `temperature` in config, else 0.8; AGT-1272) so a re-run differs; temperature and seed are in the receipt, never in `prompt_hash`. `--direction` (AGT-1562) is a steer for the chapter beyond its beat row ("slower, stay on Cora"): its own pack slice after the chapter slice, recorded in the chapter's frontmatter as `direction:`. The harness's `draft_chapter(n, direction?)` tool (MCP and harness only) runs this and returns the branch, path and receipt, never the prose | `{ok, path, branch, worktree, commit, receipt, check[], rituals[], piece}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
+| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--temperature T] [--seed N] [--direction "..."] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, runs the post-write check (AGT-1237), then commits the chapter on `draft/chNN` in a worktree (AGT-1536); the after-write rituals (AGT-1231) run when that branch is merged. Sends a sampling temperature (`--temperature`, else the provider's `temperature` in config, else 0.8; AGT-1272) so a re-run differs; temperature and seed are in the receipt, never in `prompt_hash`. `--direction` (AGT-1562) is a steer for the chapter beyond its beat row ("slower, stay on Cora"): its own pack slice after the chapter slice, recorded in the chapter's frontmatter as `direction:`. The harness's `draft_chapter(n, direction?)` tool (MCP and harness only) runs this and returns the branch, path and receipt, never the prose | `{ok, path, branch, worktree, commit, receipt, check[]}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
 | `pablo migrate lines --project <slug> [--dry-run]` | one-time split of `chapters/*.md` to one sentence per line (frontmatter untouched), committed as its own commit holding only those files; a second run changes nothing; `--dry-run` lists the files it would change (AGT-1533) | `{ok, dryRun, changed[], committed, notice?}` |
@@ -125,8 +125,10 @@ the design doc's `Novel` stage table): `premise` (`bible/overview.md` has a
 `bible/places.md`, `bible/timeline.md`, plus every `[pick]` placeholder found in a
 bible file's table rows), `acts` (the first `| Act | ... |` table in
 `outline/chapters.md`), `beats` (every numbered row of that file's chapter table),
-and `chapters` (`chapters/NN-*.md` files with their frontmatter). With no `--json` it
-prints one line per stage instead of the state object.
+and `chapters` (`chapters/NN-*.md` files with their frontmatter), plus `waiting`, the
+change branches (`draft/`, `revise/`, `edit/`, `reader/`, `plan/`) with commits `main`
+does not have yet. `pablo resume` reports the same list. With no `--json` it prints one
+line per stage instead of the state object.
 
 `pablo status --project <slug> --for "chapter N"` (also accepts `chapter-N`, `ch N`,
 or a bare `N`; anything else is a refusal naming the expected form) checks one
@@ -193,10 +195,11 @@ The chapter is written into a worktree and committed on its own branch,
 unmerged), authored as the model with the `prompt_hash` as its `Receipt:` line;
 `main` is never touched and the receipt names the branch (`branch`, `worktree`,
 `commit` in the JSON; "on branch draft/chNN" in prose). The project must be in a
-git repository. The only after-write step left at write time is the review-queue
-append (`queue`, AGT-1262), so `rituals[]` holds just that.
+git repository. There is no after-write step at write time and no review
+queue: the branch is what waits for review (`pablo status` and `pablo resume`
+list the branches waiting, AGT-1541).
 
-The rest (AGT-1231, `novel/rituals.ts`'s `runAfterMerge`) run when the draft is
+The after-write steps (AGT-1231, `novel/rituals.ts`'s `runAfterMerge`) run when the draft is
 merged to `main` (`novel/merge.ts`'s `mergeDraft`) — six rituals in order:
 outline tick (the chapter's row in
 `outline/chapters.md` moves to `draft`), a dated note under `notes/`, a bullet

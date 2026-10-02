@@ -22,13 +22,7 @@ const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url)
 
 /** Same pattern as `write-send.test.ts`'s `ritualEnv`: `git` resolves, `think` never does. */
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
-/**
- * AGT-1262: `runWrite`'s `queue` ritual now appends unconditionally to
- * `stateReviewPath(env)` — without `XDG_STATE_HOME` here every `runWrite`
- * call below would append to the author's real
- * `~/.local/state/pablo/review.jsonl`. One shared temp dir for the whole
- * file (no test here reads it back), removed once every test has run.
- */
+/** A throwaway `XDG_STATE_HOME` for every `runWrite` below, so none can touch the author's real state directory; removed once every test has run. */
 const STATE_HOME = mkdtempSync(join(tmpdir(), "pablo-continuity-state-"));
 /** `write` commits on a worktree under `$PABLO_HOME`; each vault gets its own, next to it. */
 function ritualEnv(vault: string): Record<string, string> {

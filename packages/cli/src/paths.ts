@@ -36,28 +36,6 @@ export function stateReceiptsPath(env: Record<string, string | undefined> = proc
 }
 
 /**
- * `<stateDir>/review.jsonl` — the review queue. The append-only JSONL module
- * itself is `review.ts` (AGT-1255); the `pablo review` verbs are AGT-1261,
- * `pablo status`'s per-chapter lookup is AGT-1263, and AGT-1262's `write` /
- * `prose` hooks append the `queued` events. Global, not per-vault, per the
- * design doc's "one path to watch": a piece from any vault or
- * none lands in the one file the CLI and MCP both watch. Same
- * `env`-default rule as `stateReceiptsPath` above.
- */
-export function stateReviewPath(env: Record<string, string | undefined> = process.env): string {
-  return join(stateDir(env), "review.jsonl");
-}
-
-/**
- * `<stateDir>/drafts` (AGT-1262) — where an `--out`-less `pablo prose` piece
- * is also written (frontmatter as `--out` would write) so the review queue's
- * `path` for it always names a file the editor can open.
- */
-export function stateDraftsDir(env: Record<string, string | undefined> = process.env): string {
-  return join(stateDir(env), "drafts");
-}
-
-/**
  * A `ReceiptSink` appending to an absolute JSONL path, creating its directory
  * on first use — the state-directory counterpart to core's `fileReceiptSink`.
  * Not a generalisation of that function: core's takes a *vault root* and

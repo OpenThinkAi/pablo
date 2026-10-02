@@ -46,7 +46,6 @@ test("VERBS exposes exactly the sixteen verbs, each project-required verb requir
     "publish",
     "read",
     "resume",
-    "review",
     "revise",
     "save",
     "search",
@@ -56,7 +55,7 @@ test("VERBS exposes exactly the sixteen verbs, each project-required verb requir
     "write",
   ]);
   for (const v of VERBS) {
-    if (v.name === "voice" || v.name === "prose" || v.name === "review") continue; // none resolves via a --project slug (AGT-1240, AGT-1241, AGT-1261 — the review queue is global)
+    if (v.name === "voice" || v.name === "prose") continue; // neither resolves via a --project slug (AGT-1240, AGT-1241)
     const parsed = v.args.safeParse({});
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
@@ -65,38 +64,8 @@ test("VERBS exposes exactly the sixteen verbs, each project-required verb requir
   }
 });
 
-test("review's args require action, but not project", () => {
-  const review = verb("review");
-  expect(review.args.safeParse({}).success).toBe(false);
-  expect(review.args.safeParse({ action: "list" }).success).toBe(true);
-  expect("project" in review.args.shape).toBe(false);
-});
-
-// AGT-1261 security review finding: the review queue is a human checkpoint
-// on pablo's own output, so a model connected over MCP must never be able to
-// clear it itself — `review`'s `mcpTools` narrows to one tool covering only
-// list/show/wait; `approve`/`reject` stay reachable from the CLI only.
-test("review's mcpTools narrows to list/show/wait — approve/reject are not in its schema's action enum", () => {
-  const tools = verb("review").mcpTools;
-  expect(tools).toBeDefined();
-  expect(tools!.map((t) => t.name)).toEqual(["review"]);
-
-  const mcpReview = tools![0]!;
-  for (const action of ["list", "show", "wait"]) {
-    expect(mcpReview.args.safeParse({ action }).success).toBe(true);
-  }
-  for (const action of ["approve", "reject", "bogus"]) {
-    expect(mcpReview.args.safeParse({ action }).success).toBe(false);
-  }
-  // No `unread`/`reason` either — those only make sense for approve/reject.
-  expect(Object.keys(mcpReview.args.shape).sort()).toEqual(["action", "all", "id", "timeout"]);
-});
-
-test("review's mcpTools run rejects an approve/reject action at the schema level, before run ever executes", () => {
-  const mcpReview = verb("review").mcpTools![0]!;
-  expect(mcpReview.args.safeParse({ action: "approve", id: "x" }).success).toBe(false);
-  expect(mcpReview.args.safeParse({ action: "reject", id: "x" }).success).toBe(false);
-  expect(mcpReview.args.safeParse({ action: "list" }).success).toBe(true);
+test("there is no review verb: branches replace the review queue (AGT-1541)", () => {
+  expect(VERBS.some((v) => v.name === "review")).toBe(false);
 });
 
 test("voice's args require sub, but not project", () => {
@@ -140,14 +109,6 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     out: { type: "string" }, // AGT-1242: prose --out (prose reuses `force`, already pinned above)
     draft: { type: "string" }, // AGT-1244: prose --draft
     instruction: { type: "string" }, // AGT-1244: prose --instruction (revise reuses it, AGT-1264)
-    // AGT-1261: review's `action`/`id` are NOT here — `positionalArgs` on the
-    // `review` verb tells `deriveCliOptions` to skip them, since `cli.ts`
-    // reads them from positionals (`args.rest`), never a named flag (a
-    // standards review finding — see `Verb.positionalArgs`'s docstring).
-    all: { type: "boolean", default: false }, // AGT-1261: review list --all
-    unread: { type: "boolean", default: false }, // AGT-1261: review approve --unread
-    reason: { type: "string" }, // AGT-1261: review reject --reason
-    timeout: { type: "string" }, // AGT-1261: review wait --timeout
     passage: { type: "string" }, // AGT-1264: revise --passage
     start: { type: "string" }, // AGT-1264: revise --start (revise reuses `file`, already pinned above)
     end: { type: "string" }, // AGT-1264: revise --end
@@ -935,8 +896,6 @@ test("draftChapterBody keeps the branch, path and receipt and drops prose-bearin
     commit: "abc",
     receipt: { prompt_hash: "h", words: 12 },
     check: [{ path: "chapters/02-black-ice.md", line: 3, rule: "em-dash", excerpt: "the storm came up", detail: "x" }],
-    rituals: [],
-    piece: "p1",
     text: "SHOULD NOT SURVIVE",
   }) as Record<string, unknown>;
   expect(body["branch"]).toBe("draft/ch02");

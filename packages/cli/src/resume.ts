@@ -13,6 +13,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { readMarker } from "./marker";
+import { waitingForReview } from "./branch";
 import { readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
 
@@ -40,6 +41,8 @@ export interface ResumeResult {
   readonly format: string;
   readonly title: string;
   readonly stages: NovelState;
+  /** Branches with changes `main` does not have yet: the ones waiting for review. */
+  readonly waiting: readonly string[];
   readonly last: {
     readonly note?: NoteSummary;
     readonly commit?: CommitSummary;
@@ -259,7 +262,7 @@ export async function buildResume(
 
   const briefOutcome = await briefPromise;
 
-  const result: ResumeResult = { format, title, stages: state, last, open, next };
+  const result: ResumeResult = { format, title, stages: state, waiting: waitingForReview(workDir), last, open, next };
   if (briefOutcome.brief !== undefined) return { ...result, brief: briefOutcome.brief };
   if (briefOutcome.notice !== undefined) return { ...result, notices: [briefOutcome.notice] };
   return result;
@@ -287,6 +290,7 @@ const MAX_BRIEF_LINES = 8;
  */
 export function formatResumeProse(result: ResumeResult): string {
   const body: string[] = [result.title, ...stageLines(result.stages)];
+  if (result.waiting.length > 0) body.push(`waiting for review: ${result.waiting.join(", ")}`);
 
   if (result.last.note !== undefined) {
     body.push(`last note (${result.last.note.date}): ${result.last.note.summary}`);

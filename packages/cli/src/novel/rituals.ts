@@ -8,8 +8,7 @@
  * (`pm project show ai-terminal`, the
  * `chapter N` row's "After" column). `write` no longer calls this: a draft
  * is committed on `draft/chNN` and reviewed first, so these steps run when
- * the draft is merged to `main` (`novel/merge.ts`'s `mergeDraft`). Only the
- * review-queue append (`runQueueRitual`) still happens at write time.
+ * the draft is merged to `main` (`novel/merge.ts`'s `mergeDraft`).
  *
  * Every ritual is independent and wrapped so nothing it does can throw out
  * of `runAfterMerge` or undo the chapter write that already landed — a failure
@@ -24,9 +23,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import type { Adapter } from "@openthink/pablo-core";
-import { stateReviewPath } from "../paths";
-import { appendEvent } from "../review";
-import type { QueuedEvent } from "../review";
 import { runContinuity } from "./continuity";
 
 export type RitualStatus = "ran" | "skipped" | "failed";
@@ -60,21 +56,6 @@ export interface RitualOptions {
   readonly extractor?: Adapter | undefined;
   /** Overrides the continuity extraction ritual's 120s ceiling. */
   readonly continuityTimeoutMs?: number | undefined;
-}
-
-/**
- * What the `queue` ritual (AGT-1262) needs to append a chapter's `queued`
- * event. `write.ts` has every field before it commits the draft; `id` is its
- * own `mintPieceId(...)`, minted first so it reaches the JSON `piece` field
- * even when the queue append itself fails.
- */
-export interface QueueRitualInput {
-  readonly slug: string;
-  readonly words: number;
-  readonly id: string;
-  readonly title: string;
-  readonly vault: string;
-  readonly promptHash: string;
 }
 
 const DEFAULT_THINK_TIMEOUT_MS = 20_000;
@@ -364,56 +345,6 @@ async function runThink(
   }
 
   return { name: "think", status: "ran", detail: message };
-}
-
-/**
- * Appends a `queued` event (AGT-1262) to `stateReviewPath(env)` (the one
- * global queue — never vault-relative, see `paths.ts`'s `stateReviewPath`).
- * Text-free: `QueuedEvent` carries no manuscript content, only
- * id/kind/title/path and the bookkeeping fields (`review-no-text.test.ts`
- * enforces this on the type itself). `appendEvent` throws on a write failure
- * (an unwritable state directory); `runQueueRitual` turns that into a
- * `"failed"` ritual.
- */
-function appendQueued(
-  env: Record<string, string | undefined>,
-  chapterPath: string,
-  chapter: number,
-  opts: QueueRitualInput,
-  now: () => Date,
-): Ritual {
-  const event: QueuedEvent = {
-    type: "queued",
-    id: opts.id,
-    at: now().toISOString(),
-    kind: "chapter",
-    title: opts.title,
-    path: chapterPath,
-    vault: opts.vault,
-    project: opts.slug,
-    words: opts.words,
-    prompt_hash: opts.promptHash,
-  };
-
-  appendEvent(stateReviewPath(env), event);
-  return { name: "queue", status: "ran", detail: `queued ${opts.id} (chapter ${chapter})` };
-}
-
-/**
- * The review-queue append, run at write time (the draft's branch is what gets
- * reviewed). `chapterPath` is the path the chapter will have on `main` once
- * merged, so `reviewStateFor` finds the piece by the same path `save` uses.
- * Never throws: a failure is a `"failed"` ritual.
- */
-export function runQueueRitual(
-  chapterPath: string,
-  chapter: number,
-  input: QueueRitualInput,
-  opts: { readonly env?: Record<string, string | undefined> | undefined; readonly now?: (() => Date) | undefined } = {},
-): Ritual {
-  const now = opts.now ?? (() => new Date());
-  const env = opts.env ?? process.env;
-  return attempt("queue", () => appendQueued(env, chapterPath, chapter, input, now));
 }
 
 /**

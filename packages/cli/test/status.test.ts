@@ -1,61 +1,22 @@
 /**
- * AGT-1263: `pablo status` reports `review: pending|approved|rejected|none`
- * per chapter, computed by matching the chapter file's absolute path against
- * `queued` events in the review queue (`stateReviewPath()`, AGT-1255/1261)
- * and taking the latest decision for that piece.
+ * `pablo status` and `pablo resume` report the branches waiting for review
+ * (AGT-1541): the change branches whose commits `main` does not have yet, from
+ * the branch layer's `waitingBranches`. They replaced the per-chapter
+ * `review: pending|approved|rejected|none` the JSONL review queue gave.
  *
- * `reviewStateFor` (AC3) lives in `../src/review.ts` and is unit-tested in
- * `review.test.ts`. This file covers the integration: `readNovelState`
- * wiring `review` onto each `ChapterFile` from a fixture vault plus a seeded
- * temp `XDG_STATE_HOME` queue.
- *
- * These tests never touch a real vault or a real `XDG_STATE_HOME` — every
- * disk-touching test copies the fixture vault into a temp dir and seeds a
- * temp state dir with its own `review.jsonl`.
+ * Every test works in a temp copy of the fixture vault, never a real vault.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { cpSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { waitingForReview } from "../src/branch";
 import { readNovelState } from "../src/novel/machine";
-import { stateReviewPath } from "../src/paths";
-import type { DecisionEvent, QueuedEvent, ReviewEvent } from "../src/review";
 
 const WORK = fileURLToPath(new URL("./fixtures/vault/novels/ice-house", import.meta.url));
-
-function tempWork(): string {
-  const dir = mkdtempSync(join(tmpdir(), "pablo-status-test-work-"));
-  const work = join(dir, "ice-house");
-  cpSync(WORK, work, { recursive: true });
-  return work;
-}
-
-function queuedEvent(overrides: Partial<QueuedEvent> = {}): QueuedEvent {
-  return {
-    type: "queued",
-    id: "20260907-chapter-one-aaaa",
-    at: "2026-09-07T10:00:00.000Z",
-    kind: "chapter",
-    title: "The Last Full Cut",
-    path: "/tmp/does-not-matter.md",
-    words: 900,
-    prompt_hash: "deadbeef",
-    ...overrides,
-  };
-}
-
-function decisionEvent(overrides: Partial<DecisionEvent> = {}): DecisionEvent {
-  return {
-    type: "approved",
-    id: "20260907-chapter-one-aaaa",
-    at: "2026-09-07T11:00:00.000Z",
-    by: "cli",
-    read: true,
-    ...overrides,
-  };
-}
 
 let dirs: string[] = [];
 
@@ -64,106 +25,63 @@ afterEach(() => {
   dirs = [];
 });
 
-function tempStateHome(): string {
-  const dir = mkdtempSync(join(tmpdir(), "pablo-status-test-state-"));
+function git(repo: string, ...args: string[]): void {
+  execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=t@t.example", ...args], { stdio: "pipe" });
+}
+
+/** A temp copy of the fixture novel as its own git repo on `main`. */
+function tempRepo(): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "pablo-status-test-")));
   dirs.push(dir);
-  return dir;
+  const work = join(dir, "ice-house");
+  cpSync(WORK, work, { recursive: true });
+  execFileSync("git", ["init", "-q", "-b", "main", work]);
+  git(work, "add", "-A");
+  git(work, "commit", "-qm", "seed");
+  return work;
 }
 
-function seedQueue(stateHome: string, events: readonly ReviewEvent[]): void {
-  const path = join(stateHome, "pablo", "review.jsonl");
-  mkdirSync(join(stateHome, "pablo"), { recursive: true });
-  writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+/** A branch off `main` with one commit changing chapter 1, left checked out on `main` again. */
+function branchWithChange(work: string, name: string): void {
+  git(work, "checkout", "-q", "-b", name);
+  writeFileSync(join(work, "chapters", "01-the-last-full-cut.md"), "Changed.\n");
+  git(work, "commit", "-qam", "change");
+  git(work, "checkout", "-q", "main");
 }
 
-describe("readNovelState wires `review` onto each chapter (AC1, AC4 — fixture vault + seeded temp XDG_STATE_HOME)", () => {
-  test("a chapter with no queue entry at all reads review: \"none\"", () => {
-    const stateHome = tempStateHome();
-    const state = readNovelState(WORK, { XDG_STATE_HOME: stateHome });
-
-    expect(state.chapters).toEqual([
-      { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut", review: "none" },
+describe("the novel machine no longer carries a review state per chapter", () => {
+  test("a chapter is its number, file, status and title, and nothing about a queue", () => {
+    expect(readNovelState(WORK).chapters).toEqual([
+      { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut" },
     ]);
   });
+});
 
-  test("a chapter queued with no decision reads review: \"pending\"", () => {
-    const stateHome = tempStateHome();
-    const chapterPath = join(WORK, "chapters", "01-the-last-full-cut.md");
-    seedQueue(stateHome, [queuedEvent({ path: chapterPath })]);
-
-    const state = readNovelState(WORK, { XDG_STATE_HOME: stateHome });
-    expect(state.chapters[0]?.review).toBe("pending");
+describe("waitingForReview", () => {
+  test("is empty outside a repository", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pablo-status-test-"));
+    dirs.push(dir);
+    expect(waitingForReview(dir)).toEqual([]);
   });
 
-  test("a chapter queued and approved reads review: \"approved\"", () => {
-    const stateHome = tempStateHome();
-    const chapterPath = join(WORK, "chapters", "01-the-last-full-cut.md");
-    seedQueue(stateHome, [queuedEvent({ path: chapterPath }), decisionEvent({ type: "approved" })]);
-
-    const state = readNovelState(WORK, { XDG_STATE_HOME: stateHome });
-    expect(state.chapters[0]?.review).toBe("approved");
+  test("is empty when no change branch has commits main lacks", () => {
+    const work = tempRepo();
+    git(work, "branch", "draft/ch02");
+    expect(waitingForReview(work)).toEqual([]);
   });
 
-  test("a chapter queued and rejected reads review: \"rejected\"", () => {
-    const stateHome = tempStateHome();
-    const chapterPath = join(WORK, "chapters", "01-the-last-full-cut.md");
-    seedQueue(stateHome, [queuedEvent({ path: chapterPath }), decisionEvent({ type: "rejected" })]);
-
-    const state = readNovelState(WORK, { XDG_STATE_HOME: stateHome });
-    expect(state.chapters[0]?.review).toBe("rejected");
+  test("lists the change branches with commits main lacks, sorted, and ignores other branches", () => {
+    const work = tempRepo();
+    branchWithChange(work, "revise/ab12");
+    branchWithChange(work, "draft/ch02");
+    branchWithChange(work, "scratch");
+    expect(waitingForReview(work)).toEqual(["draft/ch02", "revise/ab12"]);
   });
 
-  test("a queue entry for a different chapter's path doesn't affect this one: still \"none\"", () => {
-    const stateHome = tempStateHome();
-    seedQueue(stateHome, [queuedEvent({ path: "/some/other/vault/chapters/02-x.md" })]);
-
-    const state = readNovelState(WORK, { XDG_STATE_HOME: stateHome });
-    expect(state.chapters[0]?.review).toBe("none");
-  });
-
-  test("a missing queue file degrades to \"none\" without throwing", () => {
-    const stateHome = tempStateHome(); // never seeded — pablo/review.jsonl doesn't exist
-
-    expect(() => readNovelState(WORK, { XDG_STATE_HOME: stateHome })).not.toThrow();
-    const state = readNovelState(WORK, { XDG_STATE_HOME: stateHome });
-    expect(state.chapters[0]?.review).toBe("none");
-  });
-
-  test("a malformed queue file (bad JSON lines) degrades to \"none\" without throwing", () => {
-    const stateHome = tempStateHome();
-    const path = stateReviewPath({ XDG_STATE_HOME: stateHome });
-    mkdirSync(join(stateHome, "pablo"), { recursive: true });
-    writeFileSync(path, "not json\n{\"type\": \"queued\"\n\n", "utf8");
-
-    expect(() => readNovelState(WORK, { XDG_STATE_HOME: stateHome })).not.toThrow();
-    const state = readNovelState(WORK, { XDG_STATE_HOME: stateHome });
-    expect(state.chapters[0]?.review).toBe("none");
-  });
-
-  test("stateReviewPath sits beside receipts.jsonl under <XDG_STATE_HOME>/pablo/", () => {
-    const stateHome = tempStateHome();
-    expect(stateReviewPath({ XDG_STATE_HOME: stateHome })).toBe(join(stateHome, "pablo", "review.jsonl"));
-  });
-
-  test("readNovelState never writes to the queue file itself — it's read-only from here", () => {
-    const stateHome = tempStateHome();
-    readNovelState(WORK, { XDG_STATE_HOME: stateHome });
-    expect(() => readFileSync(stateReviewPath({ XDG_STATE_HOME: stateHome }), "utf8")).toThrow();
-  });
-
-  test("a rewritten chapter (rejected, then requeued and still pending) reads the latest state, not the old decision", () => {
-    const work = tempWork();
-    const stateHome = tempStateHome();
-    const chapterPath = join(work, "chapters", "01-the-last-full-cut.md");
-    seedQueue(stateHome, [
-      queuedEvent({ id: "old", at: "2026-09-01T00:00:00.000Z", path: chapterPath }),
-      decisionEvent({ id: "old", type: "rejected", at: "2026-09-01T01:00:00.000Z" }),
-      queuedEvent({ id: "new", at: "2026-09-07T00:00:00.000Z", path: chapterPath }),
-    ]);
-
-    const state = readNovelState(work, { XDG_STATE_HOME: stateHome });
-    expect(state.chapters[0]?.review).toBe("pending");
-
-    rmSync(work, { recursive: true, force: true });
+  test("a branch that has been merged to main is no longer waiting", () => {
+    const work = tempRepo();
+    branchWithChange(work, "draft/ch02");
+    git(work, "merge", "-q", "--no-edit", "draft/ch02");
+    expect(waitingForReview(work)).toEqual([]);
   });
 });

@@ -31,15 +31,7 @@ function tempDir(prefix: string): string {
   return dir;
 }
 
-/**
- * AGT-1262: `proseCore`'s send path now appends a `queued` event to
- * `stateReviewPath(env)` — the one global queue, never vault-relative — on
- * every completed send. Without `XDG_STATE_HOME` here that would append to
- * the author's real `~/.local/state/pablo/review.jsonl`, even though every
- * test in this file already points `PABLO_VAULT` at a throwaway vault (which
- * is enough to keep the *receipt* off the real state dir, but not the
- * queue). A fresh temp dir per call, cleaned up by the module's `afterEach`.
- */
+/** A fresh temp `XDG_STATE_HOME` per call, so a send can never write to the author's real `~/.local/state/pablo`; cleaned up by the module's `afterEach`. */
 function noStateHome(): string {
   return tempDir("pablo-prose-revise-state-");
 }

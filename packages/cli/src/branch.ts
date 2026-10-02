@@ -184,6 +184,13 @@ export function waitingBranches(repo: string): { ok: true; branches: string[] } 
   return { ok: true, branches: waiting };
 }
 
+/** The branches waiting for review in the repository holding `dir`; none when `dir` is not in a repository or git fails. What `status` and `resume` report. */
+export function waitingForReview(dir: string): string[] {
+  const repo = repoRoot(dir);
+  const waiting = repo === undefined ? undefined : waitingBranches(repo);
+  return waiting?.ok ? waiting.branches : [];
+}
+
 /**
  * What `branch` changes against `main`, as git's unified diff of the branch since it left `main` (`main...branch`,
  * so work that has landed on `main` since is not shown as the branch undoing it). Two lines of context, renames
