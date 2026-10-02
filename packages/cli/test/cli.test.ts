@@ -41,9 +41,18 @@ test("pablo --help lists the P0 verbs and exits 0", () => {
   const { stdout, exitCode } = runCli(["--help"]);
 
   expect(exitCode).toBe(0);
-  for (const verb of ["init", "resume", "status", "write", "save", "check", "dry-run", "mcp"]) {
+  for (const verb of ["init", "resume", "status", "write", "save", "check", "mcp"]) {
     expect(stdout).toContain(verb);
   }
+});
+
+test("pablo --help lists dry-run under Later and points at write --dry-run", () => {
+  const { stdout } = runCli(["--help"]);
+  const [verbs, later] = stdout.split("Later (not yet implemented):");
+
+  expect(verbs).not.toMatch(/^ {2}dry-run$/m);
+  expect(later).toMatch(/^ {2}dry-run$/m);
+  expect(stdout).toContain("write --dry-run");
 });
 
 test("pablo with no verb prints help and exits 0", () => {

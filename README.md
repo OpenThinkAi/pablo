@@ -62,7 +62,7 @@ including an unresolvable project), `1` error.
 | `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, runs the post-write check (AGT-1237), then runs the after-write rituals (AGT-1231) | `{ok, path, receipt, check[], rituals[]}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
-| `pablo dry-run ...` | (planned; today this is `write`'s own `--dry-run`) any write or revise, assembled and priced, nothing sent | the pack, slice by slice |
+| `pablo write --dry-run` (also `prose`/`revise --dry-run`) | any write or revise, assembled and priced, nothing sent; a standalone `pablo dry-run` verb is not implemented | the pack, slice by slice |
 | `pablo mcp` | serve all of the above as MCP tools, same schemas | |
 | *later* `revise`, `voice`, `edit`, `share`, `notes`, `publish` | P1/P2 — the voice loop, local editing, sharing, publishing | |
 
