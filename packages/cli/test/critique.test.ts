@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "bun:test";
-import { applyRefute, critiqueBranch, critiquePath, loadCritique } from "../src/critique";
+import type { Adapter } from "@openthink/pablo-core";
+import { adapterAsk, applyRefute, critiqueBranch, critiquePath, loadCritique } from "../src/critique";
 import type { Ask } from "../src/critique";
 import { allowedTools, harnessTools } from "../src/harness/tools";
 import { critiqueModel, VERBS } from "../src/verbs";
@@ -235,4 +236,28 @@ test("survivors are saved for review mode, keyed to the branch's head: a moved b
   expect(loadCritique(work, "draft/ch02")).toEqual([]);
   writeFileSync(critiquePath(work, "draft/ch02"), "not json");
   expect(loadCritique(work, "draft/ch02")).toEqual([]);
+});
+
+test("the run says what it is doing as it goes, and a model call is bounded by a timeout", async () => {
+  const { repo, work } = setup();
+  const lines: string[] = [];
+  const { ask } = fake([{ kind: "tells", line: 12, claim: "stock praise", evidence: "" }], {});
+  await critiqueBranch({ vaultRoot: repo, projectPath: work, branch: "draft/ch02", ask, progress: (l) => lines.push(l) });
+  expect(lines).toEqual([
+    "pablo: critique: draft/ch02: 1 changed chapter to examine",
+    "pablo: critique: examining novels/ice-house/chapters/02-thaw.md",
+    "pablo: critique: 1 candidate in novels/ice-house/chapters/02-thaw.md, re-checking",
+    "pablo: critique: 1 comment kept, 0 withdrawn",
+  ]);
+
+  let seen: { timeoutMs?: number; signal?: AbortSignal } | undefined;
+  const adapter = {
+    async *complete(request: { timeoutMs?: number; signal?: AbortSignal }) {
+      seen = request;
+      yield { type: "token" as const, text: "[]" };
+    },
+  } as unknown as Adapter;
+  expect(await adapterAsk(adapter, 1234)("p")).toBe("[]");
+  expect(seen?.timeoutMs).toBe(1234);
+  expect(seen?.signal).toBeInstanceOf(AbortSignal);
 });

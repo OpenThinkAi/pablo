@@ -327,7 +327,7 @@ async function runCritiqueVerb(args: z.infer<typeof CRITIQUE_ARGS>, ctx: VerbCon
       return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
     }
   }
-  const result = await critiqueBranch({ vaultRoot: resolved.vaultRoot, projectPath: resolved.projectPath, branch: args.branch, ask });
+  const result = await critiqueBranch({ vaultRoot: resolved.vaultRoot, projectPath: resolved.projectPath, branch: args.branch, ask, progress: (line) => ctx.stderr.write(`${line}\n`) });
   if (result.ok) return { body: result, exitCode: 0 };
   // A refusal (not a change branch, not in a repo) is exit 2; a run that failed (git, the model, the save) is exit 1.
   const code = result.kind === "refused" ? 2 : 1;

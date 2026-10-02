@@ -55,11 +55,14 @@ export type CritiqueResult =
 /** The model seam: a prompt in, the reply text out. Tests inject a fake; the real one is `adapterAsk`. */
 export type Ask = (prompt: string) => Promise<string>;
 
+/** One model call may take this long before it is abandoned, so a hung endpoint is a named failure, not a silent freeze. */
+export const ASK_TIMEOUT_MS = 300_000;
+
 /** An `Ask` over any adapter (the planner's), collecting the streamed tokens. */
-export function adapterAsk(adapter: Adapter): Ask {
+export function adapterAsk(adapter: Adapter, timeoutMs: number = ASK_TIMEOUT_MS): Ask {
   return async (prompt) => {
     let text = "";
-    for await (const event of adapter.complete({ prompt })) if (event.type === "token") text += event.text;
+    for await (const event of adapter.complete({ prompt, timeoutMs, signal: AbortSignal.timeout(timeoutMs) })) if (event.type === "token") text += event.text;
     return text;
   };
 }
@@ -280,6 +283,8 @@ export interface CritiqueOptions {
   readonly projectPath: string;
   readonly branch: string;
   readonly ask: Ask;
+  /** Told what the run is doing, one line at a time, so a long wait shows it is alive (the verb passes stderr). */
+  readonly progress?: (line: string) => void;
 }
 
 /** Critiques `branch`'s changes to the work's chapters. A failed model call is a returned notice, as in the branch layer. */
@@ -300,6 +305,8 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
   };
   const timelineText = readOr(join(opts.projectPath, "bible", "timeline.md"));
 
+  const say = opts.progress ?? (() => {});
+  say(`pablo: critique: ${opts.branch}: ${files.length} changed chapter${files.length === 1 ? "" : "s"} to examine`);
   const comments: CritiqueComment[] = [];
   let raised = 0;
   let withdrawn = 0;
@@ -315,8 +322,10 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
       const date = storyDateOf(text);
       const timeline = date !== undefined && timelineText !== "" ? timelineAt(timelineText, date, "bible/timeline.md").text : "";
 
+      say(`pablo: critique: examining ${file.path}`);
       const found = parseCandidates(await opts.ask(candidatePrompt(file.path, lines, changed, date, { ...ref, timeline })), changed);
       raised += found.length;
+      if (found.length > 0) say(`pablo: critique: ${found.length} candidate${found.length === 1 ? "" : "s"} in ${file.path}, re-checking`);
       for (const c of found) {
         const verdict = applyRefute(await opts.ask(refutePrompt(c, file.path, lines, ref.continuity)), shownLabels(lines, c.line, ref.continuity));
         if (!verdict.kept) {
@@ -329,6 +338,7 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
   } catch (error) {
     return { ok: false, kind: "error", notice: `pablo: critique failed: ${(error as Error).message}` };
   }
+  say(`pablo: critique: ${comments.length} comment${comments.length === 1 ? "" : "s"} kept, ${withdrawn} withdrawn`);
   try {
     saveCritique(opts.projectPath, opts.branch, comments);
   } catch (error) {
