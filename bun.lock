@@ -20,7 +20,6 @@
         "@modelcontextprotocol/sdk": "1.30.0",
         "@openthink/pablo-core": "workspace:*",
         "@openthink/pablo-tui": "workspace:*",
-        "@openthink/ui-leaf": "^1.6.0",
         "zod": "4.5.4",
       },
     },
@@ -42,9 +41,6 @@
       },
     },
   },
-  "trustedDependencies": [
-    "@openthink/ui-leaf",
-  ],
   "packages": {
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.3.1", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-cUD0PT0YX+rImRhfn7BfMRduP/tX/Zqt/N0dHlAyn2RlcJssCb5KsCJkhln61eh9vuJDkH8wKn3L8zJzzWXPFg=="],
 
@@ -57,8 +53,6 @@
     "@openthink/pablo-core": ["@openthink/pablo-core@workspace:packages/core"],
 
     "@openthink/pablo-tui": ["@openthink/pablo-tui@workspace:packages/tui"],
-
-    "@openthink/ui-leaf": ["@openthink/ui-leaf@1.6.0", "", { "bin": { "ui-leaf": "bin/ui-leaf" } }, "sha512-IZgSRKumxZ7BGLMvFwtr+va2ZTjw2m8B9ja3P/PYM2V01ZezjpmJ38mbpzrpsLLj3X1kYO9NgXvXsYQg5IpT0w=="],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 

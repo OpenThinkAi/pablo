@@ -64,7 +64,7 @@ including an unresolvable project), `1` error.
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
 | `pablo write --dry-run` (also `prose`/`revise --dry-run`) | any write or revise, assembled and priced, nothing sent; a standalone `pablo dry-run` verb is not implemented | the pack, slice by slice |
 | `pablo mcp` | serve all of the above as MCP tools, same schemas | |
-| *later* `revise`, `voice`, `edit`, `share`, `notes`, `publish` | P1/P2 — the voice loop, local editing, sharing, publishing | |
+| *later* `revise`, `voice`, `share`, `notes`, `publish` | P1/P2 — the voice loop, sharing, publishing | |
 
 `check` scans `chapters/*.md` (or one `--file`, work-relative or absolute inside the
 work — outside it is a refusal, exit `2`) for two things: chapters whose frontmatter
