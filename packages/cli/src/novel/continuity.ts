@@ -22,7 +22,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter, ExtractedFact, Receipt } from "@openthink/pablo-core";
-import { estimateTokens, fileReceiptSink, hashPrompt } from "@openthink/pablo-core";
+import { NoToolCallError, estimateTokens, fileReceiptSink, hashPrompt } from "@openthink/pablo-core";
 import { insertUnderHeading } from "../markdown";
 import type { Ritual } from "./rituals";
 
@@ -46,6 +46,21 @@ const DEFAULT_CONTINUITY_TIMEOUT_MS = 120_000;
 /** The instruction sent with every extraction request — the ticket's exact wording. */
 const EXTRACT_INSTRUCTION =
   "Extract every concrete fact the text establishes: names, ages, dates, objects, places, and who knows what. Quote the sentence that establishes each as its anchor.";
+
+/** Between a fact and its anchor on one line of the plain-text fallback's answer. */
+const FACT_SEPARATOR = "||";
+
+/**
+ * The plain-text retry's instruction (AGT-1271). A model that answers the
+ * forced `extract_facts` call with nothing (Gemma 4 behind mlx_lm on a real
+ * chapter) still answers a plain request, so ask for one fact per line with the
+ * establishing quote after a separator; `parseFactLines` turns that back into
+ * facts, anchored when the quote is there.
+ */
+const FALLBACK_INSTRUCTION =
+  "List every concrete fact the text establishes: names, ages, dates, objects, places, and who knows what. " +
+  `One fact per line, in the form: <fact> ${FACT_SEPARATOR} <the exact words of the text that establish it, copied character for character>. ` +
+  "No numbering, no commentary.";
 
 const NAMES_AGES_HEADING = "## Names and ages";
 const DATES_HEADING = "## Dates";
@@ -149,6 +164,20 @@ export function applyFacts(
 }
 
 /**
+ * The plain-text fallback's answer as facts: one per line, `fact || anchor`.
+ * A line with no separator is a fact with no anchor (it files under `## Check`,
+ * never dropped). Lines the model wrapped in a bullet or number are unwrapped.
+ */
+export function parseFactLines(lines: readonly string[]): ExtractedFact[] {
+  return lines.flatMap((line): ExtractedFact[] => {
+    const [fact, ...rest] = line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").split(FACT_SEPARATOR);
+    const anchor = rest.join(FACT_SEPARATOR).trim().replace(/^["“”']+|["“”']+$/g, "").trim();
+    if (fact === undefined || fact.trim() === "") return [];
+    return [{ fact: fact.trim(), entities: [], storyTime: undefined, certainty: undefined, anchor: anchor === "" ? undefined : anchor }];
+  });
+}
+
+/**
  * Writes the same `Receipt` shape `withReceipts` would (core's
  * `pack/receipts.ts`), by hand, straight to `fileReceiptSink(workDir)`.
  * `withReceipts` only wraps `complete`, `proposeEdit` and `extractFacts` —
@@ -233,9 +262,35 @@ export async function runContinuity(
   const timeoutMs = opts.timeoutMs ?? DEFAULT_CONTINUITY_TIMEOUT_MS;
   const startedAt = Date.now();
 
+  /**
+   * The tool call first; when the model answers it with no tool call, one
+   * plain-text retry through `extractFacts` before the ritual reports failure.
+   * If the retry also fails, the failure that surfaces is the tool call's —
+   * its detail carries the raw finish_reason and the first 200 chars of the
+   * answer — with the retry's own error appended.
+   */
+  async function extractWithFallback(): Promise<readonly ExtractedFact[]> {
+    try {
+      return await extract({ text: chapterBody, instruction: EXTRACT_INSTRUCTION });
+    } catch (err) {
+      if (!(err instanceof NoToolCallError)) throw err;
+      let lines: readonly string[];
+      try {
+        lines = await adapter.extractFacts({ text: chapterBody, instruction: FALLBACK_INSTRUCTION, output: "text" });
+      } catch (retryErr) {
+        throw new Error(`${firstLine(err.message)}; plain-text retry failed: ${firstLine(errMessage(retryErr))}`);
+      }
+      const facts = parseFactLines(lines);
+      if (facts.length === 0) {
+        throw new Error(`${firstLine(err.message)}; plain-text retry returned no facts`);
+      }
+      return facts;
+    }
+  }
+
   async function attemptExtraction(): Promise<Ritual> {
     try {
-      const facts = await extract({ text: chapterBody, instruction: EXTRACT_INSTRUCTION });
+      const facts = await extractWithFallback();
       writeContinuityReceipt(workDir, adapter, chapterBody, startedAt, null, factsSummaryText(facts));
 
       const existing = readFileSync(path, "utf8");

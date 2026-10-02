@@ -18,7 +18,7 @@ import { resolveAll } from "../markup/spans";
 import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "../pack/closing";
 import { validateProposal } from "../markup/validate";
 import type { ProviderConfig } from "./config";
-import { EndpointHung, ProviderResponseError } from "./errors";
+import { EndpointHung, NoToolCallError, ProviderResponseError } from "./errors";
 import { readFacts } from "./facts";
 import type { Gate } from "./queue";
 import type { RateMeter } from "./rates";
@@ -473,16 +473,21 @@ function toolArguments(endpoint: string, expected: string, payload: string): Rec
   } catch {
     throw new ProviderResponseError(endpoint, `a response that is not JSON: ${truncate(payload)}`);
   }
-  const call = (
+  const choice = (
     parsed as {
-      choices?: { message?: { content?: unknown; tool_calls?: { function?: { name?: unknown; arguments?: unknown } }[] } }[];
+      choices?: {
+        finish_reason?: unknown;
+        message?: { content?: unknown; tool_calls?: { function?: { name?: unknown; arguments?: unknown } }[] };
+      }[];
     }
-  ).choices?.[0]?.message;
+  ).choices?.[0];
+  const call = choice?.message;
 
   const tool = call?.tool_calls?.[0]?.function;
   if (tool === undefined) {
-    const said = typeof call?.content === "string" && call.content.trim() !== "" ? truncate(call.content) : "nothing";
-    throw new ProviderResponseError(endpoint, `no ${expected} tool call — it answered with ${said}`);
+    const said = typeof call?.content === "string" && call.content.trim() !== "" ? truncate(call.content) : "";
+    const finish = typeof choice?.finish_reason === "string" ? choice.finish_reason : "none";
+    throw new NoToolCallError(endpoint, expected, finish, said);
   }
   if (typeof tool.name === "string" && tool.name !== expected) {
     throw new ProviderResponseError(endpoint, `a call to ${truncate(tool.name)} rather than ${expected}`);

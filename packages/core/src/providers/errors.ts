@@ -31,7 +31,7 @@ export class EndpointHung extends Error {
 
 /** The endpoint answered, but not with a completion pablo can use. */
 export class ProviderResponseError extends Error {
-  override readonly name = "ProviderResponseError";
+  override readonly name: string = "ProviderResponseError";
 
   constructor(
     readonly endpoint: string,
@@ -43,5 +43,25 @@ export class ProviderResponseError extends Error {
         ? `pablo: the model at ${endpoint} returned ${detail}`
         : `pablo: the model at ${endpoint} returned HTTP ${status}: ${detail}`,
     );
+  }
+}
+
+/**
+ * The endpoint answered a forced tool call with no tool call at all. It keeps
+ * the raw `finish_reason` and the answer it did give, so a caller can fall back
+ * to plain text and a failure report can say what the server actually sent
+ * (AGT-1271: Gemma behind mlx_lm answered `extract_facts` with nothing).
+ */
+export class NoToolCallError extends ProviderResponseError {
+  override readonly name = "NoToolCallError";
+
+  constructor(
+    endpoint: string,
+    readonly tool: string,
+    readonly finishReason: string,
+    /** The first 200 characters of the assistant's content, or "" when it sent none. */
+    readonly answer: string,
+  ) {
+    super(endpoint, `no ${tool} tool call (finish_reason: ${finishReason}) — it answered with ${answer === "" ? "nothing" : answer}`);
   }
 }
