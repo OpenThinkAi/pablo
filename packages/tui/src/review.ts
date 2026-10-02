@@ -1,13 +1,13 @@
 // Review mode's data, pure: a branch's changes against `main` as the rail's rows and the main pane's lines. The CLI
 // runs git (it owns the branch layer, branch.ts) and hands the diff text over; this package parses it with core's
-// diff parser, groups it with the stitcher (stitch.ts) and lays it out. Nothing here reads the disk or the terminal.
+// diff parser, groups it with core's stitcher and lays it out. Nothing here reads the disk or the terminal.
 //
 // The rail lists the changes, grouped by file: a file is a group row (`file:<path>`), each edit under it a row
 // (`edit:<n>`). The main pane shows the edit under the rail's cursor: its removed and added sentences, the words that
 // differ marked, one unchanged line either side for context. Book mode lists the branches waiting for review as rows
 // `branch:<name>`; opening one is the model's `review.open`.
 
-import { detectMoves, parseDiff } from "@openthink/pablo-core";
+import { parseDiff } from "@openthink/pablo-core";
 import { clean } from "./sanitize";
 import { stitch, type Edit, type EditLine, type Seg } from "./stitch";
 import { BRANCH_ROW, type RailRow } from "./state";
@@ -41,9 +41,12 @@ const MARK: Record<Edit["kind"], string> = { change: "~", add: "+", remove: "-",
 
 /** A short rail label: the kind's mark, then the first sentence the edit puts in (or takes out). */
 function labelOf(e: Edit): string {
-  const first = e.rows.find((r) => r.sign === "+" || r.sign === "~") ?? e.rows.find((r) => r.sign === "-") ?? e.rows[0];
-  const text = (first?.segs.map((s) => s.text).join("") ?? "").trim();
-  return `${MARK[e.kind]} ${text || "(blank line)"}`;
+  const textOf = (r: EditLine) => r.segs.map((s) => s.text).join("").trim();
+  const first = (signs: string) => e.rows.find((r) => signs.includes(r.sign) && textOf(r) !== "");
+  // A binary file's change has only its notice row.
+  const row = first("+~") ?? first("-") ?? (e.kind === "change" ? e.rows[0] : undefined);
+  // Only blank lines changed: in sentence-per-line prose that is a paragraph split or joined.
+  return `${MARK[e.kind]} ${(row && textOf(row)) || "(paragraph break)"}`;
 }
 
 /** The review of a branch's diff: the diff text is cleaned of control characters before it is parsed, tabs widened. */
@@ -51,7 +54,7 @@ export function loadReview(diff: BranchDiff | undefined): Review {
   if (!diff) return { rows: [], labels: {}, edits: new Map(), notice: "The changes could not be read." };
   if (!diff.ok) return { rows: [], labels: {}, edits: new Map(), notice: clean(diff.notice) };
   const files = parseDiff(clean(diff.text).replace(/\t/g, "  "));
-  const edits = stitch(files, detectMoves(files));
+  const edits = stitch(files);
   if (edits.length === 0) return { rows: [], labels: {}, edits: new Map(), notice: "No changes against main." };
   const rows: RailRow[] = [];
   const labels: Record<string, string> = {};
