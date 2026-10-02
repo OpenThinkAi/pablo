@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "bun:test";
 import type { Adapter } from "@openthink/pablo-core";
-import { adapterAsk, applyRefute, critiqueBranch, critiquePath, loadCritique } from "../src/critique";
+import { adapterAsk, applyRefute, critiqueBranch, critiqueModel, critiquePath, loadCritique } from "../src/critique";
 import type { Ask } from "../src/critique";
 import { allowedTools, harnessTools } from "../src/harness/tools";
-import { critiqueModel, VERBS } from "../src/verbs";
+import { VERBS } from "../src/verbs";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const dirs: string[] = [];

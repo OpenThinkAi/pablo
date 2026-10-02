@@ -61,6 +61,9 @@ export type Ask = (prompt: string) => Promise<string>;
 /** One model call may take this long before it is abandoned, so a hung endpoint is a named failure, not a silent freeze. */
 export const ASK_TIMEOUT_MS = 300_000;
 
+/** The model the critic asks. Real runs use the planner role (Claude); this is a test-only injection point, so no test calls a real model. */
+export const critiqueModel: { ask?: Ask } = {};
+
 /** An `Ask` over any adapter (the planner's), collecting the streamed tokens. */
 export function adapterAsk(adapter: Adapter, timeoutMs: number = ASK_TIMEOUT_MS): Ask {
   return async (prompt) => {
@@ -93,6 +96,7 @@ function defang(text: string): string {
       from.push(i);
     }
   });
+  // matchAll always sets `index`, and `from` is co-indexed with `view` (one entry per character pushed), so both lookups are in range.
   for (const m of view.matchAll(FENCE_TAG)) chars[from[m.index!]!] = "‹";
   return chars.join("");
 }

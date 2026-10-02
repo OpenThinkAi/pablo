@@ -63,8 +63,7 @@ import { createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
 import { waitingForReview } from "./branch";
 import { checkWork } from "./check";
-import { adapterAsk, critiqueBranch } from "./critique";
-import type { Ask } from "./critique";
+import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
 import { mergeDraftInProject } from "./novel/merge";
@@ -306,9 +305,6 @@ const CRITIQUE_ARGS = z.object({
   project: projectField,
   branch: z.string().describe('A change branch to critique, e.g. "draft/ch03" or "revise/ch02-tighten": its changes against main.'),
 });
-
-/** The model the critic asks. Real runs use the planner role (Claude); this is a test-only injection point, so no test calls a real model. */
-export const critiqueModel: { ask?: Ask } = {};
 
 /**
  * AGT-1564: continuity, timeline and voice comments on a branch's changes, each re-checked by a refute call; only
