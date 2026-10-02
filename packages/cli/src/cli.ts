@@ -18,6 +18,7 @@ import { parseArgs } from "node:util";
 import { bookStages } from "./book";
 import { runCheck } from "./check";
 import { migrateLines } from "./migrate";
+import { mergeDraftInProject } from "./novel/merge";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
@@ -49,6 +50,7 @@ const P0_VERBS = [
   "save",
   "check",
   "migrate",
+  "merge",
   "publish",
   "mcp",
   "voice",
@@ -97,6 +99,10 @@ function helpText(): string {
     "  pablo migrate lines --project <slug> [--dry-run]",
     "                                            one-time split of chapters/*.md to one",
     "                                            sentence per line, committed on its own",
+    "  pablo merge --project <slug> <draft/chNN>",
+    "                                            merge a reviewed draft branch to main, then run",
+    "                                            the after-write steps (outline, note, README,",
+    "                                            continuity, commit, think sync)",
     "  pablo publish --project <slug> --target draft",
     "                                            compile every chapter into one markdown file",
     "                                            under <work>/.pablo/out/ (frontmatter stripped,",
@@ -794,6 +800,28 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       if (outcome.notice) console.log(outcome.notice);
     }
     return EXIT_OK;
+  }
+
+  if (args.verb === "merge") {
+    const [branch] = args.rest;
+    if (projectPath === undefined || branch === undefined) {
+      const message = "pablo: usage: pablo merge --project <slug> <draft/chNN>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const outcome = await mergeDraftInProject(projectPath, branch);
+    if (args.json) {
+      console.log(JSON.stringify(outcome.body));
+    } else if (outcome.body["ok"] === true) {
+      console.log(`pablo: merged ${branch} to main (${String(outcome.body["commit"]).slice(0, 7)})`);
+      for (const r of outcome.body["rituals"] as { name: string; status: string; detail: string }[]) {
+        console.log(`ritual ${r.name}: ${r.status} — ${r.detail}`);
+      }
+      for (const n of outcome.body["notices"] as string[]) console.log(n);
+    } else {
+      console.error(outcome.body["message"]);
+    }
+    return outcome.exitCode;
   }
 
   if (args.verb === "publish") {

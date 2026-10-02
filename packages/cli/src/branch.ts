@@ -51,6 +51,25 @@ export function pabloHome(env: Env = process.env): string {
   return env["PABLO_HOME"] || join(homedir(), ".cache", "pablo");
 }
 
+/** The git work tree root containing `dir`, or undefined when `dir` is not inside a git repository. */
+export function repoRoot(dir: string): string | undefined {
+  try {
+    return git(dir, ["rev-parse", "--show-toplevel"]).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** True when `branch` exists as a local branch of `repo`. */
+export function branchExists(repo: string, branch: string): boolean {
+  try {
+    git(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** `<pabloHome>/worktrees/<slug>/<branch>` — the branch's worktree directory. */
 export function worktreePath(slug: string, branch: string, env: Env = process.env): string {
   return join(pabloHome(env), "worktrees", slug, branch);

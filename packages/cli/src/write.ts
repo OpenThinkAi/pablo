@@ -4,12 +4,15 @@
  * See the design doc's `The write pipeline` section
  * (`pm project show ai-terminal`) — this file now
  * covers every step: check, pack, dry-run OR send, normalize, write, and the
- * post-write mechanical-tells check. `save`'s ritual commit (AGT-1231) is a
- * separate concern and does not happen here.
+ * post-write mechanical-tells check. The chapter is committed on its own
+ * `draft/chNN` branch in a worktree, never on `main` (AGT-1536); the
+ * after-write steps (outline, note, README, continuity, git, think sync) run
+ * when that branch is merged (`novel/merge.ts`), not here. `save`'s ritual
+ * commit (AGT-1231) is a separate concern and does not happen here.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
 import {
   createProviders,
   DEFAULT_MIN_SCENES,
@@ -25,12 +28,13 @@ import {
   withReceipts,
 } from "@openthink/pablo-core";
 import type { Adapter, CompletionStats, Intent } from "@openthink/pablo-core";
+import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./branch";
 import { checkFile, loadCheckRules } from "./check";
 import type { Hit } from "./check";
 import { readMarker } from "./marker";
 import { buildChapterPack, DEFAULT_WORD_TARGET } from "./novel/pack";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
-import { runRituals } from "./novel/rituals";
+import { runQueueRitual } from "./novel/rituals";
 import type { Ritual } from "./novel/rituals";
 import { mintPieceId } from "./review";
 
@@ -70,18 +74,12 @@ export interface RunWriteDeps {
   readonly now?: (() => Date) | undefined;
   /** Overrides where streaming progress is written. Defaults to `process.stderr`. */
   readonly stderr?: ProgressSink | undefined;
-  /** Overrides `process.env` for the after-write git/think rituals (AGT-1231) — tests set PATH here to keep `think` off it. */
+  /** Overrides `process.env` for the branch worktree location (`PABLO_HOME`) and the review queue's state directory. */
   readonly env?: Record<string, string | undefined> | undefined;
-  /** Overrides the after-write `think sync` ritual's timeout (default 20s). */
-  readonly thinkTimeoutMs?: number | undefined;
-  /** Overrides the after-write continuity extraction ritual's 120s ceiling (AGT-1232). */
-  readonly continuityTimeoutMs?: number | undefined;
 }
 
 /** The intent a drafting pack routes under — see `providers/registry.ts`'s `route`. */
 const DRAFT_INTENT: Intent = { name: "draft", kind: "drafting" };
-/** The intent the continuity ritual's extraction call routes under (AGT-1232) — `extraction` routes local, same as drafting. */
-const CONTINUITY_INTENT: Intent = { name: "continuity", kind: "extraction" };
 
 /**
  * The temperature a chapter draft is sampled at when neither `--temperature`
@@ -187,6 +185,22 @@ function buildFrontmatter(fields: FrontmatterFields): string {
   ].join("\n");
 }
 
+/** The branch a draft was committed on: its name, worktree and commit. */
+interface DraftBranch {
+  readonly name: string;
+  readonly worktree: string;
+  readonly sha: string;
+}
+
+/** `draft/chNN`, or the first free `draft/chNN-vK` when that branch already exists (a re-draft). */
+function draftBranchName(repo: string, chapter: number): string {
+  const base = `draft/ch${String(chapter).padStart(2, "0")}`;
+  if (!branchExists(repo, base)) return base;
+  for (let v = 2; ; v += 1) {
+    if (!branchExists(repo, `${base}-v${v}`)) return `${base}-v${v}`;
+  }
+}
+
 /** One line per `pablo check` hit, in the exact format `check.ts`'s `runCheck` prints. */
 function formatHitLine(hit: Hit): string {
   const detail = hit.detail !== undefined ? ` (${hit.detail})` : "";
@@ -217,12 +231,13 @@ function emitWriteSuccess(
   hits: readonly Hit[],
   rituals: readonly Ritual[],
   piece: string,
+  branch: DraftBranch,
 ): void {
   if (json) {
-    console.log(JSON.stringify({ ok: true, path, receipt, check: hits, rituals, piece }));
+    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, rituals, piece }));
     return;
   }
-  console.log(`wrote ${path} (${receipt.words} words)`);
+  console.log(`wrote ${path} (${receipt.words} words) on branch ${branch.name}`);
   const writeMs = receipt.wallMs - receipt.timeToFirstTokenMs;
   console.log(
     `read ${receipt.tokensRead} tokens in ${seconds(receipt.timeToFirstTokenMs)}s, ` +
@@ -343,6 +358,27 @@ export async function runWrite(
     return 2;
   }
 
+  // The chapter is committed on its own branch, never on main (AGT-1536). The
+  // branch and worktree are made before the model is called so a project that
+  // is not a git repository refuses up front rather than after the draw.
+  const repo = repoRoot(projectPath);
+  if (repo === undefined) {
+    emitError(`pablo: write needs ${projectPath} inside a git repository (the draft is committed on draft/ch${String(chapter).padStart(2, "0")})`, undefined, 2, args.json);
+    return 2;
+  }
+  const env = deps.env ?? process.env;
+  const branchName = draftBranchName(repo, chapter);
+  const created = createBranch(repo, markerResult.marker.slug, branchName, env);
+  if (!created.ok) {
+    emitError(created.notice, undefined, 1, args.json);
+    return 1;
+  }
+  const worktree = created.path as string;
+  // A draw that produces nothing leaves no branch behind.
+  const discardBranch = (): void => {
+    deleteBranch(repo, markerResult.marker.slug, branchName, { force: true, env });
+  };
+
   const config = loadConfig();
   const providers = createProviders(config);
   const providerId = providers.route(DRAFT_INTENT);
@@ -360,15 +396,6 @@ export async function runWrite(
   // call per process), so no additional serialization is needed here.
   const draftAdapter = deps.adapter ?? providers.adapter(providerId);
   const wrapped = withReceipts(draftAdapter, fileReceiptSink(projectPath), { pack, intent: "draft" });
-
-  // AGT-1232: the same routing `providerId` used, but under the `continuity`
-  // intent — an explicit `intents` mapping in config can send it somewhere
-  // else, but `route`'s default (kind !== "planning" -> local) puts it on the
-  // same local writer unless configured otherwise. Tests that inject
-  // `deps.adapter` get the same fake object here too, so a fake implementing
-  // `extractFactsWithAnchors` exercises the real continuity ritual without
-  // touching the network.
-  const extractor = deps.adapter ?? providers.adapter(providers.route(CONTINUITY_INTENT));
 
   const stderr = deps.stderr ?? process.stderr;
   const now = deps.now ?? (() => new Date());
@@ -409,6 +436,7 @@ export async function runWrite(
     }
   } catch (error) {
     stderr.write("\n");
+    discardBranch();
     if (error instanceof EndpointHung || error instanceof ProviderResponseError || error instanceof ProviderConfigError) {
       emitError(error.message, undefined, 2, args.json);
       return 2;
@@ -420,6 +448,7 @@ export async function runWrite(
 
   const normalized = normalizeOutput(text);
   if (normalized === "" || stats === undefined) {
+    discardBranch();
     emitError("pablo: the model returned an empty answer; nothing written", undefined, 2, args.json);
     return 2;
   }
@@ -440,8 +469,11 @@ export async function runWrite(
   // One sentence per line on disk (AGT-1531); the model only ever sees paragraphs.
   const fileContent = `${frontmatter}\n\n${splitManuscript(normalized)}\n`;
 
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, fileContent, "utf8");
+  // The project's path inside the repo, so the file lands at the same place in the worktree.
+  const projectInRepo = relative(realpathSync(repo), realpathSync(projectPath));
+  const worktreeFile = join(worktree, projectInRepo, "chapters", fileName);
+  mkdirSync(dirname(worktreeFile), { recursive: true });
+  writeFileSync(worktreeFile, fileContent, "utf8");
 
   const hits = checkFile(normalized, workRelativePath, loadCheckRules(vaultRoot));
 
@@ -457,32 +489,41 @@ export async function runWrite(
     ...(seed === undefined ? {} : { seed }),
   };
 
-  // AGT-1231: outline tick, dated note, README update, git commit, think
-  // sync — the same clock as the frontmatter's `generated` timestamp, so
-  // "today" agrees with what was just written. AGT-1262: the piece id is
-  // minted here, before `runRituals`, so it reaches the JSON/human output
-  // (AC4) even if the `queue` ritual itself fails to append.
-  const writeMs = receipt.wallMs - receipt.timeToFirstTokenMs;
-  const receiptLine = `read ${receipt.tokensRead} tokens in ${seconds(receipt.timeToFirstTokenMs)}s, wrote ${receipt.tokensWritten} in ${seconds(writeMs)}s`;
-  const pieceId = mintPieceId(now(), markerResult.marker.slug);
-  const rituals = await runRituals(projectPath, chapter, filePath, {
-    slug: markerResult.marker.slug,
-    words: wordCount,
-    model: draftAdapter.model,
-    receiptLine,
-    now,
-    env: deps.env,
-    thinkTimeoutMs: deps.thinkTimeoutMs,
-    extractor,
-    continuityTimeoutMs: deps.continuityTimeoutMs,
-    queue: {
-      id: pieceId,
-      title: packResult.inputs.beat.title,
-      vault: vaultRoot,
-      promptHash: pack.hash,
-    },
+  // The draft is committed as the model that wrote it, with the prompt hash as
+  // its receipt. The after-write steps (outline tick, note, README,
+  // continuity, think sync) are not run here: they run when the branch is
+  // merged (`novel/merge.ts`). AGT-1262: the piece id is minted here so it
+  // reaches the output even if the queue append fails; the queue event names
+  // the path the chapter will have on main.
+  const committed = commitAs(worktree, {
+    message: `${markerResult.marker.slug}: draft chapter ${chapter}`,
+    author: { name: draftAdapter.model, email: `${slugify(draftAdapter.model) || "model"}@pablo.local` },
+    receipt: pack.hash,
+    paths: [join(projectInRepo, "chapters", fileName)],
   });
+  if (!committed.ok) {
+    emitError(`${committed.notice}\n  the draft is in ${worktree}, uncommitted`, undefined, 1, args.json);
+    return 1;
+  }
+  const branch: DraftBranch = { name: branchName, worktree, sha: committed.sha as string };
 
-  emitWriteSuccess(args.json, workRelativePath, receipt, hits, rituals, pieceId);
+  const pieceId = mintPieceId(now(), markerResult.marker.slug);
+  const rituals = [
+    runQueueRitual(
+      filePath,
+      chapter,
+      {
+        id: pieceId,
+        slug: markerResult.marker.slug,
+        words: wordCount,
+        title: packResult.inputs.beat.title,
+        vault: vaultRoot,
+        promptHash: pack.hash,
+      },
+      { env: deps.env, now },
+    ),
+  ];
+
+  emitWriteSuccess(args.json, workRelativePath, receipt, hits, rituals, pieceId, branch);
   return 0;
 }

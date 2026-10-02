@@ -1,24 +1,23 @@
 /**
- * `runRituals` (AGT-1231, AGT-1232): the things every rules file already
+ * `runAfterMerge` (AGT-1231, AGT-1232; moved to the merge path by AGT-1536):
+ * the things every rules file already
  * asked the model to do after a chapter draft and that never actually
  * happened — tick the outline, drop a dated note, update the README's
  * "Where things stand" section, extract continuity facts, commit exactly the
  * touched paths, and `think sync`. See the design doc's stage table
  * (`pm project show ai-terminal`, the
- * `chapter N` row's "After" column) and `packages/cli/src/write.ts`
- * (AGT-1237), which calls this once the chapter file is on disk and merges
- * the result into the write response as `rituals`.
+ * `chapter N` row's "After" column). `write` no longer calls this: a draft
+ * is committed on `draft/chNN` and reviewed first, so these steps run when
+ * the draft is merged to `main` (`novel/merge.ts`'s `mergeDraft`). Only the
+ * review-queue append (`runQueueRitual`) still happens at write time.
  *
  * Every ritual is independent and wrapped so nothing it does can throw out
- * of `runRituals` or undo the chapter write that already landed — a failure
+ * of `runAfterMerge` or undo the chapter write that already landed — a failure
  * anywhere here is a `Ritual` with `status: "failed"`, not an exception. The
- * seven run in a fixed order: outline, note, readme, continuity, git, queue,
- * think. Continuity runs before git so `continuity.md` can be included in
+ * six run in a fixed order: outline, note, readme, continuity, git, think.
+ * Continuity runs before git so `continuity.md` can be included in
  * the same commit — but only when it actually changed (AGT-1232's
- * `runContinuity` doc comment). `queue` (AGT-1262) runs after `git` so the
- * chapter file is already committed by the time the piece is queued for
- * review, and before `think` so a queue failure is never masked by a slower
- * `think sync` outcome.
+ * `runContinuity` doc comment).
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -61,20 +60,17 @@ export interface RitualOptions {
   readonly extractor?: Adapter | undefined;
   /** Overrides the continuity extraction ritual's 120s ceiling. */
   readonly continuityTimeoutMs?: number | undefined;
-  /**
-   * AGT-1262: what the `queue` ritual needs to append this chapter's
-   * `queued` event — `write.ts` already has every one of these fields
-   * (`packResult.inputs.beat.title`, `vaultRoot`, `pack.hash`) before it
-   * calls `runRituals`, so they are passed in rather than re-derived here.
-   * `id` is `write.ts`'s own `mintPieceId(...)` call, minted before
-   * `runRituals` runs so it is available for the JSON `piece` field even
-   * when the queue append itself fails.
-   */
-  readonly queue: QueueRitualInput;
 }
 
-/** `RitualOptions.queue` — the fields the `queue` ritual needs beyond `opts.slug` (the project) and `opts.words`. */
+/**
+ * What the `queue` ritual (AGT-1262) needs to append a chapter's `queued`
+ * event. `write.ts` has every field before it commits the draft; `id` is its
+ * own `mintPieceId(...)`, minted first so it reaches the JSON `piece` field
+ * even when the queue append itself fails.
+ */
 export interface QueueRitualInput {
+  readonly slug: string;
+  readonly words: number;
   readonly id: string;
   readonly title: string;
   readonly vault: string;
@@ -98,7 +94,7 @@ function firstLine(text: string): string {
   return line ?? text.trim();
 }
 
-/** Runs `fn`, catching anything it throws into a `"failed"` ritual — the guarantee nothing escapes `runRituals`. */
+/** Runs `fn`, catching anything it throws into a `"failed"` ritual — the guarantee nothing escapes `runAfterMerge`. */
 function attempt(name: string, fn: () => Ritual): Ritual {
   try {
     return fn();
@@ -325,7 +321,7 @@ function runGit(workDir: string, candidatePaths: readonly string[], message: str
  * caller passed an explicit `env` — that literal path exists on this dev
  * machine regardless of what `PATH` a test injects, so honoring it
  * unconditionally would make a "think not on PATH" test actually shell out
- * to the real `think` and write to the real cortex. `runRituals` computes
+ * to the real `think` and write to the real cortex. `runAfterMerge` computes
  * this from whether `opts.env` is `undefined`, before defaulting it.
  */
 async function runThink(
@@ -371,42 +367,53 @@ async function runThink(
 }
 
 /**
- * Appends a `queued` event (AGT-1262) for the chapter file `write.ts` just
- * wrote and committed, to `stateReviewPath(env)` (the one global queue —
- * never vault-relative, see `paths.ts`'s `stateReviewPath`). Text-free:
- * `QueuedEvent` carries no manuscript content, only id/kind/title/path and
- * the bookkeeping fields (`review-no-text.test.ts` enforces this on the type
- * itself). `appendEvent` throws on a write failure (an unwritable state
- * directory); `attempt()` in `runRituals` turns that into a `"failed"`
- * ritual, never an exception out of this function.
- *
- * `env` is `runRituals`'s already-defaulted `opts.env ?? process.env` (the
- * same resolved value `runThink` takes below), not `opts.env` itself — a
- * second `opts.env ?? process.env` here would be a second place to keep in
- * sync with `runRituals`'s own defaulting.
+ * Appends a `queued` event (AGT-1262) to `stateReviewPath(env)` (the one
+ * global queue — never vault-relative, see `paths.ts`'s `stateReviewPath`).
+ * Text-free: `QueuedEvent` carries no manuscript content, only
+ * id/kind/title/path and the bookkeeping fields (`review-no-text.test.ts`
+ * enforces this on the type itself). `appendEvent` throws on a write failure
+ * (an unwritable state directory); `runQueueRitual` turns that into a
+ * `"failed"` ritual.
  */
-function runQueue(
+function appendQueued(
   env: Record<string, string | undefined>,
   chapterPath: string,
   chapter: number,
-  opts: RitualOptions,
+  opts: QueueRitualInput,
   now: () => Date,
 ): Ritual {
   const event: QueuedEvent = {
     type: "queued",
-    id: opts.queue.id,
+    id: opts.id,
     at: now().toISOString(),
     kind: "chapter",
-    title: opts.queue.title,
+    title: opts.title,
     path: chapterPath,
-    vault: opts.queue.vault,
+    vault: opts.vault,
     project: opts.slug,
     words: opts.words,
-    prompt_hash: opts.queue.promptHash,
+    prompt_hash: opts.promptHash,
   };
 
   appendEvent(stateReviewPath(env), event);
-  return { name: "queue", status: "ran", detail: `queued ${opts.queue.id} (chapter ${chapter})` };
+  return { name: "queue", status: "ran", detail: `queued ${opts.id} (chapter ${chapter})` };
+}
+
+/**
+ * The review-queue append, run at write time (the draft's branch is what gets
+ * reviewed). `chapterPath` is the path the chapter will have on `main` once
+ * merged, so `reviewStateFor` finds the piece by the same path `save` uses.
+ * Never throws: a failure is a `"failed"` ritual.
+ */
+export function runQueueRitual(
+  chapterPath: string,
+  chapter: number,
+  input: QueueRitualInput,
+  opts: { readonly env?: Record<string, string | undefined> | undefined; readonly now?: (() => Date) | undefined } = {},
+): Ritual {
+  const now = opts.now ?? (() => new Date());
+  const env = opts.env ?? process.env;
+  return attempt("queue", () => appendQueued(env, chapterPath, chapter, input, now));
 }
 
 /**
@@ -421,15 +428,14 @@ function stripFrontmatter(text: string): string {
 }
 
 /**
- * Runs the seven after-write rituals, in order: outline, note, readme,
- * continuity, git, queue, think. `workDir` is the project directory (e.g.
+ * Runs the six after-merge rituals, in order: outline, note, readme,
+ * continuity, git, think. `workDir` is the project directory (e.g.
  * `<vault>/novels/<slug>`); `chapterPath` is the absolute path to the
- * chapter file `write.ts` just wrote. Always resolves to exactly seven
- * `Ritual`s, never throws, and is called only on the live write path — never
- * on `--dry-run`, never after a refusal (both return before this would be
- * reached).
+ * chapter file `write.ts` just wrote. Always resolves to exactly six
+ * `Ritual`s and never throws. Called by `mergeDraft` once a draft is on `main`;
+ * `write` never calls it. `workDir` and `chapterPath` are the merged tree's.
  */
-export async function runRituals(workDir: string, chapter: number, chapterPath: string, opts: RitualOptions): Promise<Ritual[]> {
+export async function runAfterMerge(workDir: string, chapter: number, chapterPath: string, opts: RitualOptions): Promise<Ritual[]> {
   const now = opts.now ?? (() => new Date());
   // Captured before defaulting `env` — see `runThink`'s doc comment on `allowNvmFallback`.
   const allowNvmFallback = opts.env === undefined;
@@ -446,7 +452,7 @@ export async function runRituals(workDir: string, chapter: number, chapterPath: 
 
   // Reading the chapter file happens inside the wrapper too — a read failure
   // (the file `write.ts` just wrote should always exist, but nothing here
-  // should be able to throw out of `runRituals`) becomes a "failed" ritual,
+  // should be able to throw out of `runAfterMerge`) becomes a "failed" ritual,
   // same as any other continuity failure.
   const continuity = await attemptAsync("continuity", () => {
     const chapterBody = stripFrontmatter(readFileSync(chapterPath, "utf8"));
@@ -458,9 +464,7 @@ export async function runRituals(workDir: string, chapter: number, chapterPath: 
   if (continuity.status === "ran") gitPaths.push("continuity.md");
   const git = attempt("git", () => runGit(workDir, gitPaths, `${opts.slug}: draft chapter ${chapter}`));
 
-  const queue = attempt("queue", () => runQueue(env, chapterPath, chapter, opts, now));
-
   const think = await attemptAsync("think", () => runThink(chapter, opts.words, opts.slug, env, thinkTimeoutMs, allowNvmFallback));
 
-  return [outline, note, readme, continuity, git, queue, think];
+  return [outline, note, readme, continuity, git, think];
 }

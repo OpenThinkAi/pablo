@@ -231,7 +231,7 @@ function factsSummaryText(facts: readonly ExtractedFact[]): string {
  * extraction call is raced against `timeoutMs` (default 120s); a throw or a
  * timeout is `"failed"` with a notice (AC3) and still writes an error
  * receipt, same as any other failed model call — the chapter write and the
- * other rituals stand regardless (this never throws out of `runRituals`).
+ * other rituals stand regardless (this never throws out of `runAfterMerge`).
  * A successful call that places nothing new (no facts, or every fact already
  * present) is `"skipped"`; otherwise `"ran"`, `continuity.md` updated,
  * receipted with `intent: "continuity"`.

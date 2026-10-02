@@ -7,6 +7,7 @@ import type { Adapter, CompletionEvent, CompletionStats, ExtractedFact } from "@
 import { NoToolCallError } from "@openthink/pablo-core";
 import type { RunWriteDeps, WriteArgs } from "../src/write";
 import { runWrite } from "../src/write";
+import { mergeDraft } from "../src/novel/merge";
 import { applyFacts, runContinuity } from "../src/novel/continuity";
 
 /**
@@ -19,7 +20,7 @@ import { applyFacts, runContinuity } from "../src/novel/continuity";
  */
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 
-/** Same pattern as `write-send.test.ts`'s `RITUAL_ENV`: `git` resolves, `think` never does. */
+/** Same pattern as `write-send.test.ts`'s `ritualEnv`: `git` resolves, `think` never does. */
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
 /**
  * AGT-1262: `runWrite`'s `queue` ritual now appends unconditionally to
@@ -29,7 +30,10 @@ const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/
  * file (no test here reads it back), removed once every test has run.
  */
 const STATE_HOME = mkdtempSync(join(tmpdir(), "pablo-continuity-state-"));
-const RITUAL_ENV: RunWriteDeps["env"] = { PATH: NO_THINK_PATH, XDG_STATE_HOME: STATE_HOME };
+/** `write` commits on a worktree under `$PABLO_HOME`; each vault gets its own, next to it. */
+function ritualEnv(vault: string): Record<string, string> {
+  return { PATH: NO_THINK_PATH, XDG_STATE_HOME: STATE_HOME, PABLO_HOME: join(vault, "..", "pablo-home") };
+}
 
 afterAll(() => {
   rmSync(STATE_HOME, { recursive: true, force: true });
@@ -47,7 +51,7 @@ function tempGitVault(): { vault: string; project: string } {
   const dir = mkdtempSync(join(tmpdir(), "pablo-continuity-test-"));
   const vault = join(dir, "vault");
   cpSync(FIXTURE_VAULT, vault, { recursive: true });
-  runGit(vault, ["init", "-q"]);
+  runGit(vault, ["init", "-q", "-b", "main"]);
   runGit(vault, ["config", "user.email", "pablo-test@example.com"]);
   runGit(vault, ["config", "user.name", "Pablo Test"]);
   runGit(vault, ["add", "."]);
@@ -117,6 +121,27 @@ function fakeAdapter(options: FakeAdapterOptions): Adapter {
 
 function baseArgs(overrides: Partial<WriteArgs> = {}): WriteArgs {
   return { chapter: "2", words: undefined, scenes: undefined, dryRun: false, json: true, force: false, ...overrides };
+}
+
+/**
+ * The after-write steps run when the draft is merged (AGT-1536): writes
+ * chapter 2 onto `draft/ch02`, merges it with `mergeDraft` (the fake adapter
+ * is the extractor, as `runWrite` once did), and returns the write's stdout
+ * with `rituals` replaced by the merge path's.
+ */
+async function writeAndMerge(vault: string, project: string, deps: RunWriteDeps, continuityTimeoutMs?: number) {
+  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  if (outcome.result !== 0) return outcome;
+  const body = JSON.parse(outcome.lines[0] as string);
+  const merged = await mergeDraft(project, body.branch, {
+    slug: "ice-house",
+    env: deps.env,
+    now: deps.now,
+    extractor: deps.adapter,
+    continuityTimeoutMs: continuityTimeoutMs,
+  });
+  if (!merged.ok) throw new Error(merged.notice);
+  return { result: outcome.result, lines: [JSON.stringify({ ...body, rituals: merged.rituals })] };
 }
 
 /** Captures `console.log` output during `fn`, restoring it afterward even on throw. */
@@ -275,10 +300,10 @@ test("a fake adapter with extractFactsWithAnchors: continuity ritual ran, contin
   const deps: RunWriteDeps = {
     adapter: fakeAdapter({ extractFactsWithAnchors: async () => facts }),
     now: () => new Date("2026-09-06T12:00:00.000Z"),
-    env: RITUAL_ENV,
+    env: ritualEnv(vault),
   };
 
-  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  const outcome = await writeAndMerge(vault, project, deps);
   expect(outcome.result).toBe(0);
   const body = JSON.parse(outcome.lines[0] as string);
   const continuity = (body.rituals as Array<{ name: string; status: string; detail: string }>).find(
@@ -306,9 +331,9 @@ test("a fake adapter WITHOUT extractFactsWithAnchors: continuity ritual is skipp
   const { vault, project } = tempGitVault();
   const before = readFileSync(join(project, "continuity.md"), "utf8");
 
-  const deps: RunWriteDeps = { adapter: fakeAdapter({}), env: RITUAL_ENV };
+  const deps: RunWriteDeps = { adapter: fakeAdapter({}), env: ritualEnv(vault) };
 
-  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  const outcome = await writeAndMerge(vault, project, deps);
   expect(outcome.result).toBe(0);
   const body = JSON.parse(outcome.lines[0] as string);
   const continuity = (body.rituals as Array<{ name: string; status: string; detail: string }>).find(
@@ -332,10 +357,10 @@ test("a fake adapter whose extractFactsWithAnchors throws: continuity ritual fai
         throw new Error("extraction endpoint refused the request");
       },
     }),
-    env: RITUAL_ENV,
+    env: ritualEnv(vault),
   };
 
-  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  const outcome = await writeAndMerge(vault, project, deps);
   expect(outcome.result).toBe(0);
   const body = JSON.parse(outcome.lines[0] as string);
   const rituals = body.rituals as Array<{ name: string; status: string; detail: string }>;
@@ -363,11 +388,10 @@ test("a fake adapter whose extractFactsWithAnchors never resolves: a short injec
     adapter: fakeAdapter({
       extractFactsWithAnchors: () => new Promise(() => {}),
     }),
-    env: RITUAL_ENV,
-    continuityTimeoutMs: 150,
+    env: ritualEnv(vault),
   };
 
-  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  const outcome = await writeAndMerge(vault, project, deps, 150);
   expect(outcome.result).toBe(0);
   const body = JSON.parse(outcome.lines[0] as string);
   const continuity = (body.rituals as Array<{ name: string; status: string; detail: string }>).find(
@@ -406,10 +430,10 @@ test("an empty assistant message (no tool call) retries as plain text: ritual ra
         ];
       },
     }),
-    env: RITUAL_ENV,
+    env: ritualEnv(vault),
   };
 
-  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  const outcome = await writeAndMerge(vault, project, deps);
   expect(outcome.result).toBe(0);
   const body = JSON.parse(outcome.lines[0] as string);
   const continuity = (body.rituals as Array<{ name: string; status: string; detail: string }>).find(
@@ -439,10 +463,10 @@ test("when the plain-text retry also gets nothing, the ritual fails with the too
       },
       extractFacts: async () => [],
     }),
-    env: RITUAL_ENV,
+    env: ritualEnv(vault),
   };
 
-  const outcome = await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  const outcome = await writeAndMerge(vault, project, deps);
   const body = JSON.parse(outcome.lines[0] as string);
   const continuity = (body.rituals as Array<{ name: string; status: string; detail: string }>).find(
     (r) => r.name === "continuity",
@@ -470,10 +494,10 @@ test("an error that is not a missing tool call does not trigger the plain-text r
         return ["x"];
       },
     }),
-    env: RITUAL_ENV,
+    env: ritualEnv(vault),
   };
 
-  await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
+  await writeAndMerge(vault, project, deps);
   expect(retried).toBe(false);
 
   rmSync(vault, { recursive: true, force: true });
