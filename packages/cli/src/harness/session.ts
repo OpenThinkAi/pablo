@@ -58,10 +58,12 @@ export interface HarnessSpec {
    * `.pablo/sessions/`. Absent, the session is ephemeral and nothing is kept.
    */
   readonly session?: SessionChoice;
+  /** Tools built for this session (plan-branch tools), attached after `tools`. */
+  readonly sessionTools?: readonly McpToolSpec[];
 }
 
 export function harnessOptions(spec: HarnessSpec): Options {
-  const tools = spec.tools ?? harnessTools(spec.ask);
+  const tools = [...(spec.tools ?? harnessTools(spec.ask)), ...(spec.sessionTools ?? [])];
   const options: Options = {
     systemPrompt: harnessSystemPrompt(spec.work),
     tools: [...BUILTIN_TOOLS],
