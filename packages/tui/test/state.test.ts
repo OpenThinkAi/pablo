@@ -62,6 +62,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "compose.open": { type: "compose.open" }, "compose.close": { type: "compose.close" }, "compose.type": { type: "compose.type", text: "hi" }, "compose.backspace": { type: "compose.backspace" },
     "compose.submit": { type: "compose.submit" }, "compose.event": { type: "compose.event", event: { kind: "assistant", text: "hello" } },
     "compose.add": { type: "compose.add", entry: { kind: "question", id: "q1", question: "Which way?" } }, "compose.failed": { type: "compose.failed", message: "no" }, "compose.done": { type: "compose.done" },
+    "compose.pick": { type: "compose.pick" }, "compose.pick_move": { type: "compose.pick_move", by: 1 }, "compose.open_branch": { type: "compose.open_branch" },
     "compose.up": { type: "compose.up" }, "compose.down": { type: "compose.down" }, "compose.page_up": { type: "compose.page_up" }, "compose.page_down": { type: "compose.page_down" },
     "select.down": { type: "select.down" }, "select.up": { type: "select.up" }, "select.clear": { type: "select.clear" },
     escape: { type: "escape" }, measured: { type: "measured", measure: { rail: 4, main: 4, content: { visible: 2, lines: 3 } } },
