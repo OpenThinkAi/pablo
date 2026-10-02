@@ -58,6 +58,10 @@ test("every action type has a case: each applies to the initial state and to a l
     "review.open": { type: "review.open", branch: "draft/ch02" }, "review.close": { type: "review.close" }, "review.mark": { type: "review.mark", mark: "accepted" },
     "settings.open": { type: "settings.open", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.set": { type: "settings.set", settings: openSettings(DEFAULT_KEYMAP, "", "/tmp/none.json") }, "settings.close": { type: "settings.close" },
     "write.start": { type: "write.start", chapter: 2 }, "write.progress": { type: "write.progress", line: "x" }, "write.done": { type: "write.done", branch: "draft/ch02", lines: ["ok"] }, "write.failed": { type: "write.failed", message: "no", missing: ["a"] },
+    "compose.open": { type: "compose.open" }, "compose.close": { type: "compose.close" }, "compose.type": { type: "compose.type", text: "hi" }, "compose.backspace": { type: "compose.backspace" },
+    "compose.submit": { type: "compose.submit" }, "compose.event": { type: "compose.event", event: { kind: "assistant", text: "hello" } },
+    "compose.add": { type: "compose.add", entry: { kind: "question", id: "q1", question: "Which way?" } }, "compose.failed": { type: "compose.failed", message: "no" }, "compose.done": { type: "compose.done" },
+    "compose.up": { type: "compose.up" }, "compose.down": { type: "compose.down" }, "compose.page_up": { type: "compose.page_up" }, "compose.page_down": { type: "compose.page_down" },
     escape: { type: "escape" }, measured: { type: "measured", measure: { rail: 4, main: 4, content: { visible: 2, lines: 3 } } },
   };
   for (const a of Object.values(every)) {

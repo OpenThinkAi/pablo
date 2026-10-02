@@ -13,7 +13,7 @@
  * yet").
  */
 
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
 import { branchDiff, repoRoot, waitingBranches } from "./branch";
@@ -23,7 +23,13 @@ import { mergeDraftInProject } from "./novel/merge";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
 import { readMarker } from "./marker";
+import type { Composer } from "@openthink/pablo-tui";
+import { loadConfig } from "@openthink/pablo-core";
 import { runAgent } from "./harness/agent";
+import { harnessAuth } from "./harness/auth";
+import { createComposer } from "./harness/compose";
+import { loadPromptWork } from "./harness/prompt";
+import type { HarnessSpec } from "./harness/session";
 import { runMcp } from "./mcp";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
@@ -625,6 +631,28 @@ export function bareScreenTarget(cwd: string): { title: string; format: string; 
   }
 }
 
+/**
+ * The compose view's session spec for the project at `dir` (AGT-1566): the same inputs `pablo agent` builds, so the
+ * two run the same agent: the marker, the work's judgement policy and its QWEN.md (`loadPromptWork`), the config's
+ * credential. Throws with the refusal's message; the composer calls it on the first message, so a refusal (an unknown
+ * policy, no credential) shows in the conversation, not before the screen opens. pablo's tools run in this process;
+ * their progress goes nowhere (stderr would draw over the screen).
+ */
+export function composeSpec(dir: string, cwd: string, env: Record<string, string | undefined> = process.env): HarnessSpec {
+  const marker = readMarker(dir);
+  if (!marker.ok) throw new Error(marker.message);
+  const work = loadPromptWork(dir, marker.marker, basename(dir));
+  if (!work.ok) throw new Error(work.message);
+  return {
+    work: work.work,
+    projectPath: dir,
+    auth: harnessAuth(loadConfig({ env }), env),
+    ctx: { cwd, env, stderr: { write: () => {} }, caller: "mcp" },
+  };
+}
+
+const screenComposer = (dir: string, cwd: string): Composer => createComposer(() => composeSpec(dir, cwd));
+
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
 export async function main(argv: readonly string[], cwd: string = process.cwd()): Promise<number> {
   const args = parseCliArgs(argv);
@@ -649,6 +677,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         ...(vault.ok ? { checks: screenChecks(vault.path) } : {}),
         // `a w` writes the selected chapter through the same `runWrite` the verb uses (AGT-1542).
         ...(vault.ok ? { writer: screenWriter(vault.path, screen.dir) } : {}),
+        // The compose view's session is built when the first message is sent (AGT-1566).
+        composer: screenComposer(screen.dir, cwd),
         ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch) } : {}),
       });
     }

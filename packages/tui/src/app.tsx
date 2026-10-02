@@ -26,6 +26,8 @@ import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow } from "./review";
 import type { Writer } from "./screen";
+import { composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
+import { ComposeView } from "./compose-view";
 import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, shownRows, viewOf, type Mark, type RailRow, type State } from "./state";
 
 export interface AppProps {
@@ -61,6 +63,8 @@ export interface AppProps {
   readonly editor?: string;
   /** The config file the settings screen saves to. Tests pass a temporary one. */
   readonly configFile?: string;
+  /** The harness session the compose view talks to (`a c`); absent, the view opens and says there is none. */
+  readonly composer?: Composer;
   /** A command a key caused (`ai.plan`, ...); `quit` and `settings` are handled here and never reach it. */
   readonly onCommand?: (command: Command) => void;
   /** Tests pass a fixed size; the real screen measures the terminal. */
@@ -75,7 +79,7 @@ const NO_HITS: readonly CheckHit[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, composer }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -84,6 +88,12 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const editor = state.saved ? state.saved.editor : givenEditor;
   const layout = layoutOf(size.cols, size.rows, { zen: state.zen, full: state.full });
   useInput((input, key) => {
+    // In the compose view keys are text; only the arrows, Enter and Esc mean anything else.
+    if (state.mode.kind === "compose") {
+      const action = composeAction(input, key);
+      if (action) dispatch(action);
+      return;
+    }
     const token = tokenOf(input, key);
     if (state.mode.kind === "settings" && state.settings) {
       // The settings screen takes every key itself (a binding being captured must not also act); Esc asks to save.
@@ -162,6 +172,33 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   useEffect(() => {
     dispatch({ type: "measured", measure: measureOf(layout, contentBody) });
   }, [layout.railRows, layout.mainRows, layout.contentRows, layout.contentInner, contentBody]);
+  const compLayout = composeLayout(size.cols, size.rows);
+  const entries = state.compose.entries;
+  useEffect(() => {
+    dispatch({ type: "measured", measure: composeMeasure(compLayout, entries) });
+  }, [compLayout.rows, compLayout.inner, entries]);
+  // One message, one effect: `sendSeq` changes only when the author sends. The stream is read to its end whatever
+  // view is open, so leaving the compose view mid-reply loses nothing; closing the screen stops it.
+  const { sendSeq, outbox } = state.compose;
+  useEffect(() => {
+    if (outbox === null) return;
+    let live = true;
+    void (async () => {
+      try {
+        if (!composer) throw new Error("pablo isn't connected to this screen");
+        for await (const event of composer.send(outbox)) if (live) dispatch({ type: "compose.event", event });
+        if (live) dispatch({ type: "compose.done" });
+      } catch (error) {
+        if (live) dispatch({ type: "compose.failed", message: (error as Error).message });
+      }
+    })();
+    return () => { live = false; };
+  }, [sendSeq]);
+  // An answer to a question card goes to the session that asked; the turn's own stream carries on from it.
+  const { replySeq, reply } = state.compose;
+  useEffect(() => {
+    if (reply !== null) composer?.answer?.(reply.id, reply.text);
+  }, [replySeq]);
 
   if (tooSmall(size)) {
     return (
@@ -174,7 +211,8 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   if (state.mode.kind === "settings" && state.settings) return <SettingsScreen s={state.settings} cols={size.cols} rows={size.rows} />;
 
   const view = viewOf(state);
-  const where = `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}` : "book"} · ${state.focus}`;
+  const working = state.compose.busy ? ` · pablo: ${clean(state.compose.activity) || "working"}` : "";
+  const where = state.mode.kind === "compose" ? `compose · Esc back to the book${working}` : `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}` : "book"} · ${state.focus}${working}`;
   const pending = pendingText(state.pending);
   const shownComments = hits.length ? { ...comments, check: hits.length } : comments;
   const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments: shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}) }), size.cols - 4);
@@ -192,17 +230,18 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
           ))}
         </Text>
       </Box>
-      {layout.full ? null : (
+      {state.mode.kind === "compose" ? <ComposeView compose={state.compose} size={size} /> : null}
+      {state.mode.kind === "compose" || layout.full ? null : (
         <Box height={layout.middleH}>
           {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} marks={state.marks} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
           <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />
         </Box>
       )}
-      <Box height={layout.bottomH}>
+      {state.mode.kind === "compose" ? null : <Box height={layout.bottomH}>
         <Content layout={layout} state={state} />
         <KeyPanel state={state} width={layout.panelW} height={layout.bottomH} keymap={keymap} />
-      </Box>
+      </Box>}
       <Box height={1} paddingX={1}>
         <Text dimColor wrap="truncate">{`${where}${pending ? ` · ${pending}` : ""}`}</Text>
       </Box>

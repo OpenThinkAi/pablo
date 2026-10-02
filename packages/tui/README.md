@@ -14,6 +14,8 @@ src/key-panel.tsx  the key panel as a component the layout places
 src/key-config.ts  `keys` in ~/.config/pablo/config.json, laid over the defaults
 src/settings.ts  the settings screen's rules (`\`): capture a key, refuse a conflict, type the editor command, save the config
 src/settings-view.tsx  the settings screen as a component
+src/compose.ts   the compose view's pure parts: the `Composer` seam, the conversation as lines, geometry, its keys
+src/compose-view.tsx  the compose view as a component (full screen)
 src/app.tsx      the Ink root: reads the state, draws it, dispatches actions from keys
 src/screen.tsx   mounts the app in the alternate screen and restores the terminal
 src/layout.ts    the layout geometry, pure: region sizes at a terminal size, text wrapping, the `measured` payload
@@ -52,6 +54,24 @@ moves over them like any line; the cursor can rest on them. `→` on a hit's lin
 in the content area (`hitDetail`); `g f` / `g F` jump to the next / previous box, wrapping. Those keys are commands the
 app handles itself (`check.open`, `check.next`, `check.prev`) and use the model's existing `main.goto`, so the model
 gained no action. `comment-box.ts` knows nothing about checks: review mode's critic comments reuse it.
+
+## The compose view
+
+`a c` opens the compose view (AGT-1566, the harness's front end: `pm project show ai-terminal --doc harness`): the
+whole screen under the status area is the conversation with pablo, an activity line and an input box. Typing fills the
+input (`q` and the prefixes are text here), Enter sends, the arrows and PgUp/PgDn scroll back, Esc returns to the mode
+it was opened from. The conversation is state (`compose` in `state.ts`: entries, input, busy, activity, session id), so
+leaving the view loses nothing: a reply still streaming in lands in it, the footer says pablo is working, and `a c`
+comes back to it.
+
+The session itself is behind a seam. This package does not depend on the Agent SDK; `runScreen({ composer })` takes a
+`Composer` (`compose.ts`): `send(message)` yields `ComposeEvent`s up to the turn's result, `close()` ends the session.
+The cli builds it (`packages/cli/src/harness/compose.ts`, one SDK query fed by a streaming prompt). Tests hand the screen
+a fake Composer; nothing starts Claude. Entries are data (`ComposeEntry`): an author line, pablo's text, a tool call
+with its result, an error, and the `question` card for `ask_author` (AGT-1560). The card arrives as a `question`
+event, is drawn in place, and the author's next line answers it (a number picks an option): the model hands the answer
+to `Composer.answer`, and the turn's stream carries on. A new entry kind is a variant and a case in `composeLines`;
+`compose.add` appends one from outside the stream.
 
 ## The state model
 

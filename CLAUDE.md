@@ -77,9 +77,14 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `plan/` branch through `record-fact.ts`'s writer, never a chapter.
                 `ask_author` (AGT-1560) is the exception: it needs a
                 front end, so a session gets it only when its spec carries an
-                `AskAuthor` (`pablo agent` reads answers from stdin). Tests
+                `AskAuthor` (`pablo agent` reads answers from stdin; the compose
+                view shows a question card). Tests
                 inject a fake `HarnessQuery`; nothing
-                in `bun test` starts Claude. Any new dependency the CLI needs
+                in `bun test` starts Claude. The screen's compose view
+                (`a c`, AGT-1566) talks to the harness through a `Composer`
+                seam the cli passes to `runScreen` (`harness/compose.ts`, a
+                streaming-prompt session); the tui never imports the SDK.
+                Any new dependency the CLI needs
                 goes here; core stays dependency-free.
 ```
 
