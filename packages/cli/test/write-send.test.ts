@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent, CompletionRequest, CompletionStats } from "@openthink/pablo-core";
-import { EndpointHung, normalizeOutput } from "@openthink/pablo-core";
+import { EndpointHung, normalizeOutput, splitManuscript } from "@openthink/pablo-core";
 import { readEvents } from "../src/review";
 import type { QueuedEvent } from "../src/review";
 import type { ProgressSink, RunWriteDeps, WriteArgs } from "../src/write";
@@ -198,8 +198,10 @@ test("runWrite sends, normalizes, and writes the chapter file with a fake adapte
   expect(fileText).toContain("generated: 2026-09-06T12:00:00.000Z");
   expect(fileText).toContain(`prompt_hash: ${dryRunBody.prompt_hash}`);
 
+  // AGT-1531: saved one sentence per line.
   const expectedNormalized = normalizeOutput(RAW_TEXT);
-  expect(fileText).toContain(expectedNormalized);
+  expect(fileText).toContain(splitManuscript(expectedNormalized));
+  expect(fileText).toContain("sharp and sudden.\n\"Come in,\"");
   expect(fileText).not.toContain("—"); // no em-dash
   expect(fileText).not.toMatch(/[“”‘’]/); // no curly quotes
 
@@ -447,4 +449,34 @@ test("write refuses a temperature outside 0 to 2 and a non-integer seed before s
     expect(sent.result).toBe(2);
     expect(requests).toHaveLength(0);
   }
+});
+
+test("write saves one sentence per line, paragraphs blank-line separated, and the model is sent no splits (AGT-1531)", async () => {
+  const { vault, project } = tempVault();
+  const base = fakeAdapter({
+    chunks: ["The storm came up. It did not stop.\n\n", "Odile waited. Then she opened the door."],
+  });
+  const prompts: string[] = [];
+  const adapter: Adapter = {
+    ...base,
+    async *complete(request) {
+      prompts.push(request.prompt);
+      yield* base.complete(request);
+    },
+  };
+
+  const run = await captureStdout(() =>
+    runWrite(baseArgs(), vault, project, { adapter, env: RITUAL_ENV, stderr: progressSink().sink }),
+  );
+  expect(run.result).toBe(0);
+
+  const fileText = readFileSync(join(project, "chapters", "02-black-ice.md"), "utf8");
+  const body = fileText.slice(fileText.indexOf("\n---\n") + 5).trim();
+  expect(body).toBe(
+    ["The storm came up.", "It did not stop.", "", "Odile waited.", "Then she opened the door."].join("\n"),
+  );
+
+  // One send, and the pack side is pinned by pack-prose-revise.test.ts.
+  expect(prompts).toHaveLength(1);
+  rmSync(vault, { recursive: true, force: true });
 });

@@ -34,6 +34,7 @@ import {
   fileReceiptSink,
   loadConfig,
   normalizeOutput,
+  splitManuscript,
   packTimeoutMs,
   ProviderConfigError,
   ProviderResponseError,
@@ -764,7 +765,7 @@ async function sendProse(
       promptHash: pack.hash,
       beforeAppend: () => {
         mkdirSync(dirname(draftPath), { recursive: true });
-        writeFileSync(draftPath, `${draftFrontmatter}\n\n${normalized}\n`, "utf8");
+        writeFileSync(draftPath, `${draftFrontmatter}\n\n${splitManuscript(normalized)}\n`, "utf8");
       },
     });
 
@@ -790,7 +791,7 @@ async function sendProse(
     words,
   });
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, `${frontmatter}\n\n${normalized}\n`, "utf8");
+  writeFileSync(outPath, `${frontmatter}\n\n${splitManuscript(normalized)}\n`, "utf8");
 
   // Committed by pathspec from the file's own directory, so this works
   // anywhere inside a working tree without knowing the repo root (the pattern

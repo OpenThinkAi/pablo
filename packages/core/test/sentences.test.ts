@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { joinParagraphs, joinSentences, splitSentences } from "../src/index";
+import { joinManuscript, joinParagraphs, joinSentences, splitManuscript, splitSentences } from "../src/index";
 
 /**
  * The fiction sentence splitter (AGT-1530). Every fixture below is invented
@@ -404,5 +404,25 @@ describe("joinParagraphs (AGT-1532)", () => {
 
   test("is empty for blank text", () => {
     expect(joinParagraphs("\n  \n")).toBe("");
+  });
+});
+
+describe("splitManuscript / joinManuscript (AGT-1531)", () => {
+  const paragraphs = 'Mara ran. She did not look back.\n\n"Wait!" Tom called. Nobody did.';
+  const lines = 'Mara ran.\nShe did not look back.\n\n"Wait!" Tom called.\nNobody did.';
+
+  test("one sentence per line, one blank line between paragraphs", () => {
+    expect(splitManuscript(paragraphs)).toBe(lines);
+  });
+
+  test("join is the inverse", () => {
+    expect(joinManuscript(lines)).toBe(paragraphs);
+    expect(joinManuscript(paragraphs)).toBe(paragraphs);
+  });
+
+  test("structured blocks pass through untouched", () => {
+    const md = "## Heading\n\n- a. B.\n- c. D.";
+    expect(splitManuscript(md)).toBe(md);
+    expect(joinManuscript(md)).toBe(md);
   });
 });

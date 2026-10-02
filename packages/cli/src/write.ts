@@ -21,6 +21,7 @@ import {
   ProviderConfigError,
   ProviderResponseError,
   renderPack,
+  splitManuscript,
   withReceipts,
 } from "@openthink/pablo-core";
 import type { Adapter, CompletionStats, Intent } from "@openthink/pablo-core";
@@ -436,7 +437,8 @@ export async function runWrite(
     generated,
     promptHash: pack.hash,
   });
-  const fileContent = `${frontmatter}\n\n${normalized}\n`;
+  // One sentence per line on disk (AGT-1531); the model only ever sees paragraphs.
+  const fileContent = `${frontmatter}\n\n${splitManuscript(normalized)}\n`;
 
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, fileContent, "utf8");
