@@ -24,8 +24,10 @@ import type { KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { readMarker } from "../marker";
 import { findVault, resolveProject } from "../project";
 import type { ProgressSink, VerbContext } from "../verbs";
+import { startPlanSession } from "../plan";
 import { lineReader, stdinAskAuthor } from "./ask-author";
 import { harnessAuth } from "./auth";
+import { planTools } from "./plan-tools";
 import type { HarnessAuth } from "./auth";
 import { loadPromptWork } from "./prompt";
 import { chooseSession } from "./sessions";
@@ -107,6 +109,8 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
     ctx: verbCtx,
     // The card goes where the transcript goes; with --json stdout is one object, so it goes to stderr.
     ...(ctx.stdin === undefined ? {} : { ask: stdinAskAuthor(lineReader(ctx.stdin), args.json ? ctx.stderr : ctx.stdout) }),
+    // One plan branch per session; it exists only once a planning tool writes.
+    sessionTools: planTools(startPlanSession(vault.path, args.project, { env: ctx.env }), project.path),
   };
 
   const entries: TranscriptEntry[] = [];
