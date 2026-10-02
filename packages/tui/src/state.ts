@@ -32,7 +32,7 @@ export interface Rail { readonly rows: readonly RailRow[]; readonly collapsed: R
 export interface View { readonly rail: Rail; readonly main: Pane }
 
 /** What the content area shows: a planner turn, a receipt, a beat, a refusal's missing reasons. */
-export interface Content { readonly title: string; readonly body: string }
+export interface Content { readonly title: string; readonly body: string; /** Which feature put it up, so that feature can take it down again (`missing`: a stage's unmet reasons). */ readonly kind?: string }
 /** A prefix waiting for its second key; `digits` while a number is typed after it (`g 12`). */
 export interface Pending { readonly prefix: string; readonly digits?: string }
 
@@ -57,7 +57,7 @@ export interface Measure { readonly rail?: number; readonly main?: number; reado
 
 export type Action =
   // ---- the rail: the moves skip a folded group's rows; → unfolds, steps into, or enters the main pane; ← folds or steps out
-  | { type: "rail.loaded"; rows: readonly RailRow[] }
+  | { type: "rail.loaded"; rows: readonly RailRow[]; folded?: readonly string[] }
   | { type: "rail.down" } | { type: "rail.up" }
   | { type: "rail.next_group" } | { type: "rail.prev_group" }
   | { type: "rail.expand" } | { type: "rail.collapse" }
@@ -164,7 +164,8 @@ function reduceRail(rail: Rail, a: Action): Rail {
       // The same row, if it is still there, else the row at the same place: a reload after a write keeps the author's spot.
       // Folds are kept for the groups that remain; a spot now inside a fold goes up to the folded group.
       const same = row ? a.rows.findIndex((r) => r.id === row.id) : -1;
-      const kept = new Set([...rail.collapsed].filter((id) => a.rows.some((r) => r.id === id && r.group)));
+      // `folded` names the groups that start folded: honoured on the first load, when the rail had no rows yet.
+      const kept = new Set(rail.rows.length === 0 ? (a.folded ?? []) : [...rail.collapsed].filter((id) => a.rows.some((r) => r.id === id && r.group)));
       const loaded: Rail = { ...rail, rows: a.rows, collapsed: kept };
       let index = clamp(same >= 0 ? same : rail.cursor, 0, Math.max(0, a.rows.length - 1));
       const visible = new Set(shownRows(loaded).map((r) => r.index));

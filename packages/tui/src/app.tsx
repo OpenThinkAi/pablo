@@ -13,6 +13,7 @@ import { Box, Text, useApp, useInput } from "ink";
 import { tooSmall, useTerminalSize, MIN_COLS, MIN_ROWS } from "./resize";
 import type { Size } from "./resize";
 import { resolve, tokenOf } from "./chord";
+import { missingContent, type BookRail } from "./book";
 import { KeyPanel } from "./key-panel";
 import { DEFAULT_KEYMAP, keyStateOf, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
@@ -32,6 +33,8 @@ export interface AppProps {
   /** The rail's rows and their labels (an id with no label shows as itself). */
   readonly rows?: readonly RailRow[];
   readonly labels?: Readonly<Record<string, string>>;
+  /** Book mode's stages laid out (book.ts): rows, labels and the missing reasons; overrides `rows`/`labels` when given. */
+  readonly book?: BookRail;
   /** The main pane's heading and its document, one sentence per line. */
   readonly mainTitle?: string;
   readonly lines?: readonly string[];
@@ -48,7 +51,7 @@ const NO_LINES: readonly string[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, rows = NO_ROWS, labels = {}, mainTitle = "", lines = NO_LINES, size: override, keymap = DEFAULT_KEYMAP, onCommand }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows = book?.rows ?? NO_ROWS, labels = book?.labels ?? {}, mainTitle = "", lines = NO_LINES, size: override, keymap = DEFAULT_KEYMAP, onCommand }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -65,7 +68,14 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const layout = layoutOf(size.cols, size.rows, { zen: state.zen, full: state.full });
   const contentBody = state.content ? clean(state.content.body) : null;
   // What was loaded and what the layout measured reach the model as actions; neither is state of this component.
-  useEffect(() => { dispatch({ type: "rail.loaded", rows }); }, [rows]);
+  useEffect(() => { dispatch({ type: "rail.loaded", rows, ...(book ? { folded: book.folded } : {}) }); }, [rows]);
+  // A stage that is not ready says why in the content area while the cursor is on it, and takes it down when it leaves.
+  const stageId = state.mode.kind === "book" ? viewOf(state).rail.rows[viewOf(state).rail.cursor]?.id : undefined;
+  const reasons = stageId === undefined ? undefined : book?.missing[stageId];
+  useEffect(() => {
+    if (reasons) dispatch({ type: "content.show", content: missingContent(labels[stageId!]?.replace(/^\S+ /, "") ?? stageId!, reasons) });
+    else if (state.content?.kind === "missing") dispatch({ type: "content.close" });
+  }, [stageId, reasons]);
   useEffect(() => { dispatch({ type: "main.loaded", lines: lines.length }); }, [lines]);
   useEffect(() => {
     dispatch({ type: "measured", measure: measureOf(layout, contentBody) });
