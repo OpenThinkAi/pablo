@@ -10,7 +10,7 @@
 import { parseDiff } from "@openthink/pablo-core";
 import { clean } from "./sanitize";
 import { stitch, type Edit, type EditLine, type Seg } from "./stitch";
-import type { CommentKind } from "./status";
+import { commentBox } from "./comment-box";
 import { BRANCH_ROW, type RailRow } from "./state";
 
 /** What the CLI hands over for a branch: git's diff of it against `main`, or why there is none. */
@@ -30,26 +30,47 @@ export function branchRows(branches: readonly string[]): { rows: RailRow[]; labe
   return { rows, labels };
 }
 
+/** Where a comment came from: the critic (AGT-1564), a reader (a pulled GitHub review) or the author (Matt's own). */
+export type CommentSource = "critic" | "reader" | "author";
+/** A reader's or the author's tag: a thing to fix, or a thing to keep (so praise never reads like a to-do). */
+export type CommentTag = "fix" | "keep";
+
 /**
- * A critic comment (the CLI's `critique` tool, AGT-1564) as review mode needs it: the file and line it is on, what
- * kind it is and what it says. `file` is the diff's path (relative to the repo), `line` counts in the new text.
- * A structural type, so this package never imports the CLI.
+ * A comment as review mode needs it, whatever its source: the CLI's comment store entry (`.pablo/comments/<branch>.json`,
+ * AGT-1580) or a critic survivor mapped to this shape. A structural type, so this package never imports the CLI.
+ * `path` is the diff's path (relative to the repo) and `line` counts in the new text; `startLine` makes it a span.
+ * No `line` is a file-level comment; `review: true` is the whole review's summary (its `path` is then not read).
+ * `label` is an extra word for the box's header (the critic's kind: continuity, timeline, tells).
  */
 export interface ReviewComment {
-  readonly file: string;
-  readonly line: number;
-  readonly kind: CommentKind;
-  readonly claim: string;
+  readonly source: CommentSource;
+  readonly tag?: CommentTag;
+  readonly path: string;
+  readonly line?: number;
+  readonly startLine?: number;
+  readonly review?: true;
+  readonly author: string;
+  readonly body: string;
+  readonly label?: string;
 }
+
+const SOURCES: readonly CommentSource[] = ["critic", "reader", "author"];
+
+/** What the status area counts a comment under: its source, then its tag (`critic`, `reader fix`, `author keep`). */
+export const countKey = (c: ReviewComment): string => (c.tag ? `${c.source} ${c.tag}` : c.source);
 
 export interface Review {
   readonly rows: readonly RailRow[];
   readonly labels: Readonly<Record<string, string>>;
   readonly edits: ReadonlyMap<string, Edit>;
-  /** The critic's comments by the edit (`edit:<n>`) whose changed lines they are on. */
+  /** Line comments by the edit (`edit:<n>`) whose changed lines they are on, in the order given. */
   readonly comments: ReadonlyMap<string, readonly ReviewComment[]>;
-  /** The comments' counts by kind, for the status area. */
-  readonly counts: Readonly<Partial<Record<CommentKind, number>>>;
+  /** Comments shown at the top of a file's changes: the file-level ones, and line comments on no edit's lines. By path. */
+  readonly fileComments: ReadonlyMap<string, readonly ReviewComment[]>;
+  /** The whole-review summaries, shown at the top of every pane of the review. */
+  readonly summary: readonly ReviewComment[];
+  /** Every comment's count by source and tag (`countKey`), sources in the order critic, reader, author; for the status area. */
+  readonly counts: Readonly<Record<string, number>>;
   /** What the main pane says when there is nothing to show: no changes, or git's reason for none. */
   readonly notice?: string;
 }
@@ -68,7 +89,8 @@ function labelOf(e: Edit): string {
 
 /** The review of a branch's diff: the diff text is cleaned of control characters before it is parsed, tabs widened. */
 export function loadReview(diff: BranchDiff | undefined, comments: readonly ReviewComment[] = []): Review {
-  const none = { rows: [], labels: {}, edits: new Map(), comments: new Map(), counts: {} };
+  const summary = comments.filter((c) => c.review);
+  const none = { rows: [], labels: {}, edits: new Map(), comments: new Map(), fileComments: new Map(), summary, counts: countComments(comments) };
   if (!diff) return { ...none, notice: "The changes could not be read." };
   if (!diff.ok) return { ...none, notice: clean(diff.notice) };
   const files = parseDiff(clean(diff.text).replace(/\t/g, "  "));
@@ -87,16 +109,26 @@ export function loadReview(diff: BranchDiff | undefined, comments: readonly Revi
       byId.set(e.id, e);
     }
   }
-  // A comment belongs to the edit whose added lines include its line; one on no edit's lines is not shown.
+  // A line comment belongs to the edit whose added lines include its line (a span: its last line). One on no edit's
+  // lines, and a file-level one, show at the top of the file's changes, so no comment is ever hidden.
   const placed = new Map<string, ReviewComment[]>();
-  const counts: Partial<Record<CommentKind, number>> = {};
+  const perFile = new Map<string, ReviewComment[]>();
+  const push = (m: Map<string, ReviewComment[]>, k: string, c: ReviewComment) => m.set(k, [...(m.get(k) ?? []), c]);
   for (const c of comments) {
-    const e = edits.find((x) => x.path === c.file && x.kind !== "remove" && c.line >= x.line && c.line < x.line + Math.max(1, x.added));
-    if (!e) continue;
-    placed.set(e.id, [...(placed.get(e.id) ?? []), c]);
-    counts[c.kind] = (counts[c.kind] ?? 0) + 1;
+    if (c.review) continue;
+    const at = c.line;
+    const e = at === undefined ? undefined : edits.find((x) => x.path === c.path && x.kind !== "remove" && at >= x.line && at < x.line + Math.max(1, x.added));
+    if (e) push(placed, e.id, c);
+    else push(perFile, c.path, c);
   }
-  return { rows, labels, edits: byId, comments: placed, counts };
+  return { rows, labels, edits: byId, comments: placed, fileComments: perFile, summary, counts: countComments(comments) };
+}
+
+/** Counts by source and tag, sources in a fixed order so the status line does not shuffle. */
+function countComments(comments: readonly ReviewComment[]): Record<string, number> {
+  const n = new Map<string, number>();
+  for (const c of [...comments].sort((a, b) => SOURCES.indexOf(a.source) - SOURCES.indexOf(b.source))) n.set(countKey(c), (n.get(countKey(c)) ?? 0) + 1);
+  return Object.fromEntries(n);
 }
 
 /** A line of the main pane: a sign column and the words, wrapped to the pane (`cont` rows continue the one above). */
@@ -133,31 +165,32 @@ export function wrapLine(row: EditLine, width: number): DiffRow[] {
 /** The main pane's lines for the edit under the rail's cursor (a file's group row has none of its own). */
 export function reviewLines(review: Review, rowId: string | undefined, width: number): { title: string; rows: DiffRow[] } {
   const edit = rowId === undefined ? undefined : review.edits.get(rowId);
+  const path = edit ? edit.path : rowId?.startsWith("file:") ? rowId.slice(5) : undefined;
+  // The review's summary and the file's own comments come first, whichever change is under the cursor.
+  const top = [...review.summary, ...(path === undefined ? [] : review.fileComments.get(path) ?? [])].flatMap((c) => commentRows(c, width));
   if (!edit) {
-    const notice = review.notice ?? (rowId?.startsWith("file:") ? "Open a change under this file." : "");
-    return { title: rowId?.startsWith("file:") ? rowId.slice(5) : "changes", rows: notice ? wrapLine({ sign: " ", segs: [{ text: notice, hl: false }] }, width) : [] };
+    const notice = review.notice ?? (path !== undefined ? (top.length > 0 ? "" : "Open a change under this file.") : "");
+    return { title: path ?? "changes", rows: [...top, ...(notice ? wrapLine({ sign: " ", segs: [{ text: notice, hl: false }] }, width) : [])] };
   }
   const where = edit.kind === "move" && edit.from ? `moved from ${edit.from.path}:${edit.from.line} to line ${edit.line}` : `line ${edit.line} · ${edit.kind}`;
-  const rows: DiffRow[] = edit.rows.flatMap((r) => wrapLine(r, width));
+  const rows: DiffRow[] = [...top, ...edit.rows.flatMap((r) => wrapLine(r, width))];
   for (const c of review.comments.get(edit.id) ?? []) rows.push(...commentRows(c, width));
   return { title: `${edit.path} · ${where}`, rows };
 }
 
-const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, Math.max(0, n - 1)).join("")}…`);
+/** Where a comment is, for its box's header: `review`, `file`, `line 3` or `lines 3-5`. */
+function whereOf(c: ReviewComment): string {
+  if (c.review) return "review";
+  if (c.line === undefined) return "file";
+  return c.startLine !== undefined && c.startLine < c.line ? `lines ${c.startLine}-${c.line}` : `line ${c.line}`;
+}
 
 /**
- * A comment as a box under its edit, in three plain rows (a top border carrying the kind and line, the claim wrapped
- * onto as many rows as it needs, a bottom border) so the pane scrolls over them like any other row. Text is cleaned:
- * a comment is a model's words.
+ * A comment as a box, from any source, through the one box component (comment-box.ts): the top border carries the
+ * source, the tag, the critic's kind and where it is, the author dimmed after it; the body wraps onto as many rows as it
+ * needs; rows are plain so the pane scrolls over them like any other. Text is cleaned: a comment is someone's words.
  */
 export function commentRows(c: ReviewComment, width: number): DiffRow[] {
-  const w = Math.max(8, width);
-  const row = (text: string): DiffRow => ({ sign: " ", segs: [{ text, hl: false }], box: true });
-  const head = cut(`▲ ${c.kind} · line ${c.line}`, w - 5);
-  const body = wrapLine({ sign: " ", segs: [{ text: clean(c.claim).replace(/\s+/g, " ").trim(), hl: false }] }, w - 4);
-  return [
-    row(`╭ ${head} ${"─".repeat(Math.max(0, w - [...head].length - 4))}╮`),
-    ...body.map((b) => row(`│ ${b.segs.map((s) => s.text).join("").padEnd(w - 4)} │`)),
-    row(`╰${"─".repeat(w - 2)}╯`),
-  ];
+  const title = ["▲", c.source, ...(c.tag ? [c.tag] : [])].join(" ") + ` · ${c.label ? `${c.label} · ` : ""}${whereOf(c)}`;
+  return commentBox({ title, tag: c.author, body: c.body }, Math.max(8, width), { maxLines: Infinity }).map((b) => ({ sign: " ", segs: [{ text: b.text, hl: false }], box: true as const }));
 }

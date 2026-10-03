@@ -216,37 +216,62 @@ test("a failed finish stays in the review with the reason", async () => {
   expect(frame).toContain("review draft/ch03");
 });
 
+const critic = (path: string, line: number, label: string, body: string): ReviewComment => ({ source: "critic", path, line, author: "critic", body, label });
 const COMMENTS: ReviewComment[] = [
-  { file: "chapters/03-the-well.md", line: 3, kind: "continuity", claim: "Edwin died in chapter 1; he cannot sit at the table.\x1b[2J" },
-  { file: "chapters/03-the-well.md", line: 22, kind: "tells", claim: "stock intensifier" },
-  { file: "chapters/03-the-well.md", line: 15, kind: "timeline", claim: "on no edit's lines" },
-  { file: "chapters/09-else.md", line: 3, kind: "tells", claim: "other file" },
+  critic("chapters/03-the-well.md", 3, "continuity", "Edwin died in chapter 1; he cannot sit at the table.\x1b[2J"),
+  critic("chapters/03-the-well.md", 22, "tells", "stock intensifier"),
+  { source: "reader", tag: "fix", path: "chapters/03-the-well.md", line: 15, author: "atara", body: "on no edit's lines" },
+  { source: "reader", tag: "keep", path: "chapters/03-the-well.md", startLine: 2, line: 3, author: "atara", body: "I like the kettle." },
+  { source: "author", path: "chapters/03-the-well.md", author: "matt", body: "whole file: tighten" },
+  { source: "reader", review: true, path: "", author: "atara", body: "Loved it overall." },
+  { source: "reader", tag: "fix", path: "chapters/09-else.md", line: 3, author: "atara", body: "other file" },
 ];
+const text = (rows: readonly { segs: readonly { text: string }[] }[]) => rows.map((x) => x.segs.map((s) => s.text).join("")).join("\n");
 
-test("critic comments attach to the edit whose added lines they are on, with counts by kind (AGT-1564)", () => {
+test("line comments from any source attach to the edit whose added lines they are on, counted by source and tag", () => {
   const r = loadReview({ ok: true, text: DIFF }, COMMENTS);
   expect([...r.comments.keys()]).toEqual(["edit:0", "edit:1"]);
-  expect(r.counts).toEqual({ continuity: 1, tells: 1 });
+  expect(r.counts).toEqual({ critic: 2, "reader fix": 2, "reader keep": 1, author: 1, reader: 1 });
   const rows = reviewLines(r, "edit:0", 50).rows;
   const boxes = rows.filter((x) => x.box).map((x) => x.segs.map((s) => s.text).join(""));
-  expect(boxes[0]).toStartWith("╭ ▲ continuity · line 3");
-  expect(boxes.join("\n")).toContain("Edwin died in chapter 1");
-  expect(boxes.join("\n")).not.toContain("\x1b");
+  const shown = boxes.join("\n");
+  expect(shown).toContain("╭ ▲ critic · continuity · line 3");
+  expect(shown).toContain("╭ ▲ reader keep · lines 2-3");
+  expect(shown).toContain("atara");
+  expect(shown).toContain("Edwin died in chapter 1");
+  expect(shown).not.toContain("\x1b");
   expect(boxes.at(-1)).toStartWith("╰");
-  // The diff rows come first, the box after them.
-  expect(rows.findIndex((x) => x.box)).toBe(rows.filter((x) => !x.box).length);
+  // The review summary and the file's comments come first, then the diff rows, then the line boxes under them.
+  expect(shown.indexOf("▲ reader · review")).toBeLessThan(shown.indexOf("▲ critic"));
+  const firstDiff = rows.findIndex((x) => !x.box);
+  expect(rows.slice(0, firstDiff).map((x) => x.segs[0]!.text).join("\n")).toContain("Loved it overall.");
+  expect(rows.slice(0, firstDiff).map((x) => x.segs[0]!.text).join("\n")).toContain("▲ author · file");
+  expect(rows.slice(0, firstDiff).map((x) => x.segs[0]!.text).join("\n")).toContain("▲ reader fix · line 15");
+  expect(rows.slice(firstDiff).findIndex((x) => x.box)).toBe(rows.slice(firstDiff).filter((x) => !x.box).length);
   expect(reviewLines(loadReview({ ok: true, text: DIFF }), "edit:0", 50).rows.some((x) => x.box)).toBe(false);
 });
 
-test("commentRows: every row is the same width, and a long claim wraps inside the box", () => {
-  const rows = commentRows({ file: "a.md", line: 4, kind: "timeline", claim: "word ".repeat(30) }, 30).map((x) => x.segs[0]!.text);
+test("a line comment, a file-level comment and the review summary each render; the summary is on every pane, a file's comments on its group row", () => {
+  const r = loadReview({ ok: true, text: DIFF }, COMMENTS);
+  const group = text(reviewLines(r, "file:chapters/03-the-well.md", 60).rows);
+  expect(group).toContain("▲ reader · review");
+  expect(group).toContain("▲ author · file");
+  expect(group).toContain("whole file: tighten");
+  expect(group).not.toContain("other file");
+  expect(text(reviewLines(r, "edit:1", 60).rows)).toContain("Loved it overall.");
+  expect(text(reviewLines(r, "edit:1", 60).rows)).toContain("▲ critic · tells · line 22");
+  expect(text(reviewLines(r, "file:chapters/09-else.md", 60).rows)).toContain("other file");
+});
+
+test("commentRows: every row is the same width, and a long body wraps inside the box", () => {
+  const rows = commentRows({ source: "reader", tag: "fix", path: "a.md", line: 4, author: "atara", body: "word ".repeat(30) }, 30).map((x) => x.segs[0]!.text);
   expect(rows.length).toBeGreaterThan(3);
   expect(new Set(rows.map((x) => [...x].length))).toEqual(new Set([30]));
 });
 
-test("review mode shows the saved comments as boxes under the edit, and the status counts them", async () => {
+test("review mode shows the comments as boxes, and the status counts them by source and tag", async () => {
   const app = render(
-    <App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["draft/ch03"]} diffOf={() => ({ ok: true, text: DIFF })} commentsOf={() => COMMENTS} size={{ cols: 110, rows: 32 }} />,
+    <App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["draft/ch03"]} diffOf={() => ({ ok: true, text: DIFF })} commentsOf={() => COMMENTS} size={{ cols: 200, rows: 40 }} />,
   );
   await sleep(30);
   app.stdin.write(DOWN); await sleep(20);
@@ -254,7 +279,11 @@ test("review mode shows the saved comments as boxes under the edit, and the stat
   app.stdin.write(ENTER); await sleep(40);
   app.stdin.write(DOWN); await sleep(20);
   const frame = plain(app.lastFrame());
-  expect(frame).toContain("▲ continuity · line 3");
+  expect(frame).toContain("▲ critic · continuity · line 3");
   expect(frame).toContain("Edwin died in chapter 1");
-  expect(frame).toContain("1 continuity");
+  expect(frame).toContain("Loved it overall.");
+  expect(frame).toContain("2 critic");
+  expect(frame).toContain("2 reader fix");
+  expect(frame).toContain("1 reader keep");
+  expect(frame).toContain("1 author");
 });

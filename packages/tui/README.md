@@ -80,7 +80,7 @@ mapped, not assumed). A box is three ordinary rows of the pane (`comment-box.ts`
 moves over them like any line; the cursor can rest on them. `→` on a hit's line or box opens its rule and flagged pattern
 in the content area (`hitDetail`); `g f` / `g F` jump to the next / previous box, wrapping. Those keys are commands the
 app handles itself (`check.open`, `check.next`, `check.prev`) and use the model's existing `main.goto`, so the model
-gained no action. `comment-box.ts` knows nothing about checks: review mode's critic comments reuse it.
+gained no action. `comment-box.ts` knows nothing about checks: review mode shows a comment from any source (critic, reader, author; the cli's comment store `.pablo/comments/<branch>.json`, AGT-1580) through it, the body wrapped (`maxLines`).
 
 ## The compose view
 

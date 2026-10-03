@@ -18,7 +18,7 @@ import { parseArgs } from "node:util";
 import { bookStages } from "./book";
 import { branchDiff, repoRoot, waitingBranches, waitingForReview } from "./branch";
 import { runCheck, screenChecks } from "./check";
-import { loadCritique } from "./critique";
+import { reviewCommentsOf } from "./critique";
 import { migrateLines } from "./migrate";
 import { mergeDraftInProject } from "./novel/merge";
 import { initAdopt, initNovel } from "./init";
@@ -670,7 +670,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         finisher: screenFinisher(screen.dir),
         // `v e` edits on an `edit/` branch in its own worktree; `v s` saves it through the finisher above (AGT-1545).
         editSession: screenEditor(screen.dir),
-        ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch), commentsOf: (branch: string) => loadCritique(screen.dir, branch) } : {}),
+        ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch), commentsOf: (branch: string) => reviewCommentsOf(screen.dir, branch) } : {}),
       });
     }
   }
