@@ -59,7 +59,13 @@ export interface Revise {
 }
 
 /** A row of the rail: a stage, a chapter, a change. A `group` row folds the deeper rows after it until the next row at its depth or above. */
-export interface RailRow { readonly id: string; readonly depth: number; readonly group?: boolean }
+export interface RailRow {
+  readonly id: string;
+  readonly depth: number;
+  readonly group?: boolean;
+  /** A branch waiting for review that Enter on this row opens (a chapter whose draft has no file on `main` yet). */
+  readonly opens?: string;
+}
 
 /** The lines a sentence covers, first to last (both inclusive; a wrapped sentence covers several, and two sentences may share a line). */
 export interface LineSpan { readonly first: number; readonly last: number }
@@ -541,6 +547,7 @@ export function reduce(s: State, a: Action): State {
     case "rail.open": case "rail.expand": {
       const row = railRow(view.rail);
       // A branch row in the book opens that branch as a review; the book keeps its place for when the review closes.
+      if (a.type === "rail.open" && row?.opens !== undefined && s.mode.kind === "book") return reduce(s, { type: "review.open", branch: row.opens });
       if (row && !row.group && row.id.startsWith(BRANCH_ROW)) {
         return s.mode.kind === "book" ? reduce(s, { type: "review.open", branch: row.id.slice(BRANCH_ROW.length) }) : s;
       }

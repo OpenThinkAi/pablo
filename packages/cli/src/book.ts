@@ -8,7 +8,23 @@ import type { BookStage } from "@openthink/pablo-tui";
 import { chapterPreconditions } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
 
-export function bookStages(state: NovelState): BookStage[] {
+/**
+ * The newest draft branch waiting for review for chapter `n`: `draft/chNN`, or the highest `draft/chNN-vK` (a re-draft;
+ * the bare name counts as v1). Undefined when none of `waiting` is one.
+ */
+export function waitingDraft(waiting: readonly string[], n: number): string | undefined {
+  let best: { branch: string; v: number } | undefined;
+  for (const branch of waiting) {
+    const m = /^draft\/ch0*(\d+)(?:-v(\d+))?$/.exec(branch);
+    if (!m || Number(m[1]) !== n) continue;
+    const v = m[2] === undefined ? 1 : Number(m[2]);
+    if (!best || v > best.v) best = { branch, v };
+  }
+  return best?.branch;
+}
+
+/** `waiting` is the change branches waiting for review (`waitingBranches`); a chapter with no file whose draft is among them shows as `waiting`. */
+export function bookStages(state: NovelState, waiting: readonly string[] = []): BookStage[] {
   const stages: BookStage[] = [];
   const stage = (id: string, name: string, ok: boolean, missing: string[], extra: Partial<BookStage> = {}) =>
     stages.push({ id, name, depth: 0, status: ok ? "ready" : "missing", missing: ok ? [] : missing, ...extra });
@@ -31,6 +47,11 @@ export function bookStages(state: NovelState): BookStage[] {
     const name = `${n}${file?.title ? ` ${file.title}` : ""}`;
     if (file) {
       stages.push({ id: `chapter:${n}`, name, depth: 1, status: "drafted", missing: [] });
+      continue;
+    }
+    const draft = waitingDraft(waiting, n);
+    if (draft !== undefined) {
+      stages.push({ id: `chapter:${n}`, name, depth: 1, status: "waiting", missing: [], branch: draft });
       continue;
     }
     const pre = chapterPreconditions(state, n);
