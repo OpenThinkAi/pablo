@@ -186,7 +186,10 @@ export async function finishReview(projectPath: string, branch: string, rejected
     const reverted = revertRejected(repo, opts.slug, branch, rejected, env);
     if (!reverted.ok) return reverted;
   }
-  if (branchIsEmpty(repo, branch)) {
+  // A branch with nothing to merge is discarded, except a comments-only reader review the author has commented on:
+  // it merges (an empty merge) so the notes path still runs for the chapters those comments are on (AGT-1588).
+  const commentsOnly = rejected.removed.length + rejected.added.length === 0 && authorNotes.length > 0;
+  if (branchIsEmpty(repo, branch) && !commentsOnly) {
     const removed = deleteBranch(repo, opts.slug, branch, { force: true, env });
     // A discarded branch's comments are written nowhere.
     dropComments(projectPath, branch);

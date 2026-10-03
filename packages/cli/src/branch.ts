@@ -125,6 +125,8 @@ export interface CommitOptions {
   receipt?: string;
   /** Paths relative to the worktree; default is every tracked and new file. */
   paths?: readonly string[];
+  /** Record the commit even when it changes nothing (a reader's comments-only review, AGT-1588). */
+  allowEmpty?: boolean;
 }
 
 /**
@@ -147,7 +149,7 @@ export function commitAs(worktree: string, opts: CommitOptions): BranchResult {
     return { ok: false, notice: `pablo: git add failed: ${errMessage(err)}` };
   }
   try {
-    git(worktree, ["commit", "-m", message], identity);
+    git(worktree, ["commit", ...(opts.allowEmpty ? ["--allow-empty"] : []), "-m", message], identity);
     return { ok: true, sha: git(worktree, ["rev-parse", "HEAD"]).trim() };
   } catch (err) {
     return { ok: false, notice: `pablo: git commit failed: ${errMessage(err)}` };
