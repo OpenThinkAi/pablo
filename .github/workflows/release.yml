@@ -42,6 +42,8 @@ jobs:
       - run: npm install -g bun@1.3.13
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      # Tests commit to temp git repos and rely on a configured identity, as a developer machine has.
+      - run: git config --global user.name "pablo CI" && git config --global user.email "ci@pablo.invalid"
       - run: bun test
 
   publish:

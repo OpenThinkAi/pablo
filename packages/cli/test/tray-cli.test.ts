@@ -166,7 +166,8 @@ describe("packaging and the Swift helper", () => {
     expect(existsSync(join(pkgRoot, "tray", "PabloTray.swift"))).toBe(true);
   });
 
-  const swiftc = Bun.which("swiftc");
+  // AppKit exists only on macOS: Linux CI runners can have swiftc but no AppKit to check against.
+  const swiftc = process.platform === "darwin" ? Bun.which("swiftc") : null;
   test.skipIf(swiftc === null)(
     "PabloTray.swift type-checks (compiled for checking only; the helper is never run)",
     () => {
