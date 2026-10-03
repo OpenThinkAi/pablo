@@ -33,8 +33,9 @@ import type { ReaderConfig } from "@openthink/pablo-core";
 export const READING_ORG = "OpenThinkAi";
 
 /** The only files that ever reach a reading repo: a work's chapter files, by their vault path. */
-const CHAPTER_PATH = /^(?:[A-Za-z0-9._-]+\/)*chapters\/[^/]+\.md$/;
+const CHAPTER_PATH = /^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*chapters\/[^/]+\.md$/;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const ROUND_ID = SLUG;
 const GIT_IDENTITY = ["-c", "user.name=pablo", "-c", "user.email=pablo@users.noreply.github.com", "-c", "commit.gpgsign=false"];
 
 // ---------------------------------------------------------------------------
@@ -113,7 +114,7 @@ export function roundsDir(vaultRoot: string): string {
 
 /** One round's record, or undefined when there is none (or it is unreadable). */
 export function readRound(vaultRoot: string, id: string): RoundRecord | undefined {
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) return undefined; // an id is a file name: never a path
+  if (!ROUND_ID.test(id)) return undefined; // an id is a file name: never a path
   try {
     return JSON.parse(readFileSync(join(roundsDir(vaultRoot), `${id}.json`), "utf8")) as RoundRecord;
   } catch {
@@ -206,17 +207,16 @@ export interface ShareFailure {
   /** 2 = refused (a precondition), 1 = error (git/gh failed). */
   readonly code: 1 | 2;
   readonly message: string;
-  readonly tried: readonly string[];
 }
 
 export type ShareOutcome = ShareSuccess | ShareFailure;
 
 function refuse(message: string): ShareFailure {
-  return { ok: false, code: 2, message, tried: [] };
+  return { ok: false, code: 2, message };
 }
 
 function fail(message: string): ShareFailure {
-  return { ok: false, code: 1, message, tried: [] };
+  return { ok: false, code: 1, message };
 }
 
 function describe(result: RunResult): string {
