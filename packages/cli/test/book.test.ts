@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bookStages } from "../src/book";
+import { bookStages, waitingDraft } from "../src/book";
 import { chapterPreconditions, readNovelState } from "../src/novel/machine";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/vault/novels/ice-house", import.meta.url));
@@ -48,4 +48,18 @@ test("a work with no premise, acts or beats shows those stages missing with why"
   expect(by("acts").status).toBe("missing");
   expect(by("beats")).toMatchObject({ status: "missing", name: "beats" });
   expect(by("chapters").status).toBe("ready"); // the drafted chapter file is still there
+});
+
+test("a chapter with no file and a draft waiting on a branch is `waiting`, naming the newest branch; one with none is unchanged", () => {
+  const state = readNovelState(work("d"));
+  const stages = bookStages(state, ["draft/ch03", "draft/ch03-v2", "draft/ch03-v10", "draft/ch13", "revise/ch03-tighten", "draft/ch01"]);
+  const ch = (n: number) => stages.find((s) => s.id === `chapter:${n}`)!;
+  expect(ch(3)).toMatchObject({ status: "waiting", branch: "draft/ch03-v10", missing: [] });
+  expect(ch(1).status).toBe("drafted"); // a file on main wins over a branch
+  expect(ch(2).status).toBe("ready");
+  expect(ch(4)).toMatchObject({ status: "missing" });
+  expect(ch(4).branch).toBeUndefined();
+  expect(bookStages(state).find((s) => s.id === "chapter:3")?.status).toBe("missing");
+  expect(waitingDraft(["draft/ch03"], 3)).toBe("draft/ch03");
+  expect(waitingDraft(["draft/ch30"], 3)).toBeUndefined();
 });

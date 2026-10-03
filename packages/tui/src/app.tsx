@@ -14,7 +14,7 @@ import { configPath } from "@openthink/pablo-core";
 import { tooSmall, useTerminalSize, MIN_COLS, MIN_ROWS } from "./resize";
 import type { Size } from "./resize";
 import { resolve, tokenOf } from "./chord";
-import { missingContent, type BookRail } from "./book";
+import { missingContent, waitingDoc, type BookRail } from "./book";
 import { KeyPanel } from "./key-panel";
 import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
@@ -266,7 +266,9 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   // chapter is scanned for `check` hits as it opens, and each hit is a box under its line. In a review the pane shows
   // the change under the cursor instead: its removed and added sentences.
   const rowId = railRow(viewOf(state).rail)?.id;
-  const doc = useMemo(() => (rowId !== undefined && !review ? load?.(rowId) : undefined), [rowId, load, review, state.finished]);
+  // A chapter whose draft is waiting on a branch says so, and how to open it, instead of the missing-file notice.
+  const waitingBranch = rowId === undefined || review ? undefined : book?.waiting[rowId];
+  const doc = useMemo(() => (waitingBranch !== undefined && rowId !== undefined ? waitingDoc(rowId, waitingBranch) : rowId !== undefined && !review ? load?.(rowId) : undefined), [rowId, load, review, state.finished, waitingBranch]);
   const hits = useMemo(() => (doc?.file !== undefined && checks ? checks(doc.file, doc.text) : NO_HITS), [doc, checks]);
   const shownTitle = doc ? doc.title : mainTitle;
   // A document's sentences are selectable (their spans are in these rows); lines handed in as plain text are not.

@@ -655,7 +655,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       const vault = findVault(cwd);
       return await runScreen({
         ...screen,
-        stages: bookStages(readNovelState(screen.dir)),
+        stages: bookStages(readNovelState(screen.dir), waiting?.ok ? waiting.branches : []),
         // A chapter opened there is scanned with `check`'s rules from the vault, each hit a box under its line (AGT-1528).
         ...(vault.ok ? { checks: screenChecks(vault.path) } : {}),
         // `a w` writes the selected chapter through the same `runWrite` the verb uses (AGT-1542).
