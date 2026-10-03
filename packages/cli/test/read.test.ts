@@ -3,7 +3,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cachedRoundDir, fetchRound, isRoundSent, listReaderRounds, markRoundSent, parseRoundRef, readCachedRound } from "../src/read";
+import { cachedRoundDir, fetchRound, listReaderRounds, parseRoundRef, readCachedRound } from "../src/read";
+import { readSent, readerRoundsDir, sentPath } from "../src/submit";
 import type { RunResult, Runner } from "../src/share";
 import { parseCliArgs, runReadRounds } from "../src/cli";
 
@@ -71,7 +72,7 @@ function fakeGh(world: World): Runner {
       const sha = world.heads[key];
       if (sha === undefined) return { code: 1, stdout: "", stderr: "Not Found" };
       return ok(
-        JSON.stringify({ number: Number(pull[2]), state: world.state ?? "open", title: "Ice House: chapter 3", html_url: `https://github.com/${pull[1]}/pull/${pull[2]}`, user: { login: "matt" }, created_at: "2026-10-02T10:00:00Z", head: { sha, repo: { full_name: pull[1] } } }),
+        JSON.stringify({ number: Number(pull[2]), state: world.state ?? "open", title: "Ice House: chapter 3", html_url: `https://github.com/${pull[1]}/pull/${pull[2]}`, user: { login: "matt" }, created_at: "2026-10-02T10:00:00Z", head: { sha, ref: `round/atara-2026-10-02`, repo: { full_name: pull[1] } } }),
       );
     }
     const contents = /^repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(endpoint);
@@ -82,6 +83,14 @@ function fakeGh(world: World): Runner {
     }
     return { code: 1, stdout: "", stderr: `unexpected ${endpoint}` };
   };
+}
+
+/** What Submit leaves behind (AGT-1585): `<id>.sent.json` in the round's cache dir. */
+function markSent(repo: string, pr: number, env: Record<string, string>): void {
+  const dir = cachedRoundDir({ repo, pr }, env);
+  mkdirSync(dir, { recursive: true });
+  if (readCachedRound({ repo, pr }, env) === undefined) writeFileSync(join(dir, "round.json"), JSON.stringify({ id: "atara-2026-10-02" }));
+  writeFileSync(sentPath(dir, "atara-2026-10-02"), JSON.stringify({ id: "atara-2026-10-02", repo, pr, commit: SHA, reviewId: 1, reviewUrl: "u", sentAt: "2026-10-03T00:00:00Z" }));
 }
 
 function world(extra: Partial<World> = {}): World {
@@ -114,17 +123,17 @@ test("list: open requested rounds in reading repos, with chapters, sender and da
 test("list: a round submitted from this machine is marked sent, even once GitHub no longer requests it", () => {
   const env = { XDG_STATE_HOME: temp() };
   const w = world({ heads: { [`${REPO}#7`]: SHA, "OpenThinkAi/valleys-shadow-reading#2": SHA2 } });
-  markRoundSent({ repo: "OpenThinkAi/valleys-shadow-reading", pr: 2 }, env, () => new Date("2026-10-03T00:00:00Z"));
-  markRoundSent({ repo: REPO, pr: 7 }, env);
+  markSent("OpenThinkAi/valleys-shadow-reading", 2, env);
+  markSent(REPO, 7, env);
   const out = listReaderRounds({ run: fakeGh(w), env });
   if (!out.ok) return;
   expect(out.rounds.map((r) => r.status)).toEqual(["sent", "sent"]);
-  expect(isRoundSent({ repo: REPO, pr: 7 }, env)).toBe(true);
+  expect(readSent(cachedRoundDir({ repo: REPO, pr: 7 }, env), "atara-2026-10-02")).toBeDefined();
 });
 
 test("list: waiting rounds sort before sent ones; a closed sent round is dropped", () => {
   const env = { XDG_STATE_HOME: temp() };
-  markRoundSent({ repo: "OpenThinkAi/valleys-shadow-reading", pr: 2 }, env);
+  markSent("OpenThinkAi/valleys-shadow-reading", 2, env);
   const w = world({ heads: { "OpenThinkAi/valleys-shadow-reading#2": SHA2 } });
   const base = fakeGh(w);
   const out = listReaderRounds({ run: base, env });
@@ -156,7 +165,9 @@ test("read <round>: fetches the chapters at the head commit into the cache and r
   if (!out.ok) return;
   const dir = cachedRoundDir({ repo: REPO, pr: 7 }, env);
   expect(out.dir).toBe(dir);
-  expect(dir).toBe(join(env.XDG_STATE_HOME, "pablo", "rounds", REPO, "7"));
+  expect(dir).toBe(join(readerRoundsDir(env), REPO, "7"));
+  expect(readCachedRound({ repo: REPO, pr: 7 }, env)?.id).toBe("atara-2026-10-02");
+  expect(readCachedRound({ repo: REPO, pr: 7 }, env)?.commit).toMatch(/^[0-9a-f]{40}$/);
   expect(readFileSync(join(dir, CH3), "utf8")).toBe(TEXT[CH3] as string);
   expect(readFileSync(join(dir, CH4), "utf8")).toBe(TEXT[CH4] as string);
   expect(existsSync(join(dir, "notes", "secret.md"))).toBe(false);
@@ -169,7 +180,7 @@ test("read <round>: unchanged head is not fetched again; a moved head replaces t
   const w = world();
   const ref = { repo: REPO, pr: 7 };
   fetchRound({ run: fakeGh(w), env, ref });
-  markRoundSent(ref, env);
+  markSent(REPO, 7, env);
   const before = w.calls.length;
   const again = fetchRound({ run: fakeGh(w), env, ref });
   expect(again.ok && again.reused).toBe(true);
@@ -181,7 +192,7 @@ test("read <round>: unchanged head is not fetched again; a moved head replaces t
   TEXT[CH3] = "Ice gave way by March.\nThe river rose.\n";
   expect(moved.ok && !moved.reused && moved.round.commit).toBe(SHA2);
   expect(readFileSync(join(cachedRoundDir(ref, env), CH3), "utf8")).toBe("Changed.\n");
-  expect(isRoundSent(ref, env)).toBe(true);
+  expect(readSent(cachedRoundDir(ref, env), "atara-2026-10-02")).toBeDefined();
 });
 
 test("read <round>: refuses closed PRs, forks, non-reading repos; a failed fetch leaves the cache untouched", () => {

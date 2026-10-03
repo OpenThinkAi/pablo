@@ -12,16 +12,17 @@
  *  - `round.json`   — `CachedRound`: the PR head commit the chapters were read at;
  *  - `<chapter path>` — each chapter file at that commit, under the path it has
  *    in the reading repo (and the vault);
- *  - `sent.json`    — written by Submit (AGT-1585) through `markRoundSent`; its
- *    presence is what `listReaderRounds` reports as `sent`.
+ *  - `<id>.marks.json` / `<id>.sent.json` — Submit's files (AGT-1585, `submit.ts`; pass
+ *    `cachedRoundDir(ref)` as its `dir` and `CachedRound.id` as the round id); a
+ *    `<id>.sent.json` is what `listReaderRounds` reports as `sent`. A re-fetch keeps them.
  * Later tickets (the reader view, Submit, the tray) read it with `readCachedRound`
  * / `cachedRoundDir` and list rounds with `listReaderRounds`.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { stateDir } from "./paths";
 import { CHAPTER_PATH, READING_ORG } from "./share";
+import { readerRoundsDir, readSent } from "./submit";
 import type { Runner, RunResult } from "./share";
 
 type Env = Record<string, string | undefined>;
@@ -55,9 +56,9 @@ export function parseRoundRef(text: string): RoundRef | undefined {
 // The cache
 // ---------------------------------------------------------------------------
 
-/** `$XDG_STATE_HOME/pablo/rounds` (default `~/.local/state/pablo/rounds`). */
+/** `$XDG_STATE_HOME/pablo/rounds` (default `~/.local/state/pablo/rounds`): submit.ts's `readerRoundsDir`. */
 export function roundCacheRoot(env: Env = process.env): string {
-  return join(stateDir(env), "rounds");
+  return readerRoundsDir(env);
 }
 
 /** `<cache root>/<org>/<repo>/<pr>`; throws on a ref that is not a reading-repo round. */
@@ -76,20 +77,16 @@ export interface CachedChapter {
 export interface CachedRound {
   readonly repo: string;
   readonly pr: number;
+  /** `<reader>-<date>`, from the PR's head branch `round/<id>`: names Submit's local files. */
+  readonly id: string;
   readonly title: string;
   readonly prUrl: string;
-  /** The PR's head commit the chapters were read at. A review is submitted against this commit. */
+  /** The PR's head commit (full 40-hex sha) the chapters were read at: `SubmitRound.commit`. A review is pinned to it. */
   readonly commit: string;
   readonly sender: string;
   readonly chapters: readonly CachedChapter[];
   /** ISO timestamp of the fetch. */
   readonly fetchedAt: string;
-}
-
-/** `<dir>/sent.json`, written when this machine submits its review (AGT-1585). */
-export interface SentRecord {
-  /** ISO timestamp. */
-  readonly sentAt: string;
 }
 
 export function readCachedRound(ref: RoundRef, env: Env = process.env): CachedRound | undefined {
@@ -100,17 +97,10 @@ export function readCachedRound(ref: RoundRef, env: Env = process.env): CachedRo
   }
 }
 
-/** Records that this machine has submitted its review of the round; the list then shows it as `sent`. */
-export function markRoundSent(ref: RoundRef, env: Env = process.env, now: () => Date = () => new Date()): void {
-  const dir = cachedRoundDir(ref, env);
-  mkdirSync(dir, { recursive: true });
-  const record: SentRecord = { sentAt: now().toISOString() };
-  writeFileSync(join(dir, "sent.json"), `${JSON.stringify(record)}\n`, "utf8");
-}
-
-/** Whether `markRoundSent` has been called for the round on this machine. */
-export function isRoundSent(ref: RoundRef, env: Env = process.env): boolean {
-  return existsSync(join(cachedRoundDir(ref, env), "sent.json"));
+/** The round's id on this machine: the cached one, else unknown until the first fetch. */
+function sentFor(ref: RoundRef, env: Env): boolean {
+  const cached = readCachedRound(ref, env);
+  return cached !== undefined && typeof cached.id === "string" && readSent(cachedRoundDir(ref, env), cached.id) !== undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +252,7 @@ export function listReaderRounds(options: ListOptions): ListOutcome {
   return { ok: true, rounds: sorted, notices };
 }
 
-/** Every cached round that has a `sent.json`. Directory names that are not refs are ignored. */
+/** Every cached round whose `<id>.sent.json` exists. Directory names that are not refs are ignored. */
 function sentRounds(env: Env): RoundRef[] {
   const found: RoundRef[] = [];
   const root = join(roundCacheRoot(env), READING_ORG);
@@ -270,10 +260,16 @@ function sentRounds(env: Env): RoundRef[] {
   for (const repoName of readdirSync(root)) {
     const repo = `${READING_ORG}/${repoName}`;
     if (!READING_REPO.test(repo)) continue;
-    for (const prName of readdirSync(join(root, repoName))) {
+    let prNames: string[];
+    try {
+      prNames = readdirSync(join(root, repoName));
+    } catch {
+      continue; // a stray file, not a repo directory
+    }
+    for (const prName of prNames) {
       if (!/^\d{1,9}$/.test(prName)) continue;
       const ref = { repo, pr: Number(prName) };
-      if (ref.pr >= 1 && isRoundSent(ref, env)) found.push(ref);
+      if (ref.pr >= 1 && sentFor(ref, env)) found.push(ref);
     }
   }
   return found;
@@ -317,13 +313,18 @@ export function fetchRound(options: FetchOptions): FetchOutcome {
     return { ok: false, code: 1, message: `pablo: read: GitHub's answer for ${roundRefLabel(ref)} had no head commit` };
   }
   if (record["state"] !== "open") return { ok: false, code: 2, message: `pablo: read: ${roundRefLabel(ref)} is not open` };
+  const branch = str(head?.["ref"]);
+  const id = branch?.startsWith("round/") ? branch.slice("round/".length) : undefined;
+  if (id === undefined || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
+    return { ok: false, code: 2, message: `pablo: read: ${roundRefLabel(ref)} is not a round (its head branch is not round/<id>)` };
+  }
   if (str(asRecord(head?.["repo"])?.["full_name"]) !== ref.repo) {
     return { ok: false, code: 2, message: `pablo: read: ${roundRefLabel(ref)} does not come from the reading repo itself; refusing it` };
   }
 
   const dir = cachedRoundDir(ref, env);
   const cached = readCachedRound(ref, env);
-  if (cached !== undefined && cached.commit === commit && cached.chapters.every((c) => existsSync(join(dir, c.path)))) {
+  if (cached !== undefined && cached.commit === commit && cached.id === id && cached.chapters.every((c) => existsSync(join(dir, c.path)))) {
     return { ok: true, round: cached, dir, reused: true };
   }
 
@@ -342,6 +343,7 @@ export function fetchRound(options: FetchOptions): FetchOutcome {
   const round: CachedRound = {
     repo: ref.repo,
     pr: ref.pr,
+    id,
     title: str(record["title"]) ?? roundRefLabel(ref),
     prUrl: str(record["html_url"]) ?? `https://github.com/${ref.repo}/pull/${ref.pr}`,
     commit,
@@ -350,9 +352,9 @@ export function fetchRound(options: FetchOptions): FetchOutcome {
     fetchedAt: (options.now ?? (() => new Date()))().toISOString(),
   };
 
-  // Replace the previous commit's chapters wholesale (keep only sent.json), then write the new ones.
+  // Replace the previous commit's chapters wholesale (keep Submit's *.marks.json / *.sent.json), then write the new ones.
   mkdirSync(dir, { recursive: true });
-  for (const name of readdirSync(dir)) if (name !== "sent.json") rmSync(join(dir, name), { recursive: true, force: true });
+  for (const name of readdirSync(dir)) if (!name.endsWith(".marks.json") && !name.endsWith(".sent.json")) rmSync(join(dir, name), { recursive: true, force: true });
   for (const { path, text } of texts) {
     const target = join(dir, path);
     mkdirSync(dirname(target), { recursive: true });

@@ -128,7 +128,7 @@ function helpText(): string {
     "                                            PR, request the reader's review, record the round",
     "  pablo read --list [--json]               the reading rounds waiting for you on GitHub (and",
     "                                            those you have sent); no vault or project needed",
-    "  pablo read <repo>#<pr>                   fetch a round's chapters at its head commit into",
+    "  pablo read <slug>-reading#<pr>          fetch a round's chapters at its head commit into",
     "                                            $XDG_STATE_HOME/pablo/rounds/<repo>/<pr>/",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list                         every voice in the vault and the global dir",
@@ -488,14 +488,6 @@ function formatVoice(voice: Voice): string {
 }
 
 /**
- * `pablo voice new|list|show|flag|exemplar` (AGT-1240, `flag`/`exemplar`
- * AGT-1243). `sub`/`name` are positionals (`args.rest`), as is `flag`'s
- * `<line>` and `exemplar`'s `<file>` (`args.rest[2]`) — `--global`,
- * `--section`, `--title`, and `--json` are the only flags this verb takes.
- * There is no `--project`: a voice resolves from `cwd`/`PABLO_VAULT` (vault)
- * plus the global voices directory, never a `<vault>/<kind>/<slug>` project.
- */
-/**
  * `pablo read --list` / `pablo read <repo>#<pr>` (AGT-1583): the reader's rounds on GitHub, with the
  * `gh` runner and environment injectable so tests never reach GitHub.
  */
@@ -534,6 +526,14 @@ export function runReadRounds(args: ParsedArgs, run: Runner = realRunner, env: R
   return EXIT_OK;
 }
 
+/**
+ * `pablo voice new|list|show|flag|exemplar` (AGT-1240, `flag`/`exemplar`
+ * AGT-1243). `sub`/`name` are positionals (`args.rest`), as is `flag`'s
+ * `<line>` and `exemplar`'s `<file>` (`args.rest[2]`) — `--global`,
+ * `--section`, `--title`, and `--json` are the only flags this verb takes.
+ * There is no `--project`: a voice resolves from `cwd`/`PABLO_VAULT` (vault)
+ * plus the global voices directory, never a `<vault>/<kind>/<slug>` project.
+ */
 function runVoice(args: ParsedArgs, cwd: string): number {
   const [sub, name, extra] = args.rest;
   const env = process.env;
