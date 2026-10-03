@@ -287,3 +287,61 @@ test("review mode shows the comments as boxes, and the status counts them by sou
   expect(frame).toContain("1 reader keep");
   expect(frame).toContain("1 author");
 });
+
+test("c in a review types a one-line comment on the change's first line; Enter saves it and the box shows at once; Esc cancels", async () => {
+  const store: ReviewComment[] = [];
+  const saved: { branch: string; comment: ReviewComment }[] = [];
+  const saver = (branch: string, comment: ReviewComment) => { saved.push({ branch, comment }); store.push({ ...comment, author: "matt" }); return { ok: true } as const; };
+  const app = render(
+    <App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["draft/ch03"]} diffOf={() => ({ ok: true, text: DIFF })} commentsOf={() => store} commentSaver={saver} size={{ cols: 120, rows: 36 }} />,
+  );
+  await sleep(30);
+  app.stdin.write(DOWN); await sleep(20);
+  app.stdin.write(DOWN); await sleep(20);
+  app.stdin.write(ENTER); await sleep(40);
+  // On a file's group row there is no change to comment on.
+  app.stdin.write("c"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("Move the cursor to a change first");
+  app.stdin.write(ESC); await sleep(20);
+  app.stdin.write(DOWN); await sleep(20);
+  app.stdin.write("c"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("Comment on chapters/03-the-well.md line 2");
+  // Keys are text now: `y` does not accept the change, Esc cancels and saves nothing.
+  app.stdin.write("y"); await sleep(20);
+  app.stdin.write(ESC); await sleep(30);
+  expect(saved).toEqual([]);
+  expect(plain(app.lastFrame())).not.toContain("Comment on");
+  app.stdin.write("c"); await sleep(30);
+  app.stdin.write("too "); await sleep(10);
+  app.stdin.write("blunt"); await sleep(10);
+  app.stdin.write("\x7f"); await sleep(10);
+  app.stdin.write("t"); await sleep(20);
+  expect(plain(app.lastFrame())).toContain("too blunt");
+  app.stdin.write(ENTER); await sleep(40);
+  expect(saved).toEqual([{ branch: "draft/ch03", comment: { source: "author", path: "chapters/03-the-well.md", line: 2, author: "", body: "too blunt" } }]);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("▲ author · line 2");
+  expect(frame).toContain("too blunt");
+  expect(frame).toContain("1 author");
+});
+
+test("an empty comment is not saved; a refusal from the saver stays open with its reason", async () => {
+  let refuse = true;
+  const saver = (_b: string, _c: ReviewComment) => (refuse ? ({ ok: false, message: "disk full" } as const) : ({ ok: true } as const));
+  const app = render(
+    <App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["draft/ch03"]} diffOf={() => ({ ok: true, text: DIFF })} commentSaver={saver} size={{ cols: 120, rows: 36 }} />,
+  );
+  await sleep(30);
+  for (let i = 0; i < 3; i++) { app.stdin.write(DOWN); await sleep(20); }
+  app.stdin.write(ENTER); await sleep(40);
+  app.stdin.write(DOWN); await sleep(20);
+  app.stdin.write("c"); await sleep(30);
+  app.stdin.write(ENTER); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("Comment on");
+  app.stdin.write("hm"); await sleep(10);
+  app.stdin.write(ENTER); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("disk full");
+  refuse = false;
+  app.stdin.write(ENTER); await sleep(30);
+  expect(plain(app.lastFrame())).not.toContain("Comment on");
+});

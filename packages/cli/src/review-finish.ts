@@ -19,9 +19,11 @@ import { createProviders, loadConfig, parseDiff } from "@openthink/pablo-core";
 import type { Adapter, FileDiff, Intent, LineRef } from "@openthink/pablo-core";
 import { branchDiff, branchIsEmpty, commitAs, deleteBranch, ensureWorktree, fileAt, mergeBaseOf, repoRoot } from "./branch";
 import { readMarker } from "./marker";
+import { addComment, commentsPath, readComments } from "./comments";
+import type { StoredComment } from "./comments";
 import { mergeChanges } from "./novel/merge";
 import type { MergeDraftOptions } from "./novel/merge";
-import type { Ritual } from "./novel/rituals";
+import type { AuthorNote, Ritual } from "./novel/rituals";
 
 /** A path from the diff must name a file inside the work directory: relative, no `..`, no `.git`, no symlink out. */
 export function insideDir(root: string, path: string): string | undefined {
@@ -141,6 +143,30 @@ export function revertRejected(repo: string, slug: string, branch: string, rejec
   return committed.ok ? { ok: true, files: writes.length } : committed;
 }
 
+/**
+ * The branch's author comments (the store, `source: "author"`) with the text of the lines they are on, read from the
+ * branch as the author saw it: taken before any revert commit shifts its line numbers. A comment whose file or line the
+ * branch does not have keeps no text; a file-level comment has none to quote.
+ */
+export function authorNotesOf(projectPath: string, repo: string, branch: string): AuthorNote[] {
+  const files = new Map<string, string[] | undefined>();
+  const linesOf = (path: string) => {
+    if (!files.has(path)) files.set(path, fileAt(repo, branch, path)?.split("\n"));
+    return files.get(path);
+  };
+  return readComments(projectPath, branch)
+    .filter((c) => c.source === "author" && !c.review)
+    .map((c) => {
+      const lines = c.line === undefined ? undefined : linesOf(c.path);
+      const from = c.line === undefined ? 0 : (c.startLine ?? c.line);
+      const text = lines === undefined || c.line === undefined ? "" : lines.slice(from - 1, c.line).join(" ");
+      return { path: c.path, ...(c.line !== undefined ? { line: c.line } : {}), ...(c.startLine !== undefined ? { startLine: c.startLine } : {}), text, body: c.body };
+    });
+}
+
+/** The branch's comment store goes with the branch: a later branch of the same name must not inherit it. */
+const dropComments = (projectPath: string, branch: string): void => rmSync(commentsPath(projectPath, branch), { force: true });
+
 export type FinishResult =
   | { readonly ok: true; readonly merged: boolean; readonly commit?: string; readonly rituals: readonly Ritual[]; readonly notices: readonly string[] }
   | { readonly ok: false; readonly notice: string };
@@ -154,16 +180,21 @@ export async function finishReview(projectPath: string, branch: string, rejected
   const repo = repoRoot(projectPath);
   if (repo === undefined) return { ok: false, notice: `pablo: finish: ${projectPath} is not in a git repository` };
   const env = opts.env ?? process.env;
+  // The author's own comments are read now, while the branch has the lines they were written on.
+  const authorNotes = authorNotesOf(projectPath, repo, branch);
   if (rejected.removed.length + rejected.added.length > 0) {
     const reverted = revertRejected(repo, opts.slug, branch, rejected, env);
     if (!reverted.ok) return reverted;
   }
   if (branchIsEmpty(repo, branch)) {
     const removed = deleteBranch(repo, opts.slug, branch, { force: true, env });
+    // A discarded branch's comments are written nowhere.
+    dropComments(projectPath, branch);
     return { ok: true, merged: false, rituals: [], notices: removed.ok ? [] : [removed.notice] };
   }
-  const merged = await mergeChanges(projectPath, branch, opts);
+  const merged = await mergeChanges(projectPath, branch, { ...opts, ...(authorNotes.length > 0 ? { authorNotes } : {}) });
   if (!merged.ok) return merged;
+  dropComments(projectPath, branch);
   return { ok: true, merged: true, commit: merged.sha, rituals: merged.rituals, notices: merged.notices };
 }
 
@@ -198,5 +229,18 @@ export function screenFinisher(projectPath: string, deps: { env?: Record<string,
     for (const r of result.rituals) lines.push(`${r.name}: ${r.status}${r.detail ? ` — ${r.detail}` : ""}`);
     lines.push(...result.notices);
     return { ok: true, lines };
+  };
+}
+
+/** The screen's `CommentSaver` (`c` in a review, AGT-1581): stores the author's comment on the branch under the project's author name. */
+export function screenCommenter(projectPath: string): (branch: string, comment: StoredComment) => { readonly ok: true } | { readonly ok: false; readonly message: string } {
+  return (branch, comment) => {
+    const marker = readMarker(projectPath);
+    try {
+      const stored = addComment(projectPath, branch, { ...comment, source: "author", author: marker.ok ? marker.marker.author : "author" });
+      return stored ? { ok: true } : { ok: false, message: "That comment could not be saved." };
+    } catch (error) {
+      return { ok: false, message: `Not saved: ${error instanceof Error ? error.message : String(error)}` };
+    }
   };
 }

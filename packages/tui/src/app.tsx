@@ -27,7 +27,8 @@ import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, editTarget, loadReview, reviewLines, type BranchDiff, type DiffRow, type ReviewComment } from "./review";
-import type { EditSession, Finisher, Rejected } from "./screen";
+import type { CommentSaver, EditSession, Finisher, Rejected } from "./screen";
+import { commentAction, isSubmit } from "./comment-input";
 import type { Voicer, Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
@@ -66,6 +67,8 @@ export interface AppProps {
   readonly voicer?: Voicer;
   /** `s` in a review: merges the accepted changes and runs the after-write steps (the CLI's `screenFinisher`, passed in). */
   readonly finisher?: Finisher;
+  /** `c` in a review: saves the author's own comment into the branch's comment store (the CLI's `screenCommenter`, passed in). */
+  readonly commentSaver?: CommentSaver;
   /** The critic's comments on a branch (the `critique` tool's survivors): review mode shows each under the edit it is on. */
   readonly commentsOf?: (branch: string) => readonly ReviewComment[];
   /** `v e`: opens the editor on the cursor's file and line on an `edit/` branch (the CLI's `screenEditor`, passed in). */
@@ -93,7 +96,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, voicer, finisher, editSession, composer }: AppProps) {
+export function App({ title, format, drafted = 0, total = 0, branch = "main", comments = {}, book, rows: bookRows = book?.rows ?? NO_ROWS, labels: bookLabels = book?.labels ?? NO_LABELS, branches = NO_BRANCHES, diffOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, voicer, finisher, editSession, composer }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -106,6 +109,13 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     // In the compose view keys are text; only the arrows, Enter and Esc mean anything else.
     if (state.mode.kind === "compose") {
       const action = composeAction(input, key, state.compose.pick !== null);
+      if (action) dispatch(action);
+      return;
+    }
+    // While a comment is open its keys are text: the one line, then Enter saves it and Esc cancels.
+    if (state.commenting) {
+      if (isSubmit(input, key)) return saveComment();
+      const action = commentAction(input, key);
       if (action) dispatch(action);
       return;
     }
@@ -144,6 +154,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       else if (action.id === "ai.revise") openRevise(selectedOf(viewOf(state).main, pane.sentences));
       else if (action.id === "ai.voice") dispatch({ type: "voice.offer", sentences: selectedOf(viewOf(state).main, pane.sentences)?.sentences ?? [] });
       else if (action.id === "review.finish") startFinish();
+      else if (action.id === "review.comment") openComment();
       else if (action.id === "view.editor") startEdit();
       else if (action.id === "review.edit") startReviewEdit();
       else if (action.id === "view.save") startSave();
@@ -241,6 +252,29 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     );
   }
 
+  // `c` in a review: the comment goes on the first line of the change under the rail's cursor (a file's group row, or
+  // no change at all, has none to put it on).
+  function openComment() {
+    if (state.mode.kind !== "review" || state.commenting !== null || state.finishing !== null) return;
+    const edit = review?.edits.get(railRow(viewOf(state).rail)?.id ?? "");
+    if (!commentSaver) return void dispatch({ type: "content.show", content: { title: "Comment", body: "Commenting is not available here.", kind: "comment" } });
+    if (!edit) return void dispatch({ type: "content.show", content: { title: "Comment", body: "Move the cursor to a change first: a comment goes on its first line.", kind: "comment" } });
+    dispatch({ type: "comment.open", path: edit.path, line: edit.line });
+  }
+
+  // Enter on the typed comment: the saver writes it to the store and the review reads the store again, so the box
+  // is in the pane at once. An empty line saves nothing.
+  function saveComment() {
+    const c = state.commenting;
+    if (!c || !commentSaver || c.text.trim() === "") return;
+    try {
+      const r = commentSaver(c.branch, { source: "author", path: c.path, line: c.line, author: "", body: c.text.trim() });
+      dispatch(r.ok ? { type: "comment.saved" } : { type: "comment.failed", message: r.message });
+    } catch (e) {
+      dispatch({ type: "comment.failed", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   // `s` in a review: every change needs a decision first (an undecided change is neither accepted nor rejected, so it
   // is not merged on a guess); the rejected edits go to the finisher as the lines they own.
   function startFinish() {
@@ -267,7 +301,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const reviewBranch = place.kind === "review" ? place.branch : undefined;
   const waiting = useMemo(() => [...branches, ...state.written.filter((b) => !branches.includes(b))].filter((b) => !state.finished.includes(b)), [branches, state.written, state.finished]);
   const extra = useMemo(() => branchRows(waiting), [waiting]);
-  const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch), commentsOf?.(reviewBranch))), [reviewBranch, diffOf, commentsOf, state.reviewGen]);
+  const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch), commentsOf?.(reviewBranch))), [reviewBranch, diffOf, commentsOf, state.reviewGen, state.commentSeq]);
   const bookAll = useMemo(() => [...bookRows, ...extra.rows], [bookRows, extra]);
   const rows = review ? review.rows : bookAll;
   const labels = useMemo(() => (review ? review.labels : { ...bookLabels, ...extra.labels }), [review, bookLabels, extra]);

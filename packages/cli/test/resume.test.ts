@@ -77,7 +77,7 @@ test("formatResumeProse is under 30 lines and its final line starts with 'next:'
 });
 
 test("a think that sleeps past a short injected timeout produces a 'timed out' notice", async () => {
-  const thinkDir = fakeThinkPath("#!/bin/sh\nsleep 5\n");
+  const thinkDir = fakeThinkPath("#!/bin/sh\n/bin/sleep 5\n");
 
   const result = await buildResume(WORK, "ice-house", { env: { PATH: thinkDir }, timeoutMs: 150 });
 

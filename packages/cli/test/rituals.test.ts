@@ -251,7 +251,7 @@ test("a fake think script that sleeps past a short injected timeout is 'failed' 
   const project = tempProject();
   gitInitBase(project);
   const chapterPath = writeChapterFile(project, 2, "black-ice");
-  const thinkDir = fakeThinkPath("#!/bin/sh\nsleep 5\n");
+  const thinkDir = fakeThinkPath("#!/bin/sh\n/bin/sleep 5\n");
 
   const rituals = await runAfterMerge(project, 2, chapterPath, baseOpts({ env: { PATH: thinkDir }, thinkTimeoutMs: 150 }));
   const think = rituals.find((r) => r.name === "think");

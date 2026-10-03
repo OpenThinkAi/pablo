@@ -176,6 +176,18 @@ the content area and drops the branch from the book, `finish.failed` stays in th
 command the layer above has yet to handle.
 Every string from a branch (its name, the diff text) passes `clean()` before it is shown.
 
+### The author's own comments (AGT-1581)
+
+`c` (`review.comment`, a command `app.tsx` handles; a row in `keys.ts` like any other, so the key panel lists it and the
+settings rebind it) opens a one-line input in the content area for the change under the rail's cursor: `comment.open`
+puts `state.commenting` (the branch, the change's path and first line, the buffer) up and, while it is, keys are text
+(`comment-input.ts`) and Esc cancels. Enter saves through the `commentSaver` prop (cli.ts passes `screenCommenter`,
+which stores a `source: author` entry in the branch's comment store, `.pablo/comments/<branch>.json`); `comment.saved`
+bumps `commentSeq`, which makes the review read `commentsOf` again, so the box is in the pane at once. Finishing the
+review (`s`) appends the branch's author comments with the text of their lines to the chapter's dated note
+(`notes/<date>-chapter-NN.md`, the file the note step writes, so they are committed on `main`); a branch discarded by
+rejecting everything writes them nowhere. The branch's store goes with the branch either way.
+
 ## Writing from the screen
 
 `a w` on a `chapter:N` row (`ai.write`, book mode only) calls the `writer` prop, which cli.ts builds from `runWrite`

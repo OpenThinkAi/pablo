@@ -66,6 +66,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "revise.left": { type: "revise.left" }, "revise.right": { type: "revise.right" }, "revise.run": { type: "revise.run" }, "revise.partial": { type: "revise.partial", id: 1, text: "p" },
     "revise.done": { type: "revise.done", id: 1, candidate: "c", receipt: "r", model: "m" }, "revise.take": { type: "revise.take" }, "revise.taken": { type: "revise.taken", id: 1, branch: "revise/abc1234", lines: ["l"] },
     "revise.failed": { type: "revise.failed", id: 1, message: "m" }, "revise.cancel": { type: "revise.cancel" },
+    "comment.open": { type: "comment.open", path: "chapters/01-a.md", line: 2 }, "comment.type": { type: "comment.type", text: "x" }, "comment.backspace": { type: "comment.backspace" }, "comment.saved": { type: "comment.saved" }, "comment.failed": { type: "comment.failed", message: "m" },
     "compose.open": { type: "compose.open" }, "compose.close": { type: "compose.close" }, "compose.type": { type: "compose.type", text: "hi" }, "compose.backspace": { type: "compose.backspace" },
     "compose.submit": { type: "compose.submit" }, "compose.event": { type: "compose.event", event: { kind: "assistant", text: "hello" } },
     "compose.add": { type: "compose.add", entry: { kind: "question", id: "q1", question: "Which way?" } }, "compose.failed": { type: "compose.failed", message: "no" }, "compose.done": { type: "compose.done" },
