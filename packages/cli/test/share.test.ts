@@ -278,6 +278,8 @@ test("the verb is CLI only: no MCP tool, and shareWith reads readers from the co
 test("pablo share refuses through the CLI before any gh call (exit 2)", () => {
   const s = setup();
   const run = (args: string[]) => Bun.spawnSync(["bun", "run", CLI, ...args], { cwd: s.vault, env: s.env });
+  expect(run(["share", "--project", "ice-house", "--chapters", "2"]).exitCode).toBe(2);
+  expect(run(["share", "--project", "ice-house", "--reader", "atara"]).exitCode).toBe(2);
   const noReader = run(["share", "--project", "ice-house", "--reader", "atara", "--chapters", "2", "--json"]);
   expect(noReader.exitCode).toBe(2);
   expect(JSON.parse(noReader.stdout.toString()).message).toContain('reader "atara"');

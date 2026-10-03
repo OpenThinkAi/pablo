@@ -48,8 +48,7 @@ import { screenCommenter, screenFinisher } from "./review-finish";
 import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
-import { deriveCliOptions, parseForChapter, shareWith } from "./verbs";
-import { realRunner } from "./share";
+import { VERBS, deriveCliOptions, parseForChapter } from "./verbs";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
 import { runWrite } from "./write";
@@ -896,10 +895,16 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
-    const outcome = await shareWith(
-      { project: args.project as string, reader: args.reader as string, chapters: args.chapters as string },
+    if (!args.reader || !args.chapters) {
+      const message = `pablo: share requires ${args.reader ? "--chapters <N|N-M>" : "--reader <name>"}`;
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const shareVerb = VERBS.find((verb) => verb.name === "share");
+    if (shareVerb === undefined) throw new Error("the share verb is not registered");
+    const outcome = await shareVerb.run(
+      { project: args.project, reader: args.reader, chapters: args.chapters },
       { cwd, env: process.env, stderr: process.stderr },
-      realRunner,
     );
     const body = outcome.body as Record<string, unknown>;
     if (args.json) {

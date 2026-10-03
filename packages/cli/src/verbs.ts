@@ -625,7 +625,7 @@ export async function shareWith(args: z.infer<typeof SHARE_ARGS>, ctx: VerbConte
   try {
     readers = loadConfig({ env: ctx.env }).readers;
   } catch (error) {
-    return { body: { ok: false, code: 1, message: (error as Error).message, tried: [] }, exitCode: 1 };
+    return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
   }
 
   const outcome = shareRound({
@@ -640,10 +640,6 @@ export async function shareWith(args: z.infer<typeof SHARE_ARGS>, ctx: VerbConte
   });
   if (!outcome.ok) return { body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried }, exitCode: outcome.code };
   return { body: { ok: true, ...outcome.round, record: outcome.recordPath, notices: outcome.notices }, exitCode: 0 };
-}
-
-async function runShareVerb(args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
-  return shareWith(args, ctx, realRunner);
 }
 
 // ---------------------------------------------------------------------------
@@ -1258,7 +1254,7 @@ export const VERBS: readonly Verb[] = [
     description:
       "Open a reading round: push the named chapters (all on main) to the book's private reading repo as a PR the reader can comment on, request the reader's review, and record the round in the vault.",
     args: SHARE_ARGS,
-    run: runShareVerb,
+    run: (args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext) => shareWith(args, ctx, realRunner),
     // Sending the manuscript to a person is the author's act: a model connected
     // over MCP must not be able to do it, so this verb registers no MCP tool.
     mcpTools: [],

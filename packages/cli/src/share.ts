@@ -24,7 +24,6 @@
  * `gh repo view --json url` reports is where the branches are pushed).
  */
 
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -60,16 +59,14 @@ export interface RunOptions {
  */
 export type Runner = (command: "git" | "gh", args: readonly string[], options?: RunOptions) => RunResult;
 
-/** The production runner: `spawnSync` with an argument array. */
+/** The production runner: `Bun.spawnSync` with an argument array, stdin closed. */
 export const realRunner: Runner = (command, args, options = {}) => {
-  const result = spawnSync(command, [...args], {
-    cwd: options.cwd,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (result.error) return { code: 1, stdout: "", stderr: result.error.message };
-  return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  try {
+    const result = Bun.spawnSync([command, ...args], { cwd: options.cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    return { code: result.exitCode, stdout: result.stdout.toString("utf8"), stderr: result.stderr.toString("utf8") };
+  } catch (error) {
+    return { code: 1, stdout: "", stderr: (error as Error).message };
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -231,8 +228,9 @@ function localDate(now: Date): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-/** The chapter files on the vault's `main`, by chapter number: `NN-<name>.md` under `<prefix>chapters/`. */
-/** `root` is the git work tree root: `ls-tree` paths and pathspecs are relative to the working directory. */
+/**
+ * The chapter files on the vault's `main`, by chapter number: `NN-<name>.md` under `<prefix>chapters/`.
+ * `root` is the git work tree root: `ls-tree` paths and pathspecs are relative to the working directory. */
 function chaptersOnMain(run: Runner, root: string, prefix: string): Map<number, string[]> | ShareFailure {
   const listed = run("git", ["ls-tree", "--name-only", "main", "--", `${prefix}chapters/`], { cwd: root });
   if (listed.code !== 0) return fail(`pablo: share: cannot list chapters on main (${describe(listed)})`);
