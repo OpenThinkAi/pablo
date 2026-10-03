@@ -32,7 +32,13 @@ export type FinishResult = { readonly ok: true; readonly lines: readonly string[
 export type Finisher = (branch: string, rejected: Rejected) => Promise<FinishResult>;
 
 /** What `v e` hands the editor session: a project-relative file, the line to open it at, and the editor command the settings name ("" for none). */
-export interface EditRequest { readonly file: string; readonly line: number; readonly editor: string }
+export interface EditRequest {
+  readonly file: string;
+  readonly line: number;
+  readonly editor: string;
+  /** Set by `e` in a review (AGT-1591): the review branch to edit in its own worktree, with `file` repo-relative as the branch's diff names it. Unset for `v e`, whose `file` is project-relative on the work's `edit/` branch. */
+  readonly branch?: string;
+}
 /** What the editor session came to: the `edit/` branch the change is on (null when nothing changed) with lines for the content area, or why it could not run. */
 export type EditResult = { readonly ok: true; readonly branch: string | null; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
 export type EditSession = (request: EditRequest) => Promise<EditResult>;

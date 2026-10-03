@@ -26,7 +26,7 @@ import { clean } from "./sanitize";
 import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
-import { branchRows, loadReview, reviewLines, type BranchDiff, type DiffRow, type ReviewComment } from "./review";
+import { branchRows, editTarget, loadReview, reviewLines, type BranchDiff, type DiffRow, type ReviewComment } from "./review";
 import type { EditSession, Finisher, Rejected } from "./screen";
 import type { Voicer, Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
@@ -145,6 +145,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       else if (action.id === "ai.voice") dispatch({ type: "voice.offer", sentences: selectedOf(viewOf(state).main, pane.sentences)?.sentences ?? [] });
       else if (action.id === "review.finish") startFinish();
       else if (action.id === "view.editor") startEdit();
+      else if (action.id === "review.edit") startReviewEdit();
       else if (action.id === "view.save") startSave();
       else onCommand?.(action, selectedOf(viewOf(state).main, pane.sentences) ?? undefined);
     }
@@ -158,6 +159,23 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     if (!editSession) return void dispatch({ type: "edit.failed", message: "Editing is not available here." });
     if (state.mode.kind !== "book" || !doc || file === undefined) return void dispatch({ type: "edit.failed", message: state.mode.kind !== "book" ? "Edit from the book, not a review." : "Select a chapter or file to edit." });
     dispatch({ type: "edit.start", file, line: fileLineAt(doc.text, layout.mainInner, paneRows, viewOf(state).main.cursor) });
+  }
+
+  // `e` in a review (AGT-1591): the editor opens on the change under the cursor, in the review branch's own worktree. What
+  // it leaves is committed on that branch as the author, and the review reads the branch's diff again. Refused, with the
+  // reason shown, while a write, a revise, a finish or another edit is running.
+  function startReviewEdit() {
+    if (state.mode.kind !== "review") return;
+    const refuse = (message: string) => void dispatch({ type: "edit.refused", message });
+    if (state.editing !== null) return refuse("An edit is already open.");
+    if (state.finishing !== null) return refuse("A finish is running; edit when it is done.");
+    if (state.writing !== null) return refuse(`Chapter ${state.writing} is being written; edit when it is done.`);
+    if (state.revise !== null) return refuse("A revise is open; finish or cancel it first.");
+    if (!editSession) return refuse("Editing is not available here.");
+    const row = railRow(state.review.rail);
+    const target = review && row ? editTarget(review, row.id) : undefined;
+    if (!target) return refuse("Select a change to edit.");
+    dispatch({ type: "edit.start", file: target.file, line: target.line, branch: reviewBranch ?? state.mode.branch });
   }
 
   // `v s`: the open edit branch merges into `main` through the same finisher a review's `s` uses, with nothing rejected.
@@ -249,7 +267,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const reviewBranch = place.kind === "review" ? place.branch : undefined;
   const waiting = useMemo(() => [...branches, ...state.written.filter((b) => !branches.includes(b))].filter((b) => !state.finished.includes(b)), [branches, state.written, state.finished]);
   const extra = useMemo(() => branchRows(waiting), [waiting]);
-  const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch), commentsOf?.(reviewBranch))), [reviewBranch, diffOf, commentsOf]);
+  const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch), commentsOf?.(reviewBranch))), [reviewBranch, diffOf, commentsOf, state.reviewGen]);
   const bookAll = useMemo(() => [...bookRows, ...extra.rows], [bookRows, extra]);
   const rows = review ? review.rows : bookAll;
   const labels = useMemo(() => (review ? review.labels : { ...bookLabels, ...extra.labels }), [review, bookLabels, extra]);
@@ -324,7 +342,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
   const { editSeq, editing } = state;
   useEffect(() => {
     if (editing === null || !editSession) return;
-    editSession({ file: editing.file, line: editing.line, editor }).then(
+    editSession({ file: editing.file, line: editing.line, editor, ...(editing.branch !== undefined ? { branch: editing.branch } : {}) }).then(
       (r) => dispatch(r.ok ? { type: "edit.done", branch: r.branch, lines: r.lines } : { type: "edit.failed", message: r.message }),
       (e: unknown) => dispatch({ type: "edit.failed", message: e instanceof Error ? e.message : String(e) }),
     );

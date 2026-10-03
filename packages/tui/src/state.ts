@@ -197,9 +197,11 @@ export interface State {
   /** Branches this session finished (merged or discarded): the book no longer lists them, though its `branches` prop still does. */
   readonly finished: readonly string[];
   /** `v e` while the editor is open (the screen hands the terminal over): the file and line it was opened at; one at a time. */
-  readonly editing: { readonly file: string; readonly line: number } | null;
+  readonly editing: { readonly file: string; readonly line: number; readonly branch?: string } | null;
   /** Counts the editor openings, so the layer above runs one editor session per opening. */
   readonly editSeq: number;
+  /** Counts the edits a review has committed (`e`), so the layer above reads the branch's diff again. */
+  readonly reviewGen: number;
   /** The `edit/<id>` branch holding Matt's own edits, committed and waiting for Save (`v s`); at most one per work. */
   readonly editBranch: string | null;
 }
@@ -280,7 +282,9 @@ export type Action =
   // `v e`: the editor opens on a file at a line, then the change it left is on an `edit/` branch (done, `branch` null
   // when nothing changed) or the editor could not run (failed). `v s` saves: the branch merges into `main` through the
   // review finish path; done clears the edit branch, failed keeps it for another try.
-  | { type: "edit.start"; file: string; line: number }
+  | { type: "edit.start"; file: string; line: number; branch?: string }
+  // `e` in a review is refused (a write, a finish, a revise or an edit is running, or the cursor is not on a change): the message shows, nothing else changes.
+  | { type: "edit.refused"; message: string }
   | { type: "edit.done"; branch: string | null; lines: readonly string[] }
   | { type: "edit.failed"; message: string }
   | { type: "save.start"; branch: string }
@@ -341,7 +345,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, revise: null, reviseSeq: 0, written: [], voice: null, finishing: null, finished: [], editing: null, editSeq: 0, editBranch: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, revise: null, reviseSeq: 0, written: [], voice: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -678,10 +682,20 @@ export function reduce(s: State, a: Action): State {
     case "finish.failed":
       return { ...s, finishing: null, content: writeContent("Not finished", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "edit.start":
-      if (s.editing !== null || s.finishing !== null || s.revise !== null || s.mode.kind !== "book") return s;
-      return { ...s, editing: { file: a.file, line: a.line }, editSeq: s.editSeq + 1, content: writeContent(`Editing ${a.file}`, `line ${a.line}`), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      if (s.editing !== null || s.finishing !== null || s.revise !== null || s.writing !== null) return s;
+      // `v e` edits from the book; `e` (with the review's branch) from a review.
+      if (a.branch === undefined ? s.mode.kind !== "book" : s.mode.kind !== "review") return s;
+      return { ...s, editing: { file: a.file, line: a.line, ...(a.branch !== undefined ? { branch: a.branch } : {}) }, editSeq: s.editSeq + 1, content: writeContent(`Editing ${a.file}`, `line ${a.line}`), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "edit.refused":
+      return { ...s, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "edit.done": {
       if (s.editing === null) return s;
+      // An edit made in a review is on the review's own branch: the review reads its diff again (the decisions were made on
+      // the old one, so they go), and the book's `edit/` branch and written list are not touched.
+      if (s.editing.branch !== undefined) {
+        const committed = a.branch !== null;
+        return { ...s, editing: null, ...(committed ? { reviewGen: s.reviewGen + 1, marks: {} } : {}), content: writeContent(committed ? `Edited on ${a.branch}` : "No change", [...a.lines, ...(committed && Object.keys(s.marks).length > 0 ? ["the review reloaded: decide each change again"] : [])].join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      }
       const written = a.branch === null || s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
       return { ...s, editing: null, written, editBranch: a.branch ?? s.editBranch, content: writeContent(a.branch === null ? "No change" : `Edited on ${a.branch}`, a.lines.join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     }

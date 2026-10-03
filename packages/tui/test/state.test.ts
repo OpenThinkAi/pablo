@@ -56,7 +56,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "prefix.press": { type: "prefix.press", prefix: "a" }, "prefix.digit": { type: "prefix.digit", digit: "1" }, "prefix.backspace": { type: "prefix.backspace" }, "prefix.clear": { type: "prefix.clear" },
     "view.zen": { type: "view.zen" }, "view.full": { type: "view.full" },
     "review.open": { type: "review.open", branch: "draft/ch02" }, "review.close": { type: "review.close" }, "review.mark": { type: "review.mark", mark: "accepted" },
-    "edit.start": { type: "edit.start", file: "chapters/01-a.md", line: 3 }, "edit.done": { type: "edit.done", branch: "edit/ab12cd", lines: ["l"] }, "edit.failed": { type: "edit.failed", message: "m" },
+    "edit.start": { type: "edit.start", file: "chapters/01-a.md", line: 3 }, "edit.done": { type: "edit.done", branch: "edit/ab12cd", lines: ["l"] }, "edit.failed": { type: "edit.failed", message: "m" }, "edit.refused": { type: "edit.refused", message: "m" },
     "save.start": { type: "save.start", branch: "edit/ab12cd" }, "save.done": { type: "save.done", branch: "edit/ab12cd", lines: ["l"] }, "save.failed": { type: "save.failed", message: "m" },
     "voice.offer": { type: "voice.offer", sentences: ["s"] }, "voice.start": { type: "voice.start", kind: "flag" }, "voice.done": { type: "voice.done", lines: ["l"] }, "voice.failed": { type: "voice.failed", message: "m" },
     "finish.start": { type: "finish.start", branch: "draft/ch02" }, "finish.done": { type: "finish.done", branch: "draft/ch02", lines: ["l"] }, "finish.failed": { type: "finish.failed", message: "m" },
