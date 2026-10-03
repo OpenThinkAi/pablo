@@ -490,9 +490,26 @@ export interface GitHubReview {
   readonly comments: readonly GitHubReviewComment[];
 }
 
-/** One GitHub review comment back as a mark. Replies (`in_reply_to_id`) are not marks: `undefined`. */
+/**
+ * `path` when it can only name a file inside the reading repo: relative, `/`-separated, no `..`, `.` or empty
+ * segment, no backslash or NUL. A review is external input; this is the structural floor under the caller's own
+ * check that the path is one of the round's chapters.
+ */
+export function safeReviewPath(path: string): string {
+  const segments = path.split("/");
+  if (path === "" || path.startsWith("/") || /[\\\0]/.test(path) || segments.some((s) => s === "" || s === "." || s === "..")) {
+    throw new RangeError(`pablo: a review comment names ${JSON.stringify(path)}, which is not a path inside the reading repo`);
+  }
+  return path;
+}
+
+/**
+ * One GitHub review comment back as a mark. Replies (`in_reply_to_id`) are not marks: `undefined`. Throws on a
+ * `path` that could leave the reading repo ({@link safeReviewPath}).
+ */
 export function parseComment(comment: GitHubReviewComment): ResolvedMark | undefined {
   if (comment.in_reply_to_id != null) return undefined;
+  safeReviewPath(comment.path);
   const body = comment.body.replace(/\r\n/g, "\n");
   const original = comment.line == null;
   const end = original ? comment.original_line : comment.line;

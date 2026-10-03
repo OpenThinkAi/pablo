@@ -14,6 +14,7 @@ import {
   readingText,
   resolveReview,
   reviewPayload,
+  safeReviewPath,
   selectionLines,
   splitManuscript,
   suggestionBody,
@@ -329,6 +330,14 @@ describe("parseReview: GitHub's review back into marks", () => {
       ],
     });
     expect(parseReview({ body: null, comments: [] })).toEqual({ summary: "", marks: [] });
+  });
+
+  test("a path that could leave the reading repo is refused", () => {
+    for (const path of ["/etc/passwd", "../outside.md", "chapters/../../x.md", "chapters/./03.md", "chapters//03.md", "chapters\\03.md", "", "chapters/03.md\0"]) {
+      expect(() => parseReview({ comments: [{ path, body: "x", line: 1 }] }), path).toThrow(/not a path inside the reading repo/);
+    }
+    expect(safeReviewPath(CH3)).toBe(CH3);
+    expect(safeReviewPath("chapters/03..draft.md")).toBe("chapters/03..draft.md");
   });
 });
 
