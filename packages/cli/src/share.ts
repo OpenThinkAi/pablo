@@ -190,6 +190,17 @@ export interface ShareOptions {
   readonly tmpRoot?: string;
   /** Default: `OpenThinkAi`. */
   readonly org?: string;
+  /**
+   * Whether a remote URL reported by `gh repo view` may be pushed to. Default: `isReadingRepoUrl`
+   * (an https github.com URL under the org). Tests that use a local bare repo as the remote pass a
+   * permissive function; production never does.
+   */
+  readonly acceptUrl?: (url: string, repo: string) => boolean;
+}
+
+/** `https://github.com/<repo>` (optionally `.git`), nothing else: git's `ext::` and `file:` transports can run commands or reach local paths. */
+export function isReadingRepoUrl(url: string, repo: string): boolean {
+  return url === `https://github.com/${repo}` || url === `https://github.com/${repo}.git`;
 }
 
 export interface ShareSuccess {
@@ -323,6 +334,9 @@ export function shareRound(options: ShareOptions): ShareOutcome {
   }
   if (!found.isPrivate) return refuse(`pablo: share: ${repo} is not private; refusing to push chapters to it`);
   const url = found.url;
+  if (!(options.acceptUrl ?? isReadingRepoUrl)(url, repo)) {
+    return refuse(`pablo: share: gh reports an unexpected remote for ${repo} (${url.slice(0, 120)}); refusing to push to it`);
+  }
 
   const workRoot = mkdtempSync(join(options.tmpRoot ?? tmpdir(), "pablo-share-"));
   try {

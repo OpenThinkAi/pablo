@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ReaderConfig } from "@openthink/pablo-core";
 import { VERBS, shareWith } from "../src/verbs";
-import { chaptersLabel, listRounds, parseChapterSpec, readRound, realRunner, shareRound } from "../src/share";
+import { chaptersLabel, isReadingRepoUrl, listRounds, parseChapterSpec, readRound, realRunner, shareRound } from "../src/share";
 import type { RunResult, Runner } from "../src/share";
 import { mcpTools } from "../src/mcp";
 
@@ -118,6 +118,7 @@ function share(s: Setup, fake: FakeGh, overrides: Partial<Parameters<typeof shar
     run: fake.run,
     now: () => new Date(2026, 9, 2, 12),
     tmpRoot: s.dir,
+    acceptUrl: () => true, // the fake remote is a local bare repo
     ...overrides,
   });
 }
@@ -271,6 +272,7 @@ test("the verb is CLI only: no MCP tool, and shareWith reads readers from the co
     { project: "ice-house", reader: "atara", chapters: "2" },
     { cwd: s.vault, env: s.env, stderr: { write() {} } },
     fake.run,
+    () => true, // the fake remote is a local bare repo
   );
   expect(result.exitCode).toBe(0);
   expect((result.body as { pr: number }).pr).toBe(7);
@@ -296,4 +298,21 @@ test("pablo share refuses through the CLI before any gh call (exit 2)", () => {
   const [verbs, later] = help.split("Later (not yet implemented):");
   expect(verbs).toMatch(/^ {2}share$/m);
   expect(later).not.toMatch(/^ {2}share$/m);
+});
+
+test("a remote URL that is not the reading repo's https github.com URL is refused before any push", () => {
+  const s = setup();
+  for (const url of ["ext::sh -c 'touch /tmp/pwned'", "file:///etc", "/tmp/local.git", "https://evil.example/OpenThinkAi/ice-house-reading", "-oProxyCommand=x"]) {
+    const fake = fakeRunner(s.dir, { exists: true });
+    const run: Runner = (command, args, options) =>
+      command === "gh" && args[0] === "repo" && args[1] === "view"
+        ? { code: 0, stdout: JSON.stringify({ url, isPrivate: true }), stderr: "" }
+        : fake.run(command, args, options);
+    const outcome = share(s, fake, { run, acceptUrl: undefined });
+    expect(outcome).toMatchObject({ ok: false, code: 2 });
+    expect(git(fake.remote, "for-each-ref").trim()).toBe("");
+  }
+  expect(isReadingRepoUrl("https://github.com/OpenThinkAi/ice-house-reading", "OpenThinkAi/ice-house-reading")).toBe(true);
+  expect(isReadingRepoUrl("https://github.com/OpenThinkAi/ice-house-reading.git", "OpenThinkAi/ice-house-reading")).toBe(true);
+  expect(isReadingRepoUrl("https://github.com/OpenThinkAi/other", "OpenThinkAi/ice-house-reading")).toBe(false);
 });

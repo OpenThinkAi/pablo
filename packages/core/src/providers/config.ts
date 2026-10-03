@@ -283,11 +283,16 @@ function readReaders(value: unknown, source: string): ReadonlyMap<string, Reader
     if (!isRecord(entry)) throw new ProviderConfigError(`pablo: ${where} must be an object`);
     const github = readString(entry["github"], `${where}: "github"`);
     if (!GITHUB_LOGIN.test(github)) throw new ProviderConfigError(`pablo: ${where}: "github" is not a GitHub login: ${github}`);
-    readers.set(name, {
-      github,
-      name: readString(entry["name"], `${where}: "name"`),
-      email: readString(entry["email"], `${where}: "email"`),
-    });
+    const readerName = readString(entry["name"], `${where}: "name"`);
+    const email = readString(entry["email"], `${where}: "email"`);
+    // Both end up in git identity arguments (`notes pull`): no control characters, newlines or surrounding space.
+    if (/[\u0000-\u001f\u007f]/.test(readerName) || readerName !== readerName.trim()) {
+      throw new ProviderConfigError(`pablo: ${where}: "name" must be one line with no control characters or surrounding space`);
+    }
+    if (!/^[^\s@<>,;:"'\\]+@[^\s@<>,;:"'\\]+\.[^\s@<>,;:"'\\]+$/.test(email)) {
+      throw new ProviderConfigError(`pablo: ${where}: "email" is not an email address`);
+    }
+    readers.set(name, { github, name: readerName, email });
   }
   return readers;
 }

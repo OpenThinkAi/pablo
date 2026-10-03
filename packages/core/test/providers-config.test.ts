@@ -109,4 +109,9 @@ test("the config's readers are parsed, validated, and empty by default", () => {
   bad({ atara: { github: "-flag", name: "A", email: "a@b.c" } });
   bad({ atara: { github: "a", name: "", email: "a@b.c" } });
   bad({ atara: { github: "a", name: "A" } });
+  bad({ atara: { github: "a", name: "A\nB", email: "a@b.c" } });
+  bad({ atara: { github: "a", name: " A", email: "a@b.c" } });
+  bad({ atara: { github: "a", name: "A", email: "a@b.c\nX: y" } });
+  bad({ atara: { github: "a", name: "A", email: "not-an-email" } });
+  bad({ atara: { github: "a", name: "A", email: "a b@c.d" } });
 });

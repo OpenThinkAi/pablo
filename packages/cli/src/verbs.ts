@@ -614,7 +614,7 @@ const SHARE_ARGS = z.object({
  * `share`, with the `gh`/git runner injectable: `runShareVerb` (the verb's
  * `run`) passes `realRunner`; tests pass a fake so nothing reaches GitHub.
  */
-export async function shareWith(args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext, run: Runner): Promise<VerbResult> {
+export async function shareWith(args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext, run: Runner, acceptUrl?: (url: string, repo: string) => boolean): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
 
@@ -637,6 +637,7 @@ export async function shareWith(args: z.infer<typeof SHARE_ARGS>, ctx: VerbConte
     chapters: args.chapters,
     readers,
     run,
+    ...(acceptUrl ? { acceptUrl } : {}),
   });
   if (!outcome.ok) return { body: { ok: false, code: outcome.code, message: outcome.message }, exitCode: outcome.code };
   return { body: { ok: true, ...outcome.round, record: outcome.recordPath, notices: outcome.notices }, exitCode: 0 };
