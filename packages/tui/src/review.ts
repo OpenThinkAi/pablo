@@ -131,6 +131,26 @@ function countComments(comments: readonly ReviewComment[]): Record<string, numbe
   return Object.fromEntries(n);
 }
 
+/**
+ * Where `e` opens the change `id`: its file (repo-relative, as the diff names it) and the line in the branch's new text.
+ * That is the change's first added line; a pure removal has none, so it is the line before the removal. The removal's
+ * line (the first of the lines it owns, in old numbering), so it is carried to the new text by what the earlier changes in the same file added and
+ * removed (the edits are in diff order). Undefined when `id` is not a change in this review.
+ */
+export function editTarget(review: Review, id: string): { readonly file: string; readonly line: number } | undefined {
+  const edit = review.edits.get(id);
+  if (!edit) return undefined;
+  const mine = edit.addedLines.filter((l) => l.path === edit.path).map((l) => l.line);
+  if (mine.length > 0) return { file: edit.path, line: Math.min(...mine) };
+  let shift = 0;
+  for (const e of review.edits.values()) {
+    if (e === edit) break;
+    shift += e.addedLines.filter((l) => l.path === edit.path).length - e.removedLines.filter((l) => l.path === edit.path).length;
+  }
+  const gone = edit.removedLines.filter((l) => l.path === edit.path).map((l) => l.line);
+  return { file: edit.path, line: Math.max(1, (gone.length > 0 ? Math.min(...gone) : edit.line) - 1 + shift) };
+}
+
 /** A line of the main pane: a sign column and the words, wrapped to the pane (`cont` rows continue the one above). */
 export interface DiffRow extends EditLine { readonly cont?: true; readonly box?: true }
 

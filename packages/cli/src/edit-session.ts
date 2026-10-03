@@ -10,7 +10,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { branchExists, createBranch, deleteBranch, listBranches, repoRoot, worktreePath } from "./branch";
+import { branchExists, branchKind, createBranch, deleteBranch, ensureWorktree, listBranches, repoRoot, worktreePath } from "./branch";
 import type { Author } from "./branch";
 import { commitAs } from "./branch";
 import { readMarker } from "./marker";
@@ -43,7 +43,13 @@ export function editorArgs(cmd: readonly string[], path: string, line: number, r
 export type ScreenEditResult =
   | { readonly ok: true; readonly branch: string | null; readonly lines: readonly string[] }
   | { readonly ok: false; readonly message: string };
-export interface ScreenEditRequest { readonly file: string; readonly line: number; readonly editor: string }
+export interface ScreenEditRequest {
+  readonly file: string;
+  readonly line: number;
+  readonly editor: string;
+  /** `e` in a review (AGT-1591): the review branch to edit in its own worktree; `file` is then repo-relative, as the branch's diff names it. */
+  readonly branch?: string;
+}
 export type ScreenEditor = (request: ScreenEditRequest) => Promise<ScreenEditResult>;
 
 export interface EditDeps {
@@ -88,6 +94,7 @@ export async function editInProject(projectPath: string, request: ScreenEditRequ
   if (!marker.ok) return { ok: false, message: marker.message };
   const repo = repoRoot(projectPath);
   if (repo === undefined) return { ok: false, message: `pablo: edit: ${projectPath} is not in a git repository` };
+  if (request.branch !== undefined) return editOnReviewBranch(repo, marker.marker.slug, request.branch, request, deps);
   if (insideDir(projectPath, request.file) === undefined) return { ok: false, message: `pablo: edit: "${request.file}" is not a path inside the project` };
   const slug = marker.marker.slug;
 
@@ -132,6 +139,41 @@ export async function editInProject(projectPath: string, request: ScreenEditRequ
   const committed = commitAs(worktree, { message: `edit ${request.file}`, author: authorOf(repo) });
   if (!committed.ok) return { ok: false, message: committed.notice };
   return { ok: true, branch, lines: [...lines, `committed ${request.file} on ${branch} (${(committed.sha ?? "").slice(0, 7)})`, "v s saves it into main"] };
+}
+
+/**
+ * `e` in a review (AGT-1591): opens `request.file` at `request.line` in the review branch's own worktree (the branch's
+ * diff names the file repo-relative), then commits what the editor left as the author, "(edited)" in the subject. A file
+ * the editor left alone commits nothing. The branch is the one under review, so it is never made or deleted here.
+ */
+async function editOnReviewBranch(repo: string, slug: string, branch: string, request: ScreenEditRequest, deps: EditDeps): Promise<ScreenEditResult> {
+  const env = deps.env ?? process.env;
+  if (!branchKind(branch) || !branchExists(repo, branch)) return { ok: false, message: `pablo: edit: "${branch}" is not a change branch` };
+  const tree = ensureWorktree(repo, slug, branch, env);
+  if (!tree.ok) return { ok: false, message: tree.notice };
+  const worktree = tree.path ?? worktreePath(slug, branch, env);
+  if (insideDir(worktree, request.file) === undefined) return { ok: false, message: `pablo: edit: "${request.file}" is not a path inside the repository` };
+  const inTree = resolve(worktree, request.file);
+  if (!existsSync(inTree)) return { ok: false, message: `pablo: edit: ${request.file} is not on ${branch}` };
+
+  const argv = editorArgs(editorCommand(request.editor, env), inTree, request.line, worktree);
+  let code: number;
+  try {
+    code = await (deps.run ?? defaultRun)(argv, worktree);
+  } catch (error) {
+    return { ok: false, message: `pablo: edit: could not run ${argv[0]}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const lines: string[] = code === 0 ? [] : [`the editor exited with ${code}; what it saved is kept`];
+  let dirty: boolean;
+  try {
+    dirty = git(worktree, ["status", "--porcelain", "--", request.file]).trim() !== "";
+  } catch (error) {
+    return { ok: false, message: `pablo: edit: git status failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!dirty) return { ok: true, branch: null, lines: [...lines, `no change to ${request.file}`] };
+  const committed = commitAs(worktree, { message: `edit ${request.file} (edited)`, author: authorOf(repo), paths: [request.file] });
+  if (!committed.ok) return { ok: false, message: committed.notice };
+  return { ok: true, branch, lines: [...lines, `committed ${request.file} on ${branch} (${(committed.sha ?? "").slice(0, 7)})`] };
 }
 
 export function screenEditor(projectPath: string, deps: EditDeps = {}): ScreenEditor {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter } from "@openthink/pablo-core";
-import { listBranches, worktreePath } from "../src/branch";
+import { createBranch, listBranches, worktreePath } from "../src/branch";
 import { editInProject, editorArgs, editorCommand, screenEditor } from "../src/edit-session";
 import { screenFinisher } from "../src/review-finish";
 
@@ -146,4 +146,61 @@ test("Save: the edit branch merges into main through the review finish path, its
   expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(false);
   // The merged work's author stays Matt.
   expect(git(vault, "log", "--no-merges", "-1", "--format=%an", "main")).toBe("Matt Test");
+});
+
+// ---- AGT-1591: `e` in a review edits on the review branch itself
+
+const VCH1 = `novels/ice-house/${CH1}`;
+
+/** A `revise/ch01` branch with its worktree, one commit ahead of main; the diff names the file repo-relative. */
+function reviewBranch(env: Record<string, string>, vault: string) {
+  const made = createBranch(vault, "ice-house", "revise/ch01", env);
+  if (!made.ok) throw new Error(made.notice);
+  const wt = worktreePath("ice-house", "revise/ch01", env);
+  writeFileSync(join(wt, VCH1), BASE.replace("under the horse", "under the mare"));
+  git(wt, "add", ".");
+  git(wt, "commit", "-q", "-m", "revise");
+  return wt;
+}
+
+test("e in a review opens the file in the review branch's worktree at the line and commits what the editor left as the author, '(edited)' in the subject", async () => {
+  const { project, vault, env } = setup();
+  const wt = reviewBranch(env, vault);
+  const editor = fakeEditor(["from the doorway", "from the scale house"]);
+  const r = await editInProject(project, { file: VCH1, line: 8, editor: "vim", branch: "revise/ch01" }, { env, run: editor.run });
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(r.branch).toBe("revise/ch01");
+  expect(editor.calls).toHaveLength(1);
+  expect(editor.calls[0]!.cwd).toBe(wt);
+  expect(editor.calls[0]!.argv).toEqual(["vim", "+8", "--", join(wt, VCH1)]);
+  expect(git(vault, "log", "-1", "--format=%an <%ae>|%s", "revise/ch01")).toBe(`Matt Test <matt@example.com>|edit ${VCH1} (edited)`);
+  expect(git(vault, "show", `revise/ch01:${VCH1}`)).toContain("from the scale house");
+  expect(git(vault, "rev-list", "--count", "main..revise/ch01")).toBe("2");
+  // No edit/ branch was made, and main is untouched.
+  const listed = listBranches(vault);
+  expect(listed.ok && listed.branches.edit).toEqual([]);
+  expect(readFileSync(join(project, CH1), "utf8")).toBe(BASE);
+});
+
+test("e in a review: an editor that leaves the file alone commits nothing", async () => {
+  const { project, vault, env } = setup();
+  reviewBranch(env, vault);
+  const before = git(vault, "rev-parse", "revise/ch01");
+  const r = await editInProject(project, { file: VCH1, line: 8, editor: "vim", branch: "revise/ch01" }, { env, run: fakeEditor().run });
+  expect(r.ok && r.branch).toBe(null);
+  expect(git(vault, "rev-parse", "revise/ch01")).toBe(before);
+});
+
+test("e in a review: refusals run no editor (not a change branch, a path out of the tree, a file the branch lacks, an editor that cannot run)", async () => {
+  const { project, vault, env } = setup();
+  reviewBranch(env, vault);
+  const never = fakeEditor();
+  expect((await editInProject(project, { file: VCH1, line: 1, editor: "vim", branch: "main" }, { env, run: never.run })).ok).toBe(false);
+  expect((await editInProject(project, { file: "../outside.md", line: 1, editor: "vim", branch: "revise/ch01" }, { env, run: never.run })).ok).toBe(false);
+  expect((await editInProject(project, { file: "novels/ice-house/chapters/99-nope.md", line: 1, editor: "vim", branch: "revise/ch01" }, { env, run: never.run })).ok).toBe(false);
+  expect(never.calls).toEqual([]);
+  const broken = await editInProject(project, { file: VCH1, line: 1, editor: "vim", branch: "revise/ch01" }, { env, run: async () => { throw new Error("spawn ENOENT"); } });
+  expect(broken.ok).toBe(false);
+  if (!broken.ok) expect(broken.message).toContain("could not run vim");
 });
