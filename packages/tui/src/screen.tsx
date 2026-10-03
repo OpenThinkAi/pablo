@@ -31,6 +31,10 @@ export interface Rejected { readonly removed: readonly LineRef[]; readonly added
 export type FinishResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
 export type Finisher = (branch: string, rejected: Rejected) => Promise<FinishResult>;
 
+/** What saving the author's own comment (`c` in a review) came to; the layer above writes it to the comment store (AGT-1581). */
+export type CommentResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
+export type CommentSaver = (branch: string, comment: ReviewComment) => CommentResult;
+
 /** What `v e` hands the editor session: a project-relative file, the line to open it at, and the editor command the settings name ("" for none). */
 export interface EditRequest {
   readonly file: string;
@@ -66,6 +70,8 @@ export interface ScreenOptions {
   readonly composer?: Composer;
   /** `s` in a review: merges the accepted changes into `main`, runs the after-write steps and deletes the branch (the CLI's `screenFinisher`, passed in; AGT-1540). */
   readonly finisher?: Finisher;
+  /** `c` in a review: saves the author's own comment on a change into the branch's comment store (the CLI's `screenCommenter`, passed in; AGT-1581). */
+  readonly commentSaver?: CommentSaver;
   /** The critic's saved comments on a branch, shown under the edits they are on (AGT-1564). */
   readonly commentsOf?: (branch: string) => readonly ReviewComment[];
   /** `v e`: opens the editor on a file at a line on the work's `edit/` branch and commits what it left as the author (the CLI's `screenEditor`, passed in; AGT-1545). The screen gives up the terminal while it runs. */
@@ -104,7 +110,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
         stdout.write(ENTER_ALT);
       }
     });
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

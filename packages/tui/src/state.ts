@@ -165,6 +165,12 @@ export interface Compose {
   readonly pick: number | null;
 }
 
+/**
+ * `c` in a review (AGT-1581): the author's own comment being typed on the first line of the change under the cursor.
+ * `path` and `line` are the diff's (repo-relative path, line in the new text); `text` is the one-line buffer.
+ */
+export interface Commenting { readonly branch: string; readonly path: string; readonly line: number; readonly text: string }
+
 export interface State {
   readonly mode: Mode;
   readonly compose: Compose;
@@ -192,6 +198,10 @@ export interface State {
   readonly written: readonly string[];
   /** `a v`: the selected sentences offered to the voice (flag or exemplar) while the offer is up; null otherwise. */
   readonly voice: readonly string[] | null;
+  /** `c` in a review: the comment being typed, or null. */
+  readonly commenting: Commenting | null;
+  /** Counts the comments saved from the screen; a change tells the layer above to read the comment store again. */
+  readonly commentSeq: number;
   /** The branch whose review is being finished (`s`) while the merge and the after-write steps run; one at a time. */
   readonly finishing: string | null;
   /** Branches this session finished (merged or discarded): the book no longer lists them, though its `branches` prop still does. */
@@ -270,6 +280,11 @@ export type Action =
   | { type: "review.mark"; mark: Mark }
   // `s`: finish the review (merge what was accepted, run the after-write steps); done closes the review with the
   // result shown in the content area, failed stays in the review with the reason shown
+  // `c` in a review: type a one-line comment on the change under the cursor; Enter saves it (the layer above writes the
+  // store, then `comment.saved`), Esc cancels.
+  | { type: "comment.open"; path: string; line: number }
+  | { type: "comment.type"; text: string } | { type: "comment.backspace" }
+  | { type: "comment.saved" } | { type: "comment.failed"; message: string }
   // `a v`: offer the selected sentences to the voice (none selected: a hint instead); `voice.start` once f or e is
   // pressed, then done (where it was written) or failed (why not)
   | { type: "voice.offer"; sentences: readonly string[] }
@@ -321,6 +336,11 @@ const splice = (text: string, at: number, drop: number, add: string): string => 
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
 const preview = (sentences: readonly string[]): string => { const t = sentences.join(" "); return t.length > 240 ? `${t.slice(0, 237)}...` : t; };
 
+/** What the content area shows while a comment is typed: where it goes, the buffer with its cursor, how to go on. */
+export const commentContent = (c: Commenting, note = ""): Content => ({
+  kind: "comment", title: `Comment on ${c.path} line ${c.line}: Enter saves, Esc cancels`, body: `${withCursor(c.text, [...c.text].length)}${note ? `\n\n${note}` : ""}`,
+});
+
 /** What the content area shows for a revise: the buffer being typed in (with its cursor), or the candidate so far, and how to go on. */
 export function reviseContent(r: Revise): Content {
   const n = r.sentences.length;
@@ -345,7 +365,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, revise: null, reviseSeq: 0, written: [], voice: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -590,6 +610,20 @@ export function reduce(s: State, a: Action): State {
 
     // A review opens on a branch with a fresh rail and main pane; the book keeps its place for when the review closes.
     case "review.open": return s.mode.kind === "settings" || s.mode.kind === "compose" ? s : { ...s, mode: { kind: "review", branch: a.branch }, review: emptyView(), marks: {}, pane: "rail", focus: "rail", content: null, full: false, pending: null };
+    case "comment.open": {
+      if (s.mode.kind !== "review" || s.commenting !== null || s.finishing !== null || s.revise !== null) return s;
+      const c: Commenting = { branch: s.mode.branch, path: a.path, line: a.line, text: "" };
+      return { ...s, pending: null, commenting: c, content: commentContent(c), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 }, focus: s.pane };
+    }
+    case "comment.type": case "comment.backspace": {
+      const c = s.commenting;
+      if (c === null) return s;
+      const text = a.type === "comment.type" ? c.text + a.text : [...c.text].slice(0, -1).join("");
+      const next = { ...c, text };
+      return { ...s, commenting: next, content: commentContent(next) };
+    }
+    case "comment.saved": return s.commenting === null ? s : { ...s, commenting: null, commentSeq: s.commentSeq + 1, content: null, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "comment.failed": return s.commenting === null ? s : { ...s, content: commentContent(s.commenting, a.message) };
     case "revise.open": {
       // Revising needs the book (a document's sentences), and one revise or write at a time.
       if (s.mode.kind !== "book" || s.revise !== null || s.writing !== null || s.editing !== null || s.finishing !== null) return s;
@@ -752,6 +786,7 @@ export function reduce(s: State, a: Action): State {
     case "escape":
       if (s.mode.kind === "settings") return s;
       if (s.revise) return reduce(s, { type: "revise.cancel" });
+      if (s.commenting) return { ...s, commenting: null, content: null, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
       if (s.mode.kind === "compose") return s.compose.pick !== null ? reduce(s, { type: "compose.pick" }) : reduce(s, { type: "compose.close" });
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });

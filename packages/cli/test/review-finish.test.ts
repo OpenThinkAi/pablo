@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { parseDiff, stitch } from "@openthink/pablo-core";
 import type { Adapter, CompletionEvent, Edit } from "@openthink/pablo-core";
 import { branchDiff, commitAs, createBranch, worktreePath } from "../src/branch";
-import { finishReview, insideDir, revertLines, revertRejected, screenFinisher } from "../src/review-finish";
+import { addComment, commentsPath, readComments } from "../src/comments";
+import { authorNotesOf, finishReview, screenCommenter, insideDir, revertLines, revertRejected, screenFinisher } from "../src/review-finish";
 import type { Rejected } from "../src/review-finish";
 import { runWrite } from "../src/write";
 
@@ -237,4 +238,72 @@ test("screenFinisher returns the screen's lines: the merge and each after-write 
   expect(r.lines.some((l) => l.startsWith("outline: "))).toBe(true);
   const refused = await finish("revise/nope", none);
   expect(refused.ok).toBe(false);
+});
+
+// AGT-1581: the author's own comments survive the merge in the chapter's note; a discarded branch writes none.
+const REPO_CH1 = `novels/ice-house/${CH1}`;
+const author = (path: string, line: number | undefined, body: string, startLine?: number) =>
+  ({ source: "author", path, ...(line !== undefined ? { line } : {}), ...(startLine !== undefined ? { startLine } : {}), author: "matt", body }) as const;
+
+test("finishing a review appends the branch's author comments, with their line text, to the chapter's dated note, committed on main (AC3)", async () => {
+  const { vault, project, env, opts } = setup();
+  const branch = reviseBranch(vault, env);
+  addComment(project, branch, author(REPO_CH1, 9, "Scale house? Say which one."));
+  addComment(project, branch, author(REPO_CH1, 8, "Keep this opening.", 8));
+  addComment(project, branch, { ...author(REPO_CH1, 9, "A reader's, not mine."), source: "reader" });
+  const done = await finishReview(project, branch, none, opts);
+  expect(done.ok && done.merged).toBe(true);
+  const note = readFileSync(join(project, "notes", "2026-10-02-chapter-01.md"), "utf8");
+  expect(note).toContain("Author comments:");
+  expect(note).toContain('- line 9: "Odile heard it from the scale house."\n  Scale house? Say which one.');
+  expect(note).toContain('- line 8: "The pond rang under the horse."\n  Keep this opening.');
+  expect(note).not.toContain("reader's");
+  // Committed with the rest of the after-write steps, so it is on main; the branch's store goes with the branch.
+  expect(git(vault, "ls-files", "novels/ice-house/notes")).toContain("2026-10-02-chapter-01.md");
+  expect(git(vault, "status", "--porcelain", "novels/ice-house/notes")).toBe("");
+  expect(existsSync(commentsPath(project, branch))).toBe(false);
+});
+
+test("comments on a rejected line are still kept as written (their text is what the author saw); a branch with no author comments adds no section", async () => {
+  const { vault, project, env, opts } = setup();
+  const branch = reviseBranch(vault, env);
+  addComment(project, branch, author(REPO_CH1, 9, "Why change this?"));
+  const edits = editsOf(vault, branch);
+  await finishReview(project, branch, rejecting([edits[0]!]), opts);
+  const note = readFileSync(join(project, "notes", "2026-10-02-chapter-01.md"), "utf8");
+  expect(note).toContain('"Odile heard it from the scale house."');
+  const second = setup();
+  const b2 = reviseBranch(second.vault, second.env);
+  await finishReview(second.project, b2, none, second.opts);
+  expect(readFileSync(join(second.project, "notes", "2026-10-02-chapter-01.md"), "utf8")).not.toContain("Author comments");
+});
+
+test("a branch discarded by rejecting everything writes its author comments nowhere (AC4)", async () => {
+  const { vault, project, env, opts } = setup();
+  const branch = reviseBranch(vault, env);
+  addComment(project, branch, author(REPO_CH1, 9, "Discard me."));
+  const done = await finishReview(project, branch, rejecting(editsOf(vault, branch)), opts);
+  expect(done).toMatchObject({ ok: true, merged: false });
+  expect(existsSync(join(project, "notes", "2026-10-02-chapter-01.md"))).toBe(false);
+  expect(readComments(project, branch)).toEqual([]);
+});
+
+test("authorNotesOf quotes the lines as the branch has them, skips other sources and the summary, and tolerates a missing file", () => {
+  const { vault, project, env } = setup();
+  const branch = reviseBranch(vault, env);
+  addComment(project, branch, author(REPO_CH1, 9, "one"));
+  addComment(project, branch, author("novels/ice-house/chapters/09-gone.md", 2, "two"));
+  addComment(project, branch, { ...author("", undefined, "summary"), review: true });
+  addComment(project, branch, { ...author(REPO_CH1, 9, "three"), source: "critic" });
+  const notes = authorNotesOf(project, vault, branch);
+  expect(notes.map((n) => [n.body, n.text])).toEqual([["one", "Odile heard it from the scale house."], ["two", ""]]);
+});
+
+test("screenCommenter stores the comment as the author, under the project's author name", () => {
+  const { vault, project, env } = setup();
+  const branch = reviseBranch(vault, env);
+  const save = screenCommenter(project);
+  expect(save(branch, { source: "author", path: REPO_CH1, line: 9, author: "", body: "hm" })).toEqual({ ok: true });
+  expect(readComments(project, branch)).toEqual([{ source: "author", path: REPO_CH1, line: 9, author: "matt", body: "hm" }]);
+  expect(save(branch, { source: "author", path: "", author: "", body: "no file" })).toMatchObject({ ok: false });
 });

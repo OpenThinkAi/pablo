@@ -33,6 +33,26 @@ export interface Ritual {
   readonly detail: string;
 }
 
+/**
+ * One of the author's own review comments (AGT-1581), with the text of the line it was on, handed to the merge so the
+ * note step keeps it after the branch and its comment store are gone. `path` is the repo-relative path of the file
+ * commented on; only a comment on `chapters/NN-*.md` reaches a chapter's note.
+ */
+export interface AuthorNote {
+  readonly path: string;
+  readonly line?: number;
+  readonly startLine?: number;
+  /** The text of the commented line(s), as the branch had them when the author wrote the comment. */
+  readonly text: string;
+  readonly body: string;
+}
+
+/** The chapter number a repo-relative path names (`.../chapters/03-the-well.md` is 3), or undefined. */
+export function chapterOfPath(path: string): number | undefined {
+  const m = path.match(/(?:^|\/)chapters\/(\d+)-[^/]*\.md$/);
+  return m ? Number(m[1]) : undefined;
+}
+
 export interface RitualOptions {
   /** The project's slug (from `pablo.json`), used in the git and think messages. */
   readonly slug: string;
@@ -40,6 +60,8 @@ export interface RitualOptions {
   readonly model: string;
   /** The prose receipt line write.ts already prints (`read N tokens in Xs, wrote M in Ys`). */
   readonly receiptLine: string;
+  /** The author's own review comments (AGT-1581): those on this chapter's file are appended to its dated note. */
+  readonly authorNotes?: readonly AuthorNote[] | undefined;
   /** Overrides the clock the "today" date and note filename are computed from. */
   readonly now?: (() => Date) | undefined;
   /** Overrides `process.env` for `Bun.which("think", ...)` and the spawned `think` process. */
@@ -162,17 +184,26 @@ function notePath(workDir: string, chapter: number, today: string): { readonly a
   return { abs: join(workDir, rel), rel };
 }
 
+/** The author's comments as a note section: one bullet per comment with the line it was on, then the comment. Empty when there are none. */
+function authorSection(notes: readonly AuthorNote[]): string {
+  if (notes.length === 0) return "";
+  const at = (n: AuthorNote) => (n.line === undefined ? "chapter" : n.startLine !== undefined && n.startLine < n.line ? `lines ${n.startLine}-${n.line}` : `line ${n.line}`);
+  const oneLine = (t: string) => t.replace(/\s+/g, " ").trim();
+  const items = notes.map((n) => `- ${at(n)}${n.text.trim() ? `: "${oneLine(n.text)}"` : ""}\n  ${oneLine(n.body)}`);
+  return `\n\nAuthor comments:\n\n${items.join("\n")}`;
+}
+
 /**
  * Writes (or, if today's file for this chapter already exists, appends to)
  * `notes/<today>-chapter-<NN>.md`: `# <today> — chapter N drafted` as the
  * heading on first write, then one line per run with the receipt and
  * words/model.
  */
-function writeNote(workDir: string, chapter: number, today: string, receiptLine: string, words: number, model: string): Ritual {
+function writeNote(workDir: string, chapter: number, today: string, receiptLine: string, words: number, model: string, authorNotes: readonly AuthorNote[] = []): Ritual {
   const { abs, rel } = notePath(workDir, chapter, today);
   mkdirSync(dirname(abs), { recursive: true });
 
-  const bodyLine = `${receiptLine} — words: ${words}, model: ${model}`;
+  const bodyLine = `${receiptLine} — words: ${words}, model: ${model}${authorSection(authorNotes)}`;
 
   if (existsSync(abs)) {
     const existing = readFileSync(abs, "utf8");
@@ -377,7 +408,7 @@ export async function runAfterMerge(workDir: string, chapter: number, chapterPat
   const outline = attempt("outline", () => tickOutline(workDir, chapter));
 
   const { rel: noteRel } = notePath(workDir, chapter, today);
-  const note = attempt("note", () => writeNote(workDir, chapter, today, opts.receiptLine, opts.words, opts.model));
+  const note = attempt("note", () => writeNote(workDir, chapter, today, opts.receiptLine, opts.words, opts.model, (opts.authorNotes ?? []).filter((n) => chapterOfPath(n.path) === chapter)));
 
   const readme = attempt("readme", () => tickReadme(workDir, chapter, today, opts.words, opts.model));
 
