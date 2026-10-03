@@ -41,6 +41,24 @@ pablo --help
 Upgrade with `bun add -g @openthink/pablo@latest`. The cli pulls in
 `@openthink/pablo-core` and `@openthink/pablo-tui` as ordinary dependencies.
 
+## For readers
+
+If you read chapters for an author and are not a developer, this is all you need. Open the
+Terminal app, paste this one line, and press Return:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OpenThinkAi/pablo/main/install-reader.sh | sh
+```
+
+It says what it is doing at each step, installs what your Mac is missing (Bun and the GitHub CLI,
+`gh`), installs pablo, asks you to sign in to GitHub in your web browser, and starts pablo's
+menu-bar tray, which tells you when a chapter is ready. It also needs two things it will check for:
+Apple's developer tools (if they are missing it opens Apple's installer; run the line again when
+that finishes) and [Google Chrome](https://www.google.com/chrome/), where chapters open (it points
+you to the download but does not install Chrome). Running it again is safe: it skips what is
+installed and upgrades pablo. You also need a GitHub account with access to the book's reading
+repo; whoever shares the book with you sets that up.
+
 ## Develop
 
 ```sh
