@@ -237,6 +237,7 @@ test("a PR that cannot be opened is an error and records no round", () => {
   const fake = fakeRunner(s.dir, { prFails: true });
   const outcome = share(s, fake);
   expect(outcome).toMatchObject({ ok: false, code: 1 });
+  expect(outcome.ok ? "" : outcome.message).toContain("compare/round/atara-2026-10-02-base...round/atara-2026-10-02");
   expect(existsSync(join(s.vault, ".pablo", "rounds"))).toBe(false);
 });
 

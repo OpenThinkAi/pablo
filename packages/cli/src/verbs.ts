@@ -539,7 +539,7 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
 
   const outcome = checkWork(resolved.vaultRoot, resolved.projectPath, args.file);
   if (!outcome.ok) {
-    return { body: { ok: false, code: outcome.code, message: outcome.message }, exitCode: outcome.code };
+    return { body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried }, exitCode: outcome.code };
   }
   return { body: { ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced }, exitCode: 0 };
 }

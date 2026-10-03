@@ -127,7 +127,7 @@ export function listRounds(vaultRoot: string): RoundRecord[] {
   const dir = roundsDir(vaultRoot);
   if (!existsSync(dir)) return [];
   const rounds: RoundRecord[] = [];
-  for (const name of readdirSync(dir).filter((n) => n.endsWith(".json")).sort()) {
+  for (const name of readdirSync(dir).filter((n) => n.endsWith(".json"))) {
     try {
       rounds.push(JSON.parse(readFileSync(join(dir, name), "utf8")) as RoundRecord);
     } catch {
@@ -370,7 +370,10 @@ export function shareRound(options: ShareOptions): ShareOutcome {
       `Reading round for ${reader.name}: ${label} of ${options.title}.`,
     ]);
     if (opened.code !== 0) {
-      return fail(`pablo: share: pushed ${head} and ${base} to ${repo} but could not open the PR (${describe(opened)})`);
+      return fail(
+        `pablo: share: pushed ${head} and ${base} to ${repo} but could not open the PR (${describe(opened)}); ` +
+          `open it at https://github.com/${repo}/compare/${base}...${head}, or delete both branches on ${repo} to retry`,
+      );
     }
     const prUrl = opened.stdout.trim().split("\n").pop()?.trim() ?? "";
     const prMatch = /\/pull\/(\d+)\s*$/.exec(prUrl);
