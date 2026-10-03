@@ -17,7 +17,7 @@ import { createProviders, loadConfig } from "@openthink/pablo-core";
 import type { Adapter, Intent } from "@openthink/pablo-core";
 import { deleteBranch, mergeBranch, repoRoot } from "../branch";
 import { readMarker } from "../marker";
-import { runAfterMerge } from "./rituals";
+import { chapterOfPath, runAfterMerge } from "./rituals";
 import type { Ritual, RitualOptions } from "./rituals";
 
 /** `draft/ch05` or `draft/ch05-v2` -> 5; undefined for any other branch. */
@@ -120,7 +120,9 @@ export async function mergeChanges(projectPath: string, branch: string, opts: Me
     const merged = await mergeDraft(projectPath, branch, opts);
     return merged.ok ? { ok: true, sha: merged.sha, chapters: [merged.chapter], rituals: merged.rituals, notices: merged.notices } : merged;
   }
-  const chapters = chaptersTouched(repo, branch);
+  // The chapters the author commented on count too: a comments-only review changes no file but still gets its notes written.
+  const commented = (opts.authorNotes ?? []).map((n) => chapterOfPath(n.path)).filter((c): c is number => c !== undefined);
+  const chapters = [...new Set([...chaptersTouched(repo, branch), ...commented])].sort((a, b) => a - b);
   const merged = mergeBranch(repo, branch, opts.env ?? process.env);
   if (!merged.ok) return merged;
   const notices: string[] = [];

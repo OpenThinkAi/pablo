@@ -127,6 +127,8 @@ function helpText(): string {
     "                                            open a reading round: push those chapters (all",
     "                                            on main) to the book's private reading repo as a",
     "                                            PR, request the reader's review, record the round",
+    "  pablo share --list --project <slug>       the work's rounds: open, submitted (waiting to",
+    "                                            pull), pulled",
     "  pablo read --list [--json]               the reading rounds waiting for you on GitHub (and",
     "                                            those you have sent); no vault or project needed",
     "  pablo read <slug>-reading#<pr>          fetch a round's chapters at its head commit into",
@@ -954,6 +956,18 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       const message = "pablo: share requires --project <slug>";
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
+    }
+    if (args.list) {
+      const outcome = await shareWith({ project: args.project as string, list: true }, { cwd, env: process.env, stderr: process.stderr }, realRunner);
+      const body = outcome.body as { ok?: boolean; message?: string; rounds?: { id: string; chapters: number[]; status: string; closed?: boolean; prUrl: string }[]; notices?: string[] };
+      if (args.json) console.log(JSON.stringify(body));
+      else if (body.rounds === undefined) console.error(String(body.message));
+      else {
+        if (body.rounds.length === 0) console.log("pablo: no reading rounds for this project");
+        for (const r of body.rounds) console.log(`${r.id}  chapters ${r.chapters.join(", ") || "-"}  ${r.status}${r.status === "pulled" && r.closed === false ? " (not closed yet)" : ""}  ${r.prUrl}`);
+        for (const notice of body.notices ?? []) console.error(notice);
+      }
+      return outcome.exitCode;
     }
     if (!args.reader || !args.chapters) {
       const message = `pablo: share requires ${args.reader ? "--chapters <N|N-M>" : "--reader <name>"}`;
