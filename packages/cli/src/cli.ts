@@ -48,7 +48,7 @@ import { screenCommenter, screenFinisher } from "./review-finish";
 import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
-import { deriveCliOptions, parseForChapter, shareWith } from "./verbs";
+import { deriveCliOptions, notesWith, parseForChapter, shareWith } from "./verbs";
 import { realRunner } from "./share";
 import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef } from "./read";
@@ -68,6 +68,7 @@ const P0_VERBS = [
   "merge",
   "publish",
   "share",
+  "notes",
   "mcp",
   "voice",
   "prose",
@@ -78,7 +79,7 @@ const P0_VERBS = [
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
-const LATER_VERBS = ["dry-run", "notes"] as const;
+const LATER_VERBS = ["dry-run"] as const;
 
 const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
@@ -130,6 +131,9 @@ function helpText(): string {
     "                                            those you have sent); no vault or project needed",
     "  pablo read <slug>-reading#<pr>          fetch a round's chapters at its head commit into",
     "                                            $XDG_STATE_HOME/pablo/rounds/<repo>/<pr>/",
+    "  pablo notes pull --project <slug>        each reader's submitted review becomes a",
+    "                                            reader/<round> branch: one commit per suggestion,",
+    "                                            authored as the reader; comments for review mode",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list                         every voice in the vault and the global dir",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
@@ -969,6 +973,35 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       for (const notice of body["notices"] as string[]) console.log(notice);
     } else {
       console.error(String(body["message"]));
+    }
+    return outcome.exitCode;
+  }
+
+  if (args.verb === "notes") {
+    if (args.rest[0] !== "pull" || projectPath === undefined) {
+      const message = args.rest[0] !== "pull" ? 'pablo: notes: the only action is "pull" (pablo notes pull --project <slug>)' : "pablo: notes pull requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const outcome = await notesWith({ sub: "pull", project: args.project as string }, { cwd, env: process.env, stderr: process.stderr }, realRunner);
+    const body = outcome.body as {
+      ok?: boolean;
+      message?: string;
+      pulled?: { round: string; branch: string; commits: string[]; comments: number }[];
+      skipped?: { reason: string; message: string }[];
+      notices?: string[];
+    };
+    if (args.json) {
+      console.log(JSON.stringify(body));
+    } else if (body.pulled === undefined) {
+      console.error(String(body.message));
+    } else {
+      for (const p of body.pulled) {
+        console.log(`pablo: pulled round ${p.round} into ${p.branch} (${p.commits.length} suggestions, ${p.comments} comments)`);
+      }
+      for (const s of body.skipped ?? []) (s.reason === "error" || s.reason === "refused" ? console.error : console.log)(s.message);
+      for (const n of body.notices ?? []) console.log(n);
+      if (body.pulled.length === 0 && (body.skipped ?? []).length === 0) console.log("pablo: notes pull: no rounds for this work");
     }
     return outcome.exitCode;
   }

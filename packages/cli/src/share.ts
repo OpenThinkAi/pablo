@@ -24,7 +24,7 @@
  * `gh repo view --json url` reports is where the branches are pushed).
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ReaderConfig } from "@openthink/pablo-core";
@@ -112,6 +112,18 @@ export interface RoundRecord {
   readonly state: RoundState;
   /** ISO timestamp. */
   readonly createdAt: string;
+  /** Set by `notes pull` (AGT-1587) once the reader's review is in the vault: a pulled round is never pulled again. */
+  readonly pulled?: RoundPulled;
+}
+
+/** What `notes pull` made of a round's review. */
+export interface RoundPulled {
+  /** The vault branch it built, `reader/<round id>`. */
+  readonly branch: string;
+  /** The GitHub review ids it read. */
+  readonly reviews: readonly number[];
+  /** ISO timestamp. */
+  readonly at: string;
 }
 
 /** `<vault>/.pablo/rounds` — machine state, gitignored with the rest of `.pablo/`. */
@@ -127,6 +139,17 @@ export function readRound(vaultRoot: string, id: string): RoundRecord | undefine
   } catch {
     return undefined;
   }
+}
+
+/** Records that `notes pull` built `pulled.branch` from the round (atomic rewrite of its record). False when there is no such round. */
+export function markRoundPulled(vaultRoot: string, id: string, pulled: RoundPulled): boolean {
+  const round = readRound(vaultRoot, id);
+  if (round === undefined) return false;
+  const path = join(roundsDir(vaultRoot), `${id}.json`);
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify({ ...round, pulled }, null, 2)}\n`, "utf8");
+  renameSync(tmp, path);
+  return true;
 }
 
 /** Every recorded round, oldest first by creation time. Unreadable records are skipped. */

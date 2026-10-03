@@ -1,0 +1,174 @@
+{
+  "_note": "Recorded shape of GET /repos/{o}/{r}/pulls/7/reviews and /pulls/7/comments for an invented round. All text is invented.",
+  "reviews": [
+    {
+      "id": 9002,
+      "user": {
+        "login": "mattp-test"
+      },
+      "state": "COMMENTED",
+      "body": "Author note, not the reader's.",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "submitted_at": "2026-10-03T09:00:00Z"
+    },
+    {
+      "id": 9001,
+      "user": {
+        "login": "atara-test"
+      },
+      "state": "COMMENTED",
+      "body": "Loved the cold in this one.\r\nA few spots dragged.",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "submitted_at": "2026-10-03T08:00:00Z"
+    }
+  ],
+  "comments": [
+    {
+      "id": 101,
+      "pull_request_review_id": 9001,
+      "user": {
+        "login": "atara-test",
+        "type": "User"
+      },
+      "path": "novels/ice-house/chapters/02-the-saws.md",
+      "body": "**[fix]** say who\r\n\r\n```suggestion\r\nNobody in the house slept.\r\nNot even the dog.\r\n```",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "original_commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "line": 7,
+      "start_line": null,
+      "original_line": 7,
+      "original_start_line": null,
+      "side": "RIGHT",
+      "start_side": null,
+      "subject_type": "line",
+      "in_reply_to_id": null,
+      "html_url": "https://github.com/OpenThinkAi/ice-house-reading/pull/7#discussion_r101"
+    },
+    {
+      "id": 102,
+      "pull_request_review_id": 9001,
+      "user": {
+        "login": "atara-test",
+        "type": "User"
+      },
+      "path": "novels/ice-house/chapters/02-the-saws.md",
+      "body": "**[keep]** Love Odile here.",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "original_commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "line": 9,
+      "start_line": null,
+      "original_line": 9,
+      "original_start_line": null,
+      "side": "RIGHT",
+      "start_side": null,
+      "subject_type": "line",
+      "in_reply_to_id": null,
+      "html_url": "https://github.com/OpenThinkAi/ice-house-reading/pull/7#discussion_r102"
+    },
+    {
+      "id": 103,
+      "pull_request_review_id": 9001,
+      "user": {
+        "login": "atara-test",
+        "type": "User"
+      },
+      "path": "novels/ice-house/chapters/02-the-saws.md",
+      "body": "**[fix]** This beat feels rushed.",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "original_commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "line": 11,
+      "start_line": 10,
+      "original_line": 11,
+      "original_start_line": 10,
+      "side": "RIGHT",
+      "start_side": "RIGHT",
+      "subject_type": "line",
+      "in_reply_to_id": null,
+      "html_url": "https://github.com/OpenThinkAi/ice-house-reading/pull/7#discussion_r103"
+    },
+    {
+      "id": 104,
+      "pull_request_review_id": 9001,
+      "user": {
+        "login": "atara-test",
+        "type": "User"
+      },
+      "path": "novels/ice-house/chapters/02-the-saws.md",
+      "body": "```suggestion\nBy dawn the river had gone quiet.\nNobody spoke of it, not even Odile.\n```",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "original_commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "line": 14,
+      "start_line": 13,
+      "original_line": 14,
+      "original_start_line": 13,
+      "side": "RIGHT",
+      "start_side": "RIGHT",
+      "subject_type": "line",
+      "in_reply_to_id": null,
+      "html_url": "https://github.com/OpenThinkAi/ice-house-reading/pull/7#discussion_r104"
+    },
+    {
+      "id": 105,
+      "pull_request_review_id": 9001,
+      "user": {
+        "login": "atara-test",
+        "type": "User"
+      },
+      "path": "novels/ice-house/chapters/02-the-saws.md",
+      "body": "**[keep]** The pacing works.",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "original_commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "line": null,
+      "start_line": null,
+      "original_line": null,
+      "original_start_line": null,
+      "side": null,
+      "start_side": null,
+      "subject_type": "file",
+      "in_reply_to_id": null,
+      "html_url": "https://github.com/OpenThinkAi/ice-house-reading/pull/7#discussion_r105"
+    },
+    {
+      "id": 106,
+      "pull_request_review_id": 9002,
+      "user": {
+        "login": "mattp-test",
+        "type": "User"
+      },
+      "path": "novels/ice-house/chapters/02-the-saws.md",
+      "body": "Agreed.",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "original_commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "line": 9,
+      "start_line": null,
+      "original_line": 9,
+      "original_start_line": null,
+      "side": "RIGHT",
+      "start_side": null,
+      "subject_type": "line",
+      "in_reply_to_id": 102,
+      "html_url": "https://github.com/OpenThinkAi/ice-house-reading/pull/7#discussion_r106"
+    },
+    {
+      "id": 107,
+      "pull_request_review_id": 9001,
+      "user": {
+        "login": "atara-test",
+        "type": "User"
+      },
+      "path": "novels/ice-house/chapters/02-the-saws.md",
+      "body": "**[fix]** Which saws?",
+      "commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "original_commit_id": "4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090",
+      "line": null,
+      "start_line": null,
+      "original_line": 6,
+      "original_start_line": null,
+      "side": "RIGHT",
+      "start_side": null,
+      "subject_type": "line",
+      "in_reply_to_id": null,
+      "html_url": "https://github.com/OpenThinkAi/ice-house-reading/pull/7#discussion_r107"
+    }
+  ]
+}
