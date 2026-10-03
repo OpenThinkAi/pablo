@@ -28,3 +28,8 @@ test("a review adds its counts as a field", () => {
   expect(f.find((x) => x.key === "review")?.value).toBe("2 accepted · 1 rejected · 4 pending");
   expect(statusFields({ format: "novel", drafted: 1, total: 2, branch: "main", comments: {} }).some((x) => x.key === "review")).toBe(false);
 });
+
+test("a review's counts by source and tag follow the known kinds, in the order given (AGT-1580)", () => {
+  const f = statusFields({ ...input, comments: { critic: 2, "reader fix": 1, "reader keep": 1, author: 1 } });
+  expect(f.find((x) => x.key === "comments")?.value).toBe("▲ 2 critic · 1 reader fix · 1 reader keep · 1 author");
+});

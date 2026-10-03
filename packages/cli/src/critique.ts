@@ -33,6 +33,7 @@ import { join, relative } from "node:path";
 import { parseDiff, readStyle, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { BRANCH_KINDS, branchDiff, branchKind, repoRoot } from "./branch";
+import { branchFileName, readComments, type StoredComment } from "./comments";
 
 export const CRITIQUE_KINDS = ["continuity", "timeline", "tells"] as const;
 export type CritiqueKind = (typeof CRITIQUE_KINDS)[number];
@@ -370,7 +371,7 @@ interface SavedCritique {
 
 /** `<work>/.pablo/critique/<branch>.json`, the slash in a branch name made safe for a file name. */
 export function critiquePath(projectPath: string, branch: string): string {
-  return join(projectPath, ".pablo", "critique", `${branch.replace(/[^\w.-]/g, "__")}.json`);
+  return join(projectPath, ".pablo", "critique", `${branchFileName(branch)}.json`);
 }
 
 function headOf(repo: string, branch: string): string | undefined {
@@ -409,4 +410,14 @@ export function loadCritique(projectPath: string, branch: string): readonly Crit
   } catch {
     return [];
   }
+}
+
+/**
+ * Everything review mode shows for `branch`: the critic's survivors (as `critic` comments, the kind as the box's label,
+ * the claim as its body) then the comment store's entries (`.pablo/comments/`, comments.ts), in one list. The screen's
+ * `commentsOf` (cli.ts).
+ */
+export function reviewCommentsOf(projectPath: string, branch: string): readonly (StoredComment & { readonly label?: string })[] {
+  const critic = loadCritique(projectPath, branch).map((c) => ({ source: "critic" as const, path: c.file, line: c.line, author: "critic", body: c.claim, label: c.kind }));
+  return [...critic, ...readComments(projectPath, branch)];
 }

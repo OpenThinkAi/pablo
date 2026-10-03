@@ -86,3 +86,17 @@ test("hitAt finds the hit on the cursor's line or in its box; g f / g F walk the
   expect(nextHitRow(rows, 3, -1)).toBe(6); // from inside the first, round the end
   expect(nextHitRow(mainRows(CHAPTER, 80, []), 0, 1)).toBeUndefined();
 });
+
+test("commentBox wraps the body onto up to maxLines rows, every row the same width; the default stays one cut line (AGT-1580)", () => {
+  const body = "word ".repeat(30);
+  const all = commentBox({ title: "t", body }, 30, { maxLines: Infinity });
+  expect(all.length).toBeGreaterThan(3);
+  expect(new Set(all.map((r) => [...r.text].length))).toEqual(new Set([30]));
+  expect(all.map((r) => r.part)).toEqual(["top", ...all.slice(1, -1).map(() => "body" as const), "bottom"]);
+  const two = commentBox({ title: "t", body }, 30, { maxLines: 2 });
+  expect(two).toHaveLength(4);
+  expect(two[2]!.text).toContain("…");
+  expect(commentBox({ title: "t", body }, 30)).toHaveLength(3);
+  // A word longer than a row is cut across rows, never overflowing the box.
+  expect(new Set(commentBox({ title: "t", body: "x".repeat(70) }, 20, { maxLines: Infinity }).map((r) => [...r.text].length))).toEqual(new Set([20]));
+});

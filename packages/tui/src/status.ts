@@ -21,8 +21,12 @@ export interface StatusInput {
   readonly drafted: number; readonly total: number;
   /** The git branch the screen is on (`main`, `draft/ch03`). */
   readonly branch: string;
-  /** Comment counts by kind; absent or zero kinds are left out. */
-  readonly comments: Partial<Record<CommentKind, number>>;
+  /**
+   * Comment counts by label; absent or zero labels are left out. Book mode counts `check` hits by kind; a review
+   * counts by source and tag (`critic`, `reader fix`, `reader keep`, `author`, AGT-1580). The known kinds come first,
+   * any other label after them in the order given.
+   */
+  readonly comments: Partial<Record<string, number>>;
   /** In a review: the changes accepted, rejected and still pending. */
   readonly review?: { readonly accepted: number; readonly rejected: number; readonly pending: number };
 }
@@ -31,7 +35,8 @@ export function statusFields(s: StatusInput): Field[] {
   const out: Field[] = [{ key: "format", label: "", value: s.format }];
   out.push({ key: "progress", label: "ch", value: `${s.drafted} of ${s.total} drafted` });
   out.push({ key: "branch", label: "branch", value: s.branch });
-  const counts = KINDS.filter((k) => s.comments[k]).map((k) => `${s.comments[k]} ${k}`);
+  const labels = [...KINDS, ...Object.keys(s.comments).filter((k) => !(KINDS as readonly string[]).includes(k))];
+  const counts = labels.filter((k) => s.comments[k]).map((k) => `${s.comments[k]} ${k}`);
   out.push({ key: "comments", label: "comments", value: counts.length ? `▲ ${counts.join(" · ")}` : "none", color: counts.length ? "yellow" : undefined });
   if (s.review) out.push({ key: "review", label: "review", value: `${s.review.accepted} accepted · ${s.review.rejected} rejected · ${s.review.pending} pending` });
   return out;
