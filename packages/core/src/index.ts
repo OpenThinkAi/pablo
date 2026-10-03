@@ -7,3 +7,4 @@ export * from "./diff";
 export { joinManuscript, joinParagraphs, joinSentences, splitManuscript, splitSentences } from "./sentences";
 export type { FactEntry, FactLine, FactScan, Provenance } from "./facts";
 export { formatFactLine, formatProvenance, parseFactLine, scanFacts, withProvenance } from "./facts";
+export * from "./review-map";

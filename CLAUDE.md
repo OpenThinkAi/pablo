@@ -53,6 +53,10 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 `write` and `prose` save through `splitManuscript`; pack
                 assembly joins manuscript slices with `joinManuscript`, so the
                 model never sees the splits (AGT-1531).
+                `review-map.ts` maps a reader's paragraph selections to
+                sentence lines and marks to a GitHub review payload and back
+                (AGT-1584, `--doc readers`); the reader view, `share`'s
+                transport and `notes pull` call it, never re-derive it.
 packages/tui    @openthink/pablo-tui — the Ink 7 / React 19 screen, a third
                 front end on `verbs.ts` beside the CLI and MCP. Terminal and
                 React dependencies live here, never in core. Resize and

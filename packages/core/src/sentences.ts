@@ -325,7 +325,7 @@ function paragraphsOf(text: string): string[] {
  * markdown structure (heading, list item, quote, table row, fence, rule) is
  * left alone, so joining never glues a table or a bullet list into one line.
  */
-function isProseBlock(block: string): boolean {
+export function isProseBlock(block: string): boolean {
   return !block.split("\n").some((line) => /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\||```|~~~|---+\s*$|\*\*\*+\s*$)/.test(line));
 }
 
