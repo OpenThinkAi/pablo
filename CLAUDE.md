@@ -88,6 +88,15 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 (`a c`, AGT-1566) talks to the harness through a `Composer`
                 seam the cli passes to `runScreen` (`harness/compose.ts`, a
                 streaming-prompt session); the tui never imports the SDK.
+                The reader's window (`pablo read <round>`, AGT-1586): a ui-leaf
+                view, `packages/cli/views/reader.tsx`, mounted by
+                `src/reader-host.ts`. The view is dumb: it renders what the
+                host sends and posts marks back (`saveDraft`, `submit`); the
+                host maps them with core's `review-map` and sends them with
+                `submit.ts`. `views/` is type-checked with everything else
+                (the root tsconfig carries the DOM lib for it) and ships in
+                the package's `files`. It needs real Google Chrome; tests
+                use a fake `mount`, never a window.
                 Any new dependency the CLI needs
                 goes here; core stays dependency-free.
 ```

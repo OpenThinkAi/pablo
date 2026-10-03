@@ -28,6 +28,7 @@
   },
   "files": [
     "src",
+    "views",
     "policies"
   ],
   "dependencies": {
@@ -35,6 +36,13 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "@openthink/pablo-core": "workspace:*",
     "@openthink/pablo-tui": "workspace:*",
+    "@openthink/ui-leaf": "^1.6.0",
     "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
   }
 }
