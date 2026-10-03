@@ -95,20 +95,23 @@ function validate(slug: string, branch: string): string | undefined {
 }
 
 /**
- * Creates `branch` from `main` and checks it out as a worktree under
- * `worktreePath(slug, branch)`. Refuses a name outside the branch kinds, a
- * branch that already exists, and a missing `main`.
+ * Creates `branch` from `main` (or from `from`, a full commit sha: a reader's
+ * branch starts at the vault commit their round was read at, AGT-1587) and
+ * checks it out as a worktree under `worktreePath(slug, branch)`. Refuses a
+ * name outside the branch kinds, a branch that already exists, a `from` that
+ * is not a commit sha, and a missing start point.
  */
-export function createBranch(repo: string, slug: string, branch: string, env: Env = process.env): BranchResult {
+export function createBranch(repo: string, slug: string, branch: string, env: Env = process.env, from = "main"): BranchResult {
   const invalid = validate(slug, branch);
   if (invalid) return { ok: false, notice: invalid };
+  if (from !== "main" && !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(from)) return { ok: false, notice: `pablo: branch: "${from}" is not a commit sha` };
 
   const path = worktreePath(slug, branch, env);
   if (existsSync(path)) return { ok: false, notice: `pablo: branch: ${path} already exists` };
 
   try {
     mkdirSync(dirname(path), { recursive: true });
-    git(repo, ["worktree", "add", "-b", branch, path, "main"]);
+    git(repo, ["worktree", "add", "-b", branch, path, from === "main" ? "main" : `${from}^{commit}`]);
   } catch (err) {
     return { ok: false, notice: `pablo: git worktree add failed: ${errMessage(err)}` };
   }
@@ -279,7 +282,10 @@ export function mergeBranch(repo: string, branch: string, env: Env = process.env
     git(repo, ["merge", "--no-ff", "-m", `merge ${branch}`, branch], identity);
     return { ok: true, sha: git(repo, ["rev-parse", "HEAD"]).trim() };
   } catch (err) {
-    const notice = `pablo: git merge failed: ${errMessage(err)}`;
+    // git reports conflicts on stdout ("CONFLICT (content): Merge conflict in <file>"): name them, so a conflict reads as one.
+    const stdout = (err as { stdout?: Buffer | string }).stdout?.toString() ?? "";
+    const conflicts = stdout.split("\n").filter((l) => l.startsWith("CONFLICT"));
+    const notice = `pablo: git merge failed: ${conflicts.length > 0 ? conflicts.join("; ") : errMessage(err)}`;
     try {
       git(repo, ["merge", "--abort"]);
     } catch {

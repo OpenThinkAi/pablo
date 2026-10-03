@@ -75,6 +75,7 @@ import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { publishWork } from "./publish";
 import { realRunner, shareRound } from "./share";
+import { notesPull } from "./notes";
 import type { Runner } from "./share";
 import { revisePassage } from "./screen-revise";
 import { reviseCore } from "./revise";
@@ -641,6 +642,49 @@ export async function shareWith(args: z.infer<typeof SHARE_ARGS>, ctx: VerbConte
   });
   if (!outcome.ok) return { body: { ok: false, code: outcome.code, message: outcome.message }, exitCode: outcome.code };
   return { body: { ok: true, ...outcome.round, record: outcome.recordPath, notices: outcome.notices }, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// notes pull (AGT-1587)
+// ---------------------------------------------------------------------------
+
+const NOTES_ARGS = z.object({
+  sub: z.string().describe('What to do with readers\' notes; only "pull" today.'),
+  project: projectField,
+});
+
+/**
+ * `notes pull`, with the `gh`/git runner injectable: the verb's `run` passes
+ * `realRunner`; tests pass a fake serving a recorded review.
+ */
+export async function notesWith(args: z.infer<typeof NOTES_ARGS>, ctx: VerbContext, run: Runner, now?: () => Date): Promise<VerbResult> {
+  if (args.sub !== "pull") {
+    return { body: { ok: false, code: 2, message: `pablo: notes: unknown action "${args.sub}" (only "pull")` }, exitCode: 2 };
+  }
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const marker = readMarker(resolved.projectPath);
+  if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
+
+  let readers;
+  try {
+    readers = loadConfig({ env: ctx.env }).readers;
+  } catch (error) {
+    return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
+  }
+  const outcome = notesPull({
+    vaultRoot: resolved.vaultRoot,
+    projectPath: resolved.projectPath,
+    slug: marker.marker.slug,
+    readers,
+    run,
+    env: ctx.env,
+    ...(now ? { now } : {}),
+  });
+  return {
+    body: { ok: outcome.code === 0, code: outcome.code, pulled: outcome.pulled, skipped: outcome.skipped, notices: outcome.notices },
+    exitCode: outcome.code,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1258,6 +1302,17 @@ export const VERBS: readonly Verb[] = [
     run: (args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext) => shareWith(args, ctx, realRunner),
     // Sending the manuscript to a person is the author's act: a model connected
     // over MCP must not be able to do it, so this verb registers no MCP tool.
+    mcpTools: [],
+  },
+  {
+    name: "notes",
+    description:
+      "`notes pull`: turn each reader's submitted review of a reading round into a reader/<round> branch in the vault: one commit per suggestion, authored as the reader, and every comment in the branch's comment store for review mode.",
+    args: NOTES_ARGS,
+    run: (args: z.infer<typeof NOTES_ARGS>, ctx: VerbContext) => notesWith(args, ctx, realRunner),
+    positionalArgs: ["sub"],
+    // Reading a reader's review off GitHub and writing branches into the vault
+    // is the author's act, like `share`: no MCP tool.
     mcpTools: [],
   },
   {
