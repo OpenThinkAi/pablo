@@ -48,7 +48,8 @@ import { screenCommenter, screenFinisher } from "./review-finish";
 import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
-import { deriveCliOptions, parseForChapter } from "./verbs";
+import { deriveCliOptions, parseForChapter, shareWith } from "./verbs";
+import { realRunner } from "./share";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
 import { runWrite } from "./write";
@@ -64,6 +65,7 @@ const P0_VERBS = [
   "migrate",
   "merge",
   "publish",
+  "share",
   "mcp",
   "voice",
   "prose",
@@ -74,7 +76,7 @@ const P0_VERBS = [
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
-const LATER_VERBS = ["dry-run", "share", "notes"] as const;
+const LATER_VERBS = ["dry-run", "notes"] as const;
 
 const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
@@ -118,6 +120,10 @@ function helpText(): string {
     "                                            compile every chapter into one markdown file",
     "                                            under <work>/.pablo/out/ (frontmatter stripped,",
     "                                            sentences joined, quotes curled)",
+    "  pablo share --project <slug> --reader <name> --chapters N|N-M",
+    "                                            open a reading round: push those chapters (all",
+    "                                            on main) to the book's private reading repo as a",
+    "                                            PR, request the reader's review, record the round",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list                         every voice in the vault and the global dir",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
@@ -218,6 +224,10 @@ interface ParsedArgs {
   readonly end: string | undefined;
   /** `publish --target draft|review|final` (AGT-1534). */
   readonly target: string | undefined;
+  /** `share --reader <name>` (AGT-1582): a reader named in the config's `readers`. */
+  readonly reader: string | undefined;
+  /** `share --chapters 3|3-5` (AGT-1582). */
+  readonly chapters: string | undefined;
   /** `agent --new` (AGT-1565): start a fresh harness session; the old one stays on disk. */
   readonly new: boolean;
 }
@@ -279,6 +289,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     start: typeof values["start"] === "string" ? values["start"] : undefined,
     end: typeof values["end"] === "string" ? values["end"] : undefined,
     target: typeof values["target"] === "string" ? values["target"] : undefined,
+    reader: typeof values["reader"] === "string" ? values["reader"] : undefined,
+    chapters: typeof values["chapters"] === "string" ? values["chapters"] : undefined,
   };
 }
 
@@ -876,6 +888,29 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       console.log(`pablo: published ${outcome.target}: ${outcome.where} (${outcome.chapters} chapters, ${outcome.words} words)`);
     }
     return EXIT_OK;
+  }
+
+  if (args.verb === "share") {
+    if (projectPath === undefined) {
+      const message = "pablo: share requires --project <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const outcome = await shareWith(
+      { project: args.project as string, reader: args.reader as string, chapters: args.chapters as string },
+      { cwd, env: process.env, stderr: process.stderr },
+      realRunner,
+    );
+    const body = outcome.body as Record<string, unknown>;
+    if (args.json) {
+      console.log(JSON.stringify(body));
+    } else if (body["ok"] === true) {
+      console.log(`pablo: opened round ${String(body["id"])}: ${String(body["prUrl"])}`);
+      for (const notice of body["notices"] as string[]) console.log(notice);
+    } else {
+      console.error(String(body["message"]));
+    }
+    return outcome.exitCode;
   }
 
   if (args.verb === "voice") {

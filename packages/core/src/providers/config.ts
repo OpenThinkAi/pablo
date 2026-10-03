@@ -16,7 +16,8 @@
  *     "local":     { "endpoint": "http://127.0.0.1:8002/v1", "model": "mlx-community/gemma-4-31b-it-4bit", "local": true },
  *     "anthropic": { "kind": "anthropic", "key": "keychain:ANTHROPIC_API_KEY_PERSONAL/mattpardini" }
  *   },
- *   "intents": { "research": "anthropic" }
+ *   "intents": { "research": "anthropic" },
+ *   "readers": { "atara": { "github": "atara-login", "name": "Atara Example", "email": "atara@example.com" } }
  * }
  * ```
  */
@@ -48,12 +49,31 @@ export interface ProviderConfig {
   readonly temperature?: number;
 }
 
+/**
+ * A reader of the author's chapters (AGT-1582): who `pablo share --reader <name>`
+ * sends a round to. `github` is the login the PR review is requested from;
+ * `name` and `email` are who the reader's suggestions are authored as when
+ * `notes pull` turns them into commits.
+ */
+export interface ReaderConfig {
+  readonly github: string;
+  readonly name: string;
+  readonly email: string;
+}
+
+/** A reader's config key: becomes part of a branch name (`round/<reader>-<date>`), so it is a plain slug. */
+const READER_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** A GitHub login: alphanumerics and single hyphens, never starting with one (it is passed as a CLI argument). */
+const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+
 export interface PabloConfig {
   /** Insertion-ordered: routing picks "the first local" and "the first cloud" from here. */
   readonly providers: ReadonlyMap<string, ProviderConfig>;
   readonly defaultProvider: string;
   /** Intent name to provider id; an unmapped intent routes by its kind. */
   readonly intents: ReadonlyMap<string, string>;
+  /** Readers by name (the `readers` key of the config file); empty when there are none. */
+  readonly readers: ReadonlyMap<string, ReaderConfig>;
 }
 
 export const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:8002/v1";
@@ -108,6 +128,7 @@ export function defaultConfig(): PabloConfig {
     providers: new Map([[local.id, local]]),
     defaultProvider: local.id,
     intents: new Map(),
+    readers: new Map(),
   };
 }
 
@@ -132,7 +153,8 @@ export function parseConfig(text: string, source = "the config file"): PabloConf
 
   const defaultProvider = readDefault(raw["default"], providers, source);
   const intents = readIntents(raw["intents"], providers, source);
-  return { providers, defaultProvider, intents };
+  const readers = readReaders(raw["readers"], source);
+  return { providers, defaultProvider, intents, readers };
 }
 
 export interface LoadConfigOptions {
@@ -247,6 +269,27 @@ function readIntents(
     intents.set(intent, providerId);
   }
   return intents;
+}
+
+function readReaders(value: unknown, source: string): ReadonlyMap<string, ReaderConfig> {
+  if (value === undefined) return new Map();
+  if (!isRecord(value)) throw new ProviderConfigError(`pablo: ${source}: "readers" must be an object`);
+  const readers = new Map<string, ReaderConfig>();
+  for (const [name, entry] of Object.entries(value)) {
+    const where = `${source}: reader "${name}"`;
+    if (!READER_NAME.test(name)) {
+      throw new ProviderConfigError(`pablo: ${where}: the name must be lowercase letters, digits and hyphens`);
+    }
+    if (!isRecord(entry)) throw new ProviderConfigError(`pablo: ${where} must be an object`);
+    const github = readString(entry["github"], `${where}: "github"`);
+    if (!GITHUB_LOGIN.test(github)) throw new ProviderConfigError(`pablo: ${where}: "github" is not a GitHub login: ${github}`);
+    readers.set(name, {
+      github,
+      name: readString(entry["name"], `${where}: "name"`),
+      email: readString(entry["email"], `${where}: "email"`),
+    });
+  }
+  return readers;
 }
 
 function readString(value: unknown, where: string): string {

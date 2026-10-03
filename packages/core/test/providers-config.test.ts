@@ -94,3 +94,19 @@ test("a provider's sampling temperature is read, inherited, and range-checked", 
   expect(() => parseConfig(JSON.stringify({ providers: { local: { temperature: 3 } } }))).toThrow(/"temperature" must be a number from 0 to 2/);
   expect(() => parseConfig(JSON.stringify({ providers: { local: { temperature: "hot" } } }))).toThrow(/"temperature"/);
 });
+
+test("the config's readers are parsed, validated, and empty by default", () => {
+  expect(defaultConfig().readers.size).toBe(0);
+  const config = parseConfig(
+    JSON.stringify({ readers: { atara: { github: "atara-test", name: "Atara Test", email: "atara@example.com" } } }),
+  );
+  expect(config.readers.get("atara")).toEqual({ github: "atara-test", name: "Atara Test", email: "atara@example.com" });
+  const bad = (readers: unknown): void => {
+    expect(() => parseConfig(JSON.stringify({ readers }))).toThrow(ProviderConfigError);
+  };
+  bad([]);
+  bad({ "Bad Name": { github: "a", name: "A", email: "a@b.c" } });
+  bad({ atara: { github: "-flag", name: "A", email: "a@b.c" } });
+  bad({ atara: { github: "a", name: "", email: "a@b.c" } });
+  bad({ atara: { github: "a", name: "A" } });
+});
