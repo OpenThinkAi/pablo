@@ -510,6 +510,11 @@ export function parseComment(comment: GitHubReviewComment): ResolvedMark | undef
 /**
  * The inverse `notes pull` uses: a submitted review back into the round's resolved marks, in the order given.
  * `parseReview(reviewPayload(r))` is `r` for every round `resolveReview` can produce.
+ *
+ * Trust boundary: every field here comes from the GitHub API, so a mark's `path`, line numbers and replacement
+ * are unvalidated external input. This module opens no files; a caller that turns `path` into a file must check
+ * it is one of the round's recorded chapters (or confine it to the vault) first, and `applySuggestion` refuses
+ * line ranges outside the file.
  */
 export function parseReview(review: GitHubReview): ResolvedReview {
   const marks = review.comments.map(parseComment).filter((m): m is ResolvedMark => m !== undefined);
