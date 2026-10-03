@@ -172,6 +172,15 @@ export type ListOutcome =
   | { readonly ok: true; readonly rounds: readonly ReaderRound[]; readonly notices: readonly string[] }
   | { readonly ok: false; readonly code: 1; readonly message: string };
 
+/** The one GitHub search that finds the reader's waiting rounds; the tray asks it with a conditional request. */
+export const ROUND_SEARCH_ENDPOINT = "search/issues";
+export function roundSearchFields(org: string = READING_ORG): [string, string][] {
+  return [
+    ["q", `is:pr is:open review-requested:@me org:${org}`],
+    ["per_page", "100"],
+  ];
+}
+
 export interface ListOptions {
   readonly run: Runner;
   readonly env?: Env;
@@ -191,10 +200,7 @@ export function listReaderRounds(options: ListOptions): ListOutcome {
   const org = options.org ?? READING_ORG;
   const notices: string[] = [];
 
-  const search = ghJson(run, "search/issues", [
-    ["q", `is:pr is:open review-requested:@me org:${org}`],
-    ["per_page", "100"],
-  ]);
+  const search = ghJson(run, ROUND_SEARCH_ENDPOINT, roundSearchFields(org));
   if (!search.ok) return { ok: false, code: 1, message: `pablo: read: cannot ask GitHub for your rounds (${search.reason})` };
   const items = asRecord(search.value)?.["items"];
   if (!Array.isArray(items)) return { ok: false, code: 1, message: "pablo: read: GitHub's search answer had no items" };

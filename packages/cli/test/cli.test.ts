@@ -113,11 +113,14 @@ test("an unknown verb exits 1", () => {
   expect(stderr).toContain("unknown verb");
 });
 
-test("the retired `pablo tray` answers as an unknown verb (AGT-1520)", () => {
-  const { exitCode, stderr } = runCli(["tray"]);
+test("`pablo tray` is the reader's tray verb again (AGT-1589): listed in --help, never run bare here", () => {
+  // Bare `pablo tray` is the long-lived daemon (real polling, a real helper build): a test must only
+  // ever reach it through tray/cli.ts's injected deps (test/tray-cli.test.ts).
+  const { exitCode, stdout } = runCli(["--help"]);
 
-  expect(exitCode).toBe(1);
-  expect(stderr).toContain('unknown verb "tray"');
+  expect(exitCode).toBe(0);
+  expect(stdout).toContain("pablo tray install|uninstall");
+  expect(stdout).not.toContain("retired");
 });
 
 test("init novel <slug> \"<Title>\" scaffolds the work and exits 0 with a JSON summary", () => {
