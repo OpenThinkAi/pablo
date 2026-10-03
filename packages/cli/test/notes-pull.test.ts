@@ -6,13 +6,14 @@ import { fileURLToPath } from "node:url";
 import { parseDiff, stitch } from "@openthink/pablo-core";
 import type { ReaderConfig } from "@openthink/pablo-core";
 import { branchDiff, worktreePath } from "../src/branch";
-import { readComments } from "../src/comments";
+import { addComment, readComments } from "../src/comments";
 import { reviewCommentsOf } from "../src/critique";
-import { movedLine, notesPull } from "../src/notes";
+import { listRoundStatus, movedLine, notesPull } from "../src/notes";
 import { finishReview } from "../src/review-finish";
 import { readRound, realRunner } from "../src/share";
+import { waitingBranches } from "../src/branch";
 import type { RoundRecord, RunResult, Runner } from "../src/share";
-import { notesWith } from "../src/verbs";
+import { notesWith, shareWith } from "../src/verbs";
 
 /**
  * AGT-1587: `pablo notes pull`. Nothing reaches GitHub: `gh` is answered by a fake runner serving a recorded review
@@ -112,6 +113,8 @@ function fakeGh(files: Record<string, string>, recorded: { reviews: unknown[]; c
     const ok = (stdout: string): RunResult => ({ code: 0, stdout, stderr: "" });
     const endpoint = args[1] ?? "";
     const lines = (items: unknown[]) => ok(items.map((i) => JSON.stringify(i)).join("\n") + "\n");
+    if (args[0] === "pr" && args[1] === "close") return ok("");
+    if (args[0] === "api" && args[1] === "-X" && args[2] === "DELETE") return ok("");
     if (args[0] === "api" && endpoint === "repos/OpenThinkAi/ice-house-reading/pulls/7/reviews") return lines(recorded.reviews);
     if (args[0] === "api" && endpoint === "repos/OpenThinkAi/ice-house-reading/pulls/7/comments") return lines(recorded.comments);
     const m = /^repos\/OpenThinkAi\/ice-house-reading\/contents\/(.+)\?ref=([0-9a-f]+)$/.exec(endpoint);
@@ -164,12 +167,13 @@ test("a submitted review becomes reader/<round>: one commit per suggestion, auth
 
   const record = readRound(s.vault, "atara-2026-10-02");
   expect(record?.pulled).toEqual({ branch: BRANCH, reviews: [9001], at: "2026-10-03T10:00:00.000Z" });
-  // Only the API was asked: the reviews, the comments, and the chapter at the review's commit.
-  expect(fake.gh.map((a) => a[1])).toEqual([
+  // Only the API was asked: the reviews, the comments, the chapter at the review's commit, then the round was closed.
+  expect(fake.gh.slice(0, 3).map((a) => a[1])).toEqual([
     "repos/OpenThinkAi/ice-house-reading/pulls/7/reviews",
     "repos/OpenThinkAi/ice-house-reading/pulls/7/comments",
     `repos/OpenThinkAi/ice-house-reading/contents/${CH}?ref=4f1c2a9e8b7d6c5b4a39281706f5e4d3c2b1a090`,
   ]);
+  expect(fake.gh).toHaveLength(6);
 });
 
 test("every comment lands in the branch's store as source reader with its tag, at its line on the branch (AC3)", () => {
@@ -341,4 +345,127 @@ test("notesWith reads readers from pablo's config; pablo notes refuses a bad act
   const [verbs, later] = help.split("Later (not yet implemented):");
   expect(verbs).toMatch(/^ {2}notes$/m);
   expect(later).not.toMatch(/^ {2}notes$/m);
+});
+
+// ---------------------------------------------------------------------------
+// AGT-1588: round housekeeping, the empty-commit review, and the lists
+// ---------------------------------------------------------------------------
+
+const closeCalls = (fake: FakeGh) => fake.gh.filter((a) => a[0] === "pr" || (a[0] === "api" && a[1] === "-X"));
+
+test("after a pull the PR is closed with a comment (never merged), both round/ branches are deleted, the record is pulled (AC1)", () => {
+  const s = setup();
+  const fake = fakeGh({ [CH]: TEXT });
+  const outcome = pull(s, fake);
+  expect(outcome.pulled[0]?.closed).toBe(true);
+  expect(closeCalls(fake)).toEqual([
+    ["pr", "close", "7", "--repo", "OpenThinkAi/ice-house-reading", "--comment", expect.stringContaining("atara-2026-10-02")],
+    ["api", "-X", "DELETE", "repos/OpenThinkAi/ice-house-reading/git/refs/heads/round/atara-2026-10-02"],
+    ["api", "-X", "DELETE", "repos/OpenThinkAi/ice-house-reading/git/refs/heads/round/atara-2026-10-02-base"],
+  ]);
+  expect(fake.gh.some((a) => a.includes("merge"))).toBe(false);
+  expect(readRound(s.vault, "atara-2026-10-02")?.state).toBe("pulled");
+});
+
+test("a close that fails is a notice, the round stays pulled-but-open, and the next pull retries only the close; already-gone branches count as done", () => {
+  const s = setup();
+  const base = fakeGh({ [CH]: TEXT });
+  let failing = true;
+  const run: Runner = (command, args, options) => {
+    if (command === "gh" && args[0] === "pr" && args[1] === "close" && failing) return { code: 1, stdout: "", stderr: "HTTP 502: bad gateway" };
+    if (command === "gh" && args[0] === "api" && args[1] === "-X" && String(args[3]).endsWith("-base")) return { code: 1, stdout: "", stderr: "gh: Reference does not exist (HTTP 422)" };
+    return base.run(command, args, options);
+  };
+  const first = pull(s, { run, gh: base.gh });
+  expect(first.code).toBe(0);
+  expect(first.pulled[0]).toMatchObject({ branch: BRANCH, closed: false });
+  expect(first.notices.join("\n")).toContain("not closed yet");
+  expect(readRound(s.vault, "atara-2026-10-02")?.state).toBe("open");
+  expect(readRound(s.vault, "atara-2026-10-02")?.pulled?.branch).toBe(BRANCH);
+
+  failing = false;
+  const head = git(s.vault, "rev-parse", BRANCH);
+  base.gh.length = 0;
+  const again = pull(s, { run, gh: base.gh });
+  expect(again.pulled).toEqual([]);
+  expect(again.notices.join("\n")).toContain("closed the round's PR");
+  expect(base.gh.every((a) => a[0] === "pr" || a[1] === "-X")).toBe(true);
+  expect(readRound(s.vault, "atara-2026-10-02")?.state).toBe("pulled");
+  expect(git(s.vault, "rev-parse", BRANCH)).toBe(head);
+});
+
+test("a round record cannot aim the close at another repo or ref", () => {
+  const s = setup();
+  const record = join(s.vault, ".pablo", "rounds", "atara-2026-10-02.json");
+  writeFileSync(record, JSON.stringify({ ...s.round, pulled: { branch: BRANCH, reviews: [1], at: "x" }, repo: "OpenThinkAi/other-reading" }));
+  const fake = fakeGh({ [CH]: TEXT });
+  const outcome = pull(s, fake);
+  expect(outcome.notices.join("\n")).toContain("still not closed");
+  expect(fake.gh).toEqual([]);
+});
+
+const COMMENT_ONLY = {
+  reviews: RECORDED.reviews,
+  comments: RECORDED.comments.filter((c) => !String(c["body"]).includes("```suggestion")),
+};
+
+test("a comments-only review still yields a reviewable branch: one empty commit authored as the reader (AC4)", async () => {
+  const s = setup();
+  const fake = fakeGh({ [CH]: TEXT }, COMMENT_ONLY);
+  const outcome = pull(s, fake);
+  expect(outcome.code).toBe(0);
+  expect(outcome.pulled).toHaveLength(1);
+  const made = outcome.pulled[0];
+  expect(made?.commits).toHaveLength(1);
+  expect(made?.comments).toBeGreaterThan(0);
+  expect(git(s.vault, "log", "--format=%an <%ae>|%s", `${s.round.vaultCommit}..${BRANCH}`)).toBe("Atara Test <atara@example.com>|notes from Atara Test on chapter 2");
+  expect(git(s.vault, "diff", "--name-only", `${s.round.vaultCommit}..${BRANCH}`)).toBe("");
+  // waitingBranches lists it, and review mode shows only the comments.
+  const waiting = waitingBranches(s.vault);
+  expect(waiting.ok && waiting.branches).toEqual([BRANCH]);
+  expect(reviewCommentsOf(s.project, BRANCH).filter((c) => c.source === "reader").length).toBe(made?.comments ?? -1);
+  const diff = branchDiff(s.vault, BRANCH);
+  expect(diff.ok && diff.text).toBe("");
+});
+
+test("finishing a comments-only review with an author comment still runs the notes path; without one it is discarded (AC4)", async () => {
+  const s = setup();
+  pull(s, fakeGh({ [CH]: TEXT }, COMMENT_ONLY));
+  addComment(s.project, BRANCH, { source: "author", path: CH, line: 6, author: "Matt", body: "keep the saws" });
+  const done = await finishReview(s.project, BRANCH, { removed: [], added: [] }, { slug: "ice-house", env: s.env, now: () => new Date("2026-10-03T12:00:00.000Z") });
+  expect(done.ok && done.merged).toBe(true);
+  expect(readFileSync(join(s.project, "notes", "2026-10-03-chapter-02.md"), "utf8")).toContain("keep the saws");
+  expect(git(s.vault, "branch", "--list", BRANCH)).toBe("");
+
+  const t = setup();
+  pull(t, fakeGh({ [CH]: TEXT }, COMMENT_ONLY));
+  const bare = await finishReview(t.project, BRANCH, { removed: [], added: [] }, { slug: "ice-house", env: t.env, now: () => new Date("2026-10-03T12:00:00.000Z") });
+  expect(bare.ok && bare.merged).toBe(false);
+  expect(git(t.vault, "branch", "--list", BRANCH)).toBe("");
+});
+
+test("share --list: open, submitted, pulled (AC2)", async () => {
+  const s = setup();
+  const second = { ...s.round, id: "atara-2026-10-04", pr: 8, createdAt: "2026-10-04T12:00:00.000Z", head: "round/atara-2026-10-04", base: "round/atara-2026-10-04-base" };
+  const third = { ...s.round, id: "atara-2026-10-05", pr: 9, createdAt: "2026-10-05T12:00:00.000Z", pulled: { branch: "reader/atara-2026-10-05", reviews: [1], at: "x" }, state: "pulled" };
+  for (const r of [second, third]) writeFileSync(join(s.vault, ".pablo", "rounds", `${r.id}.json`), JSON.stringify(r));
+  const asked: string[] = [];
+  const run: Runner = (command, args) => {
+    asked.push([command, ...args].join(" "));
+    const reviews = args[1] === "repos/OpenThinkAi/ice-house-reading/pulls/7/reviews" ? RECORDED.reviews : [];
+    return { code: 0, stdout: reviews.map((r) => JSON.stringify(r)).join("\n"), stderr: "" };
+  };
+  const listed = listRoundStatus({ vaultRoot: s.vault, slug: "ice-house", run });
+  expect(listed.rounds.map((r) => [r.id, r.status, r.closed])).toEqual([
+    ["atara-2026-10-02", "submitted", undefined],
+    ["atara-2026-10-04", "open", undefined],
+    ["atara-2026-10-05", "pulled", true],
+  ]);
+  expect(asked.some((a) => a.includes("pulls/9"))).toBe(false);
+
+  const result = await shareWith({ project: "ice-house", list: true }, { cwd: s.vault, env: s.env, stderr: { write() {} } }, run);
+  expect(result.exitCode).toBe(0);
+  const cli = Bun.spawnSync(["bun", "run", CLI, "share", "--list", "--project", "ice-house", "--json"], { cwd: s.vault, env: { ...s.env, PATH: NO_THINK_PATH } });
+  expect(cli.exitCode).toBe(0); // gh is absent on this PATH: every open round reports a notice, none crashes
+  expect(JSON.parse(cli.stdout.toString()).rounds).toHaveLength(3);
 });

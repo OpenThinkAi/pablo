@@ -75,7 +75,7 @@ import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { publishWork } from "./publish";
 import { realRunner, shareRound } from "./share";
-import { notesPull } from "./notes";
+import { listRoundStatus, notesPull } from "./notes";
 import type { Runner } from "./share";
 import { revisePassage } from "./screen-revise";
 import { reviseCore } from "./revise";
@@ -607,20 +607,25 @@ async function runPublishVerb(args: z.infer<typeof PUBLISH_ARGS>, ctx: VerbConte
 
 const SHARE_ARGS = z.object({
   project: projectField,
-  reader: z.string().describe('A reader named in pablo\'s config "readers" (e.g. "atara").'),
-  chapters: z.string().describe('The chapters to share, all on main: "3" or "3-5".'),
+  reader: z.string().optional().describe('A reader named in pablo\'s config "readers" (e.g. "atara"). Required to open a round.'),
+  chapters: z.string().optional().describe('The chapters to share, all on main: "3" or "3-5". Required to open a round.'),
 });
 
 /**
- * `share`, with the `gh`/git runner injectable: `runShareVerb` (the verb's
+ * `share` (and `share --list`, AGT-1588: the work's rounds and where each stands; a CLI flag, not a verb argument), with the `gh`/git runner injectable: `runShareVerb` (the verb's
  * `run`) passes `realRunner`; tests pass a fake so nothing reaches GitHub.
  */
-export async function shareWith(args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext, run: Runner, acceptUrl?: (url: string, repo: string) => boolean): Promise<VerbResult> {
+export async function shareWith(args: z.infer<typeof SHARE_ARGS> & { readonly list?: boolean }, ctx: VerbContext, run: Runner, acceptUrl?: (url: string, repo: string) => boolean): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
 
   const marker = readMarker(resolved.projectPath);
   if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
+
+  if (args.list === true) {
+    const listed = listRoundStatus({ vaultRoot: resolved.vaultRoot, slug: marker.marker.slug, run });
+    return { body: { ok: true, rounds: listed.rounds, notices: listed.notices }, exitCode: 0 };
+  }
 
   let readers;
   try {

@@ -81,7 +81,8 @@ export const realRunner: Runner = (command, args, options = {}) => {
 // The round record
 // ---------------------------------------------------------------------------
 
-export type RoundState = "open";
+/** `open`: shared (possibly pulled, with its close still to do). `pulled`: pulled and closed: PR closed, `round/` branches deleted (AGT-1588). */
+export type RoundState = "open" | "pulled";
 
 export interface RoundChapter {
   readonly number: number;
@@ -148,6 +149,17 @@ export function markRoundPulled(vaultRoot: string, id: string, pulled: RoundPull
   const path = join(roundsDir(vaultRoot), `${id}.json`);
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, `${JSON.stringify({ ...round, pulled }, null, 2)}\n`, "utf8");
+  renameSync(tmp, path);
+  return true;
+}
+
+/** Records that the round's PR is closed and its `round/` branches are gone: its state becomes `pulled` (atomic rewrite). False when there is no such round. */
+export function markRoundClosed(vaultRoot: string, id: string): boolean {
+  const round = readRound(vaultRoot, id);
+  if (round === undefined) return false;
+  const path = join(roundsDir(vaultRoot), `${id}.json`);
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify({ ...round, state: "pulled" }, null, 2)}\n`, "utf8");
   renameSync(tmp, path);
   return true;
 }

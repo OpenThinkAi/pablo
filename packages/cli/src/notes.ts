@@ -17,8 +17,13 @@
  *     store (AGT-1580) with `source: "reader"`, line numbers moved to where those lines sit on the branch;
  *  6. mark the round pulled in its record, so running pull again does nothing.
  *
- * A round that fails part-way is undone (its branch and comments deleted) so a later pull can try again. Closing the
- * round's PR and deleting its `round/` branches is round housekeeping, not this verb.
+ * A review with no suggestion to take (comments only, or every suggestion kept as a comment) still gets one empty
+ * commit on the branch, authored as the reader ("notes from <name> on <chapters>"): without a commit `waitingBranches`
+ * would not list the branch and the book rail would never show it.
+ *
+ * A round that fails part-way is undone (its branch and comments deleted) so a later pull can try again. After a
+ * successful pull the round is closed (AGT-1588, `closeRound`): its PR closed, its `round/` branches deleted, its
+ * record `pulled`. A close that fails is a notice, and the next `notes pull` retries it.
  */
 
 import { rmSync, writeFileSync } from "node:fs";
@@ -29,7 +34,8 @@ import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./
 import { commentsPath, readComments, writeComments } from "./comments";
 import type { StoredComment } from "./comments";
 import { insideDir } from "./review-finish";
-import { CHAPTER_PATH, READING_ORG, listRounds, markRoundPulled } from "./share";
+import { closeRound } from "./round-housekeeping";
+import { CHAPTER_PATH, READING_ORG, chaptersLabel, listRounds, markRoundPulled, } from "./share";
 import type { RoundRecord, RunResult, Runner } from "./share";
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -62,6 +68,8 @@ export interface PulledRound {
   readonly commits: readonly string[];
   /** How many entries went to the comment store. */
   readonly comments: number;
+  /** Whether the round's PR is closed and its `round/` branches deleted (AGT-1588); false: see the notices, the next pull retries. */
+  readonly closed: boolean;
 }
 
 /** One round not pulled this time, and why. `waiting` is not a failure. */
@@ -338,6 +346,16 @@ function pullRound(options: NotesPullOptions, repo: string, round: RoundRecord):
     if (!committed.ok) return undo(committed.notice);
     commits.push(committed.sha as string);
   }
+  if (order.length === 0) {
+    // Nothing to take, but the review is still something to look at: one empty commit makes the branch reviewable.
+    const committed = commitAs(worktree, {
+      message: `notes from ${reader.name} on ${chaptersLabel(round.chapters.map((c) => c.number))}\n\nRound: ${round.id} (${round.repo}#${round.pr})`,
+      author: { name: reader.name, email: reader.email },
+      allowEmpty: true,
+    });
+    if (!committed.ok) return undo(committed.notice);
+    commits.push(committed.sha as string);
+  }
 
   // The comments, at the lines they sit on in the branch's text.
   const by = (path: string) => applied.get(path) ?? [];
@@ -376,7 +394,9 @@ function pullRound(options: NotesPullOptions, repo: string, round: RoundRecord):
 
   const at = (options.now ?? (() => new Date()))().toISOString();
   if (!markRoundPulled(options.vaultRoot, round.id, { branch, reviews: fetched.reviews, at })) return undo(`cannot mark round ${round.id} pulled`);
-  return { ok: true, pulled: { round: round.id, branch, commits, comments: entries.length }, notices };
+  const closed = closeRound({ vaultRoot: options.vaultRoot, round, run });
+  if (!closed.ok) notices.push(`pablo: notes pull: ${round.id}: pulled into ${branch}, but the round is not closed yet (${closed.message}); the next pull retries`);
+  return { ok: true, pulled: { round: round.id, branch, commits, comments: entries.length, closed: closed.ok }, notices };
 }
 
 /**
@@ -394,6 +414,12 @@ export function notesPull(options: NotesPullOptions): NotesPullOutcome {
   for (const round of listRounds(options.vaultRoot).filter((r) => r.project === options.slug)) {
     const id = typeof round.id === "string" ? round.id : "?";
     if (round.pulled !== undefined) {
+      if (round.state !== "pulled") {
+        // Pulled earlier, but the close did not finish: retry it (and nothing else).
+        const closed = closeRound({ vaultRoot: options.vaultRoot, round, run: options.run });
+        if (!closed.ok) notices.push(`pablo: notes pull: ${id}: the round is still not closed (${closed.message})`);
+        else notices.push(`pablo: notes pull: ${id}: closed the round's PR and deleted its round/ branches`);
+      }
       skipped.push({ round: id, reason: "pulled", message: `pablo: notes pull: ${id} was already pulled into ${round.pulled.branch}` });
       continue;
     }
@@ -407,4 +433,48 @@ export function notesPull(options: NotesPullOptions): NotesPullOutcome {
   }
   const code = skipped.some((s) => s.reason === "error") ? 1 : skipped.some((s) => s.reason === "refused") ? 2 : 0;
   return { code, pulled, skipped, notices };
+}
+
+/** Where a round stands: `open` (the reader has not submitted), `submitted` (waiting for `notes pull`), `pulled`. */
+export type RoundStatus = "open" | "submitted" | "pulled";
+
+export interface RoundListing {
+  readonly id: string;
+  readonly reader: string;
+  readonly chapters: readonly number[];
+  readonly pr: number;
+  readonly prUrl: string;
+  readonly status: RoundStatus;
+  /** For `pulled`: whether the PR is closed and the branches are gone; else undefined. */
+  readonly closed?: boolean;
+  readonly createdAt: string;
+}
+
+export type RoundListOutcome = { readonly ok: true; readonly rounds: readonly RoundListing[]; readonly notices: readonly string[] };
+
+/**
+ * `pablo share --list` (AGT-1588): the work's rounds with where each stands. A pulled round is known from its record
+ * (no API call); any other is asked of GitHub: a submitted review from its reader means `submitted`. When GitHub cannot
+ * be asked the round is listed as `open` with a notice.
+ */
+export function listRoundStatus(options: { readonly vaultRoot: string; readonly slug: string; readonly run: Runner }): RoundListOutcome {
+  const notices: string[] = [];
+  const rounds: RoundListing[] = [];
+  for (const round of listRounds(options.vaultRoot).filter((r) => r.project === options.slug)) {
+    const base = { id: round.id, reader: round.reader, chapters: (round.chapters ?? []).map((c) => c.number), pr: round.pr, prUrl: round.prUrl, createdAt: round.createdAt };
+    if (round.pulled !== undefined || round.state === "pulled") {
+      rounds.push({ ...base, status: "pulled", closed: round.state === "pulled" });
+      continue;
+    }
+    let status: RoundStatus = "open";
+    const problem = roundProblem(round);
+    if (problem !== undefined) notices.push(`pablo: share --list: ${round.id}: the round record cannot be used (${problem})`);
+    else {
+      const reviews = ghList(options.run, `repos/${round.repo}/pulls/${round.pr}/reviews`);
+      if (typeof reviews === "string") notices.push(`pablo: share --list: ${round.id}: ${reviews}`);
+      else if (reviews.filter(isRecord).some((r) => sameLogin(loginOf(r), round.github) && typeof r["state"] === "string" && SUBMITTED.has(r["state"]))) status = "submitted";
+    }
+    rounds.push({ ...base, status });
+  }
+  return { ok: true, rounds, notices };
 }
