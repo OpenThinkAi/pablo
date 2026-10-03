@@ -50,6 +50,8 @@ import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
 import { deriveCliOptions, parseForChapter, shareWith } from "./verbs";
 import { realRunner } from "./share";
+import type { Runner } from "./share";
+import { fetchRound, listReaderRounds, parseRoundRef } from "./read";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
 import { runWrite } from "./write";
@@ -124,6 +126,10 @@ function helpText(): string {
     "                                            open a reading round: push those chapters (all",
     "                                            on main) to the book's private reading repo as a",
     "                                            PR, request the reader's review, record the round",
+    "  pablo read --list [--json]               the reading rounds waiting for you on GitHub (and",
+    "                                            those you have sent); no vault or project needed",
+    "  pablo read <slug>-reading#<pr>          fetch a round's chapters at its head commit into",
+    "                                            $XDG_STATE_HOME/pablo/rounds/<repo>/<pr>/",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list                         every voice in the vault and the global dir",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
@@ -230,6 +236,8 @@ interface ParsedArgs {
   readonly chapters: string | undefined;
   /** `agent --new` (AGT-1565): start a fresh harness session; the old one stays on disk. */
   readonly new: boolean;
+  /** `read --list` (AGT-1583): the reader's open rounds. */
+  readonly list: boolean;
 }
 
 /**
@@ -252,6 +260,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       adopt: { type: "boolean", default: false },
       "tag-facts": { type: "boolean", default: false },
       new: { type: "boolean", default: false },
+      list: { type: "boolean", default: false },
     },
   });
 
@@ -264,6 +273,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     adopt: values["adopt"] === true,
     tagFacts: values["tag-facts"] === true,
     new: values["new"] === true,
+    list: values["list"] === true,
     for: typeof values["for"] === "string" ? values["for"] : undefined,
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
     file: typeof values["file"] === "string" ? values["file"] : undefined,
@@ -475,6 +485,45 @@ function formatVoice(voice: Voice): string {
     parts.push(["Exemplars:", ...voice.exemplars.map((ex) => `- ${ex.path}`)].join("\n"));
   }
   return parts.join("\n\n");
+}
+
+/**
+ * `pablo read --list` / `pablo read <repo>#<pr>` (AGT-1583): the reader's rounds on GitHub, with the
+ * `gh` runner and environment injectable so tests never reach GitHub.
+ */
+export function runReadRounds(args: ParsedArgs, run: Runner = realRunner, env: Record<string, string | undefined> = process.env): number {
+  if (args.list) {
+    const listed = listReaderRounds({ run, env });
+    if (!listed.ok) {
+      emit({ ok: false, code: listed.code, message: listed.message }, args.json);
+      return listed.code;
+    }
+    if (args.json) {
+      console.log(JSON.stringify({ ok: true, rounds: listed.rounds, notices: listed.notices }));
+    } else {
+      if (listed.rounds.length === 0) console.log("pablo: no reading rounds waiting for you");
+      for (const round of listed.rounds) {
+        const chapters = round.chapters.map((c) => (c.number > 0 ? String(c.number) : c.path)).join(", ") || "-";
+        const sent = round.status === "sent" ? "  [sent]" : "";
+        console.log(`${round.ref}  chapters ${chapters}  from ${round.sender || "?"}  ${round.date.slice(0, 10)}${sent}`);
+      }
+      for (const notice of listed.notices) console.error(notice);
+    }
+    return EXIT_OK;
+  }
+  const ref = parseRoundRef(args.rest[0] ?? "");
+  if (ref === undefined) {
+    emit({ ok: false, code: EXIT_REFUSED, message: "pablo: read requires a round like <slug>-reading#<pr>" }, args.json);
+    return EXIT_REFUSED;
+  }
+  const fetched = fetchRound({ run, env, ref });
+  if (!fetched.ok) {
+    emit({ ok: false, code: fetched.code, message: fetched.message }, args.json);
+    return fetched.code;
+  }
+  if (args.json) console.log(JSON.stringify({ ok: true, reused: fetched.reused, dir: fetched.dir, ...fetched.round }));
+  else console.log(`pablo: ${fetched.reused ? "already have" : "fetched"} ${fetched.round.repo}#${fetched.round.pr} at ${fetched.round.commit.slice(0, 7)}: ${fetched.dir}`);
+  return EXIT_OK;
 }
 
 /**
@@ -738,6 +787,12 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json, tagFacts: args.tagFacts, new: args.new },
       { cwd, env: process.env, stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
     );
+  }
+
+  // The reader's `read` (AGT-1583) lists/fetches reading rounds from GitHub: no vault, no project.
+  // `read <path> --project <slug>` (a file in a work) is the author's, below.
+  if (args.verb === "read" && args.project === undefined && (args.list || parseRoundRef(args.rest[0] ?? "") !== undefined)) {
+    return runReadRounds(args);
   }
 
   let projectPath: string | undefined;
