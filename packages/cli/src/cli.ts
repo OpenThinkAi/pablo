@@ -53,6 +53,7 @@ import { realRunner } from "./share";
 import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
 import { openReader } from "./reader-host";
+import { realTrayDeps, runTray } from "./tray/cli";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
 import { runWrite } from "./write";
@@ -77,6 +78,7 @@ const P0_VERBS = [
   "agent",
   "read",
   "search",
+  "tray",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -140,6 +142,9 @@ function helpText(): string {
     "  pablo notes pull --project <slug>        each reader's submitted review becomes a",
     "                                            reader/<round> branch: one commit per suggestion,",
     "                                            authored as the reader; comments for review mode",
+    "  pablo tray                               the reader's tray: poll GitHub every 30-60s for new",
+    "                                            rounds, notify, open one from the menu-bar icon",
+    "  pablo tray install|uninstall             install/remove the launchd agent that runs the tray",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list                         every voice in the vault and the global dir",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
@@ -829,6 +834,11 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // `read <path> --project <slug>` (a file in a work) is the author's, below.
   if (args.verb === "read" && args.project === undefined && (args.list || parseRoundRef(args.rest[0] ?? "") !== undefined)) {
     return args.list || args.noOpen ? runReadRounds(args) : await runReadView(args);
+  }
+
+  // `tray` (AGT-1589) is the reader's: no vault, no project, never an MCP tool.
+  if (args.verb === "tray") {
+    return await runTray(args.rest[0], realTrayDeps());
   }
 
   let projectPath: string | undefined;
