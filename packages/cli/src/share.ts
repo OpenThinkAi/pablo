@@ -50,6 +50,8 @@ export interface RunResult {
 
 export interface RunOptions {
   readonly cwd?: string;
+  /** Written to the command's stdin (e.g. a JSON request body for `gh api --input -`). Default: stdin closed. */
+  readonly input?: string;
 }
 
 /**
@@ -60,10 +62,15 @@ export interface RunOptions {
  */
 export type Runner = (command: "git" | "gh", args: readonly string[], options?: RunOptions) => RunResult;
 
-/** The production runner: `Bun.spawnSync` with an argument array, stdin closed. */
+/** The production runner: `Bun.spawnSync` with an argument array; stdin is closed unless `input` is given. */
 export const realRunner: Runner = (command, args, options = {}) => {
   try {
-    const result = Bun.spawnSync([command, ...args], { cwd: options.cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const result = Bun.spawnSync([command, ...args], {
+      cwd: options.cwd,
+      stdin: options.input === undefined ? "ignore" : Buffer.from(options.input, "utf8"),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     return { code: result.exitCode, stdout: result.stdout.toString("utf8"), stderr: result.stderr.toString("utf8") };
   } catch (error) {
     return { code: 1, stdout: "", stderr: (error as Error).message };
