@@ -33,7 +33,7 @@ import type { ReaderConfig } from "@openthink/pablo-core";
 export const READING_ORG = "OpenThinkAi";
 
 /** The only files that ever reach a reading repo: a work's chapter files, by their vault path. */
-const CHAPTER_PATH = /^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*chapters\/[^/]+\.md$/;
+export const CHAPTER_PATH = /^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*chapters\/[^/]+\.md$/;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ROUND_ID = SLUG;
 const GIT_IDENTITY = ["-c", "user.name=pablo", "-c", "user.email=pablo@users.noreply.github.com", "-c", "commit.gpgsign=false"];
