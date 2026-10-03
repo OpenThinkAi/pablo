@@ -161,7 +161,7 @@ test("fresh Mac with Homebrew: installs bun and gh with brew, pablo with bun, si
   const order = [
     "brew install oven-sh/bun/bun",
     "brew install gh",
-    "bun add -g --trust @openthink/pablo@latest",
+    "bun add -g @openthink/pablo@latest",
     "bun pm -g trust @openthink/ui-leaf",
     "gh auth login",
     "pablo tray install",
@@ -178,7 +178,7 @@ test("no Homebrew: Bun comes from bun.sh's installer and gh from GitHub's own re
   sb.stub(
     "curl",
     `case "$*" in
-  *bun.sh/install*) out=$3; printf '#!/bin/sh\\n' > "$out";;
+  *bun.sh/install*) printf '#!/bin/sh\\n' > "$4";;
   *api.github.com*) printf '{"tag_name": "v2.99.0"}\\n';;
   *gh_2.99.0_macOS_arm64.zip*) : > "$4";;
 esac`,
@@ -206,7 +206,7 @@ test("re-run when everything is present: nothing is reinstalled, pablo is upgrad
   expect(code).toBe(0);
   expect(calls.some((c) => c.startsWith("brew"))).toBe(false);
   expect(calls.some((c) => c.startsWith("curl"))).toBe(false);
-  expect(calls).toContain("bun add -g --trust @openthink/pablo@latest");
+  expect(calls).toContain("bun add -g @openthink/pablo@latest");
   expect(calls).not.toContain("gh auth login");
   expect(calls).toContain("pablo tray install");
   expect(out).toContain("already signed in");

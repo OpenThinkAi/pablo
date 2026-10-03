@@ -141,6 +141,9 @@ install_bun() {
 # gh without Homebrew: GitHub's own macOS download, placed beside bun (a folder pablo's tray also searches).
 install_gh_from_release() {
   tag=$(curl -fsSL "$GH_RELEASE_API" | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1)
+  case "$tag" in
+    "" | *[!0-9.]*) tag="" ;; # only a plain version number is ever used in a download path
+  esac
   [ -n "$tag" ] || die "Could not find the latest GitHub CLI release." \
     "Check your internet connection, or install it from https://cli.github.com and run this again."
   name="gh_${tag}_macOS_$(arch_name)"
@@ -184,12 +187,12 @@ uileaf_binary_present() {
 
 install_pablo() {
   step "Installing (or upgrading) pablo from npm"
-  # --trust: bun skips install scripts by default, and ui-leaf's one downloads the program
-  # that opens the chapter window. It is trusted by name below too, because it is a dependency of pablo.
-  must "Installing pablo" bun add -g --trust "$PABLO_PACKAGE@latest"
+  must "Installing pablo" bun add -g "$PABLO_PACKAGE@latest"
   add_bun_to_path
   have pablo || die "pablo was installed but this window cannot find it." \
     "Close this Terminal window, open a new one, and run the command again."
+  # Bun skips install scripts by default, and ui-leaf's downloads the program that opens the chapter
+  # window. Trust exactly that one package (not the whole dependency tree); this also runs its script.
   note "Allowing the chapter-window component to finish its own setup."
   # Already-trusted on a re-run is fine; whether the binary really arrived is checked next.
   bun pm -g trust "$UILEAF_PACKAGE" >/dev/null 2>&1 || true
