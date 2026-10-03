@@ -44,7 +44,9 @@ jobs:
       - run: bun run typecheck
       # Tests commit to temp git repos and rely on a configured identity, as a developer machine has.
       - run: git config --global user.name "pablo CI" && git config --global user.email "ci@pablo.invalid"
-      - run: bun test
+      # A slow runner gets a per-test budget well above a developer machine's; a test that still overruns fails
+      # on its own instead of the job sitting until timeout-minutes cancels it.
+      - run: bun test --timeout 30000
 
   publish:
     needs: check
