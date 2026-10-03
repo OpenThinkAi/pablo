@@ -295,3 +295,12 @@ test("GitHub sign-in with no terminal to type in is a clear stop; a failed sign-
   expect(failed.out).toContain("sign-in did not finish");
   expect(failed.calls).not.toContain("pablo tray install");
 });
+
+test("every pablo verb the installer runs or tells the reader to run exists in the CLI (checked against cli.ts, not a stub)", () => {
+  const script = readFileSync(SCRIPT, "utf8");
+  const cli = readFileSync(join(import.meta.dir, "..", "src", "cli.ts"), "utf8");
+  expect(script).toContain("pablo tray install");
+  expect(cli).toContain("pablo tray install|uninstall");
+  expect(script).toContain("pablo read --list");
+  expect(cli).toContain("pablo read --list");
+});
