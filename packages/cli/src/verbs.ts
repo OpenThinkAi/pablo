@@ -74,6 +74,8 @@ import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { publishWork } from "./publish";
+import { realRunner, shareRound } from "./share";
+import type { Runner } from "./share";
 import { revisePassage } from "./screen-revise";
 import { reviseCore } from "./revise";
 import type { ReviseCoreArgs } from "./revise";
@@ -596,6 +598,49 @@ async function runPublishVerb(args: z.infer<typeof PUBLISH_ARGS>, ctx: VerbConte
   const outcome = publishWork(resolved.projectPath, marker.marker.slug, marker.marker.title, args.target);
   if (!outcome.ok) return { body: refusalBody(outcome), exitCode: outcome.code };
   return { body: { ok: true, target: outcome.target, where: outcome.where, chapters: outcome.chapters, words: outcome.words }, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// share (AGT-1582)
+// ---------------------------------------------------------------------------
+
+const SHARE_ARGS = z.object({
+  project: projectField,
+  reader: z.string().describe('A reader named in pablo\'s config "readers" (e.g. "atara").'),
+  chapters: z.string().describe('The chapters to share, all on main: "3" or "3-5".'),
+});
+
+/**
+ * `share`, with the `gh`/git runner injectable: `runShareVerb` (the verb's
+ * `run`) passes `realRunner`; tests pass a fake so nothing reaches GitHub.
+ */
+export async function shareWith(args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext, run: Runner, acceptUrl?: (url: string, repo: string) => boolean): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+
+  const marker = readMarker(resolved.projectPath);
+  if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
+
+  let readers;
+  try {
+    readers = loadConfig({ env: ctx.env }).readers;
+  } catch (error) {
+    return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
+  }
+
+  const outcome = shareRound({
+    vaultRoot: resolved.vaultRoot,
+    projectPath: resolved.projectPath,
+    slug: marker.marker.slug,
+    title: marker.marker.title,
+    reader: args.reader,
+    chapters: args.chapters,
+    readers,
+    run,
+    ...(acceptUrl ? { acceptUrl } : {}),
+  });
+  if (!outcome.ok) return { body: { ok: false, code: outcome.code, message: outcome.message }, exitCode: outcome.code };
+  return { body: { ok: true, ...outcome.round, record: outcome.recordPath, notices: outcome.notices }, exitCode: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -1204,6 +1249,16 @@ export const VERBS: readonly Verb[] = [
       "Compile the work's chapters into one publishable markdown file (frontmatter stripped, sentence lines joined into paragraphs, quotes curled) under .pablo/out/. Only the draft target exists today.",
     args: PUBLISH_ARGS,
     run: runPublishVerb,
+  },
+  {
+    name: "share",
+    description:
+      "Open a reading round: push the named chapters (all on main) to the book's private reading repo as a PR the reader can comment on, request the reader's review, and record the round in the vault.",
+    args: SHARE_ARGS,
+    run: (args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext) => shareWith(args, ctx, realRunner),
+    // Sending the manuscript to a person is the author's act: a model connected
+    // over MCP must not be able to do it, so this verb registers no MCP tool.
+    mcpTools: [],
   },
   {
     name: "voice",

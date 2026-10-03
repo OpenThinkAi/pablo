@@ -36,7 +36,7 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the seventeen verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the eighteen verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "check",
     "critique",
@@ -51,6 +51,7 @@ test("VERBS exposes exactly the seventeen verbs, each project-required verb requ
     "revise_passage",
     "save",
     "search",
+    "share",
     "status",
     "timeline",
     "voice",
@@ -118,6 +119,8 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     date: { type: "string" }, // AGT-1555: timeline --date
     direction: { type: "string" }, // AGT-1562: write --direction
     branch: { type: "string" }, // AGT-1564: critique --branch
+    reader: { type: "string" }, // AGT-1582: share --reader
+    chapters: { type: "string" }, // AGT-1582: share --chapters
   });
 });
 

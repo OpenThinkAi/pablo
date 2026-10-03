@@ -12,7 +12,7 @@ export type {
   Proposal,
 } from "./types";
 export { EndpointHung, NoToolCallError, ProviderConfigError, ProviderResponseError } from "./errors";
-export type { AdapterKind, LoadConfigOptions, PabloConfig, ProviderConfig } from "./config";
+export type { AdapterKind, LoadConfigOptions, PabloConfig, ProviderConfig, ReaderConfig } from "./config";
 export {
   configDir,
   configPath,
