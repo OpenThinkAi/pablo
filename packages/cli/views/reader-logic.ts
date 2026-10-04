@@ -219,3 +219,76 @@ export function describeDraft(draft: ReviewDraft): string {
   const n = draft.marks.length;
   return n === 0 ? "No marks yet" : `${n} ${n === 1 ? "mark" : "marks"}`;
 }
+
+// --- the window's layout (AGT-1599) ---------------------------------------------------------------------
+// Pure, so the view only measures the window and applies what these return. Sizes are CSS px at 16px/rem.
+
+const REM = 16;
+const NAV_PX = 12 * REM;
+const SIDE_PX = 16 * REM;
+const GAP_PX = 1.5 * REM;
+const SHELL_PAD_PX = 1.5 * REM;
+/** The marks panel moves under the chapter below this window width. */
+export const STACK_BELOW_PX = 1100;
+/** The chapter is never squeezed below this (about 40rem); the marks panel drops under it first. */
+export const MIN_PAGE_PX = 40 * REM;
+export const MAX_PAGE_PX = 46 * REM;
+
+export interface ReaderLayout {
+  /** A chapter list column: only for a round with more than one chapter. */
+  readonly showNav: boolean;
+  /** Marks panel (and chapter list) go above/below the page instead of beside it. */
+  readonly stacked: boolean;
+  /** Very narrow window: tighter paper padding. */
+  readonly compact: boolean;
+  /** CSS `grid-template-columns` for the shell. No track exists for a column that is not shown. */
+  readonly columns: string;
+  /** The width the page column gets, in px. */
+  readonly pagePx: number;
+}
+
+export function readerLayout(windowWidth: number, chapterCount: number): ReaderLayout {
+  const showNav = chapterCount > 1;
+  const inner = windowWidth - 2 * SHELL_PAD_PX;
+  const beside = inner - SIDE_PX - GAP_PX - (showNav ? NAV_PX + GAP_PX : 0);
+  const stacked = windowWidth < STACK_BELOW_PX || beside < MIN_PAGE_PX;
+  const compact = windowWidth < MIN_PAGE_PX;
+  if (stacked) return { showNav, stacked, compact, columns: `minmax(0, ${MAX_PAGE_PX / REM}rem)`, pagePx: Math.max(0, Math.min(MAX_PAGE_PX, inner)) };
+  return { showNav, stacked, compact, columns: `${showNav ? `${NAV_PX / REM}rem ` : ""}minmax(0, ${MAX_PAGE_PX / REM}rem) ${SIDE_PX / REM}rem`, pagePx: Math.min(MAX_PAGE_PX, beside) };
+}
+
+export interface Rect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+export interface PopoverPlace {
+  /** Document coordinates (viewport + scroll), so the box scrolls with the text instead of floating over it. */
+  readonly left: number;
+  readonly top: number;
+  /** When set, `top` is the box's bottom edge (the view shifts it up by its own height). */
+  readonly above: boolean;
+}
+
+export const POPOVER_SIZE = { width: 20 * REM, height: 18 * REM } as const;
+
+/**
+ * Where the comment/suggest box goes for a selection `rect` (viewport coordinates): just below it, or just above
+ * when below would run off the window and above has more room. Never overlaps `rect`. Horizontally it follows the
+ * selection's left edge, kept inside the window.
+ */
+export function popoverPlacement(
+  rect: Rect,
+  viewport: { readonly width: number; readonly height: number },
+  scroll: { readonly x: number; readonly y: number } = { x: 0, y: 0 },
+  size: { readonly width: number; readonly height: number } = POPOVER_SIZE,
+  gap = 8,
+): PopoverPlace {
+  const width = Math.min(size.width, Math.max(0, viewport.width - 2 * gap));
+  const left = Math.max(gap, Math.min(rect.left, viewport.width - width - gap)) + scroll.x;
+  const roomBelow = viewport.height - rect.bottom - gap;
+  const roomAbove = rect.top - gap;
+  const above = roomBelow < size.height && roomAbove > roomBelow;
+  return above ? { left, top: rect.top - gap + scroll.y, above } : { left, top: rect.bottom + gap + scroll.y, above };
+}

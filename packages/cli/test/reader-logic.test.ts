@@ -11,7 +11,11 @@ import {
   excerpt,
   marksOf,
   ordered,
+  MAX_PAGE_PX,
+  MIN_PAGE_PX,
   overlaps,
+  popoverPlacement,
+  readerLayout,
   segments,
   selectedText,
   sliceIn,
@@ -152,4 +156,67 @@ test("parseDraft rebuilds a draft field by field and refuses anything malformed"
     { summary: "", marks: [{ kind: "suggestion", path: PATH, selection: sel(0, 0, 1) }] },
     { summary: "x".repeat(20_001), marks: [] },
   ]) expect(() => parseDraft(bad)).toThrow();
+});
+
+// --- AGT-1599: window layout and the pop-up's place -----------------------------------------------------
+
+test("readerLayout: marks panel beside the page at 1100px and up, under it below", () => {
+  expect(readerLayout(1280, 1).stacked).toBe(false);
+  expect(readerLayout(1100, 1).stacked).toBe(false);
+  expect(readerLayout(1099, 1).stacked).toBe(true);
+  expect(readerLayout(800, 1).columns).toBe("minmax(0, 46rem)");
+});
+
+test("readerLayout: a single chapter has no chapter column and no track for one; several do", () => {
+  const one = readerLayout(1440, 1);
+  expect(one.showNav).toBe(false);
+  expect(one.columns).toBe("minmax(0, 46rem) 16rem");
+  const many = readerLayout(1440, 3);
+  expect(many.showNav).toBe(true);
+  expect(many.columns).toBe("12rem minmax(0, 46rem) 16rem");
+  expect(readerLayout(1000, 3).showNav).toBe(true); // stacked, the list sits above the page
+});
+
+test("readerLayout: the page keeps a 40-46rem measure at common window sizes, with and without a chapter list", () => {
+  for (const width of [1280, 1440, 1920]) {
+    for (const chapters of [1, 4]) {
+      const l = readerLayout(width, chapters);
+      expect(l.stacked).toBe(false);
+      expect(l.pagePx).toBeGreaterThanOrEqual(MIN_PAGE_PX);
+      expect(l.pagePx).toBeLessThanOrEqual(MAX_PAGE_PX);
+    }
+  }
+  // a window too narrow for list + page + panel drops the panel under the page rather than squeezing the text
+  expect(readerLayout(1120, 4).stacked).toBe(true);
+  expect(readerLayout(1200, 4).stacked).toBe(false);
+  expect(readerLayout(1200, 4).pagePx).toBeGreaterThanOrEqual(MIN_PAGE_PX);
+});
+
+const VIEW = { width: 1280, height: 800 };
+const rect = (left: number, top: number, right: number, bottom: number) => ({ left, top, right, bottom });
+
+test("popoverPlacement: just below the selection when there is room", () => {
+  const p = popoverPlacement(rect(300, 200, 500, 224), VIEW);
+  expect(p).toEqual({ left: 300, top: 232, above: false });
+});
+
+test("popoverPlacement: above the selection when below has no room, and never over the selected text", () => {
+  const r = rect(300, 600, 500, 624);
+  const p = popoverPlacement(r, VIEW);
+  expect(p.above).toBe(true);
+  expect(p.top).toBeLessThanOrEqual(r.top); // its bottom edge sits above the selection
+  const low = popoverPlacement(rect(300, 780, 500, 790), VIEW);
+  expect(low.above).toBe(true);
+});
+
+test("popoverPlacement: below even when cramped if above has even less room; stays inside the window sideways", () => {
+  expect(popoverPlacement(rect(10, 20, 100, 40), { width: 1280, height: 200 }).above).toBe(false);
+  expect(popoverPlacement(rect(1270, 100, 1275, 120), VIEW).left).toBe(1280 - 320 - 8);
+  expect(popoverPlacement(rect(-50, 100, 20, 120), VIEW).left).toBe(8);
+  expect(popoverPlacement(rect(0, 100, 20, 120), { width: 300, height: 800 }).left).toBe(8); // narrower than the box: pinned left
+});
+
+test("popoverPlacement: document coordinates add the scroll offset", () => {
+  const p = popoverPlacement(rect(300, 200, 500, 224), VIEW, { x: 0, y: 1500 });
+  expect(p.top).toBe(1732);
 });
