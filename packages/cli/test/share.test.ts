@@ -375,3 +375,14 @@ test("a reader login that is not a GitHub username is refused before any gh call
     expect(fake.gh).toEqual([]);
   }
 });
+
+test("a review request that fails for a reader who already has access does not blame access", () => {
+  const s = setup();
+  const fake = fakeRunner(s.dir, { invite: "has", reviewerFails: true });
+  const outcome = share(s, fake);
+  if (!outcome.ok) throw new Error(outcome.message);
+  const text = outcome.notices.join("\n");
+  expect(text).not.toContain("they need access");
+  expect(text).toContain("already have access");
+  expect(text).toContain("gh pr edit 7 --repo OpenThinkAi/ice-house-reading --add-reviewer atara-test");
+});

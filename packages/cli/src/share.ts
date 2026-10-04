@@ -460,7 +460,10 @@ export function shareRound(options: ShareOptions): ShareOutcome {
         access.kind === "invited"
           ? `pablo: share: could not request ${reader.github} as reviewer yet (${describe(requested)}): the invitation is not accepted. ` +
               `Once they accept it, re-request the review with: ${rerequest}`
-          : `pablo: share: could not request ${reader.github} as reviewer (${describe(requested)}); ` +
+          : access.kind === "has"
+            ? `pablo: share: could not request ${reader.github} as reviewer (${describe(requested)}), though they already have access to ${repo}; ` +
+              `re-request the review with: ${rerequest}`
+            : `pablo: share: could not request ${reader.github} as reviewer (${describe(requested)}); ` +
               `they need access to ${repo}; then re-request the review with: ${rerequest}`,
       );
     }
