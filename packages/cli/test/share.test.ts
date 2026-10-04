@@ -80,7 +80,7 @@ interface FakeGh {
 }
 
 /** gh answered in memory; git passed through to the real binary (against temp repos only). */
-function fakeRunner(dir: string, opts: { exists?: boolean; isPrivate?: boolean; reviewerFails?: boolean; prFails?: boolean } = {}): FakeGh {
+function fakeRunner(dir: string, opts: { exists?: boolean; isPrivate?: boolean; reviewerFails?: boolean; prFails?: boolean; invite?: "has" | "invited" | "fails" } = {}): FakeGh {
   const remote = join(dir, "reading.git");
   const gh: string[][] = [];
   let exists = opts.exists ?? false;
@@ -100,6 +100,10 @@ function fakeRunner(dir: string, opts: { exists?: boolean; isPrivate?: boolean; 
       return ok("");
     }
     if (group === "pr" && verb === "create") return opts.prFails ? bad("boom") : ok("https://github.com/OpenThinkAi/ice-house-reading/pull/7\n");
+    if (group === "api") {
+      if (opts.invite === "fails") return bad("Resource not accessible");
+      return ok(opts.invite === "invited" ? JSON.stringify({ id: 99, invitee: { login: "atara-test" } }) : "");
+    }
     if (group === "pr" && verb === "edit") return opts.reviewerFails ? bad("not a collaborator") : ok("");
     return bad(`fake gh: unexpected ${args.join(" ")}`);
   };
@@ -315,4 +319,70 @@ test("a remote URL that is not the reading repo's https github.com URL is refuse
   expect(isReadingRepoUrl("https://github.com/OpenThinkAi/ice-house-reading", "OpenThinkAi/ice-house-reading")).toBe(true);
   expect(isReadingRepoUrl("https://github.com/OpenThinkAi/ice-house-reading.git", "OpenThinkAi/ice-house-reading")).toBe(true);
   expect(isReadingRepoUrl("https://github.com/OpenThinkAi/other", "OpenThinkAi/ice-house-reading")).toBe(false);
+});
+
+const PUT_ATARA = ["api", "-X", "PUT", "repos/OpenThinkAi/ice-house-reading/collaborators/atara-test", "-f", "permission=pull"];
+
+test("share ensures read access before requesting the review; already a collaborator changes nothing", () => {
+  const s = setup();
+  const fake = fakeRunner(s.dir, { invite: "has" });
+  const outcome = share(s, fake);
+  if (!outcome.ok) throw new Error(outcome.message);
+  const put = fake.gh.findIndex((a) => a[0] === "api");
+  const review = fake.gh.findIndex((a) => a[0] === "pr" && a[1] === "edit");
+  expect(fake.gh[put]).toEqual(PUT_ATARA);
+  expect(put).toBeGreaterThan(-1);
+  expect(put).toBeLessThan(review);
+  expect(outcome.notices).toEqual([]);
+});
+
+test("a pending invitation is stated plainly and the round is still recorded", () => {
+  const s = setup();
+  const fake = fakeRunner(s.dir, { invite: "invited" });
+  const outcome = share(s, fake);
+  if (!outcome.ok) throw new Error(outcome.message);
+  expect(outcome.notices.join("\n")).toContain("must accept the invitation GitHub emailed them (once per book)");
+  expect(readRound(s.vault, outcome.round.id)?.pr).toBe(7);
+});
+
+test("a review request that fails after an invitation says how to re-request it", () => {
+  const s = setup();
+  const fake = fakeRunner(s.dir, { invite: "invited", reviewerFails: true });
+  const outcome = share(s, fake);
+  if (!outcome.ok) throw new Error(outcome.message);
+  const text = outcome.notices.join("\n");
+  expect(text).toContain("invitation is not accepted");
+  expect(text).toContain("gh pr edit 7 --repo OpenThinkAi/ice-house-reading --add-reviewer atara-test");
+});
+
+test("a failed invite is noticed, the review is still attempted, the round is recorded", () => {
+  const s = setup();
+  const fake = fakeRunner(s.dir, { invite: "fails" });
+  const outcome = share(s, fake);
+  if (!outcome.ok) throw new Error(outcome.message);
+  expect(outcome.notices.join("\n")).toContain("could not invite atara-test");
+  expect(fake.gh.some((a) => a[0] === "pr" && a[1] === "edit")).toBe(true);
+});
+
+test("a reader login that is not a GitHub username is refused before any gh call", () => {
+  for (const github of ["bad login", "-lead", "trail-", "a--b", "x/../y", "a".repeat(40), "", "o;rm"]) {
+    const s = setup();
+    const fake = fakeRunner(s.dir);
+    const readers = new Map<string, ReaderConfig>([["atara", { github, name: "A", email: "a@example.com" }]]);
+    const outcome = share(s, fake, { readers });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.code).toBe(2);
+    expect(fake.gh).toEqual([]);
+  }
+});
+
+test("a review request that fails for a reader who already has access does not blame access", () => {
+  const s = setup();
+  const fake = fakeRunner(s.dir, { invite: "has", reviewerFails: true });
+  const outcome = share(s, fake);
+  if (!outcome.ok) throw new Error(outcome.message);
+  const text = outcome.notices.join("\n");
+  expect(text).not.toContain("they need access");
+  expect(text).toContain("already have access");
+  expect(text).toContain("gh pr edit 7 --repo OpenThinkAi/ice-house-reading --add-reviewer atara-test");
 });

@@ -36,6 +36,8 @@ export const READING_ORG = "OpenThinkAi";
 export const CHAPTER_PATH = /^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*chapters\/[^/]+\.md$/;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ROUND_ID = SLUG;
+/** A GitHub username: 1-39 alphanumerics or single hyphens, never leading or trailing one. Gates the one login `share` may invite. */
+export const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const GIT_IDENTITY = ["-c", "user.name=pablo", "-c", "user.email=pablo@users.noreply.github.com", "-c", "commit.gpgsign=false"];
 
 // ---------------------------------------------------------------------------
@@ -300,7 +302,8 @@ function chaptersOnMain(run: Runner, root: string, prefix: string): Map<number, 
 /**
  * Opens a reading round: checks the chapters and the reader, makes sure the
  * book's private reading repo exists, pushes the round's base and head
- * branches, opens the PR with the reader as requested reviewer, and records the
+ * branches, opens the PR, invites the reader to the repo (read access) and requests
+ * them as reviewer, and records the
  * round in the vault. Nothing is recorded until the PR exists; a failure after
  * the branches are pushed leaves them on the (private) reading repo and says so.
  */
@@ -321,6 +324,9 @@ export function shareRound(options: ShareOptions): ShareOutcome {
       `pablo: share: reader "${options.reader}" is not in pablo's config "readers"` +
         (known.length === 0 ? " (none are configured)" : ` (configured: ${known.join(", ")})`),
     );
+  }
+  if (!GITHUB_LOGIN.test(reader.github)) {
+    return refuse(`pablo: share: reader "${options.reader}" has github "${reader.github.slice(0, 60)}", which is not a GitHub username`);
   }
   if (!SLUG.test(options.slug)) return refuse(`pablo: share: the project slug "${options.slug}" cannot name a reading repo`);
 
@@ -436,12 +442,29 @@ export function shareRound(options: ShareOptions): ShareOutcome {
     if (!prMatch) return fail(`pablo: share: opened a PR on ${repo} but cannot read its URL from "${prUrl}"`);
     const pr = Number(prMatch[1]);
 
+    // The reader needs read access to the private repo before GitHub will take a review request for them.
     const notices: string[] = [];
+    const access = ensureReaderAccess(run, repo, reader.github);
+    if (access.kind === "invited") {
+      notices.push(
+        `pablo: share: ${reader.github} was invited to ${repo} (read access); they must accept the invitation GitHub emailed them ` +
+          `(once per book) before the round appears in their tray`,
+      );
+    } else if (access.kind === "failed") {
+      notices.push(`pablo: share: could not invite ${reader.github} to ${repo} (${access.reason}); add them as a collaborator with read access`);
+    }
+    const rerequest = `gh pr edit ${pr} --repo ${repo} --add-reviewer ${reader.github}`;
     const requested = run("gh", ["pr", "edit", String(pr), "--repo", repo, "--add-reviewer", reader.github]);
     if (requested.code !== 0) {
       notices.push(
-        `pablo: share: could not request ${reader.github} as reviewer (${describe(requested)}); ` +
-          `they need access to ${repo}, then request the review on the PR`,
+        access.kind === "invited"
+          ? `pablo: share: could not request ${reader.github} as reviewer yet (${describe(requested)}): the invitation is not accepted. ` +
+              `Once they accept it, re-request the review with: ${rerequest}`
+          : access.kind === "has"
+            ? `pablo: share: could not request ${reader.github} as reviewer (${describe(requested)}), though they already have access to ${repo}; ` +
+              `re-request the review with: ${rerequest}`
+            : `pablo: share: could not request ${reader.github} as reviewer (${describe(requested)}); ` +
+              `they need access to ${repo}; then re-request the review with: ${rerequest}`,
       );
     }
 
@@ -466,6 +489,26 @@ export function shareRound(options: ShareOptions): ShareOutcome {
   } finally {
     rmSync(workRoot, { recursive: true, force: true });
   }
+}
+
+type Access = { kind: "has" } | { kind: "invited" } | { kind: "failed"; reason: string };
+
+/**
+ * `PUT /repos/<repo>/collaborators/<login>` with `permission=pull`. GitHub answers 204 (no body) when the user
+ * already has access and 201 with an invitation object (`id`, ...) when it created a pending invitation.
+ * `gh api` prints the body, so a JSON object with an `id` means an invitation; an empty body means access.
+ */
+function ensureReaderAccess(run: Runner, repo: string, login: string): Access {
+  const result = run("gh", ["api", "-X", "PUT", `repos/${repo}/collaborators/${login}`, "-f", "permission=pull"]);
+  if (result.code !== 0) return { kind: "failed", reason: describe(result) };
+  if (result.stdout.trim() === "") return { kind: "has" };
+  try {
+    const parsed = JSON.parse(result.stdout) as { id?: unknown };
+    if (parsed !== null && typeof parsed === "object" && parsed.id !== undefined) return { kind: "invited" };
+  } catch {
+    // Not JSON: nothing says an invitation was made.
+  }
+  return { kind: "has" };
 }
 
 type RepoView = { ok: true; url: string; isPrivate: boolean } | { ok: false; reason: string };
