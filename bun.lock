@@ -12,7 +12,7 @@
     },
     "packages/cli": {
       "name": "@openthink/pablo",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "bin": {
         "pablo": "./src/cli.ts",
       },
@@ -33,11 +33,11 @@
     },
     "packages/core": {
       "name": "@openthink/pablo-core",
-      "version": "0.2.0",
+      "version": "0.2.1",
     },
     "packages/tui": {
       "name": "@openthink/pablo-tui",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@openthink/pablo-core": "workspace:*",
         "ink": "^7.0.1",
