@@ -29,7 +29,7 @@ const DATA: ReaderData = {
 };
 
 const noMutate = (async () => ({ ok: true })) as never;
-const render = (data: ReaderData): string => renderToStaticMarkup(<Reader data={data} mutate={noMutate} />);
+const render = (data: ReaderData, width?: number): string => renderToStaticMarkup(<Reader data={data} mutate={noMutate} {...(width === undefined ? {} : { width })} />);
 
 test("a chapter list when the round has several; one chapter's paragraphs with the title, no git or diff words", () => {
   const html = render(DATA);
@@ -46,6 +46,21 @@ test("a single-chapter round has no chapter list", () => {
   const html = render({ ...DATA, chapters: [DATA.chapters[1] as ReaderData["chapters"][number]], draft: { summary: "", marks: [] } });
   expect(html).not.toContain('aria-label="Chapters"');
   expect(html).toContain("The flood came.");
+});
+
+test("a single-chapter round reserves no column for a chapter list; several get one", () => {
+  const one = render({ ...DATA, chapters: [DATA.chapters[1] as ReaderData["chapters"][number]] }, 1440);
+  expect(one).toContain("grid-template-columns:minmax(0, 46rem) 16rem");
+  expect(render(DATA, 1440)).toContain("grid-template-columns:12rem minmax(0, 46rem) 16rem");
+});
+
+test("a narrow window puts the marks panel under the chapter: one column, nothing sticky, no pop-up", () => {
+  const html = render(DATA, 900);
+  expect(html).toContain("grid-template-columns:minmax(0, 46rem)");
+  expect(html).not.toContain("sticky");
+  expect(html).not.toContain('role="dialog"'); // nothing floats over the text without a selection
+  expect(html.indexOf("Your marks in this chapter")).toBeGreaterThan(html.indexOf("Ice gave way"));
+  expect(render(DATA, 1440)).toContain("sticky"); // wide: the panel and list stay in view beside the page
 });
 
 test("marks show inline: comment highlight with its number and tag colour, struck text with the replacement beside it", () => {

@@ -13,10 +13,12 @@ import {
   excerpt,
   marksOf,
   ordered,
+  popoverPlacement,
+  readerLayout,
   segments,
   selectedText,
 } from "./reader-logic";
-import type { Position, Selection } from "./reader-logic";
+import type { Position, ReaderLayout, Selection } from "./reader-logic";
 
 /**
  * The reader's window (AGT-1586, `pm project show ai-terminal --doc readers`): a chapter as plain paragraphs,
@@ -32,9 +34,15 @@ const TAGS: readonly Tag[] = ["fix", "keep"];
 interface Pending {
   readonly selection: Selection;
   readonly quote: string;
+  /** Document coordinates and side from `popoverPlacement` (AGT-1599). */
   readonly x: number;
   readonly y: number;
+  readonly above: boolean;
 }
+
+/** The window width the layout is chosen by; 1280 where there is no window (server render). */
+const DEFAULT_WIDTH = 1280;
+const windowWidth = (): number => (typeof window === "undefined" ? DEFAULT_WIDTH : window.innerWidth);
 
 /** The place in a paragraph a DOM point is: characters from the paragraph's start (CSS-drawn ghosts add none). */
 function positionOf(root: HTMLElement, node: Node, offset: number): Position | undefined {
@@ -55,10 +63,12 @@ function currentSelection(root: HTMLElement): Pending | undefined {
   if (a === undefined || b === undefined) return undefined;
   const selection = ordered(a, b);
   const box = range.getBoundingClientRect();
-  return { selection, quote: "", x: Math.max(8, Math.min(box.left, window.innerWidth - 340)), y: box.bottom + 8 };
+  const place = popoverPlacement(box, { width: window.innerWidth, height: window.innerHeight }, { x: window.scrollX, y: window.scrollY });
+  return { selection, quote: "", x: place.left, y: place.top, above: place.above };
 }
 
-export default function Reader({ data, mutate }: ViewProps<ReaderData>) {
+/** `width` is for tests (the server render has no window); the live window passes nothing and is measured. */
+export default function Reader({ data, mutate, width }: ViewProps<ReaderData> & { width?: number }) {
   const [draft, dispatch] = useReducer(draftReducer, data.draft);
   const [sent, setSent] = useState(data.sent);
   const [current, setCurrent] = useState(0);
@@ -69,6 +79,8 @@ export default function Reader({ data, mutate }: ViewProps<ReaderData>) {
   const [revisions, setRevisions] = useState<Record<string, number>>({});
   const body = useRef<HTMLDivElement>(null);
   const first = useRef(true);
+  const [measured, setMeasured] = useState(windowWidth);
+  const layout = readerLayout(width ?? measured, data.chapters.length);
 
   const chapter: ViewChapter | undefined = data.chapters[current];
   const readOnly = sent !== undefined;
@@ -94,9 +106,38 @@ export default function Reader({ data, mutate }: ViewProps<ReaderData>) {
     return () => clearTimeout(timer);
   }, [draft, readOnly, mutate]);
 
+  // The layout follows the window; a resize also closes the pop-up, whose place was worked out for the old size.
+  useEffect(() => {
+    const onResize = (): void => {
+      setMeasured(window.innerWidth);
+      setPending(undefined);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // The pop-up closes on Esc and on a press anywhere outside it (a press on the text starts a new selection,
+  // which opens it afresh on release), so it never lingers over the text once she is done with it.
+  const open = pending !== undefined;
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setPending(undefined);
+    };
+    const onDown = (e: MouseEvent): void => {
+      if (!(e.target instanceof Element) || e.target.closest('[role="dialog"]') === null) setPending(undefined);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [open]);
+
   const chapterMarks = useMemo(() => (chapter === undefined ? [] : marksOf(draft, chapter.path)), [draft, chapter]);
 
-  if (chapter === undefined) return <main style={page}>This round has no chapters.</main>;
+  if (chapter === undefined) return <main style={pageOf(layout)}>This round has no chapters.</main>;
   const note = chapterNote(draft, chapter.path);
   const revisionOf = (path: string): number => revisions[path] ?? 0;
 
@@ -105,7 +146,8 @@ export default function Reader({ data, mutate }: ViewProps<ReaderData>) {
     setCurrent(index);
   }
 
-  function onSelect(): void {
+  function onSelect(e?: { key?: string }): void {
+    if (e?.key === "Escape") return; // Esc dismisses the pop-up; it must not find the old selection and reopen it
     if (readOnly || body.current === null) return;
     const found = currentSelection(body.current);
     setPending(found === undefined || chapter === undefined ? undefined : { ...found, quote: selectedText(chapter.paragraphs, found.selection) });
@@ -139,10 +181,10 @@ export default function Reader({ data, mutate }: ViewProps<ReaderData>) {
   }
 
   return (
-    <div style={shell}>
+    <div style={shellOf(layout)}>
       <style>{css}</style>
-      {data.chapters.length > 1 && (
-        <nav style={nav} aria-label="Chapters">
+      {layout.showNav && (
+        <nav style={navOf(layout)} aria-label="Chapters">
           <div style={roundTitle}>{data.round.title}</div>
           {data.chapters.map((c, i) => (
             <button key={c.path} type="button" onClick={() => pick(i)} style={i === current ? { ...navItem, ...navActive } : navItem}>
@@ -153,9 +195,9 @@ export default function Reader({ data, mutate }: ViewProps<ReaderData>) {
         </nav>
       )}
 
-      <main style={page}>
+      <main style={pageOf(layout)}>
         <h1 style={title}>{chapterLabel(chapter)}</h1>
-        <div ref={body} onMouseUp={onSelect} onKeyUp={onSelect} style={prose}>
+        <div ref={body} onMouseUp={() => onSelect()} onKeyUp={(e) => onSelect(e)} style={prose}>
           {chapter.paragraphs.map((p, i) => (
             <p
               key={`${chapter.path}:${i}:${revisionOf(`${chapter.path}:${i}`)}`}
@@ -194,7 +236,7 @@ export default function Reader({ data, mutate }: ViewProps<ReaderData>) {
         </section>
       </main>
 
-      <aside style={side}>
+      <aside style={sideOf(layout)}>
         <h2 style={h2}>Your marks in this chapter</h2>
         {chapterMarks.filter((m) => m.mark.kind !== "chapter").length === 0 && <p style={hint}>Select some text to comment on it or suggest a change. You can also type straight into the text.</p>}
         {chapterMarks.map(({ index, mark }) =>
@@ -306,7 +348,7 @@ function Popover(props: {
   const [tag, setTag] = useState<Tag | undefined>();
   const [replacement, setReplacement] = useState(pending.quote);
   return (
-    <div style={{ ...popover, left: pending.x, top: pending.y }} role="dialog" aria-label="Mark this text" onMouseUp={(e) => e.stopPropagation()}>
+    <div style={{ ...popover, left: pending.x, top: pending.y, ...(pending.above ? { transform: "translateY(-100%)" } : {}) }} role="dialog" aria-label="Mark this text" onMouseUp={(e) => e.stopPropagation()}>
       <div style={tags}>
         <button type="button" style={mode === "comment" ? { ...tagButton, ...fixOn } : tagButton} onClick={() => setMode("comment")}>
           Comment
@@ -370,17 +412,23 @@ const css = `
   .seg.ghost::after { content: attr(data-ins); text-decoration: none; color: #1b6b34; background: #dff3e4; margin-left: 0.3em; padding: 0 0.2em; border-radius: 3px; }
   p[contenteditable]:focus { outline: 1px dashed #b9ad8e; outline-offset: 4px; }
 `;
-const shell: CSSProperties = { display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) 22rem", gap: "1.5rem", padding: "1.5rem", minHeight: "100vh", boxSizing: "border-box", font: "16px system-ui, sans-serif" };
-const nav: CSSProperties = { display: "flex", flexDirection: "column", gap: "0.25rem", width: "13rem", position: "sticky", top: "1.5rem", alignSelf: "start" };
-const roundTitle: CSSProperties = { fontWeight: 600, marginBottom: "0.5rem" };
+// The layout (which columns exist, whether the marks panel sits beside or under the page) is `readerLayout`'s.
+// Stacked, nothing is sticky: a sticky box under a one-column page is what hid the text.
+const shellOf = (l: ReaderLayout): CSSProperties => ({ display: "grid", gridTemplateColumns: l.columns, justifyContent: "center", gap: "1.5rem", padding: "1.5rem", minHeight: "100vh", boxSizing: "border-box", font: "16px system-ui, sans-serif" });
+const navOf = (l: ReaderLayout): CSSProperties =>
+  l.stacked ? { display: "flex", flexWrap: "wrap", gap: "0.25rem" } : { display: "flex", flexDirection: "column", gap: "0.25rem", position: "sticky", top: "1.5rem", alignSelf: "start" };
+const roundTitle: CSSProperties = { fontWeight: 600, marginBottom: "0.5rem", flexBasis: "100%" };
 const navItem: CSSProperties = { display: "flex", justifyContent: "space-between", textAlign: "left", padding: "0.5rem 0.75rem", border: "1px solid transparent", background: "transparent", borderRadius: 6, cursor: "pointer", font: "inherit" };
 const navActive: CSSProperties = { background: "#fff", borderColor: "#d8d1bf" };
 const count: CSSProperties = { color: "#6b5d3a", fontSize: "0.85em" };
-const page: CSSProperties = { background: "#fff", padding: "3rem 4rem", borderRadius: 4, boxShadow: "0 1px 4px rgba(0,0,0,.12)", maxWidth: "46rem", width: "100%", boxSizing: "border-box", justifySelf: "center" };
+const pageOf = (l: ReaderLayout): CSSProperties => ({ background: "#fff", padding: l.compact ? "1.5rem 1.25rem" : "2.5rem 3rem", borderRadius: 4, boxShadow: "0 1px 4px rgba(0,0,0,.12)", width: "100%", boxSizing: "border-box", minWidth: 0 });
 const title: CSSProperties = { font: "600 1.6rem Georgia, serif", margin: "0 0 2rem" };
 const prose: CSSProperties = { font: "1.15rem/1.75 Georgia, 'Iowan Old Style', serif" };
 const heading: CSSProperties = { fontWeight: 700 };
-const side: CSSProperties = { display: "flex", flexDirection: "column", gap: "0.75rem", alignSelf: "start", position: "sticky", top: "1.5rem", maxHeight: "calc(100vh - 3rem)", overflowY: "auto" };
+const sideOf = (l: ReaderLayout): CSSProperties =>
+  l.stacked
+    ? { display: "flex", flexDirection: "column", gap: "0.75rem", minWidth: 0 }
+    : { display: "flex", flexDirection: "column", gap: "0.75rem", minWidth: 0, alignSelf: "start", position: "sticky", top: "1.5rem", maxHeight: "calc(100vh - 3rem)", overflowY: "auto" };
 const card: CSSProperties = { background: "#fff", border: "1px solid #d8d1bf", borderRadius: 6, padding: "0.75rem", marginTop: "1.5rem" };
 const h2: CSSProperties = { font: "600 0.95rem system-ui, sans-serif", margin: "0 0 0.5rem" };
 const area: CSSProperties = { width: "100%", boxSizing: "border-box", font: "inherit", padding: "0.5rem", border: "1px solid #c9c1ac", borderRadius: 4, resize: "vertical" };
@@ -395,4 +443,4 @@ const link: CSSProperties = { background: "none", border: "none", color: "#6b5d3
 const submitButton: CSSProperties = { padding: "0.5rem 1.25rem", border: "none", borderRadius: 6, background: "#2f5d3a", color: "#fff", font: "inherit", cursor: "pointer" };
 const alert: CSSProperties = { color: "#8a1c14", background: "#fde8e6", padding: "0.5rem", borderRadius: 4, fontSize: "0.9rem" };
 const sentBox: CSSProperties = { background: "#e3f2e6", padding: "0.6rem", borderRadius: 4 };
-const popover: CSSProperties = { position: "fixed", width: "20rem", zIndex: 10, background: "#fff", border: "1px solid #b9ad8e", borderRadius: 8, boxShadow: "0 6px 24px rgba(0,0,0,.2)", padding: "0.75rem" };
+const popover: CSSProperties = { position: "absolute", width: "min(20rem, calc(100vw - 1rem))", boxSizing: "border-box", zIndex: 10, background: "#fff", border: "1px solid #b9ad8e", borderRadius: 8, boxShadow: "0 6px 24px rgba(0,0,0,.2)", padding: "0.75rem" };
