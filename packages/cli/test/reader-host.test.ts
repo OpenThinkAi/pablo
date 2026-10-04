@@ -9,6 +9,7 @@ import { NO_CHROME_MESSAGE, createReaderHost, findChrome, openReader, readerMuta
 import type { RunResult, Runner } from "../src/share";
 import { marksPath, readSent, sentPath } from "../src/submit";
 import { parseCliArgs, runReadView } from "../src/cli";
+import { readerActive } from "../src/tray/activity";
 import type { ReaderData, ReviewDraft } from "../views/reader-protocol";
 
 /**
@@ -326,4 +327,25 @@ test("pablo read <round> opens the window and holds until it closes; a bad ref i
   expect(await runReadView(parseCliArgs(["read", `${REPO.split("/")[1]}#7`]), async () => ({ ok: false, code: 2, message: NO_CHROME_MESSAGE }))).toBe(2);
   expect(parseCliArgs(["read", "x-reading#7", "--no-open"]).noOpen).toBe(true);
   expect(parseCliArgs(["read", "x-reading#7"]).noOpen).toBe(false);
+});
+
+test("an open reader window marks the reader active for the tray's updater (AGT-1598), and the mark goes when it closes or never opens", async () => {
+  const env = { XDG_STATE_HOME: temp() };
+  const fake = fakeView();
+  const deps = { run: fetchGh(), env, existsExecutable: () => true, binaryPath: () => undefined };
+  expect(readerActive(env)).toBe(false);
+  const out = await openReader({ repo: REPO, pr: 7 }, undefined, { ...deps, mount: async () => fake.view });
+  expect(out.ok).toBe(true);
+  expect(readerActive(env)).toBe(true);
+  fake.close();
+  if (out.ok) await out.closed;
+  expect(readerActive(env)).toBe(false);
+
+  await openReader({ repo: REPO, pr: 7 }, undefined, {
+    ...deps,
+    mount: async () => {
+      throw new Error("no ui-leaf binary");
+    },
+  });
+  expect(readerActive(env)).toBe(false);
 });

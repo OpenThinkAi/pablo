@@ -17,6 +17,7 @@
 
 import { join } from "node:path";
 import { roundRefLabel } from "../read";
+import { VERSION } from "../version";
 import type { ReaderRound, RoundRef } from "../read";
 import type { Runner } from "../share";
 import type { MaterializeTrayBundleOptions, MaterializeTrayBundleResult } from "./bundle";
@@ -24,6 +25,8 @@ import { defaultAppSupportDir } from "./launchd";
 import { roundEvent } from "./notify";
 import type { Notifier } from "./notify";
 import { nextDelayMs, pollIntervalMs, RoundPoller } from "./poll";
+import { CHECK_INTERVAL_MS, CHECK_RETRY_MS } from "./update";
+import type { UpdateOutcome, Updater } from "./update";
 import { listenForTrayRequests } from "./request";
 import type { SignalTarget, TrayRequest } from "./request";
 import { notifiedPath, readNotified, toTrayRounds, trayDir, trayParcelPath, trayStatePath, writeNotified, writeTrayState } from "./state";
@@ -81,6 +84,14 @@ export interface TrayDaemonDeps {
   readonly helperSource: string;
   /** Injected in tests so no suite installs a real, process-wide SIGUSR1 handler. */
   readonly signalTarget?: SignalTarget;
+  /** The self-updater (AGT-1598); absent means no updates (every older test, and a tray run by hand). */
+  readonly update?: Updater;
+  /** True while a reader window is open in ANOTHER process (`activity.ts`); the views this daemon opened are tracked here. */
+  readonly readerActive?: () => boolean;
+  /** Ends the process after a verified update, once everything has wound down: launchd's KeepAlive starts the tray again on the new code. */
+  readonly exit?: (code: number) => void;
+  /** pablo's own version, shown in the menu; defaults to the installed package's. */
+  readonly version?: string;
 }
 
 /**
@@ -88,7 +99,14 @@ export interface TrayDaemonDeps {
  * and a final `daemonPid: 0` state has been written. A failed or throwing poll
  * only lengthens the wait (`nextDelayMs`); nothing but `signal` ends it.
  */
-export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): Promise<void> {
+export async function runTrayDaemon(deps: TrayDaemonDeps, outerSignal: AbortSignal): Promise<void> {
+  // One stop for everything the loop owns: the caller's signal, or a verified update that needs a restart.
+  const stop = new AbortController();
+  const onOuterAbort = (): void => stop.abort();
+  if (outerSignal.aborted) stop.abort();
+  else outerSignal.addEventListener("abort", onOuterAbort, { once: true });
+  const signal = stop.signal;
+  let restarting = false;
   const log = (line: string): void => deps.log(`${deps.now().toISOString()} ${line}`);
   const env = deps.env;
   const dir = trayDir(env);
@@ -106,7 +124,9 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
   const open = new Set<string>();
 
   function publish(daemonPidOverride?: number): void {
-    const state: TrayState = { daemonPid: daemonPidOverride ?? process.pid, version: TRAY_VERSION, rounds: toTrayRounds(rounds) };
+    const state: TrayState = { daemonPid: daemonPidOverride ?? process.pid, version: deps.version ?? VERSION, rounds: toTrayRounds(rounds) };
+    const updatedTo = deps.update?.updatedTo();
+    if (updatedTo !== undefined) state.updatedTo = updatedTo;
     if (lastError !== undefined) state.lastError = lastError;
     try {
       writeTrayState(statePath, state);
@@ -213,9 +233,43 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
     }
   }
 
+  let nextCheckAt = deps.now().getTime();
+  let lastOutcome = "";
+
+  /** The updater: on start and every six hours it asks the registry; a known newer version waits for no window to be open. */
+  async function updateOnce(): Promise<void> {
+    if (deps.update === undefined) return;
+    const now = deps.now().getTime();
+    const check = now >= nextCheckAt;
+    const busy = open.size > 0 || (deps.readerActive?.() ?? false);
+    let outcome: UpdateOutcome;
+    try {
+      outcome = await deps.update.tick({ check, busy });
+    } catch (error) {
+      log(`the updater failed: ${describeError(error)}`);
+      outcome = { kind: "check-failed", reason: describeError(error) };
+    }
+    if (check) nextCheckAt = deps.now().getTime() + (outcome.kind === "check-failed" ? CHECK_RETRY_MS : CHECK_INTERVAL_MS);
+    // Said once per change, so a window held open for an hour does not log a line per poll.
+    const said = outcome.kind === "idle" ? lastOutcome : JSON.stringify(outcome);
+    if (said !== lastOutcome) {
+      lastOutcome = said;
+      if (outcome.kind === "deferred") log(`pablo ${outcome.version} is waiting: a reader window is open`);
+      else if (outcome.kind === "backoff") log(`not retrying pablo ${outcome.version} yet: it failed recently`);
+      else if (outcome.kind === "ineligible") log(`not updating: ${outcome.reason}`);
+      else if (outcome.kind === "rolled-back") log(`pablo ${outcome.version} did not verify (${outcome.reason}); staying on the running version`);
+    }
+    if (outcome.kind === "upgraded") {
+      restarting = true;
+      stop.abort();
+    }
+  }
+
   try {
     while (!signal.aborted) {
       await pollOnce();
+      await updateOnce();
+      if (restarting) break;
       publish();
 
       // Serve clicks, then wait; a click during the wait wakes the loop, which serves it without polling again.
@@ -237,11 +291,13 @@ export async function runTrayDaemon(deps: TrayDaemonDeps, signal: AbortSignal): 
       }
     }
   } finally {
+    outerSignal.removeEventListener("abort", onOuterAbort);
     stopListening();
     if (supervisorDone !== undefined) await supervisorDone;
     lastError = undefined;
     publish(0);
   }
+  if (restarting) deps.exit?.(0);
 }
 
 /** Where `PabloTray.swift` lives relative to this file. */

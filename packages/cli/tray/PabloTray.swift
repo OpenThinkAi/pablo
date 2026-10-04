@@ -35,6 +35,8 @@ struct TrayState {
     var version: String = ""
     var rounds: [TrayRound] = []
     var lastError: String = ""
+    /// Set by the daemon after a self-update, while that version is the running one.
+    var updatedTo: String = ""
 
     /// Parse the daemon's file, or fall back to "nothing waiting".
     ///
@@ -53,6 +55,7 @@ struct TrayState {
         }
         if let version = root["version"] as? String { state.version = version }
         if let lastError = root["lastError"] as? String { state.lastError = lastError }
+        if let updatedTo = root["updatedTo"] as? String { state.updatedTo = updatedTo }
         if let raw = root["rounds"] as? [[String: Any]] {
             state.rounds = raw.compactMap { item in
                 guard
@@ -91,7 +94,7 @@ indirect enum MenuEntry: Equatable {
 /// The dropdown: "Waiting for you" with one row per open round, then "Sent to
 /// Matt" with one row per submitted round (both newest first, as the daemon
 /// ordered them, at most eight each), a disabled line when there is nothing, an
-/// optional error line, a separator, and the version.
+/// optional error line, a separator, the version and, after a self-update, "Updated to <v>".
 func menuEntries(for state: TrayState) -> [MenuEntry] {
     var entries: [MenuEntry] = []
     let waiting = state.rounds.filter { !$0.sent }
@@ -120,6 +123,9 @@ func menuEntries(for state: TrayState) -> [MenuEntry] {
 
     entries.append(.separator)
     entries.append(.label(versionLine(for: state)))
+    if !state.updatedTo.isEmpty {
+        entries.append(.label("Updated to \(state.updatedTo)"))
+    }
     return entries
 }
 
@@ -281,7 +287,7 @@ final class TrayController: NSObject {
         let roundsSignature = next.rounds
             .map { "\($0.ref)|\($0.title)|\($0.sender)|\($0.sent)" }
             .joined(separator: ",")
-        let signature = [String(next.daemonPid), next.version, next.lastError, roundsSignature]
+        let signature = [String(next.daemonPid), next.version, next.lastError, next.updatedTo, roundsSignature]
             .joined(separator: "||")
         guard signature != renderedSignature else { return }
         renderedSignature = signature

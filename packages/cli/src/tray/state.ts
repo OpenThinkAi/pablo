@@ -31,6 +31,8 @@ export interface TrayState {
   version: string;
   rounds: TrayRound[];
   lastError?: string;
+  /** Set after a self-update, while that version is the running one: the menu says "Updated to <v>". */
+  updatedTo?: string;
 }
 
 /** `$XDG_STATE_HOME/pablo/tray` (default `~/.local/state/pablo/tray`): the daemon's state, the parcel and `notified.json`. */

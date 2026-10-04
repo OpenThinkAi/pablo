@@ -10,6 +10,10 @@
  */
 
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { configPath } from "@openthink/pablo-core";
+import { VERSION } from "../version";
+import { readerActive } from "./activity";
 import { materializeTrayBundle, TRAY_BUNDLE_NAME } from "./bundle";
 import { defaultHelperSource, runTrayDaemon } from "./daemon";
 import type { OpenedRound, TrayDaemonDeps } from "./daemon";
@@ -27,6 +31,18 @@ import {
 import type { Exec } from "./launchd";
 import { osascriptNotifier } from "./notify";
 import { trayDir } from "./state";
+import {
+  createUpdater,
+  isGlobalInstall,
+  parseAutoUpdate,
+  parseProbe,
+  readUpdateRecord,
+  REGISTRY_LATEST_URL,
+  uiLeafBinaryOnDisk,
+  updateRecordPath,
+  writeUpdateRecord,
+} from "./update";
+import type { LatestAnswer, UpdateEffects } from "./update";
 import { spawnTrayHelper, superviseHelper } from "./supervise";
 import { roundRefLabel } from "../read";
 import type { RoundRef } from "../read";
@@ -129,30 +145,98 @@ async function launchctlExec(cmd: string[]): Promise<{ code: number; stderr: str
   return { code, stderr };
 }
 
+async function runCommand(cmd: string[], env: Record<string, string | undefined>, timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
+  try {
+    const proc = Bun.spawn(cmd, { stdin: "ignore", stdout: "pipe", stderr: "pipe", env, timeout: timeoutMs });
+    const [code, stdout, stderr] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    return { code, stdout, stderr };
+  } catch (error) {
+    return { code: 1, stdout: "", stderr: (error as Error).message };
+  }
+}
+
+/** The registry's `latest`, asked with `If-None-Match` so an unchanged answer is a bodiless 304. */
+async function fetchLatestFromRegistry(etag: string | undefined): Promise<LatestAnswer> {
+  try {
+    const response = await fetch(REGISTRY_LATEST_URL, {
+      headers: { accept: "application/json", ...(etag === undefined ? {} : { "if-none-match": etag }) },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (response.status === 304) return { kind: "unchanged" };
+    if (!response.ok) return { kind: "error", reason: `the registry answered ${response.status}` };
+    const body = (await response.json()) as { version?: unknown };
+    return { kind: "modified", version: body.version, etag: response.headers.get("etag") ?? undefined };
+  } catch (error) {
+    return { kind: "error", reason: (error as Error).message };
+  }
+}
+
+/** The real updater effects: the registry, `bun add -g`, the installed pablo as a fresh process. Never built by a test. */
+function realUpdateEffects(env: Record<string, string | undefined>, cli: string, log: (line: string) => void): UpdateEffects {
+  const recordPath = updateRecordPath(trayDir(env));
+  return {
+    fetchLatest: fetchLatestFromRegistry,
+    bun: async (args) => {
+      const { code, stderr } = await runCommand([process.execPath, ...args], env, 300_000);
+      return { code, stderr };
+    },
+    uiLeafBinaryPresent: () => uiLeafBinaryOnDisk(env),
+    // The command launchd will run next: `bun <cli> tray`, here `--version --json`, from the same path on disk.
+    probeVersion: async () => {
+      const result = await runCommand([process.execPath, cli, "--version", "--json"], env, 30_000);
+      return result.code === 0 ? parseProbe(result.stdout) : undefined;
+    },
+    readRecord: () => readUpdateRecord(recordPath),
+    writeRecord: (record) => writeUpdateRecord(recordPath, record),
+    autoUpdate: () => {
+      try {
+        return parseAutoUpdate(readFileSync(configPath(env), "utf8"));
+      } catch {
+        return true;
+      }
+    },
+    ineligible: () => {
+      // Exit 0 only restarts the tray under launchd (KeepAlive), and only a bun global install is what `bun add -g` replaces.
+      if (env["XPC_SERVICE_NAME"] !== TRAY_LABEL) return "this tray was not started by its launchd agent (pablo tray install)";
+      if (!isGlobalInstall(cli)) return "this pablo is not the global install (a checkout updates with git)";
+      return undefined;
+    },
+    now: () => Date.now(),
+    log,
+  };
+}
+
 /** The production wiring. Never built by a test. */
 export function realTrayDeps(env: Record<string, string | undefined> = process.env): TrayCliDeps {
   const cli = defaultCliPath();
-  const daemonDeps = (): TrayDaemonDeps => ({
-    env,
-    log: (line) => {
+  const daemonDeps = (): TrayDaemonDeps => {
+    const log = (line: string): void => {
       process.stderr.write(`${line}\n`);
-    },
-    now: () => new Date(),
-    sleep: (ms) =>
-      new Promise((resolve) => {
-        setTimeout(resolve, ms).unref();
-      }),
-    run: boundedRunner,
-    notifier: osascriptNotifier(),
-    openRound: (ref): OpenedRound => {
-      const child = Bun.spawn(openRoundArgs(process.execPath, cli, ref), { stdin: "ignore", stdout: "ignore", stderr: "ignore", env });
-      return { exited: child.exited };
-    },
-    materialize: materializeTrayBundle,
-    supervise: superviseHelper,
-    spawnHelper: spawnTrayHelper,
-    helperSource: defaultHelperSource(),
-  });
+    };
+    return {
+      env,
+      log,
+      now: () => new Date(),
+      sleep: (ms) =>
+        new Promise((resolve) => {
+          setTimeout(resolve, ms).unref();
+        }),
+      run: boundedRunner,
+      notifier: osascriptNotifier(),
+      openRound: (ref): OpenedRound => {
+        const child = Bun.spawn(openRoundArgs(process.execPath, cli, ref), { stdin: "ignore", stdout: "ignore", stderr: "ignore", env });
+        return { exited: child.exited };
+      },
+      materialize: materializeTrayBundle,
+      supervise: superviseHelper,
+      spawnHelper: spawnTrayHelper,
+      helperSource: defaultHelperSource(),
+      version: VERSION,
+      update: createUpdater(realUpdateEffects(env, cli, (line) => log(`${new Date().toISOString()} ${line}`)), VERSION),
+      readerActive: () => readerActive(env),
+      exit: (code) => process.exit(code),
+    };
+  };
   return {
     env,
     exec: launchctlExec,

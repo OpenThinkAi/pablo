@@ -59,6 +59,16 @@ you to the download but does not install Chrome). Running it again is safe: it s
 installed and upgrades pablo. You also need a GitHub account with access to the book's reading
 repo; whoever shares the book with you sets that up.
 
+After that you never run the installer again: the tray keeps pablo up to date by itself (AGT-1598).
+On start and every six hours it asks the npm registry (a conditional request) for the latest
+`@openthink/pablo`. A newer version is installed only while no reader window is open (it waits
+otherwise), with the installer's own steps: `bun add -g`, `bun pm -g trust @openthink/ui-leaf`, a check
+that the ui-leaf program arrived, and a check that the newly installed `pablo --version` prints the new
+version; only then does the tray exit and launchd (`KeepAlive`) restart it on the new code, and its menu
+says "Updated to <version>". Any failing step reinstalls the previous version and that version is not
+tried again for 24 hours. It only acts when the tray was started by its launchd agent and is the global
+install. To opt out, set `{"tray": {"autoUpdate": false}}` in `~/.config/pablo/config.json`.
+
 ## Develop
 
 ```sh
