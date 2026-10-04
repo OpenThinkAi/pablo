@@ -56,6 +56,7 @@ import { openReader } from "./reader-host";
 import { realTrayDeps, runTray } from "./tray/cli";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
+import { VERSION } from "./version";
 import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
@@ -105,6 +106,7 @@ function helpText(): string {
     "dry-run as its own verb is later; today use `write --dry-run` (or `prose`/`revise --dry-run`).",
     "",
     "Every verb accepts --project <slug> and --json.",
+    "pablo --version (or -v) prints the installed version.",
     "--project resolves to <vault>/<kind>/<slug> (kind: novels, stories, essays).",
     "The vault is $PABLO_VAULT if set, else the nearest ancestor of the current",
     "directory holding a style/ or voices/ directory.",
@@ -192,6 +194,8 @@ interface ParsedArgs {
   readonly project: string | undefined;
   readonly json: boolean;
   readonly help: boolean;
+  /** `--version` / `-v` (AGT-1597): print the installed version. */
+  readonly version: boolean;
   readonly adopt: boolean;
   /** `agent --tag-facts` (AGT-1570): tag every untagged fact on a plan branch. */
   readonly tagFacts: boolean;
@@ -274,6 +278,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       ...deriveCliOptions(),
       json: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
+      version: { type: "boolean", short: "v", default: false },
       adopt: { type: "boolean", default: false },
       "tag-facts": { type: "boolean", default: false },
       new: { type: "boolean", default: false },
@@ -288,6 +293,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     project: typeof values["project"] === "string" ? values["project"] : undefined,
     json: values["json"] === true,
     help: values["help"] === true,
+    version: values["version"] === true,
     adopt: values["adopt"] === true,
     tagFacts: values["tag-facts"] === true,
     new: values["new"] === true,
@@ -741,6 +747,12 @@ const screenComposer = (dir: string, cwd: string): Composer => createComposer(()
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
 export async function main(argv: readonly string[], cwd: string = process.cwd()): Promise<number> {
   const args = parseCliArgs(argv);
+
+  // `--version` / `-v` (AGT-1597) needs no vault, config or project.
+  if (args.version) {
+    console.log(args.json ? JSON.stringify({ version: VERSION }) : `pablo ${VERSION}`);
+    return EXIT_OK;
+  }
 
   // Bare `pablo` (no verb, no flags) inside a pablo project opens the screen
   // (AGT-1522). Anywhere else — no project, or no terminal to draw on — it

@@ -79,10 +79,10 @@ Anthropic adapters.
 The three packages (`@openthink/pablo-core`, `@openthink/pablo-tui`, `@openthink/pablo`)
 release in lockstep at one version. To cut a release:
 
-1. Bump `version` in all three `packages/*/package.json`, plus the two mirrors
-   in `packages/cli/src/mcp.ts` (`SERVER_VERSION`) and
-   `packages/cli/src/harness/auth.ts` (`CLIENT_APP`). Run `bun install` so
-   `bun.lock` records the new workspace versions.
+1. Bump `version` in all three `packages/*/package.json`. Run `bun install` so
+   `bun.lock` records the new workspace versions. (`pablo --version`, the MCP
+   server version and the harness client id all read `packages/cli/package.json`
+   at runtime, so there are no other places to bump.)
 2. Land it on `main` through the stamp flow.
 3. Run the `release` workflow from the GitHub Actions tab (workflow_dispatch,
    `main` only). It typechecks and tests, then publishes core, tui, cli in that

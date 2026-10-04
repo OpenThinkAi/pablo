@@ -31,11 +31,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { VERBS } from "./verbs";
+import { VERSION } from "./version";
 import type { McpToolSpec, VerbContext } from "./verbs";
 
 const SERVER_NAME = "pablo";
-/** Mirrors `packages/cli/package.json`'s `version` — bump both together on every release. */
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = VERSION;
 
 /**
  * Every tool `pablo mcp` serves, flattened from `verb.mcpTools ?? [verb]`. The

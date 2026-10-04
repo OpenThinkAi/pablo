@@ -13,6 +13,7 @@
 
 import { claudeCredential, subscriptionEnv } from "@openthink/pablo-core";
 import type { KeyLookup, PabloConfig } from "@openthink/pablo-core";
+import { VERSION } from "../version";
 
 export type HarnessRoute = "subscription" | "api-key";
 
@@ -24,8 +25,8 @@ export interface HarnessAuth {
   readonly model?: string;
 }
 
-/** Identifies pablo in the User-Agent the SDK sends. Mirrors `packages/cli/package.json`'s version. */
-export const CLIENT_APP = "pablo/0.2.0";
+/** Identifies pablo in the User-Agent the SDK sends; the version comes from package.json. */
+export const CLIENT_APP = `pablo/${VERSION}`;
 
 export function harnessAuth(
   config: PabloConfig,
