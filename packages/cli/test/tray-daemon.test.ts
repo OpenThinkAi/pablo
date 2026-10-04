@@ -5,6 +5,8 @@ import { cachedRoundDir } from "../src/read";
 import { runTrayDaemon, TRAY_LAST_ERROR } from "../src/tray/daemon";
 import type { OpenedRound, TrayDaemonDeps } from "../src/tray/daemon";
 import { DEFAULT_INTERVAL_MS, MAX_BACKOFF_MS } from "../src/tray/poll";
+import { CHECK_INTERVAL_MS } from "../src/tray/update";
+import type { UpdateOutcome, Updater } from "../src/tray/update";
 import type { SignalTarget } from "../src/tray/request";
 import { notifiedPath, trayDir, trayParcelPath, trayStatePath } from "../src/tray/state";
 import type { TrayState } from "../src/tray/state";
@@ -317,5 +319,116 @@ describe("the helper and shutdown", () => {
     );
     expect(during).toBe(process.pid);
     expect(readState().daemonPid).toBe(0);
+  });
+});
+
+describe("self-update (AGT-1598)", () => {
+  /** An updater that records what the loop told it and answers from a script. */
+  function fakeUpdater(answers: UpdateOutcome[], updatedTo?: string): { updater: Updater; ticks: { check: boolean; busy: boolean }[] } {
+    const ticks: { check: boolean; busy: boolean }[] = [];
+    const updater: Updater = {
+      tick: async (options) => {
+        ticks.push(options);
+        return answers[Math.min(ticks.length - 1, answers.length - 1)] ?? { kind: "idle" };
+      },
+      updatedTo: () => updatedTo,
+    };
+    return { updater, ticks };
+  }
+
+  test("a verified update stops the loop, winds the helper down, writes the final state, and only then exits 0", async () => {
+    gh.setRounds([{ pr: 1 }]);
+    const { updater, ticks } = fakeUpdater([{ kind: "upgraded", version: "0.3.0" }]);
+    const exits: { code: number; daemonPid: number | undefined; supervisorAborted: boolean }[] = [];
+    let supervisorSignal: AbortSignal | undefined;
+    await runTrayDaemon(
+      deps([], {
+        update: updater,
+        materialize: async () => ({ bundlePath: "/b", helperPath: "/b/h", built: false }),
+        supervise: async (opts) => {
+          supervisorSignal = opts.signal;
+          await new Promise<void>((resolve) => opts.signal.addEventListener("abort", () => resolve(), { once: true }));
+        },
+        exit: (code) => exits.push({ code, daemonPid: readState().daemonPid, supervisorAborted: supervisorSignal?.aborted === true }),
+      }),
+      controller.signal,
+    );
+    expect(ticks).toHaveLength(1); // no second turn of the loop
+    expect(exits).toEqual([{ code: 0, daemonPid: 0, supervisorAborted: true }]);
+    expect(controller.signal.aborted).toBe(false); // the caller's own signal was never the thing that stopped it
+  });
+
+  test("an ordinary shutdown never calls exit", async () => {
+    const { updater } = fakeUpdater([{ kind: "idle" }]);
+    const exits: number[] = [];
+    await runTrayDaemon(deps([], { update: updater, exit: (c) => exits.push(c) }), controller.signal);
+    expect(exits).toEqual([]);
+  });
+
+  test("the check is due on start and every six hours; between, a tick is only a look at what is known", async () => {
+    const { updater, ticks } = fakeUpdater([{ kind: "idle" }]);
+    await runTrayDaemon(
+      deps([() => {}, () => clock.advance(CHECK_INTERVAL_MS), () => {}], { update: updater }),
+      controller.signal,
+    );
+    expect(ticks.map((t) => t.check)).toEqual([true, false, true, false]);
+  });
+
+  test("busy while a reader window is open in another process, and while one this tray opened is", async () => {
+    gh.setRounds([{ pr: 1 }]);
+    let active = true;
+    const { updater, ticks } = fakeUpdater([{ kind: "deferred", version: "0.3.0" }]);
+    await runTrayDaemon(deps([() => void (active = false)], { update: updater, readerActive: () => active }), controller.signal);
+    expect(ticks.map((t) => t.busy)).toEqual([true, false]);
+    expect(logs.filter((l) => l.includes("waiting: a reader window is open"))).toHaveLength(1); // said once, not per poll
+  });
+
+  test("the tray's own open view counts as busy until it closes", async () => {
+    gh.setRounds([{ pr: 1 }]);
+    const { updater, ticks } = fakeUpdater([{ kind: "idle" }]);
+    const handlers = new Set<() => void>();
+    let release: () => void = () => {};
+    let waits = 0;
+    mkdirSync(trayDir(env), { recursive: true });
+    await runTrayDaemon(
+      deps([], {
+        update: updater,
+        signalTarget: { on: (_s, h) => void handlers.add(h), off: (_s, h) => void handlers.delete(h) },
+        openRound: () => ({ exited: new Promise<void>((resolve) => (release = resolve)) }),
+        sleep: async () => {
+          waits += 1;
+          if (waits === 1) {
+            await new Promise((r) => setTimeout(r, 0));
+            writeFileSync(trayParcelPath(trayDir(env)), JSON.stringify({ action: "open", ref: "OpenThinkAi/alpha-reading#1" }));
+            handlers.forEach((h) => h());
+            return new Promise<void>(() => {});
+          }
+          if (waits === 2) return; // the wait ends with the window still open: the next turn sees it
+          if (waits === 3) {
+            release(); // the window closes
+            await new Promise((r) => setTimeout(r, 0));
+            return;
+          }
+          controller.abort();
+        },
+      }),
+      controller.signal,
+    );
+    expect(ticks.map((t) => t.busy)).toEqual([false, true, false]);
+  });
+
+  test("the state file carries pablo's version and, after an update, updatedTo", async () => {
+    const { updater } = fakeUpdater([{ kind: "idle" }], "0.3.0");
+    await runTrayDaemon(deps([], { update: updater, version: "0.3.0" }), controller.signal);
+    // after shutdown the final state keeps both; during the run they were written too
+    const final = readState();
+    expect(final.version).toBe("0.3.0");
+    expect(final.updatedTo).toBe("0.3.0");
+  });
+
+  test("an updater that throws is logged and does not end the loop", async () => {
+    const updater: Updater = { tick: async () => Promise.reject(new Error("boom")), updatedTo: () => undefined };
+    await runTrayDaemon(deps([() => {}], { update: updater }), controller.signal);
+    expect(logs.some((l) => l.includes("the updater failed: boom"))).toBe(true);
   });
 });
