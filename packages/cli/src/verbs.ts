@@ -757,7 +757,7 @@ type VoiceLocationLookup =
  * that duplicate (`looksLikeVoicePath`) is exactly the drift `voice.ts`'s
  * docstring on `isVoicePathArgument` warns a bound can suffer from.
  */
-function resolveVoiceLocationOrRefusal(ctx: VerbContext, name: string): VoiceLocationLookup {
+function resolveVoiceLocationOrRefusal(ctx: Pick<VerbContext, "cwd" | "env">, name: string): VoiceLocationLookup {
   if (isVoicePathArgument(name)) {
     const message = (abs: string) => `pablo: voice path must be inside the vault (${abs})`;
     const vault = findVault(ctx.cwd, ctx.env);
@@ -809,7 +809,7 @@ export function runVoiceRule(
 
   let location: VoiceLocation;
   if (ctx.caller === "mcp") {
-    const located = resolveVoiceLocationOrRefusal(ctx as VerbContext, args.name);
+    const located = resolveVoiceLocationOrRefusal(ctx, args.name);
     if (!located.ok) return located.result;
     location = located.location;
   } else {
