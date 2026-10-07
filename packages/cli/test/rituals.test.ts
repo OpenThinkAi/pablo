@@ -100,7 +100,9 @@ function baseOpts(overrides: Partial<RitualOptions> = {}): RitualOptions {
     receiptLine: "read 1200 tokens in 0.4s, wrote 42 in 1.4s",
     now: () => new Date("2026-09-06T12:00:00.000Z"),
     env: { PATH: NO_THINK_PATH },
-    thinkTimeoutMs: 2000,
+    // Generous: a fake think that exits at once took over 2s to spawn when the full suite ran on a loaded machine
+    // (stamp merge pre-check, 2026-10-07). The timeout test injects its own short value.
+    thinkTimeoutMs: 15000,
     ...overrides,
   };
 }
@@ -229,7 +231,7 @@ test("a fake think script that exits 0 is 'ran'", async () => {
 
   rmSync(thinkDir, { recursive: true, force: true });
   rmSync(project, { recursive: true, force: true });
-});
+}, 20_000);
 
 test("a fake think script that exits 3 is 'failed' with 'exited 3'", async () => {
   const project = tempProject();
@@ -245,7 +247,7 @@ test("a fake think script that exits 3 is 'failed' with 'exited 3'", async () =>
 
   rmSync(thinkDir, { recursive: true, force: true });
   rmSync(project, { recursive: true, force: true });
-});
+}, 20_000);
 
 test("a fake think script that sleeps past a short injected timeout is 'failed' with 'timed out'", async () => {
   const project = tempProject();
