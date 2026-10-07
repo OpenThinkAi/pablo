@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "bun:test";
 import type { Adapter } from "@openthink/pablo-core";
-import { adapterAsk, applyRefute, critiqueBranch, critiqueModel, critiquePath, loadCritique } from "../src/critique";
+import { adapterAsk, applyRefute, critiqueBranch, critiqueModel, critiquePath, loadCritique, styleReference } from "../src/critique";
 import type { Ask } from "../src/critique";
 import { allowedTools, harnessTools } from "../src/harness/tools";
 import { VERBS } from "../src/verbs";
@@ -108,6 +108,39 @@ test("the candidate prompt carries continuity, the bible, the timeline at the st
   expect(p).toContain("style/prose.md");
   expect(p).toContain("*8");
   expect(p).not.toContain("RESEARCH-ONLY-MARKER");
+});
+
+test("the critic's style reference is style/ then the work's QWEN.md rule sections, by path; none without a QWEN.md (AGT-1593)", async () => {
+  const { repo, work } = setup();
+  const { ask, prompts } = fake([], {});
+  await critiqueBranch({ vaultRoot: repo, projectPath: work, branch: "draft/ch02", ask });
+  const p = prompts[0]!;
+  const style = p.indexOf("## style/prose.md");
+  const rules = p.indexOf("## novels/ice-house/QWEN.md");
+  expect(style).toBeGreaterThan(-1);
+  expect(rules).toBeGreaterThan(style);
+  expect(p.indexOf("No one explains the ice trade", rules)).toBeGreaterThan(rules);
+  expect(p).toContain("Odile unless a chapter says otherwise.");
+  expect(p).not.toContain("Per-session order");
+  expect(p).not.toContain("## The files");
+
+  const ref = styleReference(repo, work);
+  expect(ref).toContain("## style/prose.md");
+  rmSync(join(work, "QWEN.md"));
+  const bare = styleReference(repo, work);
+  expect(bare).toContain("## style/prose.md");
+  expect(bare).not.toContain("## novels/ice-house/QWEN.md");
+});
+
+test("writer-only text in QWEN.md never reaches the critic", () => {
+  const { repo, work } = setup();
+  writeFileSync(
+    join(work, "QWEN.md"),
+    "# T\n\n## Ground rules\n\nKeep it plain.\n\n<!-- writer-only -->\nWRITER-SECRET\n<!-- /writer-only -->\n",
+  );
+  const ref = styleReference(repo, work);
+  expect(ref).toContain("Keep it plain.");
+  expect(ref).not.toContain("WRITER-SECRET");
 });
 
 test("the refute call sees more of the text than the comment's own line, and a withdrawal needs a cited line", async () => {

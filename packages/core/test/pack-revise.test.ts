@@ -175,3 +175,11 @@ test("assembly touches no model and no clock", () => {
   }
   expect(calls).toEqual([]);
 });
+
+test("a revise pack carries style/ then the work's rules, in that order, labelled by path (AGT-1593)", () => {
+  const pack = assemblePack("revise", inputs());
+  const rules = pack.slices.find((slice) => slice.name === "rules");
+
+  expect(rules?.text.indexOf("Short sentences")).toBeLessThan(rules?.text.indexOf("Napa Valley, 1962") ?? -1);
+  expect(rules?.source).toBe(`${STYLE[0]?.path ?? ""}, ${WORK_RULES.path}`);
+});

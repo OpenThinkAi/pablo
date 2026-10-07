@@ -122,6 +122,11 @@ export interface DraftingInputs {
   readonly beat: BeatRow;
   /** `<vault>/style/*.md`. The built-in craft rules are added on top, always. */
   readonly style: readonly TextSource[];
+  /**
+   * The work's own rule sections from its `QWEN.md` (ground rules, point of view
+   * and voice), layered after `style`. The period facts are in `periodFacts`.
+   */
+  readonly workRules?: TextSource | undefined;
   /** The work's period and place facts, usually a section of its `QWEN.md`. */
   readonly periodFacts?: TextSource | undefined;
   /** `bible/characters/*`: who exists. */

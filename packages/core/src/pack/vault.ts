@@ -32,6 +32,21 @@ export const DEFAULT_TAIL_WORDS = 500;
 export const PERIOD_FACTS_SECTION = "## Setting and period facts";
 const PERIOD_FACTS_END = "## The files";
 
+/** A `## ` section heading that addresses the agent, not the writer: never part of the voice. */
+export const AGENT_SECTION_HEADING = /repl(y|ies)|agent/i;
+
+/**
+ * `QWEN.md` sections that are operating instructions for the agent working in
+ * the work (the vault templates' memory-brief, memory-command and session-order
+ * sections, pablo's own drafting notes), not prose rules for the writer.
+ */
+const AGENT_PROCESS_HEADING = /brief from memory|memory commands|per-session|drafting through pablo/i;
+
+/** The heading that opens the file map; everything from here on is agent orientation. */
+const FILES_HEADING = /^(the )?files$/i;
+
+const WRITER_ONLY_MARKER = /^[ \t]*<!--\s*\/?writer-only\s*-->[ \t]*\n?/gm;
+
 export interface ReadDraftingOptions {
   /** The vault root (`~/writing`), which holds `style/`. */
   readonly vaultRoot: string;
@@ -67,6 +82,8 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
 
   const workRulesPath = join(workRoot, "QWEN.md");
   const workRules = read(workRulesPath) ?? "";
+  // The period facts have their own slice, so the rules slice leaves that section out.
+  const ruleText = workRuleSections(workRules, { exclude: [PERIOD_FACTS_SECTION] });
   const timelinePath = join(workRoot, "bible", "timeline.md");
 
   return {
@@ -76,6 +93,7 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
     },
     beat,
     style: readStyle(vaultRoot),
+    workRules: source(vaultRoot, workRulesPath, ruleText),
     periodFacts: source(
       vaultRoot,
       workRulesPath,
@@ -109,9 +127,39 @@ export function readStyle(vaultRoot: string): readonly TextSource[] {
     });
 }
 
-/** The work's own rules file, for a span edit. */
+/**
+ * The work's own rules, for a span edit or a revise: `QWEN.md`'s rule sections
+ * only (see `workRuleSections`), labelled by path. `undefined` when the work
+ * has no `QWEN.md` or it holds no rule sections.
+ */
 export function readWorkRules(vaultRoot: string, workRoot: string): TextSource | undefined {
-  return sourceOfFile(vaultRoot, join(workRoot, "QWEN.md"));
+  return sourceOfFile(vaultRoot, join(workRoot, "QWEN.md"), (text) => workRuleSections(text));
+}
+
+/**
+ * The prose rules a work's `QWEN.md` adds to the shared `style/` (AGT-1593: the
+ * work's own voice layer is its `QWEN.md`). The `## ` sections kept are the
+ * rules (ground rules, setting and period facts, point of view and voice, and
+ * any a work adds); dropped are the title/preamble, sections that address the
+ * agent (`AGENT_SECTION_HEADING`), the template's agent process sections
+ * (memory brief and commands, per-session order, pablo drafting notes), and
+ * the file map and anything after it. `<!-- writer-only -->` fence lines are
+ * removed but their content stays: writer-only text is for exactly this reader.
+ * `options.exclude` drops sections whose heading starts with one of the given
+ * strings (the drafting pack sends period facts in a slice of their own).
+ */
+export function workRuleSections(text: string, options: { readonly exclude?: readonly string[] } = {}): string {
+  const exclude = (options.exclude ?? []).map((heading) => heading.replace(/^#+\s*/, "").toLowerCase());
+  const parts = `\n${text.replace(/\r\n/g, "\n").replace(WRITER_ONLY_MARKER, "")}`.split(/\n(?=## )/).slice(1);
+  const kept: string[] = [];
+  for (const part of parts) {
+    const heading = (part.split("\n", 1)[0] ?? "").replace(/^##\s*/, "").trim();
+    if (FILES_HEADING.test(heading)) break;
+    if (AGENT_SECTION_HEADING.test(heading) || AGENT_PROCESS_HEADING.test(heading)) continue;
+    if (exclude.some((prefix) => heading.toLowerCase().startsWith(prefix))) continue;
+    kept.push(part.trim());
+  }
+  return kept.join("\n\n");
 }
 
 /** A markdown file read into a `TextSource`, or `undefined` when it is absent or empty. */

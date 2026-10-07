@@ -20,7 +20,7 @@
 
 import { isAbsolute, join, relative, sep } from "node:path";
 import type { DraftingInputs, Pack, TextSource } from "@openthink/pablo-core";
-import { assemblePack, DEFAULT_MIN_SCENES, readDraftingInputs } from "@openthink/pablo-core";
+import { AGENT_SECTION_HEADING, assemblePack, DEFAULT_MIN_SCENES, readDraftingInputs } from "@openthink/pablo-core";
 import type { Marker } from "../marker";
 
 /** `draft-chapter`'s length target, ported as pablo's default (AC2). */
@@ -28,9 +28,6 @@ export const DEFAULT_WORD_TARGET = 1800;
 
 /** The real vault's family tree ends its cast facts here; open questions after it are not facts. */
 const CAST_ENDS_AT = "## Decisions for Matt";
-
-/** A `## ` section heading that addresses the agent, not the reader — dropped by the voice filter. */
-const AGENT_SECTION_HEADING = /repl(y|ies)|agent/i;
 
 /**
  * Distinct from `./project`'s `Refusal` (which always carries `tried`, a
