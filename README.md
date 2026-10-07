@@ -220,7 +220,7 @@ runs chapter N's preconditions (same checks as `status --for`) and refuses, exit
 naming `missing[]`, if any fail. Then it assembles the drafting pack from
 `@openthink/pablo-core`'s `readDraftingInputs` + `assemblePack` — the voice
 (`style/*.md`'s prose sections only; any `## ` heading matching `/repl(y|ies)|agent/i`
-is dropped before assembly, never sent), the work's rules, period facts, cast and
+is dropped before assembly, never sent), the work's rules (`QWEN.md`'s rule sections, after `style/`), period facts, cast and
 places, the timeline gated by the beat's story date, `continuity.md`, the tail of
 chapter N-1, and the beat row itself, at `--words` (default 1800) and `--scenes`
 (default 3). Any slice sourced under one of the marker's `neverSend` prefixes is a
@@ -370,6 +370,21 @@ the loader; it rejects an unknown `format` or a missing required key, naming it.
 | `neverSend` | no | `["research/", "notes/"]` |
 | `publish` | no | `{}` |
 | `policy` | no | — (a minimal default judgement policy) |
+
+`voice` is the list of rule sources a work writes under, in order: the shared
+`<vault>/style/*.md` first, then the work's own `QWEN.md`. pablo sends them in that
+order, each labelled by path. The writer's drafting pack carries `style/` then the
+work's `QWEN.md` rule sections (its ground rules, point of view and voice, and any
+rule section a work adds); `revise` and span edits carry the same two layers, and
+`critique` checks tells against them. The setting and period facts section is sent in
+the pack's own period slice instead. The work's rules add to the shared ones and
+never remove them. A work with no `QWEN.md` gets `style/` alone. Sections of
+`QWEN.md` that instruct the agent (the memory brief and commands, per-session order,
+the file map and everything after it, any `## ` heading matching
+`/repl(y|ies)|agent/i`) are not rules for the writer and are never sent to it. The
+`voice` key itself is read only by the screen's voice view (`projectVoiceName()`);
+the packs always read `style/` and `QWEN.md`. A work-specific `voices/<name>/` is not
+a thing: the work's voice is its `QWEN.md`.
 
 `policy` names the judgement policy the harness (`pablo agent`) loads into its system
 prompt: when to research, invent, ask the author or proceed. pablo ships

@@ -315,6 +315,17 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       cutOrder: 1,
     },
     {
+      name: "workRules",
+      heading: "# Rules for this work (binding; they add to the prose rules above)",
+      text: inputs.workRules?.text.trim() ?? "",
+      source: inputs.workRules?.path,
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 2,
+    },
+    {
       name: "craft",
       heading: "# Craft rules (binding, and the ones models break)",
       text: CRAFT_RULES,

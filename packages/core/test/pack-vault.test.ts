@@ -11,7 +11,9 @@ import {
   parseBeatRows,
   readDraftingInputs,
   readStyle,
+  readWorkRules,
   section,
+  workRuleSections,
   timelineAt,
 } from "../src/index";
 
@@ -188,6 +190,7 @@ test("the drafting pack assembles draft-chapter's slices, in draft-chapter's ord
     "brief",
     "chapter",
     "style",
+    "workRules",
     "craft",
     "period",
     "cast",
@@ -272,4 +275,77 @@ test("timelineAt before every row marks all of them not yet, and an empty timeli
 
   const none = timelineAt("", "1900", "t.md");
   expect(none).toMatchObject({ exists: [], notYet: [], text: "" });
+});
+
+test("the drafting pack carries the work's QWEN.md rule sections after style/, and only those (AGT-1593)", () => {
+  const inputs = readDraftingInputs({ vaultRoot: VAULT, workRoot: WORK, chapter: 2, wordTarget: 1800 });
+  const pack = assemblePack("drafting", inputs);
+  const names = pack.slices.map((slice) => slice.name);
+  const rules = pack.slices.find((slice) => slice.name === "workRules");
+
+  expect(names.indexOf("style")).toBeLessThan(names.indexOf("workRules"));
+  expect(rules?.source).toBe("novels/ice-house/QWEN.md");
+  expect(rules?.text).toContain("## Ground rules (set by the author)");
+  expect(rules?.text).toContain("No one explains the ice trade");
+  expect(rules?.text).toContain("## Point of view and voice");
+  expect(rules?.text).toContain("Odile unless a chapter says otherwise.");
+  // Ground rules come before point of view, as in the file.
+  expect(rules!.text.indexOf("Ground rules")).toBeLessThan(rules!.text.indexOf("Point of view"));
+  // The period facts keep their own slice; agent-only sections never reach the writer.
+  expect(rules?.text).not.toContain("Penobscot Bay");
+  expect(rules?.text).not.toContain("## The files");
+  expect(rules?.text).not.toContain("Per-session order");
+  expect(rules?.text).not.toContain("Work-specific rules.");
+  expect(pack.prompt).toContain("Penobscot Bay");
+  expect(pack.prompt.indexOf("No em-dashes anywhere")).toBeLessThan(pack.prompt.indexOf("No one explains the ice trade"));
+});
+
+test("a work with no QWEN.md gets only style/ in its drafting pack and no work rules", () => {
+  const inputs = readDraftingInputs({ vaultRoot: VAULT, workRoot: WORK, chapter: 2, wordTarget: 1800 });
+  const bare = { ...inputs, workRules: undefined };
+  const names = assemblePack("drafting", bare).slices.map((slice) => slice.name);
+
+  expect(names).toContain("style");
+  expect(names).not.toContain("workRules");
+  expect(readWorkRules(VAULT, join(VAULT, "novels", "no-such-work"))).toBeUndefined();
+});
+
+test("workRuleSections keeps rule sections, drops agent sections, the file map and what follows, and unfences writer-only text", () => {
+  const text = [
+    "# Title",
+    "",
+    "Preamble for the agent.",
+    "",
+    "## Ground rules",
+    "",
+    "Rule one.",
+    "",
+    "<!-- writer-only -->",
+    "Writer note.",
+    "<!-- /writer-only -->",
+    "",
+    "## Brief from memory (generated)",
+    "",
+    "@./.brief.md",
+    "",
+    "## In replies to the author",
+    "",
+    "Be brief.",
+    "",
+    "## Setting and period facts",
+    "",
+    "Facts.",
+    "",
+    "## Files",
+    "",
+    "map",
+    "",
+    "## Point of view and voice",
+    "",
+    "after the file map",
+  ].join("\n");
+
+  expect(workRuleSections(text)).toBe("## Ground rules\n\nRule one.\n\nWriter note.\n\n## Setting and period facts\n\nFacts.");
+  expect(workRuleSections(text, { exclude: ["## Setting and period facts"] })).not.toContain("Facts.");
+  expect(workRuleSections("no headings here")).toBe("");
 });

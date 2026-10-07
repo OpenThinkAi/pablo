@@ -48,6 +48,7 @@ export { withReceipts } from "./receipts";
 export { fileReceiptSink, RECEIPTS_RELATIVE_PATH, receiptsPath } from "./receipt-log";
 export type { ReadDraftingOptions, TimelineAt } from "./vault";
 export {
+  AGENT_SECTION_HEADING,
   chapterTail,
   DEFAULT_TAIL_WORDS,
   gateTimeline,
@@ -61,6 +62,7 @@ export {
   timelineAt,
   readWorkRules,
   section,
+  workRuleSections,
 } from "./vault";
 export {
   CRITICMARKUP_EDIT_CLOSING,

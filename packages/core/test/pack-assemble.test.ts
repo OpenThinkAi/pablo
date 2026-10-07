@@ -204,3 +204,14 @@ test("pack.context is what the adapter is given, and pack.prompt is what goes ov
   expect(assemblePack("spanEdit", inputs({ output: "text" })).prompt).not.toBe(assemblePack("spanEdit", inputs()).prompt);
 });
 
+
+test("a span-edit pack carries style/ before the work's rules, each labelled by path (AGT-1593)", () => {
+  const pack = assemblePack("spanEdit", inputs());
+  const names = pack.slices.map((slice) => slice.name);
+
+  expect(names.indexOf("style")).toBeLessThan(names.indexOf("workRules"));
+  expect(pack.slices.find((slice) => slice.name === "style")?.source).toBe("style/prose.md, style/anti-tells.md");
+  expect(pack.slices.find((slice) => slice.name === "workRules")?.source).toBe("novels/ice-house/QWEN.md");
+  expect(pack.prompt.indexOf("Straight quotes")).toBeLessThan(pack.prompt.indexOf("The harbor is the whole economy."));
+  expect(assemblePack("spanEdit", inputs({ workRules: undefined })).slices.map((slice) => slice.name)).not.toContain("workRules");
+});

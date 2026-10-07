@@ -8,7 +8,7 @@
  *   - timeline: a line mentions something before its date in `bible/timeline.md`
  *     (the story date is the chapter's `story_date`; the gate is core's
  *     `timelineAt`, the same code the drafting pack and the `timeline` tool use);
- *   - tells: a voice tell the style guide (`style/*.md`) names.
+ *   - tells: a voice tell the style guide (`style/*.md`) or the work's own rules (its `QWEN.md`) names.
  *
  * Two model passes, both through the one injected `ask` seam: a candidate pass
  * per changed chapter, then a refute pass per candidate with more of the text
@@ -30,10 +30,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { parseDiff, readStyle, timelineAt } from "@openthink/pablo-core";
+import { parseDiff, readStyle, timelineAt, workRuleSections } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { BRANCH_KINDS, branchDiff, branchKind, repoRoot } from "./branch";
 import { branchFileName, readComments, type StoredComment } from "./comments";
+import { stripWriterOnly } from "./harness/prompt";
 
 export const CRITIQUE_KINDS = ["continuity", "timeline", "tells"] as const;
 export type CritiqueKind = (typeof CRITIQUE_KINDS)[number];
@@ -171,10 +172,10 @@ function storyDateOf(text: string): string | undefined {
 
 // ---------------------------------------------------------------- the candidate pass
 
-const CRITIC_SYSTEM = `You are the continuity critic for a work of fiction. You get one chapter as it stands on a branch, with the lines that branch changed marked "*", plus the work's reference: continuity.md, the bible, the timeline as of the chapter's story date, and the style guide. Comment on the CHANGED lines only, and only on these three things:
+const CRITIC_SYSTEM = `You are the continuity critic for a work of fiction. You get one chapter as it stands on a branch, with the lines that branch changed marked "*", plus the work's reference: continuity.md, the bible, the timeline as of the chapter's story date, and the style guide (the shared rules, then the work's own). Comment on the CHANGED lines only, and only on these three things:
 - "continuity": a changed line contradicts continuity.md or the bible, or contradicts another line of the chapter.
 - "timeline": a changed line mentions a thing the timeline says does not exist yet at the chapter's story date (or an anachronism of the period).
-- "tells": a changed line has a voice tell the style guide names (a banned word, name, phrase or habit).
+- "tells": a changed line has a voice tell the style guide or the work's rules name (a banned word, name, phrase or habit).
 Do not comment on taste, pacing, or anything the three kinds do not cover. Say nothing when nothing is wrong.
 Reply with JSON only: [{"kind": "continuity" or "timeline" or "tells", "line": 12, "claim": "one sentence", "evidence": "what it contradicts, quoted from the reference"}]. "line" is the number shown beside a changed line. An empty array means no comments.
 ${DATA_RULE}`;
@@ -184,6 +185,18 @@ interface Candidate {
   readonly line: number;
   readonly claim: string;
   readonly evidence: string;
+}
+
+/**
+ * The prose rules the critic checks "tells" against: the shared `style/*.md` first, then the work's own `QWEN.md`
+ * rule sections (AGT-1593), each labelled by path. Writer-only fenced text is left out (it is the writer's, not the
+ * critic's), as are the agent-only sections `workRuleSections` drops. A work without a `QWEN.md` gets only `style/`.
+ */
+export function styleReference(vaultRoot: string, projectPath: string): string {
+  const sources = readStyle(vaultRoot).map((s) => ({ path: s.path, text: s.text }));
+  const rules = workRuleSections(stripWriterOnly(readOr(join(projectPath, "QWEN.md"))));
+  if (rules !== "") sources.push({ path: relative(vaultRoot, join(projectPath, "QWEN.md")), text: rules });
+  return sources.map((s) => `## ${s.path}\n${s.text}`).join("\n\n");
 }
 
 interface Reference {
@@ -315,7 +328,7 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
   const ref = {
     continuity: readOr(join(opts.projectPath, "continuity.md")),
     bible: bibleFiles(opts.projectPath),
-    style: readStyle(opts.vaultRoot).map((s) => `## ${s.path}\n${s.text}`).join("\n\n"),
+    style: styleReference(opts.vaultRoot, opts.projectPath),
   };
   const timelineText = readOr(join(opts.projectPath, "bible", "timeline.md"));
 
