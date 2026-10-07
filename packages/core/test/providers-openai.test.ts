@@ -75,7 +75,8 @@ test("an endpoint that sends nothing becomes a named error, not a wait", async (
   const error = hung as EndpointHung;
   expect(error.endpoint).toBe(fake.url);
   expect(error.timeoutMs).toBe(120);
-  expect(error.elapsedMs).toBeGreaterThanOrEqual(120);
+  // A timer can fire a millisecond early as Date.now() measures it (CI saw 119, release run 37585160346).
+  expect(error.elapsedMs).toBeGreaterThanOrEqual(110);
   expect(error.message).toContain(fake.url);
   expect(error.message).toMatch(/is the server running\?/);
 });
