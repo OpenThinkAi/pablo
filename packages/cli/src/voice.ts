@@ -536,3 +536,90 @@ export function addExemplar(
   const { committed, notice } = commitTouchedFile(destPath, `voice: add exemplar ${basename(destPath)}`);
   return { ok: true, path: destPath, committed, ...(notice ? { notice } : {}) };
 }
+
+// ---------------------------------------------------------------------------
+// voice rule (AGT-1594) — a typed rule goes into the voice's `## Rules`
+// section, from the CLI, MCP and the screen's `a v` alike, through `addRule`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a rule lands. `voice`: the voice's own rules file, the one `flagLine`
+ * writes (`style/prose.md` for `fiction`, `voice.md` for a named voice).
+ * `work`: the work's own `QWEN.md`, its voice layer after the shared style
+ * (AGT-1593). The screen's picker and `voice rule --target` name these two.
+ */
+export type RuleTarget = "voice" | "work";
+export const RULE_TARGETS: readonly RuleTarget[] = ["voice", "work"];
+
+const RULES_HEADING = "## Rules";
+/** A work's QWEN.md keeps its rules under a heading like `## Ground rules (set by Matt, 2026-09-01)`; a rule joins that section when it exists. */
+const WORK_RULES_HEADING = /^##\s+ground rules\b/i;
+
+/** The heading a rule goes under in `lines`: for the work, an existing "Ground rules" section, else `## Rules`. */
+function rulesHeading(lines: readonly string[], target: RuleTarget): string {
+  if (target === "work") {
+    const found = lines.find((line) => WORK_RULES_HEADING.test(line));
+    if (found !== undefined) return found.trim();
+  }
+  return RULES_HEADING;
+}
+
+export interface RuleOk {
+  readonly ok: true;
+  readonly path: string;
+  readonly target: RuleTarget;
+  readonly committed: boolean;
+  readonly notice?: string;
+}
+
+export type RuleResult = RuleOk | Refusal;
+
+/**
+ * `pablo voice rule <name> "<text>" [--example "<sentences>"] [--target voice|work]`:
+ * appends `- <text>` as the last line of the target's rules section (see
+ * `rulesHeading`; the section is created at EOF if missing) and commits the
+ * file the way `flagLine` does. With `example`, the bullet is followed by an
+ * indented `Flagged: "<example>"` line, so `check` (which reads every
+ * `Flagged:` line of `style/prose.md`, and of a named voice's rules in
+ * `prose`) catches the sentence the rule came from. `check` does not read a
+ * work's QWEN.md, so a `Flagged:` line under the `work` target documents the
+ * example for the writer but is not enforced by `check`.
+ *
+ * `text` and `example` are untrusted (a model supplies them over MCP): flattened to one line each, like `flagLine`'s
+ * `line`, so neither can forge a heading. A bullet already present verbatim is not repeated (notice, exit 0).
+ * `target: "work"` needs `projectPath` and an existing `QWEN.md` there; `location` is not used then.
+ */
+export function addRule(
+  location: VoiceLocation | undefined,
+  text: string,
+  opts: { readonly target?: RuleTarget; readonly projectPath?: string; readonly example?: string } = {},
+): RuleResult {
+  const target = opts.target ?? "voice";
+  const safeText = text.replace(/[\r\n]+/g, " ").trim();
+  if (safeText === "") return refuse("pablo: voice rule: text must not be empty", []);
+  const safeExample = (opts.example ?? "").replace(/[\r\n]+/g, " ").trim();
+
+  let targetPath: string;
+  if (target === "work") {
+    if (opts.projectPath === undefined) return refuse("pablo: voice rule: --target work needs a project (--project <slug>)", []);
+    targetPath = join(opts.projectPath, "QWEN.md");
+    if (!existsSync(targetPath)) return refuse(`pablo: voice rule: the work has no QWEN.md (${targetPath})`, [targetPath]);
+  } else {
+    if (location === undefined) return refuse("pablo: voice rule: no voice to write into", []);
+    targetPath = flagTargetPath(location);
+  }
+
+  const existing = existsSync(targetPath) ? readFileSync(targetPath, "utf8") : "";
+  const lines = existing.split("\n");
+  const bullet = `- ${safeText}`;
+  if (lines.includes(bullet)) {
+    return { ok: true, path: targetPath, target, committed: false, notice: `pablo: voice rule: already a rule in ${targetPath}` };
+  }
+
+  const entry = safeExample === "" ? bullet : `${bullet}\n  Flagged: "${safeExample}"`;
+  const updated = insertUnderHeading(lines, rulesHeading(lines, target), entry);
+  writeFileSync(targetPath, updated.join("\n"), "utf8");
+
+  const { committed, notice } = commitTouchedFile(targetPath, `voice: add a rule to ${basename(targetPath)}`);
+  return { ok: true, path: targetPath, target, committed, ...(notice ? { notice } : {}) };
+}

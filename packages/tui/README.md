@@ -63,13 +63,26 @@ changes, drops it. In a review the pane shows changes, not sentences, so nothing
 
 ### `a v`: the voice
 
-With sentences selected, `a v` puts them up in the content area with two choices: `f` flags them (a rejected tell,
-written as a `Flagged:` line) and `e` keeps them (an exemplar). Esc withdraws the offer before it clears the selection.
+`a v` puts the selected sentences up in the content area (none selected is fine: see `r`) with the choices in
+`keys.ts` `VOICE_CHOICES`, also listed in the key panel while the offer is up: `f` flags them (a rejected tell, written
+as a `Flagged:` line), `e` keeps them (an exemplar), `r` types a rule. `f` and `e` need a selection and do nothing
+without one. Esc withdraws the offer before it clears the selection.
+
+`r` (AGT-1594) opens a one-line input in the content area, like a review comment: typing fills it, Backspace deletes,
+Enter writes, Esc cancels. Tab changes where the rule goes, the two `VOICE_TARGETS` in `keys.ts` (the default first):
+the voice's own rules file (the vault's `style/prose.md` for `fiction`, else the voice's `voice.md`) or this work's
+`QWEN.md`. Either way it is a bullet under a `## Rules` section (a work's `## Ground rules` section is used when it
+has one), created if missing, and committed. With sentences selected the bullet is followed by `Flagged: "<selection>"`,
+so `pablo check` catches the line (check reads `Flagged:` lines from `style/prose.md`, not from `QWEN.md`: under the
+work target the line documents the example for the writer and the author). State: `voice` (the offered sentences,
+possibly none) and `voiceRule` (sentences, the targets, which one, the text); the choices and targets reach the model as
+data in `voice.offer` / `voice.rule`, so `state.ts` imports nothing.
+
 The screen does not write the voice: `ScreenOptions.voicer` is the CLI's `screenVoicer` (`screen-voice.ts`), which
-calls `flagLine` / `addExemplar`, the functions behind `voice flag` / `voice exemplar`, on the voice the project's
-`pablo.json` names (`fiction`, the vault's `style/`, unless it points into `voices/<name>`). The content area then
-says where it was written. A fiction voice has no `exemplars/`, so `e` there is refused with that reason. State: `voice`
-(the offered sentences) and the `voice.*` actions.
+calls `flagLine` / `addExemplar` / `addRule`, the functions behind `voice flag` / `voice exemplar` / `voice rule`, on the
+voice the project's `pablo.json` names (`fiction`, the vault's `style/`, unless it points into `voices/<name>`); a rule
+is `voicer("rule", sentences, { text, target })`. The content area then says where it was written. A fiction voice has
+no `exemplars/`, so `e` there is refused with that reason. Actions: the `voice.*` ones.
 
 ### Check hits and comment boxes
 

@@ -7,7 +7,7 @@
 // columns as fit that height; when the grid is too wide it drops the secondary keys (the primaries still name every
 // action), and when even that is too wide it flows the entries along the rows.
 
-import { groups, keyStateOf, prefixesOf, prefixRows, rowsOf, showKey, isPrefix, PREFIXES, DEFAULT_KEYMAP, type KeyAction, type KeyState, type Keymap } from "./keys";
+import { groups, keyStateOf, voiceChoicesFor, VOICE_RULE_KEYS, prefixesOf, prefixRows, rowsOf, showKey, isPrefix, PREFIXES, DEFAULT_KEYMAP, type KeyAction, type KeyState, type Keymap } from "./keys";
 import type { Pending, State } from "./state";
 
 /** `keys` is how a listing reads (`↓/↑ j/k`); `prim` and `sec` are its two halves, the secondary drawn dim. */
@@ -32,10 +32,16 @@ export function entriesOf(ks: KeyState, pending: Pending | null = null, km: Keym
 }
 
 /** The panel's entries for the screen's state, with its pending prefix: what the layout draws. */
-export const entriesFor = (s: State, km: Keymap = DEFAULT_KEYMAP): Entry[] => entriesOf(keyStateOf(s), s.pending, km);
+export function entriesFor(s: State, km: Keymap = DEFAULT_KEYMAP): Entry[] {
+  // `a v` takes the keys while it is up: its choices, or the rule input's (both are data in keys.ts).
+  if (s.voiceRule) return VOICE_RULE_KEYS.map((k) => entry(showKey(k.key), "", k.key === "tab" && s.voiceRule!.targets.length < 2 ? "" : k.label)).filter((e) => e.label);
+  if (s.voice) return [...voiceChoicesFor(s.voice.length).map((c) => entry(c.key, "", c.label)), entry("Esc", "", "cancel")];
+  return entriesOf(keyStateOf(s), s.pending, km);
+}
 
 /** The panel's title: the pending prefix and its meaning, else where the keys act. */
-export function panelTitle(ks: KeyState, pending: Pending | null = null): string {
+export function panelTitle(ks: KeyState, pending: Pending | null = null, voice = false): string {
+  if (voice) return "voice";
   if (pending) return isPrefix(pending.prefix) ? `${pending.prefix} ${PREFIXES[pending.prefix]}` : pending.prefix;
   return ks.state === "rail" ? (ks.review ? "changes" : "contents") : ks.state === "main" ? "keys" : "content";
 }

@@ -15,7 +15,7 @@ export interface KeyPanelProps {
 }
 
 export function KeyPanel({ state, width, height, keymap = DEFAULT_KEYMAP }: KeyPanelProps) {
-  const shape = panelOf(panelTitle(keyStateOf(state), state.pending), entriesFor(state, keymap), width, height);
+  const shape = panelOf(panelTitle(keyStateOf(state), state.pending, state.voice !== null || state.voiceRule !== null), entriesFor(state, keymap), width, height);
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1} width={width} height={height}>
       <Text bold wrap="truncate">{shape.title}</Text>

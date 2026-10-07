@@ -5,14 +5,17 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
-import { addExemplar, flagLine, resolveVoice } from "./voice";
+import { addExemplar, addRule, flagLine, resolveVoice } from "./voice";
+import type { RuleTarget } from "./voice";
 
-export type VoiceKind = "flag" | "exemplar";
+export type VoiceKind = "flag" | "exemplar" | "rule";
+/** `a v r` (AGT-1594): the typed rule and which file it goes into (the voice's rules file, or the work's QWEN.md). */
+export interface ScreenRule { readonly text: string; readonly target: RuleTarget }
 /** What the screen gets back: lines for the content area saying where it was written, or why it was not. */
 export type ScreenVoiceResult =
   | { readonly ok: true; readonly lines: readonly string[] }
   | { readonly ok: false; readonly message: string };
-export type ScreenVoicer = (kind: VoiceKind, sentences: readonly string[]) => Promise<ScreenVoiceResult>;
+export type ScreenVoicer = (kind: VoiceKind, sentences: readonly string[], rule?: ScreenRule) => Promise<ScreenVoiceResult>;
 
 /**
  * The voice a project writes in, by name: the `voices/<name>` its `pablo.json` `voice` list points into, else `fiction`
@@ -37,14 +40,26 @@ export function projectVoiceName(vaultRoot: string, projectPath: string): string
 const titleOf = (text: string) => text.split(/\s+/).slice(0, 6).join(" ").replace(/[^\p{L}\p{N} '-]/gu, "").trim() || "exemplar";
 
 export function screenVoicer(vaultRoot: string, projectPath: string, deps: { env?: Record<string, string | undefined>; now?: () => Date } = {}): ScreenVoicer {
-  return async (kind, sentences) => {
+  return async (kind, sentences, rule) => {
     const text = sentences.join(" ").trim();
-    if (text === "") return { ok: false, message: "Nothing is selected." };
+    if (text === "" && kind !== "rule") return { ok: false, message: "Nothing is selected." };
     const env = deps.env ?? process.env;
     const name = projectVoiceName(vaultRoot, projectPath);
     const located = resolveVoice(name, { cwd: projectPath, env });
-    if (!located.ok) return { ok: false, message: located.message };
+    // A rule for the work's own QWEN.md needs no voice to resolve.
+    if (!located.ok && !(kind === "rule" && rule?.target === "work")) return { ok: false, message: located.message };
     const shown = (path: string) => (path.startsWith(vaultRoot + sep) ? relative(vaultRoot, path) : path);
+
+    if (kind === "rule") {
+      if (rule === undefined || rule.text.trim() === "") return { ok: false, message: "Type the rule first." };
+      const r = addRule(located.ok ? located : undefined, rule.text, { target: rule.target, projectPath, ...(text === "" ? {} : { example: text }) });
+      if (!r.ok) return { ok: false, message: r.message };
+      if (r.notice?.includes("already a rule")) return { ok: true, lines: [r.notice] };
+      const whose = rule.target === "work" ? "the work's QWEN.md" : `voice ${name}`;
+      return { ok: true, lines: [`Rule added in ${shown(r.path)} (${whose})${r.committed ? ", committed" : ""}.`, `- ${rule.text.trim()}`, ...(text === "" ? [] : [`Flagged: "${text}"`]), ...(r.notice ? [r.notice] : [])] };
+    }
+
+    if (!located.ok) return { ok: false, message: located.message };
 
     if (kind === "flag") {
       const r = flagLine(located, text);

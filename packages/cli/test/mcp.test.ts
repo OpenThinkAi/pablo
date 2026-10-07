@@ -63,7 +63,7 @@ function parseTextBody(result: unknown): unknown {
 // project-scoped.
 const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "save", "check", "revise", "revise_passage", "migrate", "publish", "read", "search"]);
 
-test("listTools returns the project-scoped verbs, prose, and the four narrow voice_* tools", async () => {
+test("listTools returns the project-scoped verbs, prose, and the five narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
 
   expect(tools.map((t) => t.name).sort()).toEqual([
@@ -84,6 +84,7 @@ test("listTools returns the project-scoped verbs, prose, and the four narrow voi
     "voice_exemplar",
     "voice_flag",
     "voice_list",
+    "voice_rule",
     "voice_show",
     "write",
   ]);
@@ -106,6 +107,7 @@ test("each voice_* tool's input schema carries only its own arguments", async ()
   expect(propsOf("voice_show")).toEqual(["name"]);
   expect(propsOf("voice_flag")).toEqual(["line", "name", "section"]);
   expect(propsOf("voice_exemplar")).toEqual(["file", "name", "title"]);
+  expect(propsOf("voice_rule")).toEqual(["example", "name", "project", "target", "text"]);
 
   // The schema itself enforces requiredness structurally (AC1's "honest
   // schema" — no `sub` discriminator, no runtime-only requiredness check).

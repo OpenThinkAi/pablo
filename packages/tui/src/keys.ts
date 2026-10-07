@@ -14,7 +14,7 @@
 // over them, refusing two bindings on one key in one state; the result is a Keymap that is passed explicitly to the
 // panel and the key handler, never installed globally.
 
-import type { Action as ModelAction, State } from "./state";
+import type { Action as ModelAction, State, VoiceChoiceInfo, VoiceKind, VoiceTargetInfo } from "./state";
 
 export const STATES = ["rail", "main", "content"] as const;
 export type KeyStateName = (typeof STATES)[number];
@@ -102,7 +102,7 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "ai.compose", states: OUTSIDE, prefix: "a", key: "c", label: "compose", description: "Open the compose view: a full-screen conversation with pablo. Esc returns here with the session kept.", do: { type: "compose.open" } },
   { id: "ai.write", states: OUTSIDE, needs: "book", prefix: "a", key: "w", label: "write chapter", description: "Write the selected chapter with the local writer.", do: cmd("ai.write") },
   { id: "ai.revise", states: MAIN, prefix: "a", key: "r", label: "revise", description: "Revise the selected sentences.", do: cmd("ai.revise") },
-  { id: "ai.voice", states: MAIN, prefix: "a", key: "v", label: "voice", description: "Flag the line under the cursor as a voice tell, or keep it as an exemplar.", do: cmd("ai.voice") },
+  { id: "ai.voice", states: MAIN, prefix: "a", key: "v", label: "voice", description: "Add the selected sentences to the voice (flag them, keep them as an exemplar), or type a rule for it.", do: cmd("ai.voice") },
 
   // ---- f: filter
   { id: "filter.all", states: OUTSIDE, needs: "review", prefix: "f", key: "a", label: "all changes", description: "Show every change in the review.", do: cmd("filter.all") },
@@ -121,6 +121,37 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "go.hit_prev", states: MAIN, prefix: "g", key: "F", label: "previous hit", description: "Go to the previous check hit in the document, wrapping round at the start.", do: cmd("check.prev") },
   { id: "go.line", states: MAIN, prefix: "g", key: "<n>", label: "line", description: "Type a line number, then close it with the go prefix key again or Enter, to go to that line.", fixed: true },
 ];
+
+// ---------------------------------------------------------------- `a v`: the voice choices, as data
+//
+// What `a v` offers and where a typed rule can go are rows here, not code in the app: the offer in the content area, the
+// key panel while it is up, and the key handler all read these. A choice that `needsSelection` is left out when no
+// sentences are selected (a rule can still be typed then). `kind` is what the app hands the voicer (the CLI's
+// `screenVoicer`); a target's `id` is what the voicer takes as `RuleTarget` (`voice`: the voice's own rules file, the
+// vault's style/prose.md for `fiction`; `work`: the work's QWEN.md, its voice layer after the shared style).
+
+export interface VoiceChoice extends VoiceChoiceInfo { readonly label: string; readonly needsSelection: boolean }
+export const VOICE_CHOICES: readonly VoiceChoice[] = [
+  { key: "f", kind: "flag", label: "flag", description: "flag it: a rejected tell, written to the voice's Flagged lines", needsSelection: true },
+  { key: "e", kind: "exemplar", label: "exemplar", description: "keep it: an exemplar of the voice", needsSelection: true },
+  { key: "r", kind: "rule", label: "rule", description: "rule: type a rule for the voice (the selection, if any, becomes its Flagged example)", needsSelection: false },
+];
+/** The choices on offer for a selection of `n` sentences. */
+export const voiceChoicesFor = (n: number): readonly VoiceChoice[] => VOICE_CHOICES.filter((c) => n > 0 || !c.needsSelection);
+/** The choice a key picks on the offer, if it is on offer for `n` sentences. */
+export const voiceChoiceOf = (token: string, n: number): VoiceChoice | undefined => voiceChoicesFor(n).find((c) => c.key === token);
+
+export interface VoiceTarget extends VoiceTargetInfo { readonly id: "voice" | "work" }
+/** Where a typed rule goes, the default first; Tab in the rule input cycles. Each is a `## Rules` section (a work's existing "Ground rules" section is used when it has one). */
+export const VOICE_TARGETS: readonly VoiceTarget[] = [
+  { id: "voice", label: "the voice's rules (style/prose.md for fiction, else voice.md)" },
+  { id: "work", label: "this work's QWEN.md" },
+];
+/** The rule input's own keys, for the key panel: Enter writes, Tab changes the target, Esc cancels. */
+export const VOICE_RULE_KEYS: readonly { readonly key: string; readonly label: string }[] = [
+  { key: "enter", label: "write rule" }, { key: "tab", label: "target" }, { key: "esc", label: "cancel" },
+];
+export type { VoiceKind };
 
 // ---------------------------------------------------------------- key tokens
 

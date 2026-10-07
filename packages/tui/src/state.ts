@@ -171,6 +171,15 @@ export interface Compose {
  */
 export interface Commenting { readonly branch: string; readonly path: string; readonly line: number; readonly text: string }
 
+/** What `a v` can do with the offered sentences (AGT-1547, `rule` AGT-1594); the choices themselves are data in keys.ts (`VOICE_CHOICES`) and arrive in `voice.offer`. */
+export type VoiceKind = "flag" | "exemplar" | "rule";
+/** One choice on the `a v` offer, as the content area lists it (keys.ts `VOICE_CHOICES` is the data). */
+export interface VoiceChoiceInfo { readonly key: string; readonly kind: VoiceKind; readonly description: string }
+/** One place a typed rule can go (keys.ts `VOICE_TARGETS` is the data). */
+export interface VoiceTargetInfo { readonly id: string; readonly label: string }
+/** `a v r` (AGT-1594): a rule being typed on one line. `sentences` are the selection it is the example of (maybe none); `at` indexes `targets`. */
+export interface VoiceRule { readonly sentences: readonly string[]; readonly targets: readonly VoiceTargetInfo[]; readonly at: number; readonly text: string }
+
 export interface State {
   readonly mode: Mode;
   readonly compose: Compose;
@@ -198,6 +207,8 @@ export interface State {
   readonly written: readonly string[];
   /** `a v`: the selected sentences offered to the voice (flag or exemplar) while the offer is up; null otherwise. */
   readonly voice: readonly string[] | null;
+  /** `a v r`: the rule being typed (one line), until Enter hands it to the voicer or Esc cancels; null otherwise. */
+  readonly voiceRule: VoiceRule | null;
   /** `c` in a review: the comment being typed, or null. */
   readonly commenting: Commenting | null;
   /** Counts the comments saved from the screen; a change tells the layer above to read the comment store again. */
@@ -287,8 +298,11 @@ export type Action =
   | { type: "comment.saved" } | { type: "comment.failed"; message: string }
   // `a v`: offer the selected sentences to the voice (none selected: a hint instead); `voice.start` once f or e is
   // pressed, then done (where it was written) or failed (why not)
-  | { type: "voice.offer"; sentences: readonly string[] }
-  | { type: "voice.start"; kind: "flag" | "exemplar" }
+  | { type: "voice.offer"; sentences: readonly string[]; choices?: readonly VoiceChoiceInfo[] }
+  // `r` on the offer opens the one-line rule input (Tab changes the target, Enter is `voice.start` with kind rule, Esc cancels).
+  | { type: "voice.rule"; targets: readonly VoiceTargetInfo[] }
+  | { type: "voice.rule_type"; text: string } | { type: "voice.rule_backspace" } | { type: "voice.rule_target" }
+  | { type: "voice.start"; kind: VoiceKind }
   | { type: "voice.done"; lines: readonly string[] }
   | { type: "voice.failed"; message: string }
   | { type: "finish.start"; branch: string }
@@ -336,6 +350,16 @@ const splice = (text: string, at: number, drop: number, add: string): string => 
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
 const preview = (sentences: readonly string[]): string => { const t = sentences.join(" "); return t.length > 240 ? `${t.slice(0, 237)}...` : t; };
 
+/** What the content area shows while a voice rule is typed: where it goes (Tab changes it), the example it is made from, the buffer with its cursor. */
+export function voiceRuleContent(r: VoiceRule): Content {
+  const target = r.targets[r.at];
+  const others = r.targets.length > 1 ? `  (Tab: ${r.targets[(r.at + 1) % r.targets.length]!.label})` : "";
+  return {
+    kind: "voice", title: "Add a rule: Enter writes it, Esc cancels",
+    body: [`Into: ${target?.label ?? ""}${others}`, ...(r.sentences.length ? [`Example: “${preview(r.sentences)}”`] : []), "", withCursor(r.text, [...r.text].length)].join("\n"),
+  };
+}
+
 /** What the content area shows while a comment is typed: where it goes, the buffer with its cursor, how to go on. */
 export const commentContent = (c: Commenting, note = ""): Content => ({
   kind: "comment", title: `Comment on ${c.path} line ${c.line}: Enter saves, Esc cancels`, body: `${withCursor(c.text, [...c.text].length)}${note ? `\n\n${note}` : ""}`,
@@ -365,7 +389,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -585,7 +609,7 @@ export function reduce(s: State, a: Action): State {
       return { ...s, pane: "rail", focus: s.focus === "content" ? "content" : "rail" };
 
     case "content.show": return { ...s, content: a.content, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
-    case "content.close": return { ...s, voice: null, content: null, full: false, focus: s.focus === "content" ? s.pane : s.focus, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "content.close": return { ...s, voice: null, voiceRule: null, content: null, full: false, focus: s.focus === "content" ? s.pane : s.focus, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "content.down": return { ...s, contentScroll: scrollBy(s.contentScroll, 1) };
     case "content.up": return { ...s, contentScroll: scrollBy(s.contentScroll, -1) };
     case "content.page_down": return { ...s, contentScroll: scrollBy(s.contentScroll, pageStep(s.contentScroll.visible)) };
@@ -695,17 +719,34 @@ export function reduce(s: State, a: Action): State {
       return { ...s, marks: was === a.mark ? rest : { ...rest, [row.id]: a.mark } };
     }
     case "voice.offer": {
-      const reset = { contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
-      if (a.sentences.length === 0) return { ...s, ...reset, voice: null, content: voiceContent("Voice", "Select the sentences first (⇧↓ / ⇧↑), then a v.") };
-      const body = [...a.sentences.map((t) => `“${t}”`), "", "f  flag it: a rejected tell, written to the voice's Flagged lines", "e  keep it: an exemplar of the voice", "Esc  cancel"].join("\n");
-      return { ...s, ...reset, voice: a.sentences, content: voiceContent(a.sentences.length === 1 ? "Add the sentence to the voice" : `Add the ${a.sentences.length} sentences to the voice`, body) };
+      const reset = { contentScroll: { ...s.contentScroll, scroll: 0, length: 0 }, voiceRule: null };
+      // With nothing selected only the choices that need no selection are offered (the rule), so the offer is still made.
+      const choices = (a.choices ?? []).map((c) => `${c.key}  ${c.description}`);
+      const body = [...a.sentences.map((t) => `“${t}”`), ...(a.sentences.length ? [""] : ["Nothing is selected (⇧↓ / ⇧↑ selects sentences)."]), ...choices, "Esc  cancel"].join("\n");
+      return { ...s, ...reset, voice: a.sentences, content: voiceContent(a.sentences.length === 0 ? "Add to the voice" : a.sentences.length === 1 ? "Add the sentence to the voice" : `Add the ${a.sentences.length} sentences to the voice`, body) };
     }
-    case "voice.start":
+    case "voice.rule": {
+      if (s.voice === null || a.targets.length === 0) return s;
+      const r: VoiceRule = { sentences: s.voice, targets: a.targets, at: 0, text: "" };
+      return { ...s, voice: null, voiceRule: r, content: voiceRuleContent(r), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 }, focus: s.pane };
+    }
+    case "voice.rule_type": case "voice.rule_backspace": case "voice.rule_target": {
+      const r = s.voiceRule;
+      if (r === null) return s;
+      const next: VoiceRule = a.type === "voice.rule_type" ? { ...r, text: r.text + a.text }
+        : a.type === "voice.rule_backspace" ? { ...r, text: [...r.text].slice(0, -1).join("") }
+        : { ...r, at: (r.at + 1) % r.targets.length };
+      return { ...s, voiceRule: next, content: voiceRuleContent(next) };
+    }
+    case "voice.start": {
+      // A rule needs its text; the others take the offer. Either way what was up is taken and the content area says it is writing.
+      if (a.kind === "rule") return s.voiceRule === null || s.voiceRule.text.trim() === "" ? s : { ...s, voiceRule: null, content: voiceContent("Adding the rule", "writing…") };
       return s.voice === null ? s : { ...s, voice: null, content: voiceContent(a.kind === "flag" ? "Flagging" : "Keeping as an exemplar", "writing…") };
+    }
     case "voice.done":
-      return { ...s, voice: null, content: voiceContent("Added to the voice", a.lines.join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      return { ...s, voice: null, voiceRule: null, content: voiceContent("Added to the voice", a.lines.join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "voice.failed":
-      return { ...s, voice: null, content: voiceContent("Not added to the voice", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      return { ...s, voice: null, voiceRule: null, content: voiceContent("Not added to the voice", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "finish.start":
       return s.finishing !== null || s.mode.kind !== "review" ? s : { ...s, finishing: a.branch, content: writeContent(`Finishing ${a.branch}`, "merging…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "finish.done": {
@@ -787,6 +828,7 @@ export function reduce(s: State, a: Action): State {
       if (s.mode.kind === "settings") return s;
       if (s.revise) return reduce(s, { type: "revise.cancel" });
       if (s.commenting) return { ...s, commenting: null, content: null, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      if (s.voiceRule) return { ...s, voiceRule: null, content: null, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
       if (s.mode.kind === "compose") return s.compose.pick !== null ? reduce(s, { type: "compose.pick" }) : reduce(s, { type: "compose.close" });
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });
