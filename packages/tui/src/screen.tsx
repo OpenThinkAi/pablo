@@ -23,7 +23,9 @@ export type Writer = (chapter: number, progress: (line: string) => void) => Prom
 
 /** What `a v` came to: lines saying where the sentences were written, or why they were not. */
 export type VoiceResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
-export type Voicer = (kind: "flag" | "exemplar", sentences: readonly string[]) => Promise<VoiceResult>;
+/** `a v r` (AGT-1594): the typed rule and the target it goes to (`voice`: the voice's rules file; `work`: the work's QWEN.md). */
+export interface VoiceRuleRequest { readonly text: string; readonly target: "voice" | "work" }
+export type Voicer = (kind: "flag" | "exemplar" | "rule", sentences: readonly string[], rule?: VoiceRuleRequest) => Promise<VoiceResult>;
 
 /** What a review's rejected edits come to as lines: removed ones by old line number, added ones by new (the stitcher's `removedLines` / `addedLines`). */
 export interface Rejected { readonly removed: readonly LineRef[]; readonly added: readonly LineRef[] }
@@ -64,7 +66,7 @@ export interface ScreenOptions {
   readonly writer?: Writer;
   /** `a r`: revises the selected sentences and commits the taken candidate on a `revise/` branch (the CLI's `screenReviser`, passed in; AGT-1544). */
   readonly reviser?: Reviser;
-  /** `a v`: flags the selected sentences in the voice, or keeps them as an exemplar (the CLI's `screenVoicer`, passed in from cli.ts; AGT-1547). */
+  /** `a v`: flags the selected sentences in the voice, keeps them as an exemplar, or writes a typed rule (the CLI's `screenVoicer`, passed in from cli.ts; AGT-1547). */
   readonly voicer?: Voicer;
   /** The harness session behind the compose view; the cli builds it (the tui does not depend on the Agent SDK). */
   readonly composer?: Composer;

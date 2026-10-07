@@ -48,7 +48,7 @@ import { screenCommenter, screenFinisher } from "./review-finish";
 import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
-import { deriveCliOptions, notesWith, parseForChapter, shareWith } from "./verbs";
+import { deriveCliOptions, notesWith, parseForChapter, runVoiceRule, shareWith } from "./verbs";
 import { realRunner } from "./share";
 import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
@@ -155,6 +155,9 @@ function helpText(): string {
     "                                            style/prose.md section (default \"Flagged\")",
     '  pablo voice exemplar <name> <file> [--title "<t>"]',
     "                                            keep a piece as-is under the voice's exemplars/",
+    '  pablo voice rule <name> "<text>" [--example "<s>"] [--target voice|work --project <slug>]',
+    "                                            add a rule under ## Rules of style/prose.md (fiction),",
+    "                                            voice.md, or (--target work) the work's QWEN.md",
     "  pablo prose --voice <name> --brief <file|-> [--context <file>]...",
     "              [--format email|post|page|reply|note] [--words N]",
     "              [--draft <file> --instruction \"<text>\"]",
@@ -227,6 +230,8 @@ interface ParsedArgs {
   readonly section: string | undefined;
   /** `voice exemplar --title "<t>"`: the title to file the exemplar under. */
   readonly title: string | undefined;
+  /** `voice rule --example "<sentences>"` (AGT-1594): written as a Flagged line under the rule. */
+  readonly example: string | undefined;
   /** `prose --voice <name>`: which voice directory to write in. */
   readonly voice: string | undefined;
   /** `prose --brief <file|->`: the ask (a file, or `-` for stdin). */
@@ -313,6 +318,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     global: values["global"] === true,
     section: typeof values["section"] === "string" ? values["section"] : undefined,
     title: typeof values["title"] === "string" ? values["title"] : undefined,
+    example: typeof values["example"] === "string" ? values["example"] : undefined,
     voice: typeof values["voice"] === "string" ? values["voice"] : undefined,
     brief: typeof values["brief"] === "string" ? values["brief"] : undefined,
     context: Array.isArray(values["context"]) ? (values["context"] as string[]) : [],
@@ -702,7 +708,34 @@ function runVoice(args: ParsedArgs, cwd: string): number {
     return EXIT_OK;
   }
 
-  const message = `pablo: voice: unknown subcommand "${sub ?? ""}" (expected new, list, show, flag, or exemplar)`;
+  if (sub === "rule") {
+    if (name === undefined || extra === undefined) {
+      const message = 'pablo: usage: pablo voice rule <name> "<text>" [--example "<sentences>"] [--target voice|work --project <slug>]';
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    if (args.target !== undefined && args.target !== "voice" && args.target !== "work") {
+      const message = `pablo: voice rule: --target must be voice or work (got "${args.target}")`;
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const { body, exitCode } = runVoiceRule(
+      { name, text: extra, example: args.example, target: args.target, project: args.project },
+      { cwd, env },
+    );
+    const b = body as { ok: boolean; path?: string; committed?: boolean; notice?: string; message?: string };
+    if (args.json) {
+      console.log(JSON.stringify(body));
+    } else if (!b.ok) {
+      console.error(String(b.message));
+    } else {
+      console.log(`pablo: rule added in ${b.path}${b.committed ? " (committed)" : ""}`);
+      if (b.notice) console.log(b.notice);
+    }
+    return exitCode;
+  }
+
+  const message = `pablo: voice: unknown subcommand "${sub ?? ""}" (expected new, list, show, flag, exemplar, or rule)`;
   emit({ ok: false, code: EXIT_ERROR, message }, args.json);
   return EXIT_ERROR;
 }

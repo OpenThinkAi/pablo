@@ -106,6 +106,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     line: { type: "string" },
     section: { type: "string" },
     title: { type: "string" },
+    example: { type: "string" }, // AGT-1594: voice rule --example
     voice: { type: "string" },
     brief: { type: "string" },
     context: { type: "string", multiple: true },
@@ -705,17 +706,18 @@ test("prose.run with no vault resolves a global voice and a brief under ctx.cwd"
 // `mcp.test.ts`'s full stdio round trip for the same tools driven end to end).
 // ---------------------------------------------------------------------------
 
-test("voice exposes exactly four mcpTools, each with a disjoint schema and no sub field", () => {
+test("voice exposes exactly five mcpTools, each with a disjoint schema and no sub field", () => {
   const tools = verb("voice").mcpTools;
   expect(tools).toBeDefined();
-  expect(tools!.map((t) => t.name).sort()).toEqual(["voice_exemplar", "voice_flag", "voice_list", "voice_show"]);
+  expect(tools!.map((t) => t.name).sort()).toEqual(["voice_exemplar", "voice_flag", "voice_list", "voice_rule", "voice_show"]);
 
   const shapeKeys = (name: string) => Object.keys(voiceMcpTool(name).args.shape).sort();
   expect(shapeKeys("voice_list")).toEqual([]);
   expect(shapeKeys("voice_show")).toEqual(["name"]);
   expect(shapeKeys("voice_flag")).toEqual(["line", "name", "section"]);
   expect(shapeKeys("voice_exemplar")).toEqual(["file", "name", "title"]);
-  for (const name of ["voice_list", "voice_show", "voice_flag", "voice_exemplar"]) {
+  expect(shapeKeys("voice_rule")).toEqual(["example", "name", "project", "target", "text"]);
+  for (const name of ["voice_list", "voice_show", "voice_flag", "voice_exemplar", "voice_rule"]) {
     expect("sub" in voiceMcpTool(name).args.shape).toBe(false);
   }
 });

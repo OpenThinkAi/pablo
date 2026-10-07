@@ -16,7 +16,7 @@ import type { Size } from "./resize";
 import { resolve, tokenOf } from "./chord";
 import { missingContent, waitingDoc, type BookRail } from "./book";
 import { KeyPanel } from "./key-panel";
-import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, type Command, type Keymap } from "./keys";
+import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, voiceChoiceOf, voiceChoicesFor, VOICE_CHOICES, VOICE_TARGETS, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
 import { fileLineAt, type MainDoc } from "./document";
 import { hitAt, hitDetail, mainPane, nextHitRow, textRows, type CheckHit, type MainRow } from "./hits";
@@ -29,6 +29,7 @@ import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, editTarget, loadReview, reviewLines, type BranchDiff, type DiffRow, type ReviewComment } from "./review";
 import type { CommentSaver, EditSession, Finisher, Rejected } from "./screen";
 import { commentAction, isSubmit } from "./comment-input";
+import { voiceRuleAction } from "./voice-input";
 import type { Voicer, Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
@@ -119,6 +120,13 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       if (action) dispatch(action);
       return;
     }
+    // While a voice rule is open (`a v r`) its keys are text: the one line, Tab changes the target, Enter writes it.
+    if (state.voiceRule) {
+      if (isSubmit(input, key)) return startVoice("rule");
+      const action = voiceRuleAction(input, key);
+      if (action) dispatch(action);
+      return;
+    }
     // While a revise is open its keys are text: the instruction, then the candidate.
     if (state.revise) {
       const action = reviseAction(state.revise, input, key);
@@ -138,8 +146,14 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       return;
     }
     if (!token) return;
-    // With the voice offer up (`a v`), f flags and e keeps; every other key goes its way and Esc withdraws the offer.
-    if (state.voice !== null && state.content?.kind === "voice" && (token === "f" || token === "e")) return startVoice(token === "f" ? "flag" : "exemplar");
+    // With the voice offer up (`a v`) its choices (keys.ts `VOICE_CHOICES`: f flags, e keeps, r types a rule) are the
+    // keys; every other key goes its way and Esc withdraws the offer. A choice that needs a selection is not one without.
+    if (state.voice !== null && state.content?.kind === "voice") {
+      const choice = voiceChoiceOf(token, state.voice.length);
+      if (choice?.kind === "rule") return void dispatch({ type: "voice.rule", targets: VOICE_TARGETS });
+      if (choice) return startVoice(choice.kind);
+      if (VOICE_CHOICES.some((c) => c.key === token)) return; // a choice that needs a selection, with none: nothing happens (f is not the filter prefix here)
+    }
     for (const action of resolve(keyStateOf(state), state.pending, token, keymap)) {
       if (action.type !== "command") dispatch(action);
       else if (action.id === "quit") exit();
@@ -152,7 +166,7 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
       }
       else if (action.id === "ai.write") startWrite();
       else if (action.id === "ai.revise") openRevise(selectedOf(viewOf(state).main, pane.sentences));
-      else if (action.id === "ai.voice") dispatch({ type: "voice.offer", sentences: selectedOf(viewOf(state).main, pane.sentences)?.sentences ?? [] });
+      else if (action.id === "ai.voice") { const sentences = selectedOf(viewOf(state).main, pane.sentences)?.sentences ?? []; dispatch({ type: "voice.offer", sentences, choices: voiceChoicesFor(sentences.length) }); }
       else if (action.id === "review.finish") startFinish();
       else if (action.id === "review.comment") openComment();
       else if (action.id === "view.editor") startEdit();
@@ -241,12 +255,14 @@ export function App({ title, format, drafted = 0, total = 0, branch = "main", co
     );
   }
 
-  // `f` / `e` on the voice offer: the voicer writes the selected sentences and says where.
-  function startVoice(kind: "flag" | "exemplar") {
-    const sentences = state.voice ?? [];
+  // `f` / `e` on the voice offer, or Enter on a typed rule: the voicer writes it and says where.
+  function startVoice(kind: "flag" | "exemplar" | "rule") {
+    const rule = state.voiceRule;
+    if (kind === "rule" && (rule === null || rule.text.trim() === "")) return;
+    const sentences = kind === "rule" ? rule!.sentences : state.voice ?? [];
     if (!voicer) return void dispatch({ type: "voice.failed", message: "The voice is not available here." });
     dispatch({ type: "voice.start", kind });
-    voicer(kind, sentences).then(
+    voicer(kind, sentences, kind === "rule" ? { text: rule!.text.trim(), target: VOICE_TARGETS[rule!.at]?.id ?? "voice" } : undefined).then(
       (r) => dispatch(r.ok ? { type: "voice.done", lines: r.lines } : { type: "voice.failed", message: r.message }),
       (e: unknown) => dispatch({ type: "voice.failed", message: e instanceof Error ? e.message : String(e) }),
     );
