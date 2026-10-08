@@ -16,7 +16,7 @@
 import { basename, dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
-import { branchDiff, repoRoot, waitingBranches, waitingForReview } from "./branch";
+import { branchDiff, fileAt, repoRoot, waitingBranches, waitingForReview } from "./branch";
 import { runCheck, screenChecks } from "./check";
 import { reviewCommentsOf } from "./critique";
 import { migrateLines } from "./migrate";
@@ -826,7 +826,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         // Reviews group polls GitHub for the work's reading rounds, and Enter pulls a review that is in (AGT-1641).
         refresh: screenRefresh(screen.dir),
         ...(slug !== undefined ? { rounds: screenRounds(screen.dir, slug), puller: screenPuller(screen.dir, slug) } : {}),
-        ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch), commentsOf: (branch: string) => reviewCommentsOf(screen.dir, branch) } : {}),
+        ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch), fileOf: (branch: string, path: string) => fileAt(repo, branch, path), commentsOf: (branch: string) => reviewCommentsOf(screen.dir, branch) } : {}),
       });
     }
   }

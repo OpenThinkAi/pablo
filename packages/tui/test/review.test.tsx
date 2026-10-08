@@ -301,7 +301,7 @@ test("c in a review types a one-line comment on the change's first line; Enter s
   app.stdin.write(ENTER); await sleep(40);
   // On a file's group row there is no change to comment on.
   app.stdin.write("c"); await sleep(30);
-  expect(plain(app.lastFrame())).toContain("Move the cursor to a change first");
+  expect(plain(app.lastFrame())).toContain("Move the cursor to a change or a comment first");
   app.stdin.write(ESC); await sleep(20);
   app.stdin.write(DOWN); await sleep(20);
   app.stdin.write("c"); await sleep(30);
@@ -344,4 +344,57 @@ test("an empty comment is not saved; a refusal from the saver stays open with it
   refuse = false;
   app.stdin.write(ENTER); await sleep(30);
   expect(plain(app.lastFrame())).not.toContain("Comment on");
+});
+
+// A reader who only commented (AGT-1641 follow-up): the branch changes nothing, so each comment is its own row with
+// the chapter's lines around it, and the review can still be finished.
+const CH3 = "novels/vs/chapters/03-yard.md";
+const CH3_TEXT = ["---", "chapter: 3", "---", "", "Cora watched from the winery door.", "The man was young, perhaps thirty-seven.", "He was looking for something.", "", "The sun turned the cliffs burnt sienna.", "The heat faded."].join("\n");
+const READER_NOTES: ReviewComment[] = [
+  { source: "reader", path: "", review: true, author: "Atara", body: "overall really easy to read" },
+  { source: "reader", path: CH3, line: 9, author: "Atara", body: "burnt sienna has come up multiple times" },
+  { source: "reader", path: CH3, line: 6, author: "Atara", body: "how young is cora?" },
+];
+
+test("loadReview: line comments on unchanged text are notes in line order, each with the lines around it", () => {
+  const review = loadReview({ ok: true, text: "" }, READER_NOTES, (path) => (path === CH3 ? CH3_TEXT : undefined));
+  expect(review.notice).toBeUndefined();
+  expect(review.rows.map((r) => r.id)).toEqual([`file:${CH3}`, "note:2", "note:1"]);
+  expect(review.labels["note:2"]).toBe("› how young is cora?");
+  expect(review.labels[`file:${CH3}`]).toBe(`${CH3} (2)`);
+  const { title, rows } = reviewLines(review, "note:2", 80);
+  expect(title).toBe(`${CH3} · line 6 · comment`);
+  const text = rows.map((r) => r.segs.map((g) => g.text).join(""));
+  expect(text.some((t) => t.includes("overall really easy to read"))).toBe(true); // the summary on top
+  expect(text).toContain("Cora watched from the winery door.");
+  expect(text).toContain("He was looking for something.");
+  const rowWith = (words: string) => rows.find((r) => r.segs.map((g) => g.text).join("").includes(words));
+  expect(rowWith("perhaps thirty-seven")?.segs.every((g) => g.hl)).toBe(true);
+  expect(rowWith("winery door")?.segs.some((g) => g.hl)).toBe(false);
+  expect(text.some((t) => t.includes("how young is cora?"))).toBe(true);
+});
+
+test("loadReview: without the branch's text, comments on unchanged text stay at the top as before", () => {
+  const review = loadReview({ ok: true, text: "" }, READER_NOTES);
+  expect(review.rows).toEqual([]);
+  expect(review.notice).toBe("No changes against main.");
+  expect(review.fileComments.get(CH3)).toHaveLength(2);
+});
+
+test("a comments-only reader review: each comment is a row shown in context, and s finishes it with nothing rejected", async () => {
+  const f = finishing({ ok: true, lines: ["nothing accepted: discarded reader/atara-2026-10-04"] });
+  const app = render(<App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["reader/atara-2026-10-04"]} diffOf={() => ({ ok: true, text: "" })} commentsOf={() => READER_NOTES} fileOf={(_b, path) => (path === CH3 ? CH3_TEXT : undefined)} finisher={f.finisher} size={{ cols: 110, rows: 32 }} />);
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER]) { app.stdin.write(k); await sleep(30); }
+  let frame = plain(app.lastFrame());
+  expect(frame).toContain("› how young is cora?");
+  expect(frame).toContain("› burnt sienna has come");
+  expect(frame).not.toContain("No changes against main.");
+  app.stdin.write(DOWN); await sleep(30);
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("line 6 · comment");
+  expect(frame).toContain("The man was young, perhaps thirty-seven.");
+  app.stdin.write("s"); await sleep(60);
+  expect(f.calls).toEqual([{ branch: "reader/atara-2026-10-04", rejected: { removed: [], added: [] } }]);
+  expect(plain(app.lastFrame())).toContain("discarded reader/atara-2026-10-04");
 });

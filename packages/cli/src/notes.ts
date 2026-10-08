@@ -354,7 +354,7 @@ function pullRound(options: NotesPullOptions, repo: string, round: RoundRecord):
       allowEmpty: true,
     });
     if (!committed.ok) return undo(committed.notice);
-    commits.push(committed.sha as string);
+    // Not a suggestion's commit: `commits` counts suggestions, and this one carries none.
   }
 
   // The comments, at the lines they sit on in the branch's text.
