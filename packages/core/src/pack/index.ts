@@ -5,6 +5,7 @@ export type {
   Pack,
   PackKind,
   ProseInputs,
+  ReaderNote,
   ReviseInputs,
   Slice,
   SliceAction,

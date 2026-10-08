@@ -17,7 +17,7 @@ import { createProviders, loadConfig } from "@openthink/pablo-core";
 import type { Adapter, Intent } from "@openthink/pablo-core";
 import { deleteBranch, mergeBranch, repoRoot } from "../branch";
 import { readMarker } from "../marker";
-import { chapterOfPath, runAfterMerge } from "./rituals";
+import { chapterOfPath, runAfterMerge, runAfterRevision } from "./rituals";
 import type { Ritual, RitualOptions } from "./rituals";
 
 /** `draft/ch05` or `draft/ch05-v2` -> 5; undefined for any other branch. */
@@ -128,8 +128,10 @@ export async function mergeChanges(projectPath: string, branch: string, opts: Me
   const notices: string[] = [];
   const removed = deleteBranch(repo, opts.slug, branch, { env: opts.env ?? process.env });
   if (!removed.ok) notices.push(removed.notice);
+  // Not a draft: nothing was drafted, so only the author's own comments are written down (AGT-1642).
+  const revision = { slug: opts.slug, branch, authorNotes: opts.authorNotes, now: opts.now };
   const rituals: Ritual[] = [];
-  for (const chapter of chapters) rituals.push(...(await ritualsFor(projectPath, chapter, branch, opts, notices)));
+  for (const chapter of chapters) rituals.push(...runAfterRevision(projectPath, chapter, revision));
   return { ok: true, sha: merged.sha as string, chapters, rituals, notices };
 }
 

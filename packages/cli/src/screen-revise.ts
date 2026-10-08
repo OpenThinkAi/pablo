@@ -13,8 +13,9 @@
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { splitManuscript } from "@openthink/pablo-core";
-import type { Adapter } from "@openthink/pablo-core";
-import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./branch";
+import type { Adapter, ReaderNote } from "@openthink/pablo-core";
+import { branchExists, commitAs, createBranch, deleteBranch, ensureWorktree, repoRoot } from "./branch";
+import { readComments, writeComments } from "./comments";
 import { readMarker } from "./marker";
 import { reviseCore, frontmatterLength } from "./revise";
 import { insideDir } from "./review-finish";
@@ -27,7 +28,16 @@ export interface ScreenSelection {
   readonly sentences: readonly string[];
   readonly stored: { readonly from: number; readonly to: number };
 }
-export interface ScreenReviseRequest extends ScreenSelection { readonly instruction: string }
+export interface ScreenReviseRequest extends ScreenSelection {
+  readonly instruction: string;
+  /**
+   * In a review (AGT-1642): the review branch the revise reads from and the candidate is committed on, in its own
+   * worktree; `file` is then repo-relative, as the branch's diff names it. Absent: `file` is project-relative on `main`.
+   */
+  readonly branch?: string;
+  /** The reader's comment the revise answers: its own section of Gemma's pack, ahead of the author's direction. */
+  readonly note?: ReaderNote;
+}
 export type ScreenReviseResult =
   | { readonly ok: true; readonly candidate: string; readonly receipt: string; readonly model: string; readonly lines: readonly string[] }
   | { readonly ok: false; readonly message: string };
@@ -97,12 +107,48 @@ export function replacementLines(candidate: string, located: Pick<Located, "pref
 
 const NO_FILE = "Open a chapter to revise its sentences.";
 
+/** Where a review branch's copy of a repo-relative `file` is: the work's directory in the branch's worktree, and the file relative to it. */
+interface OnBranch { readonly repo: string; readonly slug: string; readonly worktree: string; readonly project: string; readonly file: string; readonly inRepo: string }
+
+function onBranch(projectPath: string, branch: string, file: string, env: Record<string, string | undefined>): OnBranch | string {
+  const marker = readMarker(projectPath);
+  if (!marker.ok) return marker.message;
+  const repo = repoRoot(projectPath);
+  if (repo === undefined) return `pablo: revise needs ${projectPath} inside a git repository`;
+  const tree = ensureWorktree(repo, marker.marker.slug, branch, env);
+  if (!tree.ok) return tree.notice;
+  const projectInRepo = relative(realpathSync(repo), realpathSync(projectPath));
+  const projectFile = relative(projectInRepo, file);
+  const project = join(tree.path as string, projectInRepo);
+  if (projectFile.startsWith("..") || insideDir(project, projectFile) === undefined) return NO_FILE;
+  return { repo, slug: marker.marker.slug, worktree: tree.path as string, project, file: projectFile, inRepo: file };
+}
+
+/**
+ * The branch's stored comments on `file` after lines `from`..`to` (0-based) became `added` lines: those below move by
+ * the difference, those on the replaced lines go to its last new line, so every other comment stays on its sentence.
+ */
+export function shiftComments<C extends { readonly path: string; readonly line?: number; readonly startLine?: number }>(comments: readonly C[], file: string, from: number, to: number, added: number): C[] {
+  // `from`/`to` are 0-based stored lines (as the selection has them); a comment's `line` is 1-based (as GitHub's are).
+  const delta = added - (to - from + 1);
+  const move = (line: number) => (line - 1 > to ? line + delta : line - 1 >= from ? from + Math.max(1, added) : line);
+  return comments.map((c) => {
+    if (c.path !== file || c.line === undefined) return c;
+    return { ...c, line: move(c.line), ...(c.startLine !== undefined ? { startLine: Math.min(move(c.startLine), move(c.line)) } : {}) };
+  });
+}
+
 export function screenReviser(vaultRoot: string, projectPath: string, deps: ScreenReviserDeps = {}): ScreenReviser {
   const env = deps.env ?? process.env;
 
   return {
     async revise(request, partial) {
-      const full = insideDir(projectPath, request.file);
+      // In a review the text is the branch's, read in its worktree; on the book it is the work's own file on `main`.
+      const where = request.branch === undefined ? undefined : onBranch(projectPath, request.branch, request.file, env);
+      if (typeof where === "string") return { ok: false, message: where };
+      const project = where?.project ?? projectPath;
+      const file = where?.file ?? request.file;
+      const full = insideDir(project, file);
       if (full === undefined) return { ok: false, message: NO_FILE };
       let raw: string;
       try { raw = readFileSync(full, "utf8"); } catch { return { ok: false, message: NO_FILE }; }
@@ -111,8 +157,8 @@ export function screenReviser(vaultRoot: string, projectPath: string, deps: Scre
       const base = frontmatterLength(raw);
       if (located.start < base) return { ok: false, message: "Select sentences of the chapter's text, not its frontmatter." };
       const outcome = await withWriteLock(() => reviseCore(
-        { file: request.file, passage: undefined, start: located.start - base, end: located.end - base, instruction: request.instruction, dryRun: false /* send the pack to the model; the file is never written either way */ },
-        { vaultRoot, projectPath, env },
+        { file, passage: undefined, start: located.start - base, end: located.end - base, instruction: request.instruction, dryRun: false /* send the pack to the model; the file is never written either way */, ...(request.note ? { readerNote: request.note } : {}) },
+        { vaultRoot, projectPath: project, env },
         // The progress lines go nowhere: the screen shows the candidate as it streams (`onCandidate`) and the receipt at the end.
         { adapter: deps.adapter, stderr: { write: () => {} }, onCandidate: partial },
       ));
@@ -132,6 +178,7 @@ export function screenReviser(vaultRoot: string, projectPath: string, deps: Scre
     async take(request) {
       const candidate = request.candidate.trim();
       if (candidate === "") return { ok: false, message: "The candidate is empty; nothing to take." };
+      if (request.branch !== undefined) return takeOnBranch(projectPath, request, candidate, env);
       if (insideDir(projectPath, request.file) === undefined) return { ok: false, message: NO_FILE };
       const marker = readMarker(projectPath);
       if (!marker.ok) return { ok: false, message: marker.message };
@@ -182,6 +229,47 @@ export function screenReviser(vaultRoot: string, projectPath: string, deps: Scre
       return { ok: true, branch, lines: [`revised ${request.file} on ${branch}`, `authored as ${author}${edited ? " (you edited the candidate)" : ""}`, `receipt ${request.receipt.slice(0, 12)}`] };
     },
   };
+}
+
+/**
+ * `take` in a review (AGT-1642): the candidate replaces the selected lines on the review branch itself, in its
+ * worktree, as one more commit; the branch's other comments move with the lines. The review then reads the branch again
+ * and the revision is one more change to accept or reject.
+ */
+async function takeOnBranch(projectPath: string, request: ScreenTakeRequest, candidate: string, env: Record<string, string | undefined>): Promise<ScreenTakeResult> {
+  const branch = request.branch as string;
+  const where = onBranch(projectPath, branch, request.file, env);
+  if (typeof where === "string") return { ok: false, message: where };
+  // The same file `onBranch` checked inside the work's directory, named from the worktree's root: `inRepo` is `file` as given.
+  const full = join(where.worktree, where.inRepo);
+  let raw: string;
+  try { raw = readFileSync(full, "utf8"); } catch { return { ok: false, message: NO_FILE }; }
+  const located = locateSelection(raw, request.sentences, request.stored);
+  if (located === undefined) return { ok: false, message: `${branch} no longer has those sentences; reopen the review and try again.` };
+  const lines = raw.split("\n");
+  const added = replacementLines(candidate, located);
+  lines.splice(request.stored.from, request.stored.to - request.stored.from + 1, ...added);
+  writeFileSync(full, lines.join("\n"));
+
+  const marker = readMarker(projectPath);
+  const edited = candidate !== request.offered.trim();
+  const author = edited && marker.ok ? marker.marker.author : request.model;
+  const instruction = request.instruction.replace(/\s+/g, " ").trim();
+  const flat = (text: string) => text.replace(/\s+/g, " ").trim();
+  const answering = request.note ? `\n\nIn answer to ${flat(request.note.reader) || "a reader"}: "${flat(request.note.comment)}"` : "";
+  const committed = commitAs(where.worktree, {
+    message: `${where.slug}: revise ${where.file}${edited ? " (edited)" : ""}\n\n${instruction}${answering}`,
+    author: { name: author, email: `${slugify(author) || "author"}@pablo.local` },
+    receipt: request.receipt,
+    paths: [where.inRepo],
+  });
+  if (!committed.ok) {
+    // Leave the branch as it was: the file goes back to its committed text.
+    writeFileSync(full, raw);
+    return { ok: false, message: committed.notice };
+  }
+  writeComments(projectPath, branch, shiftComments(readComments(projectPath, branch), where.inRepo, request.stored.from, request.stored.to, added.length));
+  return { ok: true, branch, lines: [`revised ${where.file} on ${branch}`, `authored as ${author}${edited ? " (you edited the candidate)" : ""}`, `receipt ${request.receipt.slice(0, 12)}`] };
 }
 
 // ---------------------------------------------------------------------------

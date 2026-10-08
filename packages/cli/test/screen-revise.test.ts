@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { waitingBranches } from "../src/branch";
-import { locateSelection, replacementLines, revisePassage, screenReviser } from "../src/screen-revise";
+import { locateSelection, replacementLines, revisePassage, screenReviser, shiftComments } from "../src/screen-revise";
 
 /**
  * The screen's reviser (AGT-1544): `reviseCore` against a fake Adapter and `take` on a temp git copy of the fixture
@@ -222,4 +222,11 @@ test("revisePassage refuses a passage not in the file, an empty instruction and 
   expect(out.ok).toBe(false);
   expect(prompts).toEqual([]);
   expect(git(vault, "branch", "--list", "revise/*")).toBe("");
+});
+
+test("shiftComments: a revision's lines move the comments below it and gather the ones on it to its last line", () => {
+  const c = (line: number, startLine?: number, path = "a.md") => ({ path, line, ...(startLine !== undefined ? { startLine } : {}) });
+  // stored lines 4..5 (lines 5-6) became three lines
+  const out = shiftComments([c(3), c(5), c(6, 5), c(9), c(9, undefined, "b.md"), { path: "a.md" }], "a.md", 4, 5, 3);
+  expect(out).toEqual([c(3), c(7), c(7, 7), c(10), c(9, undefined, "b.md"), { path: "a.md" }]);
 });

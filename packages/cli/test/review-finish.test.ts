@@ -80,18 +80,17 @@ test("the stitcher splits the revise branch into the three edits the tests rejec
   expect(edits.map((e) => e.kind)).toEqual(["change", "add", "remove"]);
 });
 
-test("accepting everything merges the branch whole, runs the after-write steps and deletes the branch and its worktree (AC1-3)", async () => {
+test("accepting everything merges the branch whole and deletes the branch and its worktree; a revise drafted nothing, so no after-write step runs (AC1-3, AGT-1642)", async () => {
   const { vault, project, env, opts } = setup();
+  const readmeBefore = readFileSync(join(project, "README.md"), "utf8");
   const branch = reviseBranch(vault, env);
   const done = await finishReview(project, branch, none, opts);
   expect(done.ok).toBe(true);
   if (!done.ok) return;
   expect(done.merged).toBe(true);
-  expect(done.rituals.map((r) => r.name)).toEqual(["outline", "note", "readme", "continuity", "git", "think"]);
-  expect(done.rituals.find((r) => r.name === "continuity")?.status).toBe("skipped"); // no extractor
-  expect(done.rituals.find((r) => r.name === "think")?.status).toBe("skipped"); // think-free PATH
-  expect(done.rituals.find((r) => r.name === "note")?.status).toBe("ran");
-  expect(existsSync(join(project, "notes", "2026-10-02-chapter-01.md"))).toBe(true);
+  expect(done.rituals).toEqual([]); // no outline tick, README "drafted", continuity re-extraction or think "drafted"
+  expect(existsSync(join(project, "notes", "2026-10-02-chapter-01.md"))).toBe(false);
+  expect(readFileSync(join(project, "README.md"), "utf8")).toBe(readmeBefore);
   expect(chapter(project)).toContain("Odile heard it from the scale house.");
   expect(chapter(project)).toContain("The cold had a sound of its own.");
   expect(chapter(project)).not.toContain("Nobody spoke of the order.");
@@ -226,7 +225,7 @@ test("revertRejected on a branch with no worktree adds one, and finishing remove
   expect(chapter(project)).not.toContain("The cold had a sound");
 });
 
-test("screenFinisher returns the screen's lines: the merge and each after-write step", async () => {
+test("screenFinisher returns the screen's lines: the merge, and the note when the author commented", async () => {
   const { vault, project, env, opts } = setup();
   const branch = reviseBranch(vault, env);
   const edits = editsOf(vault, branch);
@@ -235,7 +234,7 @@ test("screenFinisher returns the screen's lines: the merge and each after-write 
   expect(r.ok).toBe(true);
   if (!r.ok) return;
   expect(r.lines[0]).toMatch(/^merged revise\/ab12 into main \(/);
-  expect(r.lines.some((l) => l.startsWith("outline: "))).toBe(true);
+  expect(r.lines.some((l) => l.startsWith("outline: "))).toBe(false); // a revise drafted nothing
   const refused = await finish("revise/nope", none);
   expect(refused.ok).toBe(false);
 });
@@ -275,7 +274,8 @@ test("comments on a rejected line are still kept as written (their text is what 
   const second = setup();
   const b2 = reviseBranch(second.vault, second.env);
   await finishReview(second.project, b2, none, second.opts);
-  expect(readFileSync(join(second.project, "notes", "2026-10-02-chapter-01.md"), "utf8")).not.toContain("Author comments");
+  // With no author comments a revise writes no note at all (AGT-1642: nothing was drafted).
+  expect(existsSync(join(second.project, "notes", "2026-10-02-chapter-01.md"))).toBe(false);
 });
 
 test("a branch discarded by rejecting everything writes its author comments nowhere (AC4)", async () => {

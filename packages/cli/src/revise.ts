@@ -33,7 +33,7 @@ import {
   renderPack,
   withReceipts,
 } from "@openthink/pablo-core";
-import type { Adapter, CompletionStats, Intent, Pack, Span, SliceAction, SliceAdjustment } from "@openthink/pablo-core";
+import type { Adapter, CompletionStats, Intent, Pack, ReaderNote, Span, SliceAction, SliceAdjustment } from "@openthink/pablo-core";
 
 /** A minimal `process.stderr`-shaped sink — mirrors `write.ts`'s/`prose.ts`'s `ProgressSink`. */
 export interface ProgressSink {
@@ -70,6 +70,8 @@ export interface ReviseCoreArgs {
   /** What to change about the passage, in the author's own words. */
   readonly instruction: string | undefined;
   readonly dryRun: boolean;
+  /** A reader's comment this revise answers (AGT-1642): its own section of the pack, before the instruction. */
+  readonly readerNote?: ReaderNote | undefined;
 }
 
 /** What `reviseCore` needs beyond its own args: the resolved project it operates in. */
@@ -274,7 +276,7 @@ export type AssembleReviseResult =
  * it; sanitizing it again beforehand is harmless since flatten-and-trim is
  * idempotent.
  */
-function buildRevisePack(vaultRoot: string, projectPath: string, body: string, span: Span, instruction: string): Pack {
+function buildRevisePack(vaultRoot: string, projectPath: string, body: string, span: Span, instruction: string, readerNote?: ReaderNote): Pack {
   const passage = body.slice(span.start, span.end);
   const { before, after } = neighbourParagraphs(body, span);
   // Chapters are stored one sentence per line; the model sees paragraphs, never the splits.
@@ -285,6 +287,7 @@ function buildRevisePack(vaultRoot: string, projectPath: string, body: string, s
     passage: joinManuscript(passage),
     after: joinManuscript(after),
     instruction: sanitizeInstruction(instruction),
+    ...(readerNote === undefined ? {} : { readerNote }),
   });
 }
 
@@ -520,7 +523,7 @@ export async function reviseCore(args: ReviseCoreArgs, ctx: ReviseCoreContext, d
   const spanResult = resolveSpan(args, body, resolved);
   if (!spanResult.ok) return spanResult.outcome;
 
-  const pack = buildRevisePack(ctx.vaultRoot, ctx.projectPath, body, spanResult.span, args.instruction);
+  const pack = buildRevisePack(ctx.vaultRoot, ctx.projectPath, body, spanResult.span, args.instruction, args.readerNote);
 
   if (args.dryRun) {
     return { body: dryRunBody(pack), exitCode: 0, pack };

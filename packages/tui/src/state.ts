@@ -74,7 +74,16 @@ export interface Revise {
   readonly model: string;
   readonly cursor: number;
   readonly note: string;
+  /** In a review (AGT-1642): the branch the revise reads and commits to; `file` is then repo-relative. */
+  readonly branch?: string;
+  /** The reader's comment the revise answers, shown in the box and sent to the model as its own section. */
+  readonly reader?: ReaderNote;
+  /** The review row (`note:<n>`) the revise answers; taking the candidate marks it accepted. */
+  readonly answers?: string;
 }
+
+/** A reader's comment as a revise carries it: who, the line(s) it was on, what they said. */
+export interface ReaderNote { readonly reader: string; readonly quoted: string; readonly comment: string }
 
 /** A row of the rail: a stage, a chapter, a change. A `group` row folds the deeper rows after it until the next row at its depth or above. */
 export interface RailRow {
@@ -300,7 +309,7 @@ export type Action =
   // `a w`: start writing a chapter, stream the writer's progress into the content area, then open the review on the new
   // branch with the receipt shown, or show the refusal and its missing reasons
   // `a r`: ask for an instruction, run the revise, edit the candidate, take it onto a `revise/` branch (opens its review).
-  | { type: "revise.open"; file: string; sentences: readonly string[]; stored: { readonly from: number; readonly to: number } }
+  | { type: "revise.open"; file: string; sentences: readonly string[]; stored: { readonly from: number; readonly to: number }; branch?: string; reader?: ReaderNote; answers?: string }
   | { type: "revise.type"; text: string } | { type: "revise.backspace" } | { type: "revise.left" } | { type: "revise.right" }
   | { type: "revise.run" }
   | { type: "revise.partial"; id: number; text: string }
@@ -406,6 +415,16 @@ export function reviseContent(r: Revise): Content {
   const n = r.sentences.length;
   const sel = `${n} sentence${n === 1 ? "" : "s"}: ${preview(r.sentences)}`;
   const note = r.note ? `\n\n${r.note}` : "";
+  // Answering a reader (AGT-1642): their words and the line they were on come first; the author says what to do.
+  if (r.reader) {
+    const said = `${r.reader.reader}: "${r.reader.comment}"\nOn: ${r.reader.quoted}`;
+    switch (r.phase) {
+      case "ask": return { kind: "revise", title: `Revise · ${r.reader.reader}'s note: tell Gemma what to revise here. Enter runs, Esc cancels`, body: `${said}\n\n› ${withCursor(r.instruction, r.cursor)}${note}` };
+      case "running": return { kind: "revise", title: "Revising... Esc cancels", body: `${said}\n\nYou asked: ${r.instruction}\n\n${r.candidate || "waiting for the model..."}` };
+      case "edit": return { kind: "revise", title: "Candidate: edit it, Enter takes it into the review, Esc discards", body: `${withCursor(r.candidate, r.cursor)}\n\n--- was ---\n${r.sentences.join(" ")}\n\n--- ${r.reader.reader} said ---\n${r.reader.comment}\n\n--- you asked ---\n${r.instruction}${note}` };
+      case "taking": return { kind: "revise", title: "Taking the candidate...", body: r.candidate };
+    }
+  }
   switch (r.phase) {
     case "ask": return { kind: "revise", title: "Revise: what should change? Enter runs, Esc cancels", body: `${sel}\n\n${withCursor(r.instruction, r.cursor)}${note}` };
     case "running": return { kind: "revise", title: "Revising... Esc cancels", body: `${sel}\n\n${r.instruction}\n\n${r.candidate || "waiting for the model..."}` };
@@ -686,10 +705,11 @@ export function reduce(s: State, a: Action): State {
     case "comment.saved": return s.commenting === null ? s : { ...s, commenting: null, commentSeq: s.commentSeq + 1, content: null, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "comment.failed": return s.commenting === null ? s : { ...s, content: commentContent(s.commenting, a.message) };
     case "revise.open": {
-      // Revising needs the book (a document's sentences), and one revise or write at a time.
-      if (s.mode.kind !== "book" || s.revise !== null || s.writing !== null || s.editing !== null || s.finishing !== null) return s;
+      // Revising needs the book (a document's sentences), or a review answering a comment on its branch; one revise or write at a time.
+      if (s.mode.kind !== (a.branch === undefined ? "book" : "review") || s.revise !== null || s.writing !== null || s.editing !== null || s.finishing !== null) return s;
       const id = s.reviseSeq + 1;
-      return showRevise({ ...s, reviseSeq: id, pending: null, focus: s.pane }, { id, phase: "ask", file: a.file, sentences: a.sentences, stored: a.stored, instruction: "", candidate: "", offered: "", receipt: "", model: "", cursor: 0, note: "" }, true);
+      const extra = { ...(a.branch !== undefined ? { branch: a.branch } : {}), ...(a.reader ? { reader: a.reader } : {}), ...(a.answers !== undefined ? { answers: a.answers } : {}) };
+      return showRevise({ ...s, reviseSeq: id, pending: null, focus: s.pane }, { id, phase: "ask", file: a.file, sentences: a.sentences, stored: a.stored, instruction: "", candidate: "", offered: "", receipt: "", model: "", cursor: 0, note: "", ...extra }, true);
     }
     case "revise.type": case "revise.backspace": case "revise.left": case "revise.right": {
       const r = s.revise;
@@ -705,7 +725,7 @@ export function reduce(s: State, a: Action): State {
     case "revise.run": {
       const r = s.revise;
       if (r === null || r.phase !== "ask") return s;
-      if (r.instruction.trim() === "") return showRevise(s, { ...r, note: "Say what should change first." }, false);
+      if (r.instruction.trim() === "") return showRevise(s, { ...r, note: r.reader ? "Tell Gemma what to revise first: the note alone is not enough to go on." : "Say what should change first." }, false);
       return showRevise(s, { ...r, phase: "running", candidate: "", note: "" }, true);
     }
     case "revise.partial":
@@ -732,6 +752,17 @@ export function reduce(s: State, a: Action): State {
     }
     case "revise.taken": {
       if (s.revise?.id !== a.id) return s;
+      // Taken into the review it was opened from (AGT-1642): the branch is read again, the revision is one more change to
+      // accept or reject, and the comment it answers is accepted.
+      if (s.revise.branch !== undefined && s.mode.kind === "review") {
+        const answered = s.revise.answers;
+        return {
+          ...s, revise: null, full: false, reviewGen: s.reviewGen + 1,
+          marks: answered === undefined ? s.marks : { ...s.marks, [answered]: "accepted" },
+          content: writeContent(`Revised on ${a.branch}`, [...a.lines, "", "Gemma's version is now a change in this review, with the note under it: y accepts it, n rejects it."].join("\n")),
+          contentScroll: { ...s.contentScroll, scroll: 0, length: 0 },
+        };
+      }
       const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
       const next = reduce({ ...s, revise: null, full: false, written }, { type: "review.open", branch: a.branch });
       return next.mode.kind === "review" ? { ...next, content: writeContent(`Revised on ${a.branch}`, a.lines.join("\n")) } : next;
