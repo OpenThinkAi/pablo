@@ -49,6 +49,12 @@ export function bookRail(stages: readonly BookStage[]): BookRail {
   };
 }
 
+/** The status area's progress: chapters drafted of the book's total (every row under the chapters group). */
+export const bookCounts = (stages: readonly BookStage[]): { drafted: number; total: number } => ({
+  drafted: stages.filter((s) => s.status === "drafted").length,
+  total: stages.filter((s) => s.depth > 0).length,
+});
+
 /** What the content area shows for a stage that is not ready. */
 export const missingContent = (name: string, reasons: readonly string[]) =>
   ({ kind: "missing", title: `Not ready: ${name}`, body: reasons.map((r) => `- ${r}`).join("\n") });

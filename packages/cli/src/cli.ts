@@ -48,6 +48,7 @@ import { screenCommenter, screenFinisher } from "./review-finish";
 import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
+import { screenPuller, screenRefresh, screenRounds } from "./screen-reviews";
 import { deriveCliOptions, notesWith, parseForChapter, runVoiceRule, shareWith } from "./verbs";
 import { realRunner } from "./share";
 import type { Runner } from "./share";
@@ -800,6 +801,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       const repo = repoRoot(screen.dir);
       const waiting = repo === undefined ? undefined : waitingBranches(repo);
       const vault = findVault(cwd);
+      const marked = readMarker(screen.dir);
+      const slug = marked.ok ? marked.marker.slug : undefined;
       return await runScreen({
         ...screen,
         stages: bookStages(readNovelState(screen.dir), waiting?.ok ? waiting.branches : []),
@@ -819,6 +822,10 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         commentSaver: screenCommenter(screen.dir),
         // `v e` edits on an `edit/` branch in its own worktree; `v s` saves it through the finisher above (AGT-1545).
         editSession: screenEditor(screen.dir),
+        // The rail reads the book again every few seconds, so a branch made outside the screen shows (AGT-1640); the
+        // Reviews group polls GitHub for the work's reading rounds, and Enter pulls a review that is in (AGT-1641).
+        refresh: screenRefresh(screen.dir),
+        ...(slug !== undefined ? { rounds: screenRounds(screen.dir, slug), puller: screenPuller(screen.dir, slug) } : {}),
         ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch), commentsOf: (branch: string) => reviewCommentsOf(screen.dir, branch) } : {}),
       });
     }

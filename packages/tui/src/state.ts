@@ -25,6 +25,20 @@
 /** The id prefix of a rail row that names a branch waiting for review (`branch:draft/ch03`). */
 export const BRANCH_ROW = "branch:";
 
+/** The id prefix of a rail row that names a reading round in the Reviews group (`round:atara-2026-10-04`). */
+export const ROUND_ROW = "round:";
+
+/**
+ * A reading round as the Reviews group shows it (AGT-1640): `reading` while it is with the reader, `submitted` when
+ * their review is in and not yet pulled. A structural type, so this file imports nothing; the layer above fills it.
+ */
+export interface Round {
+  readonly id: string;
+  readonly reader: string;
+  readonly chapters: readonly number[];
+  readonly status: "reading" | "submitted";
+}
+
 /** The id prefix of a rail row that is one change in a review (`edit:3`): the rows a mark can be put on. */
 export const EDIT_ROW = "edit:";
 /** The author's decision on a change; a change with none is still pending. */
@@ -225,6 +239,14 @@ export interface State {
   readonly reviewGen: number;
   /** The `edit/<id>` branch holding Matt's own edits, committed and waiting for Save (`v s`); at most one per work. */
   readonly editBranch: string | null;
+  /** Counts the refresh ticks: each one tells the layer above to read the book's stages and branches again (AGT-1640). */
+  readonly tick: number;
+  /** The work's reading rounds as last polled (AGT-1640); a pulled round leaves at once, before the next poll says so. */
+  readonly rounds: readonly Round[];
+  /** Why the last poll for rounds failed, until one succeeds; null when it did. */
+  readonly roundsNote: string | null;
+  /** The round being pulled (Enter on a submitted round, AGT-1641) while the pull runs; one at a time. */
+  readonly pulling: string | null;
 }
 
 /**
@@ -305,6 +327,14 @@ export type Action =
   | { type: "voice.start"; kind: VoiceKind }
   | { type: "voice.done"; lines: readonly string[] }
   | { type: "voice.failed"; message: string }
+  // ---- live data (AGT-1640): a tick reads the book again; a poll brings the reading rounds or says why it could not
+  | { type: "tick" }
+  | { type: "rounds.loaded"; rounds: readonly Round[]; note?: string }
+  | { type: "rounds.failed"; message: string }
+  // Enter on a submitted round (AGT-1641): pull its review into a `reader/` branch, then open that review
+  | { type: "pull.start"; id: string }
+  | { type: "pull.done"; id: string; branch: string; lines: readonly string[] }
+  | { type: "pull.failed"; message: string }
   | { type: "finish.start"; branch: string }
   | { type: "finish.done"; branch: string; lines: readonly string[] }
   | { type: "finish.failed"; message: string }
@@ -390,6 +420,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
   pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
+  tick: 0, rounds: [], roundsNote: null, pulling: null,
 });
 
 // ---------------------------------------------------------------- reading the state
@@ -710,6 +741,19 @@ export function reduce(s: State, a: Action): State {
       // The receipt stays up beside the review it led to; Esc takes it down.
       return next.mode.kind === "review" ? { ...next, content: writeContent(`Wrote ${s.writing === null ? "" : `chapter ${s.writing} `}on ${a.branch}`, a.lines.join("\n")) } : next;
     }
+    case "tick": return { ...s, tick: s.tick + 1 };
+    case "rounds.loaded": return { ...s, rounds: a.rounds, roundsNote: a.note ?? null };
+    case "rounds.failed": return { ...s, roundsNote: a.message };
+    case "pull.start":
+      return s.pulling !== null || s.mode.kind !== "book" ? s : { ...s, pulling: a.id, content: writeContent(`Pulling ${a.id}`, "reading the review from GitHub…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "pull.done": {
+      // The pulled round leaves the Reviews group now; its branch is listed with the others and its review opens.
+      const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
+      const next = reduce({ ...s, pulling: null, written, rounds: s.rounds.filter((r) => r.id !== a.id) }, { type: "review.open", branch: a.branch });
+      return next.mode.kind === "review" ? { ...next, content: writeContent(`Pulled ${a.id} into ${a.branch}`, a.lines.join("\n")) } : next;
+    }
+    case "pull.failed":
+      return { ...s, pulling: null, content: writeContent("Not pulled", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "write.failed":
       return { ...s, writing: null, content: writeContent("Not written", [a.message, ...a.missing.map((m) => `- ${m}`)].join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "review.mark": {
