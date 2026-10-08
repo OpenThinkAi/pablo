@@ -39,8 +39,12 @@ export interface Round {
   readonly status: "reading" | "submitted";
 }
 
-/** The id prefix of a rail row that is one change in a review (`edit:3`): the rows a mark can be put on. */
+/** The id prefix of a rail row that is one change in a review (`edit:3`). */
 export const EDIT_ROW = "edit:";
+/** The id prefix of a rail row that is a comment on text the review's branch did not change (`note:1`). */
+export const NOTE_ROW = "note:";
+/** A review's findings, the rows a mark can be put on and `g f` steps between: its changes and its comments on unchanged text. */
+export const isFinding = (id: string): boolean => id.startsWith(EDIT_ROW) || id.startsWith(NOTE_ROW);
 /** The author's decision on a change; a change with none is still pending. */
 export type Mark = "accepted" | "rejected";
 
@@ -311,6 +315,8 @@ export type Action =
   | { type: "write.failed"; message: string; missing: readonly string[] }
   // y / n on the change under the rail's cursor: sets the mark; the same mark again clears it, the other one changes it
   | { type: "review.mark"; mark: Mark }
+  // `g f` / `g F` in a review: the next or previous finding (a change or a comment), wrapping round
+  | { type: "review.step"; dir: 1 | -1 }
   // `s`: finish the review (merge what was accepted, run the after-write steps); done closes the review with the
   // result shown in the content area, failed stays in the review with the reason shown
   // `c` in a review: type a one-line comment on the change under the cursor; Enter saves it (the layer above writes the
@@ -455,7 +461,7 @@ export function reviewCounts(s: State): { accepted: number; rejected: number; pe
   const out = { accepted: 0, rejected: 0, pending: 0 };
   if (placeOf(s).kind !== "review") return out;
   for (const r of s.review.rail.rows) {
-    if (!r.id.startsWith(EDIT_ROW)) continue;
+    if (!isFinding(r.id)) continue;
     const m = s.marks[r.id];
     if (m === "accepted") out.accepted++; else if (m === "rejected") out.rejected++; else out.pending++;
   }
@@ -758,9 +764,27 @@ export function reduce(s: State, a: Action): State {
       return { ...s, writing: null, content: writeContent("Not written", [a.message, ...a.missing.map((m) => `- ${m}`)].join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "review.mark": {
       const row = s.mode.kind === "review" ? railRow(s.review.rail) : undefined;
-      if (!row || !row.id.startsWith(EDIT_ROW)) return s;
+      if (!row || !isFinding(row.id)) return s;
       const { [row.id]: was, ...rest } = s.marks;
-      return { ...s, marks: was === a.mark ? rest : { ...rest, [row.id]: a.mark } };
+      if (was === a.mark) return { ...s, marks: rest };
+      // A decision made moves on to the next finding still without one, so a review is y, y, n, s.
+      const marked = { ...s, marks: { ...rest, [row.id]: a.mark } };
+      const rows = s.review.rail.rows;
+      const at = s.review.rail.cursor;
+      const order = [...rows.keys()].slice(at + 1).concat([...rows.keys()].slice(0, at));
+      const next = order.find((i) => isFinding(rows[i]!.id) && marked.marks[rows[i]!.id] === undefined);
+      return next === undefined ? marked : { ...marked, review: { ...s.review, rail: railTo(s.review.rail, next) } };
+    }
+    case "review.step": {
+      if (s.mode.kind !== "review") return s;
+      const rows = s.review.rail.rows;
+      const at = s.review.rail.cursor;
+      const n = rows.length;
+      for (let k = 1; k <= n; k++) {
+        const i = (((at + a.dir * k) % n) + n) % n;
+        if (isFinding(rows[i]!.id)) return { ...s, review: { ...s.review, rail: railTo(s.review.rail, i) } };
+      }
+      return s;
     }
     case "voice.offer": {
       const reset = { contentScroll: { ...s.contentScroll, scroll: 0, length: 0 }, voiceRule: null };

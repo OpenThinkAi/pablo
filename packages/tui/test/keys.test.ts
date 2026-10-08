@@ -45,7 +45,7 @@ test("a conflicting binding in one state is refused with a message", () => {
   expect(() => effectiveKeys({ "rail.down": "k" })).toThrow(/rail\.down and rail\.up \(secondary\) are both "k" in the rail state/);
   expect(() => effectiveKeys({ "rail.down": { primary: "j", secondary: "j" } })).toThrow(/both primary and secondary/);
   // a key that is a prefix in that state
-  expect(() => effectiveKeys({ "app.quit": "g" })).toThrow(/g is the go to prefix in the main state/);
+  expect(() => effectiveKeys({ "app.quit": "g" })).toThrow(/g is the go to prefix in the (rail|main) state/);
   // a prefix's second keys among themselves
   expect(() => effectiveKeys({ "go.end": "g" })).toThrow(/go\.top and go\.end are both "g" after g/);
   // a review's key (n rejects) conflicts with the rail's in that state
