@@ -55,6 +55,7 @@ test("every action type has a case: each applies to the initial state and to a l
     "focus.content": { type: "focus.content" }, "focus.back": { type: "focus.back" },
     "prefix.press": { type: "prefix.press", prefix: "a" }, "prefix.digit": { type: "prefix.digit", digit: "1" }, "prefix.backspace": { type: "prefix.backspace" }, "prefix.clear": { type: "prefix.clear" },
     "view.zen": { type: "view.zen" }, "view.full": { type: "view.full" },
+    "review.step": { type: "review.step", dir: 1 },
     "review.open": { type: "review.open", branch: "draft/ch02" }, "review.close": { type: "review.close" }, "review.mark": { type: "review.mark", mark: "accepted" },
     "edit.start": { type: "edit.start", file: "chapters/01-a.md", line: 3 }, "edit.done": { type: "edit.done", branch: "edit/ab12cd", lines: ["l"] }, "edit.failed": { type: "edit.failed", message: "m" }, "edit.refused": { type: "edit.refused", message: "m" },
     "save.start": { type: "save.start", branch: "edit/ab12cd" }, "save.done": { type: "save.done", branch: "edit/ab12cd", lines: ["l"] }, "save.failed": { type: "save.failed", message: "m" },
@@ -412,10 +413,12 @@ test("review.mark sets the mark on the change under the cursor; the same mark ag
   expect(at(s)).toBe("edit:0");
   s = then(s, { type: "review.mark", mark: "accepted" });
   expect(s.marks).toEqual({ "edit:0": "accepted" });
-  s = then(s, { type: "review.mark", mark: "rejected" });
+  expect(at(s)).toBe("edit:1"); // a decision moves on to the next change with none
+  s = then(s, { type: "rail.up" }, { type: "review.mark", mark: "rejected" });
   expect(s.marks).toEqual({ "edit:0": "rejected" });
-  s = then(s, { type: "review.mark", mark: "rejected" });
+  s = then(s, { type: "rail.up" }, { type: "review.mark", mark: "rejected" });
   expect(s.marks).toEqual({});
+  expect(at(s)).toBe("edit:0"); // clearing stays put
 });
 
 test("review.mark does nothing on a file row, in a book, or under settings; marks are per change and reset on open and close", () => {
@@ -423,12 +426,33 @@ test("review.mark does nothing on a file row, in a book, or under settings; mark
   expect(then(onFile, { type: "review.mark", mark: "accepted" })).toBe(onFile);
   const b = book({ type: "rail.down" });
   expect(then(b, { type: "review.mark", mark: "accepted" })).toBe(b);
-  const marked = review({ type: "rail.down" }, { type: "review.mark", mark: "accepted" }, { type: "rail.down" }, { type: "review.mark", mark: "rejected" });
+  const marked = review({ type: "rail.down" }, { type: "review.mark", mark: "accepted" }, { type: "review.mark", mark: "rejected" });
   expect(marked.marks).toEqual({ "edit:0": "accepted", "edit:1": "rejected" });
   expect(reviewCounts(marked)).toEqual({ accepted: 1, rejected: 1, pending: 1 });
   expect(then(marked, { type: "review.close" }).marks).toEqual({});
   expect(then(marked, { type: "review.close" }, { type: "review.open", branch: "draft/ch01" }).marks).toEqual({});
   expect(reviewCounts(b)).toEqual({ accepted: 0, rejected: 0, pending: 0 });
+});
+
+test("review.step goes to the next or previous finding, a change or a comment, skipping file rows and wrapping round", () => {
+  const rows: readonly RailRow[] = [{ id: "file:a.md", depth: 0, group: true }, { id: "edit:0", depth: 1 }, { id: "note:1", depth: 1 }, { id: "file:b.md", depth: 0, group: true }, { id: "edit:1", depth: 1 }];
+  let s = then(initialState(), { type: "review.open", branch: "reader/x" }, { type: "rail.loaded", rows });
+  expect(at(s)).toBe("file:a.md");
+  s = then(s, { type: "review.step", dir: 1 });
+  expect(at(s)).toBe("edit:0");
+  s = then(s, { type: "review.step", dir: 1 }, { type: "review.step", dir: 1 });
+  expect(at(s)).toBe("edit:1"); // past b.md's file row
+  s = then(s, { type: "review.step", dir: 1 });
+  expect(at(s)).toBe("edit:0"); // wrapped round
+  s = then(s, { type: "review.step", dir: -1 });
+  expect(at(s)).toBe("edit:1");
+  // A comment takes a decision like a change, and counts with them.
+  s = then(s, { type: "review.step", dir: -1 }, { type: "review.mark", mark: "accepted" });
+  expect(s.marks).toEqual({ "note:1": "accepted" });
+  expect(reviewCounts(s)).toEqual({ accepted: 1, rejected: 0, pending: 2 });
+  expect(at(s)).toBe("edit:1");
+  const b = book({ type: "rail.down" });
+  expect(then(b, { type: "review.step", dir: 1 })).toBe(b);
 });
 
 test("finish.start shows the merge in progress; finish.done closes the review, shows the result and retires the branch; finish.failed stays in the review", () => {

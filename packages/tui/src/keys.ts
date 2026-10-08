@@ -87,8 +87,8 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "content.back", states: CONTENT, key: "tab", label: "back", description: "Move focus back out of the content area, to the pane where the cursor is.", do: { type: "focus.back" }, fixed: true },
 
   // ---- in a review: each change in the rail is accepted, rejected or edited; finishing merges the branch
-  { id: "review.accept", states: OUTSIDE, needs: "review", key: "y", label: "accept", description: "Accept the change under the cursor; again to clear it.", do: { type: "review.mark", mark: "accepted" } },
-  { id: "review.reject", states: OUTSIDE, needs: "review", key: "n", label: "reject", description: "Reject the change under the cursor; again to clear it.", do: { type: "review.mark", mark: "rejected" } },
+  { id: "review.accept", states: OUTSIDE, needs: "review", key: "y", label: "accept", description: "Accept the change or comment under the cursor and go to the next one with no decision; again to clear it.", do: { type: "review.mark", mark: "accepted" } },
+  { id: "review.reject", states: OUTSIDE, needs: "review", key: "n", label: "reject", description: "Reject the change or comment under the cursor and go to the next one with no decision; again to clear it.", do: { type: "review.mark", mark: "rejected" } },
   { id: "review.edit", states: OUTSIDE, needs: "review", key: "e", label: "edit", description: "Edit the change under the cursor.", do: cmd("review.edit") },
   { id: "review.comment", states: OUTSIDE, needs: "review", key: "c", label: "comment", description: "Leave your own comment on the change under the cursor: type one line, Enter saves it as a box, Esc cancels.", do: cmd("review.comment") },
   { id: "review.finish", states: OUTSIDE, needs: "review", key: "s", label: "finish", description: "Finish the review: merge what was accepted.", do: cmd("review.finish") },
@@ -117,8 +117,10 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   // ---- g: go to
   { id: "go.top", states: MAIN, prefix: "g", key: "g", label: "top", description: "Go to the first line of the document.", do: { type: "main.top" } },
   { id: "go.end", states: MAIN, prefix: "g", key: "e", label: "end", description: "Go to the last line of the document.", do: { type: "main.end" } },
-  { id: "go.hit_next", states: MAIN, prefix: "g", key: "f", label: "next hit", description: "Go to the next check hit in the document, wrapping round at the end.", do: cmd("check.next") },
-  { id: "go.hit_prev", states: MAIN, prefix: "g", key: "F", label: "previous hit", description: "Go to the previous check hit in the document, wrapping round at the start.", do: cmd("check.prev") },
+  { id: "go.next", states: OUTSIDE, needs: "review", prefix: "g", key: "f", label: "next change", description: "Go to the next change or comment in the review, wrapping round at the end.", do: { type: "review.step", dir: 1 } },
+  { id: "go.prev", states: OUTSIDE, needs: "review", prefix: "g", key: "F", label: "previous change", description: "Go to the previous change or comment in the review, wrapping round at the start.", do: { type: "review.step", dir: -1 } },
+  { id: "go.hit_next", states: MAIN, needs: "book", prefix: "g", key: "f", label: "next hit", description: "Go to the next check hit in the document, wrapping round at the end.", do: cmd("check.next") },
+  { id: "go.hit_prev", states: MAIN, needs: "book", prefix: "g", key: "F", label: "previous hit", description: "Go to the previous check hit in the document, wrapping round at the start.", do: cmd("check.prev") },
   { id: "go.line", states: MAIN, prefix: "g", key: "<n>", label: "line", description: "Type a line number, then close it with the go prefix key again or Enter, to go to that line.", fixed: true },
 ];
 

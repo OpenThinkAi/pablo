@@ -135,7 +135,7 @@ test("a branch name is cleaned wherever it is shown; an empty diff says so", asy
   expect(plain(raw)).toContain("No changes against main.");
 });
 
-test("y and n mark the change under the cursor; the rail and the status counts show it; pressing again changes it", async () => {
+test("y and n mark the change under the cursor and move on to the next undecided one; the same key again clears it", async () => {
   const app = mount();
   await sleep(30);
   for (const k of [DOWN, DOWN, ENTER, DOWN]) { app.stdin.write(k); await sleep(30); } // into the review, onto edit 0
@@ -145,12 +145,32 @@ test("y and n mark the change under the cursor; the rail and the status counts s
   frame = plain(app.lastFrame());
   expect(frame).toMatch(/✓ ~ She never looked up/);
   expect(frame).toContain("1 accepted · 0 rejected · 1 pending");
+  expect(frame).toContain("line 22 · change"); // moved on to the next change
+  app.stdin.write("k"); await sleep(30);
   app.stdin.write("n"); await sleep(30);
   frame = plain(app.lastFrame());
   expect(frame).toMatch(/✗ ~ She never looked up/);
   expect(frame).toContain("0 accepted · 1 rejected · 1 pending");
+  app.stdin.write("k"); await sleep(30);
   app.stdin.write("n"); await sleep(30);
-  expect(plain(app.lastFrame())).toContain("0 accepted · 0 rejected · 2 pending");
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("0 accepted · 0 rejected · 2 pending");
+  expect(frame).toContain("line 2 · change"); // a cleared mark stays put
+});
+
+test("g f and g F step between the changes, wrapping round, from the main pane too", async () => {
+  const app = mount();
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER]) { app.stdin.write(k); await sleep(30); } // into the review, on the file row
+  app.stdin.write("g"); await sleep(20); app.stdin.write("f"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("line 2 · change");
+  app.stdin.write("l"); await sleep(30); // into the main pane
+  app.stdin.write("g"); await sleep(20); app.stdin.write("f"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("line 22 · change");
+  app.stdin.write("g"); await sleep(20); app.stdin.write("f"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("line 2 · change"); // wrapped round
+  app.stdin.write("g"); await sleep(20); app.stdin.write("F"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("line 22 · change");
 });
 
 test("loadReview renders through core's stitcher: a moved paragraph is one row, a paragraph split is labelled as one", () => {
@@ -394,6 +414,15 @@ test("a comments-only reader review: each comment is a row shown in context, and
   frame = plain(app.lastFrame());
   expect(frame).toContain("line 6 · comment");
   expect(frame).toContain("The man was young, perhaps thirty-seven.");
+  app.stdin.write("s"); await sleep(60);
+  expect(f.calls).toEqual([]); // a comment needs a decision too
+  expect(plain(app.lastFrame())).toContain("2 changes have no decision yet");
+  app.stdin.write("y"); await sleep(30); // the first comment, then on to the second
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("✓ › how young is cora?");
+  expect(frame).toContain("line 9 · comment");
+  app.stdin.write("n"); await sleep(30);
+  expect(plain(app.lastFrame())).toContain("1 accepted · 1 rejected · 0 pending");
   app.stdin.write("s"); await sleep(60);
   expect(f.calls).toEqual([{ branch: "reader/atara-2026-10-04", rejected: { removed: [], added: [] } }]);
   expect(plain(app.lastFrame())).toContain("discarded reader/atara-2026-10-04");

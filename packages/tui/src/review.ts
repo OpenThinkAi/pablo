@@ -11,7 +11,7 @@ import { parseDiff } from "@openthink/pablo-core";
 import { clean } from "./sanitize";
 import { stitch, type Edit, type EditLine, type Seg } from "./stitch";
 import { commentBox } from "./comment-box";
-import { BRANCH_ROW, type RailRow } from "./state";
+import { BRANCH_ROW, NOTE_ROW, type RailRow } from "./state";
 
 /** What the CLI hands over for a branch: git's diff of it against `main`, or why there is none. */
 export type BranchDiff = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly notice: string };
@@ -80,8 +80,6 @@ export interface Review {
 /** A line comment on unchanged text: the comment and the branch's lines around it, the commented ones standing out. */
 export interface Note { readonly comment: ReviewComment; readonly path: string; readonly line: number; readonly rows: readonly EditLine[] }
 
-/** The id prefix of a rail row that is a comment on unchanged text. */
-export const NOTE_ROW = "note:";
 /** Lines of the branch's text shown before and after a commented line. */
 const CONTEXT = 2;
 
