@@ -71,6 +71,8 @@ export interface AppProps {
   readonly finisher?: Finisher;
   /** `c` in a review: saves the author's own comment into the branch's comment store (the CLI's `screenCommenter`, passed in). */
   readonly commentSaver?: CommentSaver;
+  /** A file's text on a branch (repo-relative path), for the lines around a comment on text the branch did not change. */
+  readonly fileOf?: (branch: string, path: string) => string | undefined;
   /** The critic's comments on a branch (the `critique` tool's survivors): review mode shows each under the edit it is on. */
   readonly commentsOf?: (branch: string) => readonly ReviewComment[];
   /** `v e`: opens the editor on the cursor's file and line on an `edit/` branch (the CLI's `screenEditor`, passed in). */
@@ -111,7 +113,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, voicer, finisher, editSession, composer, refresh, rounds, puller, refreshMs = REFRESH_MS, roundsMs = ROUNDS_MS }: AppProps) {
+export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, voicer, finisher, editSession, composer, refresh, rounds, puller, refreshMs = REFRESH_MS, roundsMs = ROUNDS_MS }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -330,10 +332,12 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   // no change at all, has none to put it on).
   function openComment() {
     if (state.mode.kind !== "review" || state.commenting !== null || state.finishing !== null) return;
-    const edit = review?.edits.get(railRow(viewOf(state).rail)?.id ?? "");
+    const id = railRow(viewOf(state).rail)?.id ?? "";
+    // On a change, the comment goes on its first line; on a reader's comment (a note), beside it: a reply on the same line.
+    const at = review?.edits.get(id) ?? review?.notes.get(id);
     if (!commentSaver) return void dispatch({ type: "content.show", content: { title: "Comment", body: "Commenting is not available here.", kind: "comment" } });
-    if (!edit) return void dispatch({ type: "content.show", content: { title: "Comment", body: "Move the cursor to a change first: a comment goes on its first line.", kind: "comment" } });
-    dispatch({ type: "comment.open", path: edit.path, line: edit.line });
+    if (!at) return void dispatch({ type: "content.show", content: { title: "Comment", body: "Move the cursor to a change or a comment first: yours goes on its line.", kind: "comment" } });
+    dispatch({ type: "comment.open", path: at.path, line: at.line });
   }
 
   // Enter on the typed comment: the saver writes it to the store and the review reads the store again, so the box
@@ -356,7 +360,9 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     const open = reviewBranch ?? state.mode.branch;
     const counts = reviewCounts(state);
     if (!finisher) return void dispatch({ type: "finish.failed", message: "Finishing is not available here." });
-    if (!review || review.edits.size === 0) return void dispatch({ type: "finish.failed", message: "There are no changes to finish." });
+    // A review of comments only (a reader who suggested nothing) finishes too: with no reply of the author's the branch
+    // is discarded, with one it merges empty so the notes are kept (review-finish.ts).
+    if (!review || (review.edits.size === 0 && review.notes.size === 0)) return void dispatch({ type: "finish.failed", message: "There are no changes to finish." });
     if (counts.pending > 0) return void dispatch({ type: "finish.failed", message: `${counts.pending} change${counts.pending === 1 ? " has" : "s have"} no decision yet: y accepts, n rejects.` });
     const rejected: Rejected = {
       removed: [...review.edits.values()].filter((e) => state.marks[e.id] === "rejected").flatMap((e) => e.removedLines),
@@ -379,7 +385,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     const waitingRows = branchRows(waiting);
     return { rows: [...reviews.rows, ...waitingRows.rows], labels: { ...reviews.labels, ...waitingRows.labels } };
   }, [waiting, state.rounds]);
-  const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch), commentsOf?.(reviewBranch))), [reviewBranch, diffOf, commentsOf, state.reviewGen, state.commentSeq]);
+  const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch), commentsOf?.(reviewBranch), fileOf ? (path) => fileOf(reviewBranch, path) : undefined)), [reviewBranch, diffOf, fileOf, commentsOf, state.reviewGen, state.commentSeq]);
   const bookAll = useMemo(() => [...bookRows, ...extra.rows], [bookRows, extra]);
   const rows = review ? review.rows : bookAll;
   const labels = useMemo(() => (review ? review.labels : { ...bookLabels, ...extra.labels }), [review, bookLabels, extra]);

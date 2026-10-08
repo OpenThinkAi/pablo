@@ -416,7 +416,8 @@ test("a comments-only review still yields a reviewable branch: one empty commit 
   expect(outcome.code).toBe(0);
   expect(outcome.pulled).toHaveLength(1);
   const made = outcome.pulled[0];
-  expect(made?.commits).toHaveLength(1);
+  // `commits` counts suggestions; the empty commit that makes the branch reviewable is not one.
+  expect(made?.commits).toEqual([]);
   expect(made?.comments).toBeGreaterThan(0);
   expect(git(s.vault, "log", "--format=%an <%ae>|%s", `${s.round.vaultCommit}..${BRANCH}`)).toBe("Atara Test <atara@example.com>|notes from Atara Test on chapter 2");
   expect(git(s.vault, "diff", "--name-only", `${s.round.vaultCommit}..${BRANCH}`)).toBe("");

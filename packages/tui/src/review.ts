@@ -65,8 +65,10 @@ export interface Review {
   readonly edits: ReadonlyMap<string, Edit>;
   /** Line comments by the edit (`edit:<n>`) whose changed lines they are on, in the order given. */
   readonly comments: ReadonlyMap<string, readonly ReviewComment[]>;
-  /** Comments shown at the top of a file's changes: the file-level ones, and line comments on no edit's lines. By path. */
+  /** Comments shown at the top of a file's changes: the file-level ones, and line comments on no edit's lines when the branch's text cannot be read. By path. */
   readonly fileComments: ReadonlyMap<string, readonly ReviewComment[]>;
+  /** Line comments on no edit's lines (a reader's notes on text nobody changed), each its own rail row (`note:<n>`) with the lines around it. */
+  readonly notes: ReadonlyMap<string, Note>;
   /** The whole-review summaries, shown at the top of every pane of the review. */
   readonly summary: readonly ReviewComment[];
   /** Every comment's count by source and tag (`countKey`), sources in the order critic, reader, author; for the status area. */
@@ -74,6 +76,33 @@ export interface Review {
   /** What the main pane says when there is nothing to show: no changes, or git's reason for none. */
   readonly notice?: string;
 }
+
+/** A line comment on unchanged text: the comment and the branch's lines around it, the commented ones standing out. */
+export interface Note { readonly comment: ReviewComment; readonly path: string; readonly line: number; readonly rows: readonly EditLine[] }
+
+/** The id prefix of a rail row that is a comment on unchanged text. */
+export const NOTE_ROW = "note:";
+/** Lines of the branch's text shown before and after a commented line. */
+const CONTEXT = 2;
+
+/** `comment` with the lines around it from `text` (the branch's file); undefined when its line is not in the text. */
+function noteOf(comment: ReviewComment, text: string): Note | undefined {
+  const line = comment.line;
+  if (line === undefined) return undefined;
+  const lines = text.split("\n");
+  if (line < 1 || line > lines.length) return undefined;
+  const first = comment.startLine !== undefined && comment.startLine < line ? comment.startLine : line;
+  const rows: EditLine[] = [];
+  for (let n = Math.max(1, first - CONTEXT); n <= Math.min(lines.length, line + CONTEXT); n++) {
+    const words = clean(lines[n - 1] ?? "").replace(/\t/g, "  ");
+    // A blank line between paragraphs stays a blank row, so the passage reads as it does in the chapter.
+    rows.push({ sign: " ", segs: [{ text: words, hl: n >= first && n <= line && words.trim() !== "" }] });
+  }
+  return { comment, path: comment.path, line, rows };
+}
+
+/** A note's rail label: the comment's first words, after a mark that says it is a comment, not a change. */
+const noteLabel = (c: ReviewComment) => `› ${clean(c.body).replace(/\s+/g, " ").trim()}`;
 
 const MARK: Record<Edit["kind"], string> = { change: "~", add: "+", remove: "-", move: "⇄" };
 
@@ -88,40 +117,51 @@ function labelOf(e: Edit): string {
 }
 
 /** The review of a branch's diff: the diff text is cleaned of control characters before it is parsed, tabs widened. */
-export function loadReview(diff: BranchDiff | undefined, comments: readonly ReviewComment[] = []): Review {
+export function loadReview(diff: BranchDiff | undefined, comments: readonly ReviewComment[] = [], textOf?: (path: string) => string | undefined): Review {
   const summary = comments.filter((c) => c.review);
-  const none = { rows: [], labels: {}, edits: new Map(), comments: new Map(), fileComments: new Map(), summary, counts: countComments(comments) };
+  const none = { rows: [], labels: {}, edits: new Map(), comments: new Map(), fileComments: new Map(), notes: new Map(), summary, counts: countComments(comments) };
   if (!diff) return { ...none, notice: "The changes could not be read." };
   if (!diff.ok) return { ...none, notice: clean(diff.notice) };
   const files = parseDiff(clean(diff.text).replace(/\t/g, "  "));
   const edits = stitch(files);
-  if (edits.length === 0) return { ...none, notice: "No changes against main." };
-  const rows: RailRow[] = [];
-  const labels: Record<string, string> = {};
-  const byId = new Map<string, Edit>();
-  for (const path of [...new Set(edits.map((e) => e.path))]) {
-    const mine = edits.filter((e) => e.path === path);
-    rows.push({ id: `file:${path}`, depth: 0, group: true });
-    labels[`file:${path}`] = `${path} (${mine.length})`;
-    for (const e of mine) {
-      rows.push({ id: e.id, depth: 1 });
-      labels[e.id] = labelOf(e);
-      byId.set(e.id, e);
-    }
-  }
   // A line comment belongs to the edit whose added lines include its line (a span: its last line). One on no edit's
-  // lines, and a file-level one, show at the top of the file's changes, so no comment is ever hidden.
+  // lines is a note (AGT-1641 follow-up): its own row, with the branch's lines around it, so a comments-only reader
+  // review is something to read. A file-level one, or a note whose text cannot be read, shows at the top of the file.
   const placed = new Map<string, ReviewComment[]>();
   const perFile = new Map<string, ReviewComment[]>();
+  const notes = new Map<string, Note>();
   const push = (m: Map<string, ReviewComment[]>, k: string, c: ReviewComment) => m.set(k, [...(m.get(k) ?? []), c]);
+  const texts = new Map<string, string | undefined>();
+  const textAt = (path: string) => { if (!texts.has(path)) texts.set(path, textOf?.(path)); return texts.get(path); };
   for (const c of comments) {
     if (c.review) continue;
     const at = c.line;
     const e = at === undefined ? undefined : edits.find((x) => x.path === c.path && x.kind !== "remove" && at >= x.line && at < x.line + Math.max(1, x.added));
-    if (e) push(placed, e.id, c);
+    if (e) { push(placed, e.id, c); continue; }
+    const text = at === undefined ? undefined : textAt(c.path);
+    const note = text === undefined ? undefined : noteOf(c, text);
+    if (note) notes.set(`${NOTE_ROW}${notes.size + 1}`, note);
     else push(perFile, c.path, c);
   }
-  return { rows, labels, edits: byId, comments: placed, fileComments: perFile, summary, counts: countComments(comments) };
+  if (edits.length === 0 && notes.size === 0) return { ...none, fileComments: perFile, notice: "No changes against main." };
+  const rows: RailRow[] = [];
+  const labels: Record<string, string> = {};
+  const byId = new Map<string, Edit>();
+  const paths = [...new Set([...edits.map((e) => e.path), ...[...notes.values()].map((n) => n.path)])];
+  for (const path of paths) {
+    const mine = edits.filter((e) => e.path === path);
+    const mineNotes = [...notes].filter(([, n]) => n.path === path);
+    rows.push({ id: `file:${path}`, depth: 0, group: true });
+    labels[`file:${path}`] = `${path} (${mine.length + mineNotes.length})`;
+    // Changes and notes in the order of their lines, so the rail walks the chapter top to bottom.
+    const items = [...mine.map((e) => ({ id: e.id, line: e.line, label: labelOf(e) })), ...mineNotes.map(([id, n]) => ({ id, line: n.line, label: noteLabel(n.comment) }))].sort((a, b) => a.line - b.line);
+    for (const it of items) {
+      rows.push({ id: it.id, depth: 1 });
+      labels[it.id] = it.label;
+    }
+    for (const e of mine) byId.set(e.id, e);
+  }
+  return { rows, labels, edits: byId, comments: placed, fileComments: perFile, notes, summary, counts: countComments(comments) };
 }
 
 /** Counts by source and tag, sources in a fixed order so the status line does not shuffle. */
@@ -138,6 +178,8 @@ function countComments(comments: readonly ReviewComment[]): Record<string, numbe
  * removed (the edits are in diff order). Undefined when `id` is not a change in this review.
  */
 export function editTarget(review: Review, id: string): { readonly file: string; readonly line: number } | undefined {
+  const note = review.notes.get(id);
+  if (note) return { file: note.path, line: note.line };
   const edit = review.edits.get(id);
   if (!edit) return undefined;
   const mine = edit.addedLines.filter((l) => l.path === edit.path).map((l) => l.line);
@@ -185,9 +227,11 @@ export function wrapLine(row: EditLine, width: number): DiffRow[] {
 /** The main pane's lines for the edit under the rail's cursor (a file's group row has none of its own). */
 export function reviewLines(review: Review, rowId: string | undefined, width: number): { title: string; rows: DiffRow[] } {
   const edit = rowId === undefined ? undefined : review.edits.get(rowId);
-  const path = edit ? edit.path : rowId?.startsWith("file:") ? rowId.slice(5) : undefined;
+  const note = rowId === undefined ? undefined : review.notes.get(rowId);
+  const path = edit ? edit.path : note ? note.path : rowId?.startsWith("file:") ? rowId.slice(5) : undefined;
   // The review's summary and the file's own comments come first, whichever change is under the cursor.
   const top = [...review.summary, ...(path === undefined ? [] : review.fileComments.get(path) ?? [])].flatMap((c) => commentRows(c, width));
+  if (note) return { title: `${note.path} · ${whereOf(note.comment)} · comment`, rows: [...top, ...note.rows.flatMap((r) => wrapLine(r, width)), ...commentRows(note.comment, width)] };
   if (!edit) {
     const notice = review.notice ?? (path !== undefined ? (top.length > 0 ? "" : "Open a change under this file.") : "");
     return { title: path ?? "changes", rows: [...top, ...(notice ? wrapLine({ sign: " ", segs: [{ text: notice, hl: false }] }, width) : [])] };

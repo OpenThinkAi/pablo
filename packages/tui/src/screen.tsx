@@ -73,6 +73,8 @@ export interface ScreenOptions {
   readonly branches?: readonly string[];
   /** A branch's changes against `main` as git's diff, for review mode. */
   readonly diffOf?: (branch: string) => BranchDiff;
+  /** A file's text on a branch, for the lines around a comment on unchanged text. */
+  readonly fileOf?: (branch: string, path: string) => string | undefined;
   /** Scans a chapter's raw text for `check` hits (pablo-cli's checkFile, with the vault's rules): each shows as a box under its line. */
   readonly checks?: (file: string, text: string) => readonly CheckHit[];
   /** `a w`: writes a chapter (the CLI's `runWrite`, passed in from cli.ts) and says what came of it (AGT-1542). */
@@ -130,7 +132,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
         stdout.write(ENTER_ALT);
       }
     });
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} {...(options.refresh ? { refresh: options.refresh } : {})} {...(options.rounds ? { rounds: options.rounds } : {})} {...(options.puller ? { puller: options.puller } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} {...(options.fileOf ? { fileOf: options.fileOf } : {})} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} {...(options.refresh ? { refresh: options.refresh } : {})} {...(options.rounds ? { rounds: options.rounds } : {})} {...(options.puller ? { puller: options.puller } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),
