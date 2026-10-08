@@ -26,7 +26,7 @@ import { clean } from "./sanitize";
 import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
-import { branchRows, editTarget, loadReview, reviewLines, type BranchDiff, type DiffRow, type ReviewComment } from "./review";
+import { branchRows, editTarget, loadReview, reviewLines, type BranchDiff, type DiffRow, type Note, type ReviewComment } from "./review";
 import type { CommentSaver, EditSession, Finisher, Puller, Refresher, Rejected, RoundsPoller } from "./screen";
 import { roundDoc, roundOf, roundRows, reviewsIn } from "./reviews";
 import { commentAction, isSubmit } from "./comment-input";
@@ -199,7 +199,10 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     for (const action of resolve(keyStateOf(state), state.pending, token, keymap)) {
       // Enter on a reading round (AGT-1641) is the screen's: a review that is in is pulled, then opened.
       const round = action.type === "rail.open" && state.mode.kind === "book" ? roundOf(state.rounds, railRow(viewOf(state).rail)?.id) : undefined;
+      // `y` on a reader's comment (AGT-1642) is accept and revise: the author says what Gemma should do about it.
+      const note = action.type === "review.mark" && action.mark === "accepted" && state.mode.kind === "review" ? review?.notes.get(railRow(viewOf(state).rail)?.id ?? "") : undefined;
       if (round) openRound(round);
+      else if (note && note.comment.tag !== "keep" && state.marks[railRow(viewOf(state).rail)?.id ?? ""] !== "accepted") openNoteRevise(railRow(viewOf(state).rail)!.id, note);
       else if (action.type !== "command") dispatch(action);
       else if (action.id === "quit") exit();
       else if (action.id === "settings") dispatch({ type: "settings.open", settings: openSettings(keymap, editor, configFile ?? configPath()) });
@@ -299,7 +302,16 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     if (!selected) return none("Select the sentences to revise first: Shift+Down / Shift+Up in the main pane.");
     dispatch({ type: "revise.open", file: doc.file, sentences: selected.sentences, stored: selected.stored });
   }
-  const requestOf = (r: Revise) => ({ file: r.file, sentences: r.sentences, stored: r.stored, instruction: r.instruction });
+  // `y` on a reader's comment in a review: a revise of the commented line(s) on the review branch, with the comment as
+  // the reader's note. A comment on blank lines has no sentence to revise; it is marked as is.
+  function openNoteRevise(id: string, note: Note) {
+    const branch = reviewBranch ?? (state.mode.kind === "review" ? state.mode.branch : undefined);
+    const sentences = note.quoted.map((l) => l.trim()).filter((l) => l !== "");
+    if (branch === undefined || sentences.length === 0) return void dispatch({ type: "review.mark", mark: "accepted" });
+    if (!reviser) return void dispatch({ type: "content.show", content: { title: "Revise", body: "Revising is not available here.", kind: "revise" } });
+    dispatch({ type: "revise.open", file: note.path, sentences, stored: note.stored, branch, reader: { reader: note.comment.author || "A reader", quoted: sentences.join(" "), comment: note.comment.body }, answers: id });
+  }
+  const requestOf = (r: Revise) => ({ file: r.file, sentences: r.sentences, stored: r.stored, instruction: r.instruction, ...(r.branch !== undefined ? { branch: r.branch } : {}), ...(r.reader ? { note: r.reader } : {}) });
   function startRevise(r: Revise) {
     if (r.phase !== "ask" || r.instruction.trim() === "" || !reviser) return;
     reviser.revise(requestOf(r), (text) => dispatch({ type: "revise.partial", id: r.id, text })).then(

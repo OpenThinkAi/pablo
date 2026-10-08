@@ -78,7 +78,15 @@ export interface Review {
 }
 
 /** A line comment on unchanged text: the comment and the branch's lines around it, the commented ones standing out. */
-export interface Note { readonly comment: ReviewComment; readonly path: string; readonly line: number; readonly rows: readonly EditLine[] }
+export interface Note {
+  readonly comment: ReviewComment;
+  readonly path: string;
+  readonly line: number;
+  readonly rows: readonly EditLine[];
+  /** The commented line(s) as stored, 0-based inclusive, and their text: what a revise answering the comment rewrites. */
+  readonly stored: { readonly from: number; readonly to: number };
+  readonly quoted: readonly string[];
+}
 
 /** Lines of the branch's text shown before and after a commented line. */
 const CONTEXT = 2;
@@ -96,7 +104,7 @@ function noteOf(comment: ReviewComment, text: string): Note | undefined {
     // A blank line between paragraphs stays a blank row, so the passage reads as it does in the chapter.
     rows.push({ sign: " ", segs: [{ text: words, hl: n >= first && n <= line && words.trim() !== "" }] });
   }
-  return { comment, path: comment.path, line, rows };
+  return { comment, path: comment.path, line, rows, stored: { from: first - 1, to: line - 1 }, quoted: lines.slice(first - 1, line) };
 }
 
 /** A note's rail label: the comment's first words, after a mark that says it is a comment, not a change. */

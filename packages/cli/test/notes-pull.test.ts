@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDiff, stitch } from "@openthink/pablo-core";
-import type { ReaderConfig } from "@openthink/pablo-core";
+import type { Adapter, CompletionEvent, ReaderConfig } from "@openthink/pablo-core";
 import { branchDiff, worktreePath } from "../src/branch";
 import { addComment, readComments } from "../src/comments";
 import { reviewCommentsOf } from "../src/critique";
 import { listRoundStatus, movedLine, notesPull } from "../src/notes";
 import { finishReview } from "../src/review-finish";
+import { screenReviser } from "../src/screen-revise";
 import { readRound, realRunner } from "../src/share";
 import { waitingBranches } from "../src/branch";
 import type { RoundRecord, RunResult, Runner } from "../src/share";
@@ -469,4 +470,62 @@ test("share --list: open, submitted, pulled (AC2)", async () => {
   const cli = Bun.spawnSync(["bun", "run", CLI, "share", "--list", "--project", "ice-house", "--json"], { cwd: s.vault, env: { ...s.env, PATH: NO_THINK_PATH } });
   expect(cli.exitCode).toBe(0); // gh is absent on this PATH: every open round reports a notice, none crashes
   expect(JSON.parse(cli.stdout.toString()).rounds).toHaveLength(3);
+});
+
+// AGT-1642, the whole journey a reader's comment takes: pulled, answered by a revise on the review branch (the author's
+// direction plus the reader's note in the pack), the revision accepted, the review finished. The vault is checked at the
+// end, not just the step that changed: main has the revised sentence, the branch and its comments are gone, and nothing
+// a draft would write (README, outline, notes, continuity) was touched.
+test("scenario: pull a comments-only review, revise a fix comment on the branch, finish, and main has only the revision", async () => {
+  const s = setup();
+  const before = (rel: string) => { try { return readFileSync(join(s.project, rel), "utf8"); } catch { return undefined; } };
+  const untouched = ["README.md", "outline/chapters.md", "continuity.md"].map((rel) => [rel, before(rel)] as const);
+  const notesBefore = git(s.vault, "ls-files", "novels/ice-house/notes");
+  expect(pull(s, fakeGh({ [CH]: TEXT }, COMMENT_ONLY)).pulled).toHaveLength(1);
+  const stored = readComments(s.project, BRANCH);
+  const fix = stored.find((c) => c.body === "This beat feels rushed.");
+  expect(fix?.line).toBe(11);
+  const keep = stored.find((c) => c.body === "Love Odile here.");
+  expect(keep?.line).toBe(9);
+
+  // `y` on the fix comment: the author's direction, the reader's note, the commented line from the branch's worktree.
+  const prompts: string[] = [];
+  const model: Adapter = {
+    id: "local", model: "test-gemma", preferredOutput: "text",
+    async *complete(req: { prompt: string }): AsyncIterable<CompletionEvent> {
+      prompts.push(req.prompt);
+      yield { type: "token", text: "The ice groaned under the floor. It went on a long time." };
+      yield { type: "done", stats: { timeToFirstTokenMs: 10, elapsedMs: 20, tokensRead: 100, tokensWritten: 12, tokensPerSecond: 600 } };
+    },
+    async proposeEdit(): Promise<never> { throw new Error("not used"); },
+    async extractFacts(): Promise<never> { throw new Error("not used"); },
+  };
+  const reviser = screenReviser(s.vault, s.project, { adapter: model, env: s.env });
+  const request = { file: CH, sentences: ["The ice groaned under the floor."], stored: { from: 10, to: 10 }, instruction: "slow it down, let the sound linger", branch: BRANCH, note: { reader: fix!.author, quoted: "The ice groaned under the floor.", comment: fix!.body } };
+  const revised = await reviser.revise(request, () => {});
+  expect(revised.ok).toBe(true);
+  if (!revised.ok) return;
+  expect(prompts[0]).toContain("# What a reader said");
+  expect(prompts[0]).toContain('Atara Test, reading the line "The ice groaned under the floor.", wrote: "This beat feels rushed."');
+  expect(prompts[0]).toContain("# What the author wants\n\nslow it down, let the sound linger");
+  expect(prompts[0]).not.toContain("# What to change");
+  const taken = await reviser.take({ ...request, candidate: revised.candidate, offered: revised.candidate, receipt: revised.receipt, model: revised.model });
+  expect(taken).toMatchObject({ ok: true, branch: BRANCH });
+  // One more commit on the same branch, by the model; the line below the revision moved down by one with it.
+  expect(git(s.vault, "log", "-1", "--format=%an|%s", BRANCH)).toBe("test-gemma|ice-house: revise chapters/02-the-saws.md");
+  expect(git(s.vault, "show", `${BRANCH}:${CH}`).split("\n").slice(10, 12)).toEqual(["The ice groaned under the floor.", "It went on a long time."]);
+  const shifted = readComments(s.project, BRANCH);
+  expect(shifted.find((c) => c.body === "Love Odile here.")?.line).toBe(9); // above the revision: unmoved
+  expect(shifted.find((c) => c.body === "This beat feels rushed.")?.line).toBe(12); // on the revised lines: their last line
+
+  // Accept the revision (nothing rejected), dismiss the keep comment, finish.
+  const done = await finishReview(s.project, BRANCH, { removed: [], added: [] }, { slug: "ice-house", env: s.env, now: () => new Date("2026-10-03T12:00:00.000Z") });
+  expect(done).toMatchObject({ ok: true, merged: true, rituals: [] });
+  const main = readFileSync(join(s.vault, CH), "utf8");
+  expect(main).toContain("The ice groaned under the floor.\nIt went on a long time.\n");
+  expect(git(s.vault, "branch", "--list", BRANCH)).toBe("");
+  expect(readComments(s.project, BRANCH)).toEqual([]);
+  for (const [rel, text] of untouched) expect(before(rel)).toBe(text);
+  expect(git(s.vault, "ls-files", "novels/ice-house/notes")).toBe(notesBefore);
+  expect(git(s.vault, "log", "--format=%s", "-3", "main")).not.toContain("draft chapter");
 });

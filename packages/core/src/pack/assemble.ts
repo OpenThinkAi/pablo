@@ -32,6 +32,7 @@ import type {
   Pack,
   PackKind,
   ProseInputs,
+  ReaderNote,
   ReviseInputs,
   Slice,
   SpanEditInputs,
@@ -649,9 +650,22 @@ function reviseSpecs(inputs: ReviseInputs): BuiltSpecs {
       reducible: true,
       cutOrder: 2,
     },
+    // A reader's comment, when the revise answers one (AGT-1642): what they said, on which line, before the author's
+    // direction. Never cut: without it the direction can read as arbitrary.
+    ...(inputs.readerNote === undefined ? [] : [{
+      name: "readerNote",
+      heading: "# What a reader said",
+      text: readerNoteText(inputs.readerNote),
+      source: "a reader's comment",
+      required: true,
+      keep: "head" as const,
+      minTokens: 0,
+      reducible: false,
+      cutOrder: 0,
+    }]),
     {
       name: "instruction",
-      heading: "# What to change",
+      heading: inputs.readerNote === undefined ? "# What to change" : "# What the author wants",
       text: inputs.instruction.trim(),
       source: "the author's instruction",
       required: true,
@@ -679,6 +693,13 @@ function reviseSpecs(inputs: ReviseInputs): BuiltSpecs {
     tail: new Set<string>(),
     expectedOutputTokens: Math.max(MIN_EXPECTED_OUTPUT_TOKENS, estimateTokens(inputs.passage) * 2),
   };
+}
+
+/** `Atara, reading the line "…", wrote: "…"`: the note as one plain paragraph, its quotes flattened to one line each. */
+function readerNoteText(note: ReaderNote): string {
+  const flat = (text: string) => text.replace(/\s+/g, " ").trim();
+  const quoted = flat(note.quoted);
+  return `${flat(note.reader) || "A reader"}, reading ${quoted === "" ? "this passage" : `the line "${quoted}"`}, wrote: "${flat(note.comment)}"`;
 }
 
 function joinSlices(slices: readonly Slice[]): string {

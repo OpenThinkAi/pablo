@@ -183,3 +183,15 @@ test("a revise pack carries style/ then the work's rules, in that order, labelle
   expect(rules?.text.indexOf("Short sentences")).toBeLessThan(rules?.text.indexOf("Napa Valley, 1962") ?? -1);
   expect(rules?.source).toBe(`${STYLE[0]?.path ?? ""}, ${WORK_RULES.path}`);
 });
+
+test("a reader's note (AGT-1642) is its own section before the author's direction, which is then what the author wants", () => {
+  const plain = assemblePack("revise", inputs());
+  expect(plain.slices.map((s) => s.name)).not.toContain("readerNote");
+  expect(plain.prompt).toContain("# What to change");
+  const noted = assemblePack("revise", inputs({ readerNote: { reader: "Atara", quoted: "The cliffs turned\n  burnt sienna.", comment: "burnt sienna has come up\nbefore" }, instruction: "find a vineyard image" }));
+  const names = noted.slices.map((s) => s.name);
+  expect(names.indexOf("readerNote")).toBe(names.indexOf("instruction") - 1);
+  expect(noted.prompt).toContain('# What a reader said\n\nAtara, reading the line "The cliffs turned burnt sienna.", wrote: "burnt sienna has come up before"');
+  expect(noted.prompt).toContain("# What the author wants\n\nfind a vineyard image");
+  expect(noted.prompt).not.toContain("# What to change");
+});

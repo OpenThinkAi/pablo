@@ -4,7 +4,7 @@
 
 import { tokenOf, type InkKey } from "./chord";
 import { clean } from "./sanitize";
-import type { Action, Revise } from "./state";
+import type { Action, ReaderNote, Revise } from "./state";
 
 /** The selected sentences of a document, and the instruction to revise them by. `stored` is 0-based and inclusive. */
 export interface ReviseRequest {
@@ -12,6 +12,10 @@ export interface ReviseRequest {
   readonly sentences: readonly string[];
   readonly stored: { readonly from: number; readonly to: number };
   readonly instruction: string;
+  /** In a review: the branch to read from and commit to (`file` repo-relative). */
+  readonly branch?: string;
+  /** The reader's comment the revise answers. */
+  readonly note?: ReaderNote;
 }
 /** What a revise came to: the candidate and the receipt it carries, or why there is none. */
 export type ReviseResult =

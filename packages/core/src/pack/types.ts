@@ -217,4 +217,17 @@ export interface ReviseInputs {
   readonly after: string;
   /** What to change about the passage, in the author's own words. */
   readonly instruction: string;
+  /**
+   * A reader's comment the revise answers (AGT-1642): who wrote it, the line(s) it was on, and what they said. The
+   * comment says what is wrong; `instruction` stays the author's direction. Absent for a plain revise.
+   */
+  readonly readerNote?: ReaderNote | undefined;
+}
+
+/** A reader's comment on a passage, carried into a revise as its own section of the pack. */
+export interface ReaderNote {
+  readonly reader: string;
+  /** The line(s) the comment was on, verbatim. */
+  readonly quoted: string;
+  readonly comment: string;
 }

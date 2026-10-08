@@ -6,6 +6,7 @@ import { bookRail, type BookStage } from "../src/book";
 import { branchRows, commentRows, loadReview, reviewLines, wrapLine } from "../src/review";
 import type { ReviewComment } from "../src/review";
 import type { FinishResult, Finisher, Rejected } from "../src/screen";
+import type { ReviseRequest, Reviser, TakeRequest } from "../src/revise";
 import { markWords, stitch } from "../src/stitch";
 
 afterEach(() => cleanup());
@@ -417,13 +418,65 @@ test("a comments-only reader review: each comment is a row shown in context, and
   app.stdin.write("s"); await sleep(60);
   expect(f.calls).toEqual([]); // a comment needs a decision too
   expect(plain(app.lastFrame())).toContain("2 changes have no decision yet");
-  app.stdin.write("y"); await sleep(30); // the first comment, then on to the second
+  app.stdin.write("n"); await sleep(30); // dismiss the first comment, then on to the second
   frame = plain(app.lastFrame());
-  expect(frame).toContain("✓ › how young is cora?");
+  expect(frame).toContain("✗ › how young is cora?");
   expect(frame).toContain("line 9 · comment");
   app.stdin.write("n"); await sleep(30);
-  expect(plain(app.lastFrame())).toContain("1 accepted · 1 rejected · 0 pending");
+  expect(plain(app.lastFrame())).toContain("0 accepted · 2 rejected · 0 pending");
   app.stdin.write("s"); await sleep(60);
   expect(f.calls).toEqual([{ branch: "reader/atara-2026-10-04", rejected: { removed: [], added: [] } }]);
   expect(plain(app.lastFrame())).toContain("discarded reader/atara-2026-10-04");
+});
+
+test("y on a reader's comment is accept and revise: the author's direction is required, Gemma's candidate is taken onto the review branch, and the review reads it again", async () => {
+  const asked: ReviseRequest[] = [];
+  const taken: TakeRequest[] = [];
+  let revised = false;
+  const reviser: Reviser = {
+    revise: async (r) => { asked.push(r); return { ok: true, candidate: "The man was young, no more than thirty.", receipt: "abc123def456", model: "gemma", lines: [] }; },
+    take: async (r) => { taken.push(r); revised = true; return { ok: true, branch: "reader/atara-2026-10-04", lines: ["revised chapters/03-yard.md on reader/atara-2026-10-04"] }; },
+  };
+  const NEW = "diff --git a/novels/vs/chapters/03-yard.md b/novels/vs/chapters/03-yard.md\n--- a/novels/vs/chapters/03-yard.md\n+++ b/novels/vs/chapters/03-yard.md\n@@ -6 +6 @@\n-The man was young, perhaps thirty-seven.\n+The man was young, no more than thirty.\n";
+  const app = render(<App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["reader/atara-2026-10-04"]} diffOf={() => ({ ok: true, text: revised ? NEW : "" })} commentsOf={() => READER_NOTES} fileOf={(_b, path) => (path === CH3 ? CH3_TEXT : undefined)} reviser={reviser} size={{ cols: 110, rows: 32 }} />);
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER, DOWN]) { app.stdin.write(k); await sleep(30); } // onto "how young is cora?"
+  app.stdin.write("y"); await sleep(40);
+  let frame = plain(app.lastFrame());
+  expect(frame).toContain("Atara's note: tell Gemma what to revise here");
+  expect(frame).toContain('Atara: "how young is cora?"');
+  expect(frame).toContain("On: The man was young, perhaps thirty-seven.");
+  app.stdin.write(ENTER); await sleep(30);
+  expect(asked).toHaveLength(0); // the note alone is not enough to go on
+  expect(plain(app.lastFrame())).toContain("Tell Gemma what to revise first");
+  for (const ch of "make him younger") { app.stdin.write(ch); await sleep(5); }
+  app.stdin.write(ENTER); await sleep(60);
+  expect(asked).toHaveLength(1);
+  expect(asked[0]).toMatchObject({ file: CH3, branch: "reader/atara-2026-10-04", instruction: "make him younger", sentences: ["The man was young, perhaps thirty-seven."], stored: { from: 5, to: 5 }, note: { reader: "Atara", comment: "how young is cora?", quoted: "The man was young, perhaps thirty-seven." } });
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("no more than thirty");
+  expect(frame).toContain("--- Atara said ---");
+  app.stdin.write(ENTER); await sleep(60);
+  expect(taken).toHaveLength(1);
+  expect(taken[0]).toMatchObject({ branch: "reader/atara-2026-10-04", candidate: "The man was young, no more than thirty.", offered: "The man was young, no more than thirty." });
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("review reader/atara-2026-10-04"); // still in the same review
+  expect(frame).toContain("Gemma's version is now a change in this review");
+  expect(frame).toContain("~ The man was young, no"); // the review read the branch again
+  expect(frame).toMatch(/0 accepted · 0 rejected · 2 pending/); // the new change and the other comment wait for a decision
+});
+
+test("n on a reader's comment dismisses it with no model call; a keep comment's y only accepts it", async () => {
+  const asked: ReviseRequest[] = [];
+  const reviser: Reviser = { revise: async (r) => { asked.push(r); return { ok: false, message: "no" }; }, take: async () => ({ ok: false, message: "no" }) };
+  const notes: ReviewComment[] = [{ ...READER_NOTES[2]!, tag: "keep" }, READER_NOTES[1]!];
+  const app = render(<App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["reader/atara-2026-10-04"]} diffOf={() => ({ ok: true, text: "" })} commentsOf={() => notes} fileOf={(_b, path) => (path === CH3 ? CH3_TEXT : undefined)} reviser={reviser} size={{ cols: 110, rows: 32 }} />);
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER, DOWN]) { app.stdin.write(k); await sleep(30); }
+  app.stdin.write("y"); await sleep(40); // a keep comment: praise, nothing to revise
+  app.stdin.write("n"); await sleep(40);
+  expect(asked).toHaveLength(0);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("1 accepted · 1 rejected · 0 pending");
+  expect(frame).not.toContain("tell Gemma what to revise");
 });

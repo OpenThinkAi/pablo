@@ -397,6 +397,31 @@ function stripFrontmatter(text: string): string {
  * `Ritual`s and never throws. Called by `mergeDraft` once a draft is on `main`;
  * `write` never calls it. `workDir` and `chapterPath` are the merged tree's.
  */
+/**
+ * The after-merge steps for a chapter a non-draft branch changed (revise/, edit/, reader/, AGT-1642): it was not drafted,
+ * so none of the "chapter drafted" steps run (outline tick, README bullet, continuity re-extraction, think "drafted").
+ * The author's own review comments on the chapter, if any, go to its dated note under "revised", committed on their own.
+ */
+export function runAfterRevision(workDir: string, chapter: number, opts: Pick<RitualOptions, "slug" | "authorNotes" | "now"> & { readonly branch: string }): Ritual[] {
+  const notes = (opts.authorNotes ?? []).filter((n) => chapterOfPath(n.path) === chapter);
+  if (notes.length === 0) return [];
+  const today = (opts.now ?? (() => new Date()))().toISOString().slice(0, 10);
+  const { abs, rel } = notePath(workDir, chapter, today);
+  const note = attempt("note", () => {
+    mkdirSync(dirname(abs), { recursive: true });
+    const body = `Revised on ${opts.branch}.${authorSection(notes)}`;
+    if (existsSync(abs)) {
+      const existing = readFileSync(abs, "utf8");
+      writeFileSync(abs, `${existing}${existing.endsWith("\n") ? "" : "\n"}\n${body}\n`, "utf8");
+      return { name: "note", status: "ran", detail: `appended to ${rel}` };
+    }
+    writeFileSync(abs, `# ${today} — chapter ${chapter} revised\n\n${body}\n`, "utf8");
+    return { name: "note", status: "ran", detail: `created ${rel}` };
+  });
+  const git = note.status === "ran" ? attempt("git", () => runGit(workDir, [rel], `${opts.slug}: notes on chapter ${chapter} (${opts.branch})`)) : { name: "git", status: "skipped" as const, detail: "no note written" };
+  return [note, git];
+}
+
 export async function runAfterMerge(workDir: string, chapter: number, chapterPath: string, opts: RitualOptions): Promise<Ritual[]> {
   const now = opts.now ?? (() => new Date());
   // Captured before defaulting `env` — see `runThink`'s doc comment on `allowNvmFallback`.
