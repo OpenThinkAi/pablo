@@ -390,14 +390,6 @@ function stripFrontmatter(text: string): string {
 }
 
 /**
- * Runs the six after-merge rituals, in order: outline, note, readme,
- * continuity, git, think. `workDir` is the project directory (e.g.
- * `<vault>/novels/<slug>`); `chapterPath` is the absolute path to the
- * chapter file `write.ts` just wrote. Always resolves to exactly six
- * `Ritual`s and never throws. Called by `mergeDraft` once a draft is on `main`;
- * `write` never calls it. `workDir` and `chapterPath` are the merged tree's.
- */
-/**
  * The after-merge steps for a chapter a non-draft branch changed (revise/, edit/, reader/, AGT-1642): it was not drafted,
  * so none of the "chapter drafted" steps run (outline tick, README bullet, continuity re-extraction, think "drafted").
  * The author's own review comments on the chapter, if any, go to its dated note under "revised", committed on their own.
@@ -422,6 +414,14 @@ export function runAfterRevision(workDir: string, chapter: number, opts: Pick<Ri
   return [note, git];
 }
 
+/**
+ * Runs the six after-merge rituals, in order: outline, note, readme,
+ * continuity, git, think. `workDir` is the project directory (e.g.
+ * `<vault>/novels/<slug>`); `chapterPath` is the absolute path to the
+ * chapter file `write.ts` just wrote. Always resolves to exactly six
+ * `Ritual`s and never throws. Called by `mergeDraft` once a draft is on `main`;
+ * `write` never calls it. `workDir` and `chapterPath` are the merged tree's.
+ */
 export async function runAfterMerge(workDir: string, chapter: number, chapterPath: string, opts: RitualOptions): Promise<Ritual[]> {
   const now = opts.now ?? (() => new Date());
   // Captured before defaulting `env` — see `runThink`'s doc comment on `allowNvmFallback`.

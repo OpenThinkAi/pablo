@@ -129,8 +129,9 @@ export async function mergeChanges(projectPath: string, branch: string, opts: Me
   const removed = deleteBranch(repo, opts.slug, branch, { env: opts.env ?? process.env });
   if (!removed.ok) notices.push(removed.notice);
   // Not a draft: nothing was drafted, so only the author's own comments are written down (AGT-1642).
+  const revision = { slug: opts.slug, branch, authorNotes: opts.authorNotes, now: opts.now };
   const rituals: Ritual[] = [];
-  for (const chapter of chapters) rituals.push(...runAfterRevision(projectPath, chapter, { slug: opts.slug, branch, ...(opts.authorNotes ? { authorNotes: opts.authorNotes } : {}), ...(opts.now ? { now: opts.now } : {}) }));
+  for (const chapter of chapters) rituals.push(...runAfterRevision(projectPath, chapter, revision));
   return { ok: true, sha: merged.sha as string, chapters, rituals, notices };
 }
 

@@ -200,9 +200,10 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
       // Enter on a reading round (AGT-1641) is the screen's: a review that is in is pulled, then opened.
       const round = action.type === "rail.open" && state.mode.kind === "book" ? roundOf(state.rounds, railRow(viewOf(state).rail)?.id) : undefined;
       // `y` on a reader's comment (AGT-1642) is accept and revise: the author says what Gemma should do about it.
-      const note = action.type === "review.mark" && action.mark === "accepted" && state.mode.kind === "review" ? review?.notes.get(railRow(viewOf(state).rail)?.id ?? "") : undefined;
+      const row = railRow(viewOf(state).rail);
+      const note = row && action.type === "review.mark" && action.mark === "accepted" && state.mode.kind === "review" ? review?.notes.get(row.id) : undefined;
       if (round) openRound(round);
-      else if (note && note.comment.tag !== "keep" && state.marks[railRow(viewOf(state).rail)?.id ?? ""] !== "accepted") openNoteRevise(railRow(viewOf(state).rail)!.id, note);
+      else if (row && note && note.comment.tag !== "keep" && state.marks[row.id] !== "accepted") openNoteRevise(row.id, note);
       else if (action.type !== "command") dispatch(action);
       else if (action.id === "quit") exit();
       else if (action.id === "settings") dispatch({ type: "settings.open", settings: openSettings(keymap, editor, configFile ?? configPath()) });
