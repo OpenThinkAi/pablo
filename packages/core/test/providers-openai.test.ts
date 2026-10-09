@@ -353,3 +353,55 @@ test("a completion forwards temperature and seed only when the request sets them
   expect(fake.requests[1]?.body?.["temperature"]).toBe(0.8);
   expect(fake.requests[1]?.body?.["seed"]).toBe(7);
 });
+
+test("a local endpoint is asked not to think, on both the streamed and the tool path", async () => {
+  const fake = endpoint({ tool: { arguments: { replacement: "A tighter line." } } });
+  const adapter = providersAt(fake.url, { local: true }).adapter("local");
+  const document: Document = { path: "/tmp/chapter-01.md", text: "A line that could be tighter." };
+
+  await drain(adapter.complete({ prompt: "plain" }));
+  await adapter.proposeEdit({ intent: revise, instruction: "tighten it", document, span: { start: 0, end: 29 }, output: "tool" });
+
+  for (const request of fake.requests) {
+    expect(request.body["chat_template_kwargs"]).toEqual({ enable_thinking: false });
+  }
+});
+
+test("thinking stays the server's call for a hosted endpoint, and a config may turn it back on locally", async () => {
+  const fake = endpoint({ tokens: ["a"] });
+
+  await drain(providersAt(fake.url, { local: false }).adapter("local").complete({ prompt: "hosted" }));
+  await drain(providersAt(fake.url, { local: true, thinking: true }).adapter("local").complete({ prompt: "thinks" }));
+  await drain(providersAt(fake.url, { local: false, thinking: false }).adapter("local").complete({ prompt: "told not to" }));
+
+  expect(fake.requests[0]?.body).not.toHaveProperty("chat_template_kwargs");
+  expect(fake.requests[1]?.body).not.toHaveProperty("chat_template_kwargs");
+  expect(fake.requests[2]?.body["chat_template_kwargs"]).toEqual({ enable_thinking: false });
+});
+
+test('a "thinking" that is not true or false is a config error', () => {
+  expect(() => parseConfig(JSON.stringify({ providers: { local: { thinking: "no" } } }))).toThrow(/"thinking" must be true or false/);
+});
+
+test("a model that spends its whole budget thinking is named as such, not an empty answer", async () => {
+  const fake = endpoint({
+    reasoning: ["Original ", "sentence: ", "..."],
+    tokens: [],
+    finishReason: "length",
+    usage: { prompt_tokens: 40, completion_tokens: 60 },
+  });
+
+  const said = await drain(providersAt(fake.url, { thinking: true }).adapter("local").complete({ prompt: "revise" })).catch(
+    (error: unknown) => error,
+  );
+
+  expect(said).toBeInstanceOf(ProviderResponseError);
+  expect((said as Error).message).toContain("spent all 60 tokens of its budget thinking");
+  expect((said as Error).message).toContain('"thinking": false');
+});
+
+test("thinking followed by an answer streams only the answer", async () => {
+  const fake = endpoint({ reasoning: ["hmm"], tokens: ["The ", "man ", "was ", "old."] });
+  const { text } = await drain(providersAt(fake.url, { thinking: true }).adapter("local").complete({ prompt: "revise" }));
+  expect(text).toBe("The man was old.");
+});

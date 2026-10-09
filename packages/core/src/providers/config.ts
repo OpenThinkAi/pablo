@@ -47,6 +47,15 @@ export interface ProviderConfig {
   readonly timeoutMs: number;
   /** Sampling temperature `write` sends when `--temperature` is not given; absent means write's own default. */
   readonly temperature?: number;
+  /**
+   * Whether an OpenAI-compatible endpoint may think before it answers. Absent
+   * means off for a local endpoint and the server's own default otherwise.
+   * Gemma 4 on mlx_lm thinks by default, and the thinking spends the same
+   * `max_tokens` the answer needs: a one-sentence revise ran out mid-thought
+   * and came back empty (2026-10-08). Off is also what the 2026-09-02
+   * bake-off measured.
+   */
+  readonly thinking?: boolean;
 }
 
 /**
@@ -215,6 +224,11 @@ function readProvider(
     throw new ProviderConfigError(`pablo: ${where}: "temperature" must be a number from 0 to 2`);
   }
 
+  const thinking = entry["thinking"] ?? existing?.thinking;
+  if (thinking !== undefined && typeof thinking !== "boolean") {
+    throw new ProviderConfigError(`pablo: ${where}: "thinking" must be true or false`);
+  }
+
   const rawKey = entry["key"];
   if (rawKey !== undefined && typeof rawKey !== "string") {
     throw new ProviderConfigError(`pablo: ${where}: "key" must be a string`);
@@ -229,6 +243,7 @@ function readProvider(
     key: keySourceFor(id, rawKey, where),
     timeoutMs: rawTimeout,
     ...(rawTemperature === undefined ? {} : { temperature: rawTemperature }),
+    ...(thinking === undefined ? {} : { thinking }),
   };
 }
 

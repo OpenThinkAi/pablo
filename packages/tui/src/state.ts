@@ -78,7 +78,7 @@ export interface Revise {
   readonly branch?: string;
   /** The reader's comment the revise answers, shown in the box and sent to the model as its own section. */
   readonly reader?: ReaderNote;
-  /** The review row (`note:<n>`) the revise answers; taking the candidate marks it accepted. */
+  /** The review row (`note:<n>`) the revise answers; taking the candidate moves its comment under the new change. */
   readonly answers?: string;
 }
 
@@ -752,14 +752,17 @@ export function reduce(s: State, a: Action): State {
     }
     case "revise.taken": {
       if (s.revise?.id !== a.id) return s;
-      // Taken into the review it was opened from (AGT-1642): the branch is read again, the revision is one more change to
-      // accept or reject, and the comment it answers is accepted.
+      // Taken into the review it was opened from (AGT-1642): the branch is read again and the revision is one more change
+      // to accept or reject, with the comment it answers under it. Decisions on other comments stay (a note's id is its
+      // comment's, see loadReview); a change's id is its place in the diff, which the new change can shift, so those are
+      // decided again, as after an edit.
       if (s.revise.branch !== undefined && s.mode.kind === "review") {
         const answered = s.revise.answers;
+        const marks = Object.fromEntries(Object.entries(s.marks).filter(([id]) => id.startsWith(NOTE_ROW) && id !== answered));
+        const dropped = Object.keys(s.marks).some((id) => id.startsWith(EDIT_ROW));
         return {
-          ...s, revise: null, full: false, reviewGen: s.reviewGen + 1,
-          marks: answered === undefined ? s.marks : { ...s.marks, [answered]: "accepted" },
-          content: writeContent(`Revised on ${a.branch}`, [...a.lines, "", "Gemma's version is now a change in this review, with the note under it: y accepts it, n rejects it."].join("\n")),
+          ...s, revise: null, full: false, reviewGen: s.reviewGen + 1, marks,
+          content: writeContent(`Revised on ${a.branch}`, [...a.lines, "", "Gemma's version is now a change in this review, with the note under it: y accepts it, n rejects it.", ...(dropped ? ["the review reloaded: decide each change again"] : [])].join("\n")),
           contentScroll: { ...s.contentScroll, scroll: 0, length: 0 },
         };
       }
