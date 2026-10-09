@@ -17,6 +17,10 @@ export interface FakeEndpointOptions {
   /** Milliseconds between tokens; the serialization test needs the stream to last. */
   readonly gapMs?: number;
   readonly usage?: { readonly prompt_tokens: number; readonly completion_tokens: number };
+  /** Thinking streamed as mlx_lm does (`delta.reasoning`) before any `tokens`. */
+  readonly reasoning?: readonly string[];
+  /** The last chunk's finish_reason, e.g. "length" when the budget ran out. */
+  readonly finishReason?: string;
   /** Answer with headers and then never send a byte, so the adapter must time out. */
   readonly silent?: boolean;
   readonly status?: number;
@@ -73,9 +77,18 @@ export function startFakeEndpoint(options: FakeEndpointOptions = {}): FakeEndpoi
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           if (options.silent) return;
+          for (const thought of options.reasoning ?? []) {
+            await Bun.sleep(gapMs);
+            controller.enqueue(encoder.encode(event({ choices: [{ index: 0, delta: { reasoning: thought } }] })));
+          }
           for (const token of tokens) {
             await Bun.sleep(gapMs);
             controller.enqueue(encoder.encode(event({ choices: [{ index: 0, delta: { content: token } }] })));
+          }
+          if (options.finishReason !== undefined) {
+            controller.enqueue(
+              encoder.encode(event({ choices: [{ index: 0, delta: {}, finish_reason: options.finishReason }] })),
+            );
           }
           if (options.usage) controller.enqueue(encoder.encode(event({ choices: [], usage: options.usage })));
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));

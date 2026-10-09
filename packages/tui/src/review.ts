@@ -139,14 +139,19 @@ export function loadReview(diff: BranchDiff | undefined, comments: readonly Revi
   const push = (m: Map<string, ReviewComment[]>, k: string, c: ReviewComment) => m.set(k, [...(m.get(k) ?? []), c]);
   const texts = new Map<string, string | undefined>();
   const textAt = (path: string) => { if (!texts.has(path)) texts.set(path, textOf?.(path)); return texts.get(path); };
+  // A note's id is its comment's place among the line comments, not its place among the notes: taking a revision
+  // reloads the review mid-decision and moves the answered comment under the new change, and the decisions already
+  // made on the other notes have to stay on the comments they were made on.
+  let ordinal = 0;
   for (const c of comments) {
     if (c.review) continue;
+    ordinal += 1;
     const at = c.line;
     const e = at === undefined ? undefined : edits.find((x) => x.path === c.path && x.kind !== "remove" && at >= x.line && at < x.line + Math.max(1, x.added));
     if (e) { push(placed, e.id, c); continue; }
     const text = at === undefined ? undefined : textAt(c.path);
     const note = text === undefined ? undefined : noteOf(c, text);
-    if (note) notes.set(`${NOTE_ROW}${notes.size + 1}`, note);
+    if (note) notes.set(`${NOTE_ROW}${ordinal}`, note);
     else push(perFile, c.path, c);
   }
   if (edits.length === 0 && notes.size === 0) return { ...none, fileComments: perFile, notice: "No changes against main." };

@@ -137,6 +137,9 @@ export function createOpenAiAdapter(options: OpenAiAdapterOptions): Adapter {
     let firstTokenAt: number | undefined;
     let tokensWritten = 0;
     let tokensRead: number | undefined;
+    let answered = false;
+    let thought = false;
+    let finish: string | undefined;
 
     try {
       const idleMs = request.timeoutMs ?? provider.timeoutMs;
@@ -186,7 +189,10 @@ export function createOpenAiAdapter(options: OpenAiAdapterOptions): Adapter {
             const parsed = parseChunk(provider.endpoint, payload);
             if (parsed.promptTokens !== undefined) tokensRead = parsed.promptTokens;
             if (parsed.completionTokens !== undefined) tokensWritten = parsed.completionTokens;
+            if (parsed.reasoning) thought = true;
+            if (parsed.finish !== undefined) finish = parsed.finish;
             if (parsed.text === undefined || parsed.text === "") continue;
+            answered = true;
             if (firstTokenAt === undefined) firstTokenAt = now();
             if (parsed.completionTokens === undefined) tokensWritten += 1;
             yield { type: "token", text: parsed.text };
@@ -194,6 +200,17 @@ export function createOpenAiAdapter(options: OpenAiAdapterOptions): Adapter {
         }
       } finally {
         reader.releaseLock();
+      }
+
+      // A thinking model can spend the whole budget before it answers; that is
+      // not an empty answer, and saying so names the fix.
+      if (!answered && thought) {
+        throw new ProviderResponseError(
+          provider.endpoint,
+          finish === "length"
+            ? `only thinking: it spent all ${tokensWritten} tokens of its budget thinking and never answered (set "thinking": false for this provider)`
+            : `only thinking and no answer (set "thinking": false for this provider)`,
+        );
       }
 
       const stats = measure(started, firstTokenAt ?? now(), now(), tokensRead, tokensWritten);
@@ -259,6 +276,7 @@ export function createOpenAiAdapter(options: OpenAiAdapterOptions): Adapter {
             // Forced rather than "auto": the caller has already decided this is
             // the tool path, and mlx_lm honours the forced form.
             tool_choice: { type: "function", function: { name: tool.function.name } },
+            ...thinkingField(provider),
             ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
             ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
           }),
@@ -387,10 +405,22 @@ function body(provider: ProviderConfig, request: CompletionRequest): Record<stri
     messages: [{ role: "user", content: request.prompt }],
     stream: true,
     stream_options: { include_usage: true },
+    ...thinkingField(provider),
     ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     ...(request.seed === undefined ? {} : { seed: request.seed }),
   };
+}
+
+/**
+ * The chat-template switch for a model that thinks before it answers (Gemma 4,
+ * Qwen3). Sent only when thinking is off, which a local endpoint is unless its
+ * config says otherwise; a hosted OpenAI endpoint gets nothing, because it
+ * rejects arguments it does not know. A template with no such switch ignores it.
+ */
+function thinkingField(provider: ProviderConfig): Record<string, unknown> {
+  const off = provider.thinking === false || (provider.thinking === undefined && provider.local);
+  return off ? { chat_template_kwargs: { enable_thinking: false } } : {};
 }
 
 /**
@@ -533,6 +563,9 @@ function extractPrompt(request: ExtractRequest): string {
 
 interface ParsedChunk {
   readonly text: string | undefined;
+  /** Whether the chunk carried thinking (mlx_lm `reasoning`, others `reasoning_content`). */
+  readonly reasoning: boolean;
+  readonly finish: string | undefined;
   readonly promptTokens: number | undefined;
   readonly completionTokens: number | undefined;
 }
@@ -546,12 +579,16 @@ function parseChunk(endpoint: string, payload: string): ParsedChunk {
     throw new ProviderResponseError(endpoint, `a stream chunk that is not JSON: ${truncate(payload)}`);
   }
   const chunk = parsed as {
-    choices?: { delta?: { content?: unknown } }[];
+    choices?: { delta?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown }; finish_reason?: unknown }[];
     usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
   };
-  const content = chunk.choices?.[0]?.delta?.content;
+  const choice = chunk.choices?.[0];
+  const content = choice?.delta?.content;
+  const reasoning = choice?.delta?.reasoning ?? choice?.delta?.reasoning_content;
   return {
     text: typeof content === "string" ? content : undefined,
+    reasoning: typeof reasoning === "string" && reasoning !== "",
+    finish: typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined,
     promptTokens: countOf(chunk.usage?.prompt_tokens),
     completionTokens: countOf(chunk.usage?.completion_tokens),
   };

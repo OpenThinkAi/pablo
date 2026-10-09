@@ -466,6 +466,30 @@ test("y on a reader's comment is accept and revise: the author's direction is re
   expect(frame).toMatch(/0 accepted · 0 rejected · 2 pending/); // the new change and the other comment wait for a decision
 });
 
+test("taking a revision keeps the decisions on the other comments where they were made (Atara's store order, 2026-10-08)", async () => {
+  // The store lists "how young is cora?" first, as Atara's real round did. Before stable note ids, the take moved that
+  // comment under the new change, the other comment became note:1, and the accepted mark landed on it.
+  const notes: ReviewComment[] = [READER_NOTES[0]!, READER_NOTES[2]!, READER_NOTES[1]!];
+  let revised = false;
+  const reviser: Reviser = {
+    revise: async () => ({ ok: true, candidate: "The man was thirty-seven.", receipt: "abc123def456", model: "gemma", lines: [] }),
+    take: async () => { revised = true; return { ok: true, branch: "reader/atara-2026-10-04", lines: ["revised"] }; },
+  };
+  const NEW = "diff --git a/novels/vs/chapters/03-yard.md b/novels/vs/chapters/03-yard.md\n--- a/novels/vs/chapters/03-yard.md\n+++ b/novels/vs/chapters/03-yard.md\n@@ -6 +6 @@\n-The man was young, perhaps thirty-seven.\n+The man was thirty-seven.\n";
+  const app = render(<App title="Ice House" format="novel" book={bookRail(STAGES)} branches={["reader/atara-2026-10-04"]} diffOf={() => ({ ok: true, text: revised ? NEW : "" })} commentsOf={() => notes} fileOf={(_b, path) => (path === CH3 ? CH3_TEXT : undefined)} reviser={reviser} size={{ cols: 110, rows: 32 }} />);
+  await sleep(30);
+  for (const k of [DOWN, DOWN, ENTER, DOWN, DOWN]) { app.stdin.write(k); await sleep(30); } // onto the burnt sienna comment
+  app.stdin.write("n"); await sleep(40); // rejected; the cursor moves on to the undecided "how young is cora?"
+  app.stdin.write("y"); await sleep(40);
+  for (const ch of "drop young") { app.stdin.write(ch); await sleep(5); }
+  app.stdin.write(ENTER); await sleep(60);
+  app.stdin.write(ENTER); await sleep(60);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("~ The man was thirty-seve"); // the rail clips the label
+  expect(frame).toContain("0 accepted · 1 rejected · 1 pending"); // the new change waits; the rejection stayed on its comment
+  expect(frame).toMatch(/✗ › burnt sienna/);
+});
+
 test("n on a reader's comment dismisses it with no model call; a keep comment's y only accepts it", async () => {
   const asked: ReviseRequest[] = [];
   const reviser: Reviser = { revise: async (r) => { asked.push(r); return { ok: false, message: "no" }; }, take: async () => ({ ok: false, message: "no" }) };
