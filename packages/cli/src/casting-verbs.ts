@@ -22,6 +22,11 @@
  *   with the gates, retakes and pace policy into takes and `v1.json`; it
  *   provisions the `scorers` extra, and with `--json-lines` relays each line's
  *   progress event to stdout as it lands (always on stderr).
+ * - `mix --project W --episode N [--version k]` (AGT-1684) turns a performed
+ *   episode into `renders/epNN/epNN.v<k>.m4a`: the takes paced by the manifest,
+ *   the script's cues from the content-addressed cue library, normalised and
+ *   encoded, the `epNN.m4a` link moved and each line's start/end written into
+ *   the manifest. It provisions the `mix` extra (Stable Audio Open).
  *
  * Each `run` resolves what it can from `ctx` (the vault, for the library's
  * default `<vault>/casting`; the work, when `project` is given, for receipts)
@@ -35,7 +40,7 @@
 
 import { resolve } from "node:path";
 import { z } from "zod";
-import { ensureProvisioned, realCastingDeps, runCasting, runPython, runPythonStreaming, SCORERS_EXTRA } from "./casting";
+import { ensureProvisioned, MIX_EXTRA, realCastingDeps, runCasting, runPython, runPythonStreaming, SCORERS_EXTRA } from "./casting";
 import type { CastingDeps } from "./casting";
 import { readMarker } from "./marker";
 import { findVault, resolveProject } from "./project";
@@ -113,6 +118,17 @@ const PERFORM_ARGS = z.object({
     .optional()
     .default(false)
     .describe("Also write each line's progress event (take key, path, status, stretch) to stdout as a JSON line as it lands; they always go to stderr."),
+});
+
+const MIX_ARGS = z.object({
+  project: z.string().describe("The work whose performed radio episode to mix."),
+  episode: z.number().int().positive().describe("The episode number; it must have been performed (`pablo perform`)."),
+  version: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("The manifest version to mix (default: the newest). An unmixed version is completed in place; a version that already has audio is remixed into a new version (the newest only)."),
 });
 
 const VOICES_ARGS = z.object({
@@ -294,7 +310,35 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     },
   };
 
-  return [audition, cast, voices, perform] as readonly Verb[];
+  const mix: Verb<typeof MIX_ARGS.shape> = {
+    name: "mix",
+    description:
+      "Mix a performed radio episode into its episode file: the takes in line order, each paced by the manifest's stretch, with the script's SFX, BED and MUSIC cues placed from the content-addressed cue library (Stable Audio Open for SFX and beds on MPS, a synthesized tonewheel organ for music; the same description is the same asset in every episode), normalised to -1 dBFS and encoded as AAC in renders/epNN/epNN.v<k>.m4a, with epNN.m4a moved to it and each line's start and end written into the manifest. Mixing a version that already has audio makes a new version with identical takes; earlier versions' audio is never touched. Needs the episode performed first; generates cues on the GPU only for descriptions not yet in the library.",
+    args: MIX_ARGS,
+    run: async (args, ctx) => {
+      const where = locate(ctx, args.project);
+      if ("exitCode" in where) return where;
+      const work = where.work as string;
+      const machine = deps(ctx.env);
+      const casting = { env: ctx.env, stderr: ctx.stderr };
+      const ready = ensureProvisioned(casting, machine, work, [MIX_EXTRA]);
+      if (!ready.ok) return ready.result;
+      const result = runPython(ready.layout, machine, casting, [
+        "mix",
+        ...flag("--episode", args.episode),
+        ...flag("--version", args.version),
+        ...flag("--vault", where.vault),
+        "--work",
+        work,
+      ]);
+      return {
+        body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) },
+        exitCode: result.exitCode,
+      };
+    },
+  };
+
+  return [audition, cast, voices, perform, mix] as readonly Verb[];
 }
 
 /** A `perform` progress line (`{"event": ...}`), as opposed to the final body. */

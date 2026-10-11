@@ -549,6 +549,9 @@ export function takesGcText(body: unknown): string {
 /** The extra `pablo gate` needs to score audio (`packages/casting/pyproject.toml`). */
 export const SCORERS_EXTRA = "scorers";
 
+/** The extra `pablo mix` needs to generate SFX and BED cues (Stable Audio Open: diffusers, torch). AGT-1684. */
+export const MIX_EXTRA = "mix";
+
 /** Makes a path the author typed absolute against their cwd: the Python side runs in the casting sources. */
 function absolute(cwd: string, path: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);

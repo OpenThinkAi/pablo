@@ -47,6 +47,7 @@ test("VERBS exposes exactly the twenty-eight verbs, each project-required verb r
     "draft_unit",
     "merge",
     "migrate",
+    "mix", // AGT-1684
     "notes",
     "output",
     "perform", // AGT-1683
@@ -163,6 +164,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     keep: { type: "string" }, // AGT-1671: promote --keep
     engine: { type: "string" }, // AGT-1683: perform --engine
     "json-lines": { type: "boolean", default: false }, // AGT-1683: perform --json-lines
+    version: { type: "string" }, // AGT-1684: mix --version k (cli.ts reads it as --mix-version; elsewhere --version prints the version)
   });
 });
 
