@@ -5,11 +5,17 @@ rest from the words of the quoted description. Fields (a fixed vocabulary, so
 matching is comparable): gender, age, pitch, energy, warmth, register, era,
 roles. Phrases that map to nothing are returned as `free_text`, left for the
 harness (a later ticket) to normalise; they are never guessed at here.
+
+`parse_traits` (AGT-1679) validates a card's `traits` block against the same
+vocabulary (`TRAIT_VOCABULARY`, derived from the mapper's tables), so what
+the mapper produces is always a valid card block.
 """
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 AGE_BANDS = ("child", "teen", "20s", "30s", "40s", "50s", "60s", "70s")
@@ -143,3 +149,68 @@ def normalise(role: str, gender: str | None, description: str | None) -> Traits:
     if kinds:
         traits["roles"] = kinds
     return Traits(traits=traits, free_text=tuple(free))
+
+
+# ---------------------------------------------------------------------------
+# Validation (AGT-1679): the vocabulary a card's `traits` block must use.
+# Derived from the mapper's own tables above, so a mapped description always
+# validates and there is one vocabulary, not two.
+# ---------------------------------------------------------------------------
+
+TRAIT_VOCABULARY: dict[str, tuple[str, ...]] = {
+    "gender": ("f", "m", "x"),
+    "age": AGE_BANDS,
+    **{name: tuple(table) for name, table in _TABLES.items()},
+}
+"""Closed fields and their allowed values, in card order."""
+
+TRAIT_ORDER = (*TRAIT_VOCABULARY.keys(), "roles")
+_ROLE_KIND = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+
+
+class TraitsError(ValueError):
+    """A traits block outside the vocabulary; a refusal naming the field."""
+
+
+def parse_traits(raw: str | Mapping[str, object] | None) -> dict[str, object]:
+    """Validates a traits block (a JSON string or a mapping) and returns it in card order.
+
+    `roles` is the one open field: short lowercase role kinds ("lead",
+    "bookkeeper"), weighed lightly by the matcher; every other field is closed.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise TraitsError(f"--traits is not valid JSON: {error}") from error
+    else:
+        value = dict(raw)
+    if not isinstance(value, dict):
+        raise TraitsError("--traits must be a JSON object")
+
+    unknown = sorted(set(value) - set(TRAIT_ORDER))
+    if unknown:
+        raise TraitsError(f"unknown trait {', '.join(unknown)}; the fields are {', '.join(TRAIT_ORDER)}")
+
+    traits: dict[str, object] = {}
+    for name in TRAIT_ORDER:
+        if name not in value:
+            continue
+        given = value[name]
+        if name == "roles":
+            if not isinstance(given, list) or not all(isinstance(r, str) and _ROLE_KIND.match(r) for r in given):
+                raise TraitsError('trait roles must be a list of short lowercase role kinds, e.g. ["lead", "bookkeeper"]')
+            traits[name] = list(given)
+            continue
+        allowed = TRAIT_VOCABULARY[name]
+        if given not in allowed:
+            raise TraitsError(f"trait {name} must be one of {', '.join(allowed)} (got {json.dumps(given)})")
+        traits[name] = given
+    return traits
+
+
+def require_gender(traits: Mapping[str, object]) -> None:
+    if "gender" not in traits:
+        raise TraitsError('a card\'s traits need at least a gender (matching filters on it): pass --traits \'{"gender": "f", ...}\'')

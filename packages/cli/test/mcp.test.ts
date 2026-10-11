@@ -67,7 +67,9 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
   const { tools } = await client.listTools();
 
   expect(tools.map((t) => t.name).sort()).toEqual([
+    "audition", // AGT-1679: the voice library's verbs; project optional (receipts only)
     "bind",
+    "cast",
     "check",
     "critique",
     "draft_chapter",
@@ -87,6 +89,7 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "voice_list",
     "voice_rule",
     "voice_show",
+    "voices",
     "write",
   ]);
   for (const tool of tools) {

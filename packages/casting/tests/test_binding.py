@@ -145,7 +145,7 @@ def test_bind_pins_the_card_hash_and_records_manual(env: dict[str, str], vault: 
     card = json.loads((vault / "casting/voices/cora/card.json").read_text())
     entry = cast["roles"]["CORA"]
     assert entry["slug"] == "cora" and entry["by"] == "manual"
-    assert entry["card_hash"] == card_hash(card) and entry["card_hash"].startswith("sha256:")
+    assert entry["card_hash"] == card_hash(card) and len(entry["card_hash"]) == 64  # library.card_hash, hex
     assert "at" in entry and cast["version"] == 1
 
 
@@ -154,6 +154,19 @@ def test_card_hash_follows_the_reference(vault: Path) -> None:
     changed = {**card, "reference": {"sha256": "different"}}
     assert card_hash(card) != card_hash(changed)
     assert card_hash(card) == card_hash(dict(reversed(list(card.items()))))  # key order does not matter
+
+
+def test_retiring_a_bound_voice_keeps_its_pin_and_refuses_new_binds(env: dict[str, str], vault: Path, work: Path) -> None:
+    """AGT-1679: `voices retire` leaves the card hash alone (stories that pin it still match) but bind refuses it."""
+    bind(env, vault, work, "CORA", "cora")
+    pinned = json.loads((work / "outputs/radio/casting/cast.json").read_text())["roles"]["CORA"]["card_hash"]
+    body, code = call(env, "voices", "retire", "cora", "--vault", str(vault))
+    assert code == 0 and body["hash"] == pinned
+    retired = json.loads((vault / "casting/voices/cora/card.json").read_text())
+    assert card_hash(retired) == pinned
+    # binding.load_card reads `retired` off the card and bind() refuses it (AGT-1680's check, unchanged here).
+    refused, code = bind(env, vault, work, "CORA", "cora")
+    assert code == 2 and "retired" in str(refused["message"])
 
 
 def test_bind_refuses_a_slug_not_in_the_library(env: dict[str, str], vault: Path, work: Path) -> None:
@@ -199,7 +212,7 @@ def test_bind_needs_a_library(env: dict[str, str], work: Path) -> None:
 def test_bind_honours_the_configured_library(env: dict[str, str], vault: Path, work: Path) -> None:
     config = Path(env["XDG_CONFIG_HOME"]) / "pablo" / "casting.json"
     config.parent.mkdir(parents=True)
-    config.write_text(json.dumps({"library": str(vault / "casting" / "voices")}), encoding="utf-8")
+    config.write_text(json.dumps({"library": str(vault / "casting")}), encoding="utf-8")  # the library root (AGT-1679)
     assert call(env, "bind", "--work", str(work), "--role", "CORA", "--voice", "cora")[1] == 0
 
 

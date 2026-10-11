@@ -17,7 +17,7 @@ import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
-import { doctorText, gateText, realCastingDeps, runAudition, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
+import { doctorText, gateText, realCastingDeps, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
 import { parseForEpisode, radioBind, radioStatus } from "./radio";
 import { branchDiff, fileAt, repoRoot, waitingBranches } from "./branch";
 import { runCheck, screenChecks } from "./check";
@@ -53,7 +53,7 @@ import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
 import { screenPuller, screenRefresh, screenRounds } from "./screen-reviews";
-import { deriveCliOptions, notesWith, parseForChapter, runVoiceRule, shareWith } from "./verbs";
+import { deriveCliOptions, notesWith, parseForChapter, runVoiceRule, shareWith, VERBS, verbArgsFromCli } from "./verbs";
 import { realRunner } from "./share";
 import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
@@ -90,6 +90,8 @@ const P0_VERBS = [
   "takes",
   "bind",
   "gate",
+  "cast",
+  "voices",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -209,6 +211,21 @@ function helpText(): string {
     "                                            configured weights) on first use, then check",
     "                                            it runs; no model is loaded. Needs uv",
     "                                            (brew install uv); writing verbs never do",
+    '  pablo audition --role R --describe "..." [--designer qwen3|voxcpm2] [-n 6]',
+    "                [--traits '{\"gender\":\"f\",...}'] [--seed S]",
+    "                                            render n candidate voices reading the audition",
+    "                                            passage into <vault>/casting/voices/<slug>/",
+    "                                            auditions/ (untracked), scored, near duplicates",
+    "                                            marked",
+    "  pablo cast --role R --candidate n [--recast] [--notes \"...\"]",
+    "                                            freeze a candidate as the voice's card",
+    "                                            (card.json, reference.flac/.txt, ECAPA",
+    "                                            embedding); prints the card hash. --recast",
+    "                                            archives the old card under recast/. No",
+    "                                            --from-wav: voices are synthetic only",
+    "  pablo voices list [--auto-admitted] | show <slug> | retire <slug> [--reason \"...\"]",
+    "                                            the shared voice library; retire keeps the",
+    "                                            card hash, so pinned stories still perform",
     "  pablo takes show <key> --project <slug>  one radio take: inputs, scores, timings and",
     "                                            receipt id (a unique key prefix is enough)",
     "  pablo takes gc --project <slug> [--yes]  list the takes no manifest references, then",
@@ -313,6 +330,8 @@ interface ParsedArgs {
   readonly list: boolean;
   /** `read <round> --no-open` (AGT-1586): fetch the round into the cache without opening the reader window. */
   readonly noOpen: boolean;
+  /** Every parsed flag, raw (AGT-1679): the casting verbs build their args from it with `verbArgsFromCli`. */
+  readonly values: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -339,6 +358,11 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       list: { type: "boolean", default: false },
       "no-open": { type: "boolean", default: false },
       yes: { type: "boolean", default: false },
+      // `audition -n 6` (AGT-1679): the derived `n` option, with its short form.
+      n: { type: "string", short: "n" },
+      // Declared only so `cast --from-wav` is refused by name (synthetic voices only);
+      // no verb's schema has it, so it never reaches a verb's args.
+      "from-wav": { type: "string" },
     },
   });
 
@@ -384,6 +408,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     target: typeof values["target"] === "string" ? values["target"] : undefined,
     reader: typeof values["reader"] === "string" ? values["reader"] : undefined,
     chapters: typeof values["chapters"] === "string" ? values["chapters"] : undefined,
+    values,
   };
 }
 
@@ -413,6 +438,68 @@ function emit(result: Result, json: boolean): void {
   }
   if (result.ok) console.log(result.message);
   else console.error(result.message);
+}
+
+/** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
+const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices"]);
+
+/** Plain-text output for a casting verb's body. */
+export function castingText(verb: string, body: Record<string, unknown>): string {
+  const lines: string[] = [];
+  if (typeof body["message"] === "string") lines.push(`pablo: ${body["message"]}`);
+  if (verb === "audition" && Array.isArray(body["candidates"])) {
+    for (const c of body["candidates"] as Array<Record<string, unknown>>) {
+      const scores = (c["scores"] ?? {}) as Record<string, unknown>;
+      const near = (c["near_duplicates"] as number[] | undefined) ?? [];
+      lines.push(
+        `  ${String(c["candidate"])}: seed ${String(c["seed"])}, ${String(c["seconds"])} s${c["reference_ok"] ? "" : " (too short or long for a reference)"}, ` +
+          `naturalness ${String(scores["utmos"])}/5, ${String(scores["pitch_hz"])} Hz, ${String(scores["wps"])} w/s` +
+          (near.length > 0 ? `, sounds like ${near.join(", ")}` : "") +
+          `  ${String(c["file"])}`,
+      );
+    }
+  }
+  if (verb === "voices" && Array.isArray(body["voices"])) {
+    const rows = body["voices"] as Array<Record<string, unknown>>;
+    if (rows.length === 0) lines.push(`pablo: no voices in ${String(body["library"])}`);
+    for (const row of rows) {
+      if (row["cast"] !== true) {
+        lines.push(`${String(row["slug"])}  not cast (${String(row["auditions"])} auditions)`);
+        continue;
+      }
+      const traits = Object.entries((row["traits"] ?? {}) as Record<string, unknown>)
+        .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join("/") : String(v)}`)
+        .join(" ");
+      const status = [row["retired"] ? "retired" : "", row["admitted_by"] === "auto" ? "auto-admitted" : ""].filter(Boolean).join(", ");
+      lines.push(`${String(row["slug"])}  ${String(row["hash"]).slice(0, 12)}  ${traits}${status ? `  (${status})` : ""}`);
+    }
+  }
+  if (verb === "voices" && body["card"] !== undefined) {
+    lines.push(`${String(body["slug"])}  ${String(body["hash"])}${body["retired"] ? "  (retired)" : ""}${body["reference_intact"] ? "" : "  REFERENCE CHANGED"}`);
+    lines.push(JSON.stringify(body["card"], null, 2));
+  }
+  return lines.length > 0 ? lines.join("\n") : JSON.stringify(body, null, 2);
+}
+
+async function runCastingVerb(args: ParsedArgs, cwd: string): Promise<number> {
+  const verb = VERBS.find((v) => v.name === args.verb);
+  if (verb === undefined) return EXIT_ERROR;
+  if (args.verb === "cast" && args.values["from-wav"] !== undefined) {
+    const message = "pablo: cast has no --from-wav: voices are synthetic only, and a card's reference comes from a designer (`pablo audition`), never from a recording";
+    emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+    return EXIT_REFUSED;
+  }
+  const built = verbArgsFromCli(verb, args.values, args.rest);
+  if (!built.ok) {
+    emit({ ok: false, code: EXIT_ERROR, message: built.message }, args.json);
+    return EXIT_ERROR;
+  }
+  const result = await verb.run(built.args as never, { cwd, env: process.env, stderr: process.stderr });
+  const body = result.body as Record<string, unknown>;
+  if (args.json) console.log(JSON.stringify(body));
+  else if (body["ok"] === true) console.log(castingText(verb.name, body));
+  else console.error(typeof body["message"] === "string" ? (body["message"].startsWith("pablo") ? body["message"] : `pablo: ${body["message"]}`) : "pablo: failed");
+  return result.exitCode;
 }
 
 function refusalResult(refusal: Refusal): Result {
@@ -936,6 +1023,14 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     return result.exitCode;
   }
 
+  // The casting verbs (`audition` AGT-1678, `cast`/`voices` AGT-1679) run off
+  // their one `VERBS` entry, exactly as `pablo mcp` does: the verb resolves the
+  // vault (the library's default home) and the optional `--project` (receipts)
+  // itself, and provisions the Python side lazily.
+  if (CASTING_VERBS.has(args.verb)) {
+    return await runCastingVerb(args, cwd);
+  }
+
   let projectPath: string | undefined;
   if (args.project !== undefined) {
     const resolved = resolveProjectFromCwd(cwd, args.project);
@@ -950,17 +1045,6 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return markerRefusal.code;
     }
     projectPath = resolved.path;
-  }
-
-  // `audition` (AGT-1678) is the first casting verb: it provisions the Python
-  // side lazily. `--project` is optional; with one, receipts go under the work.
-  if (args.verb === "audition") {
-    const result = runAudition({ dryRun: args.dryRun }, { env: process.env, stderr: process.stderr }, realCastingDeps(process.env), projectPath);
-    const body = result.body as { ok?: boolean; message?: string };
-    if (args.json) console.log(JSON.stringify(result.body));
-    else if (body.ok) console.log(`pablo: ${body.message ?? "audition ok"}`);
-    else console.error(body.message ?? "pablo: audition failed");
-    return result.exitCode;
   }
 
   // `takes` (AGT-1681): the radio output's take store. `gc` lists, then asks

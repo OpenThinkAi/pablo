@@ -36,9 +36,11 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the twenty verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the twenty-three verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
+    "audition",
     "bind",
+    "cast",
     "check",
     "critique",
     "draft_chapter",
@@ -57,10 +59,16 @@ test("VERBS exposes exactly the twenty verbs, each project-required verb requiri
     "status",
     "timeline",
     "voice",
+    "voices",
     "write",
   ]);
   for (const v of VERBS) {
     if (v.name === "voice" || v.name === "prose") continue; // neither resolves via a --project slug (AGT-1240, AGT-1241)
+    // The voice library is shared across works (AGT-1679): project is optional, for receipts only.
+    if (v.name === "audition" || v.name === "cast" || v.name === "voices") {
+      expect(v.args.shape).toHaveProperty("project");
+      continue;
+    }
     const parsed = v.args.safeParse({});
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
@@ -124,7 +132,18 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     branch: { type: "string" }, // AGT-1564: critique --branch
     reader: { type: "string" }, // AGT-1582: share --reader
     chapters: { type: "string" }, // AGT-1582: share --chapters
-    role: { type: "string" }, // AGT-1680: bind --role (bind reuses `voice`, already pinned above)
+    role: { type: "string" }, // AGT-1680: bind --role; AGT-1679: audition/cast --role
+    describe: { type: "string" }, // AGT-1679: audition --describe
+    designer: { type: "string" }, // AGT-1679: audition --designer
+    n: { type: "string" }, // AGT-1679: audition -n (cli.ts adds the short form)
+    traits: { type: "string" }, // AGT-1679: audition/cast --traits
+    slug: { type: "string" }, // AGT-1679: audition/cast --slug
+    candidate: { type: "string" }, // AGT-1679: cast --candidate
+    recast: { type: "boolean", default: false }, // AGT-1679: cast --recast
+    notes: { type: "string" }, // AGT-1679: cast --notes
+    by: { type: "string" }, // AGT-1679: cast --by
+    "auto-admitted": { type: "boolean", default: false }, // AGT-1679: voices list --auto-admitted
+    reason: { type: "string" }, // AGT-1679: voices retire --reason
   });
 });
 

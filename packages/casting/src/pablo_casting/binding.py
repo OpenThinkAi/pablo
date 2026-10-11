@@ -14,13 +14,13 @@ from `chapters/` and keeps `casting/cast.json` at the work's top level.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pablo_casting.library import Library, LibraryRefusal, card_hash, resolve_root
 from pablo_casting.script import Script, has_cast_line, parse_script
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -63,18 +63,12 @@ def read_episode(work: Path, number: int) -> tuple[Path, Script] | None:
 
 
 def library_dir(vault: Path | None, configured: str | None, explicit: Path | None) -> Path | None:
-    """`--library`, else the config's `library`, else `<vault>/casting/voices`."""
-    if explicit is not None:
-        return explicit
-    if configured:
-        return Path(configured).expanduser()
-    return None if vault is None else vault / "casting" / "voices"
-
-
-def card_hash(card: object) -> str:
-    """sha256 over the card's canonical JSON; `reference.sha256` is inside it, so a changed reference is a changed card."""
-    canonical = json.dumps(card, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    """The library's `voices/` directory, by `library.py`'s one rule: the library root is
+    `--library`, else the config's `library`, else `<vault>/casting`. `None` when none is known."""
+    try:
+        return Library(explicit if explicit is not None else resolve_root(configured, str(vault) if vault is not None else None)).voices
+    except LibraryRefusal:
+        return None
 
 
 class BindingRefusal(Exception):

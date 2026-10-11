@@ -1060,6 +1060,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "soundfile" },
+    { name = "soxr" },
 ]
 
 [package.optional-dependencies]
@@ -1093,9 +1096,12 @@ requires-dist = [
     { name = "librosa", marker = "extra == 'scorers'", specifier = ">=0.10" },
     { name = "mlx-audio", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'scorers'", specifier = ">=0.5.8" },
     { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'scorers'", specifier = ">=0.4.3" },
+    { name = "numpy", specifier = ">=2.0" },
     { name = "numpy", marker = "extra == 'scorers'", specifier = ">=2.0" },
     { name = "onnxruntime", marker = "extra == 'scorers'", specifier = ">=1.20" },
+    { name = "soundfile", specifier = ">=0.12" },
     { name = "soundfile", marker = "extra == 'scorers'", specifier = ">=0.13" },
+    { name = "soxr", specifier = ">=0.5" },
     { name = "speechbrain", marker = "extra == 'scorers'", specifier = ">=1.1.1" },
     { name = "speechmos", marker = "extra == 'scorers'", specifier = ">=0.0.1.1" },
     { name = "torch", marker = "extra == 'scorers'", specifier = ">=2.6" },

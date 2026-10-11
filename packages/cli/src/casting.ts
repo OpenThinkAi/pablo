@@ -26,17 +26,17 @@
  *
  * Everything that touches the machine goes through `CastingDeps`, so `bun
  * test` injects a fake and never needs `uv`, Python or a model. The verbs are
- * dispatched by `cli.ts` only; registering them in `verbs.ts` (MCP, the
- * harness) comes with the real `cast`/`audition` verbs, so an agent cannot
- * trigger a multi-gigabyte download through a tool before those land.
+ * `audition`, `cast` and `voices` (AGT-1679) are `VERBS` entries
+ * (`casting-verbs.ts`), so the CLI, `pablo mcp` and the harness reach them
+ * through one entry each; each calls `runCasting` below. `doctor` stays
+ * CLI-only: it reports the machine, not a work.
  *
  * `pablo gate` (AGT-1682) is the first verb that needs an optional extra:
  * scoring audio provisions with `--extra scorers` (torch, speechbrain, the
  * MLX scorers), which the stamp records, so a venv provisioned for
  * `audition --dry-run` alone is topped up once and never downgraded.
  * `gate calibrate` and `gate --scores` read score records only and need no
- * extra. `gate` stays CLI-only for the same reason as above: its first run
- * downloads the scorers' weights.
+ * extra. `gate` stays CLI-only: its first run downloads the scorers' weights.
  */
 
 import { createHash } from "node:crypto";
@@ -359,16 +359,16 @@ interface ScorerRow {
 }
 
 /**
- * `pablo audition --dry-run`: the first casting verb. It provisions the
- * Python side when needed and runs the no-model audition check. A real
- * audition (rendering candidates) lands with the cast-card ticket; until then
- * plain `audition` is "not implemented yet" and provisions nothing.
+ * Runs one casting command (`["audition", "--dry-run"]`, `["cast", "--role",
+ * ...]`, `["voices", "list"]`): provisions the Python side when needed, then
+ * runs `python -m pablo_casting <args> [--work <work>] --json` and returns its
+ * body as pablo's own, with whether this call provisioned. Every casting verb
+ * (`casting-verbs.ts`) comes through here.
  */
-export function runAudition(args: { readonly dryRun: boolean }, ctx: CastingContext, deps: CastingDeps, work: string | undefined): VerbResult {
-  if (!args.dryRun) return failure('pablo: "audition" is not implemented yet; `pablo audition --dry-run` checks the casting side without a model');
+export function runCasting(args: readonly string[], ctx: CastingContext, deps: CastingDeps, work: string | undefined): VerbResult {
   const ready = ensureProvisioned(ctx, deps, work);
   if (!ready.ok) return ready.result;
-  const result = runPython(ready.layout, deps, ctx, ["audition", "--dry-run"]);
+  const result = runPython(ready.layout, deps, ctx, [...args, ...(work === undefined ? [] : ["--work", work])]);
   return { body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) }, exitCode: result.exitCode };
 }
 

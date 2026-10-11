@@ -5,9 +5,17 @@ description = "pablo's casting side: voices, takes and the mix. Run as `python -
 license = "MIT"
 requires-python = ">=3.12,<3.13"
 # Runtime dependencies stay light until an engine lands: huggingface_hub is
-# only imported by `pull`, the one command that downloads weights.
+# only imported by `pull`, the one command that downloads weights; numpy,
+# soundfile (FLAC/WAV) and soxr (resampling) are the cast-card audio plumbing
+# (AGT-1679). The real designers (mlx-audio) and the embedder, MOS scorer and
+# aligner `pablo_casting.real` reuses from `scorers.py` come from the optional
+# `scorers` extra below, imported lazily; without it a real audition is a
+# refusal naming what is missing.
 dependencies = [
     "huggingface-hub>=0.34",
+    "numpy>=2.0",
+    "soundfile>=0.12",
+    "soxr>=0.5",
 ]
 
 # The gate's scorer stack (AGT-1682), installed by pablo on the first `pablo gate`

@@ -84,6 +84,7 @@ import { reviseCore } from "./revise";
 import type { ReviseCoreArgs } from "./revise";
 import { buildResume } from "./resume";
 import { readWorkStatus } from "./work-state";
+import { castingVerbs } from "./casting-verbs";
 import { saveCore } from "./save";
 import { addExemplar, addRule, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { VoiceLocation } from "./voice";
@@ -1499,6 +1500,8 @@ export const VERBS: readonly Verb[] = [
     run: runSearchVerb,
     positionalArgs: ["phrase"],
   },
+  // AGT-1679: `audition`, `cast`, `voices` — the voice library (casting-verbs.ts).
+  ...castingVerbs(),
 ];
 
 // ---------------------------------------------------------------------------
@@ -1576,4 +1579,41 @@ export function deriveCliOptions(): Record<string, CliOptionConfig> {
     }
   }
   return options;
+}
+
+/**
+ * AGT-1679: the args object a verb's `run` takes, built from the CLI's parsed
+ * `values` and positionals: positional fields (`positionalArgs`, in order)
+ * from `rest`, every other field from its flag, and a numeric field's flag
+ * text turned into a number (`parseArgs` only knows strings). The verb's own
+ * zod shape validates the result, so a CLI call and an MCP call of the same
+ * verb are checked by the same schema. Used by `cli.ts` for the verbs it
+ * dispatches generically (the casting verbs).
+ */
+export function verbArgsFromCli(
+  verb: Verb,
+  values: Readonly<Record<string, unknown>>,
+  rest: readonly string[],
+): { readonly ok: true; readonly args: unknown } | { readonly ok: false; readonly message: string } {
+  const positional = verb.positionalArgs ?? [];
+  const raw: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(verb.args.shape)) {
+    const index = positional.indexOf(key);
+    const value = index >= 0 ? rest[index] : values[key];
+    if (value === undefined) continue;
+    const { base } = unwrapToBase(schema as z.ZodTypeAny);
+    if (base instanceof z.ZodNumber && typeof value === "string") {
+      const number = Number(value);
+      if (value.trim() === "" || !Number.isFinite(number)) return { ok: false, message: `pablo ${verb.name}: --${key} must be a number (got "${value}")` };
+      raw[key] = number;
+    } else {
+      raw[key] = value;
+    }
+  }
+  const parsed = verb.args.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue) => `${issue.path.join(".") || "args"}: ${issue.message}`).join("; ");
+    return { ok: false, message: `pablo ${verb.name}: ${issues}` };
+  }
+  return { ok: true, args: parsed.data };
 }
