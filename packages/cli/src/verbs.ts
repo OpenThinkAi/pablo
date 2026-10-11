@@ -63,7 +63,9 @@ import { createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
 import { checkWork, radioScriptsChecked } from "./check";
+import { checkAcross, promoteFinding } from "./across";
 import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
+import type { Ask } from "./critique";
 import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
@@ -384,18 +386,22 @@ const CRITIQUE_ARGS = z.object({
  * survivors come back, as line comments, and are saved under the work's `.pablo/critique/` for review mode. The book
  * is not changed and no branch is made.
  */
+/** The critic's model (the planner role), or the test injection; a planner that cannot be built is exit 1. Shared by `critique` and `check --across`. */
+function criticAsk(ctx: VerbContext): Ask | VerbResult {
+  if (critiqueModel.ask !== undefined) return critiqueModel.ask;
+  try {
+    return adapterAsk(createPlanner(loadConfig({ env: ctx.env }), { keys: { env: ctx.env }, claude: { env: ctx.env } }).adapter);
+  } catch (error) {
+    return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
+  }
+}
+
 async function runCritiqueVerb(args: z.infer<typeof CRITIQUE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
 
-  let ask = critiqueModel.ask;
-  if (ask === undefined) {
-    try {
-      ask = adapterAsk(createPlanner(loadConfig({ env: ctx.env }), { keys: { env: ctx.env }, claude: { env: ctx.env } }).adapter);
-    } catch (error) {
-      return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
-    }
-  }
+  const ask = criticAsk(ctx);
+  if (typeof ask !== "function") return ask;
   const result = await critiqueBranch({ vaultRoot: resolved.vaultRoot, projectPath: resolved.projectPath, branch: args.branch, ask, progress: (line) => ctx.stderr.write(`${line}\n`) });
   if (result.ok) return { body: result, exitCode: 0 };
   // A refusal (not a change branch, not in a repo) is exit 2; a run that failed (git, the model, the save) is exit 1.
@@ -623,11 +629,26 @@ const CHECK_ARGS = z.object({
     .optional()
     .describe(`Work-relative or absolute path to scan; omit to scan every unit of the output (the novel's ${OUTPUTS.novel.artifactDir}/*.md).`),
   output: outputField.optional(),
+  across: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Compare every output's continuity ledger and report facts that contradict between tellings, each re-checked by the critic's refute step, with a promote action per side."),
 });
 
 async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
+
+  // AGT-1671: contradictions between the outputs' ledgers, through the critic's refute step.
+  if (args.across) {
+    const ask = criticAsk(ctx);
+    if (typeof ask !== "function") return ask;
+    const result = await checkAcross({ projectPath: resolved.projectPath, ask, progress: (line) => ctx.stderr.write(`${line}\n`) });
+    if (result.ok) return { body: result, exitCode: 0 };
+    const code = result.kind === "refused" ? 2 : 1;
+    return { body: { ok: false, code, message: result.notice }, exitCode: code };
+  }
 
   // Over MCP `file` is model-controlled, exactly like save's. `checkWork` already
   // refuses anything outside the work directory (a stricter bound), so this is
@@ -650,7 +671,7 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
       exitCode: outcome.code,
     };
   }
-  const body: Record<string, unknown> = { ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced };
+  const body: Record<string, unknown> = { ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}) };
   // A radio work also gets its scripts read: unknown directions and unbound roles (AGT-1680).
   const radio = radioScriptsChecked(args.file, args.output) ? radioCheck({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath) : undefined;
   if (radio !== undefined) {
@@ -659,6 +680,29 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     body["radio"] = rest;
   }
   return { body, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// promote
+// ---------------------------------------------------------------------------
+
+const PROMOTE_ARGS = z.object({
+  project: projectField,
+  finding: z.string().regex(/^x[0-9a-f]{8}$/, "a finding id from check --across, e.g. x1a2b3c4d").describe("A finding id from the last `check --across`."),
+  keep: outputField.describe('The output whose side of the finding is kept, e.g. "novel": its fact goes to facts.md.'),
+});
+
+/**
+ * AGT-1671: a `check --across` finding's promote action. The kept side's fact goes to facts.md with
+ * `established-by: <type>/<unit>` on a plan/ branch, and each contradicting unit gets a comment on its line there,
+ * shown in review mode.
+ */
+async function runPromoteVerb(args: z.infer<typeof PROMOTE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const result = promoteFinding({ projectPath: resolved.projectPath, finding: args.finding, keep: args.keep, env: ctx.env });
+  if (result.ok) return { body: result, exitCode: 0 };
+  return { body: { ok: false, code: result.code, message: result.notice }, exitCode: result.code };
 }
 
 // ---------------------------------------------------------------------------
@@ -1551,9 +1595,16 @@ export const VERBS: readonly Verb[] = [
   {
     name: "check",
     description:
-      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`.",
+      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. With `output` it adds the core check under `core`: story-time (a mention dated after the unit's year) and names the bible, facts.md and the output's own ledger do not know. With `across` it instead compares every output's continuity ledger and reports contradictions between tellings, each with a promote action. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`.",
     args: CHECK_ARGS,
     run: runCheckVerb,
+  },
+  {
+    name: "promote",
+    description:
+      "Promote one side of a `check --across` finding: its fact goes to facts.md (the story core's facts every output honours) with established-by, on a plan/ branch for review, and each contradicting unit gets a comment on its line there.",
+    args: PROMOTE_ARGS,
+    run: runPromoteVerb,
   },
   {
     name: "bind",

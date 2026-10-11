@@ -77,6 +77,14 @@ export interface RitualOptions {
   readonly extractor?: Adapter | undefined;
   /** Overrides the continuity extraction ritual's 120s ceiling. */
   readonly continuityTimeoutMs?: number | undefined;
+  /**
+   * The output the unit belongs to (AGT-1671), default `novel`: continuity
+   * extraction files its facts in that output's own ledger
+   * (`outputs/<type>/continuity.md`; the novel's through the migration shim).
+   */
+  readonly output?: string | undefined;
+  /** What one of the output's units is called (`chapter`, `episode`): the ledger's unit tag (`ch03`, `ep05`). Default `chapter`. */
+  readonly unitNoun?: string | undefined;
 }
 
 const DEFAULT_THINK_TIMEOUT_MS = 20_000;
@@ -445,12 +453,12 @@ export async function runAfterMerge(workDir: string, chapter: number, chapterPat
   // same as any other continuity failure.
   const continuity = await attemptAsync("continuity", () => {
     const chapterBody = stripFrontmatter(readFileSync(chapterPath, "utf8"));
-    return runContinuity(workDir, chapter, chapterBody, { adapter: opts.extractor, timeoutMs: opts.continuityTimeoutMs });
+    return runContinuity(workDir, chapter, chapterBody, { adapter: opts.extractor, timeoutMs: opts.continuityTimeoutMs, output: opts.output, unitNoun: opts.unitNoun });
   });
 
   const chapterRel = relative(workDir, chapterPath).split(sep).join("/");
   const gitPaths = [chapterRel, beatsFile(workDir), noteRel, "README.md"];
-  if (continuity.status === "ran") gitPaths.push(continuityFile(workDir));
+  if (continuity.status === "ran") gitPaths.push(continuityFile(workDir, opts.output ?? "novel"));
   const git = attempt("git", () => runGit(workDir, gitPaths, `${opts.slug}: draft chapter ${chapter}`));
 
   const think = await attemptAsync("think", () => runThink(chapter, opts.words, opts.slug, env, thinkTimeoutMs, allowNvmFallback));

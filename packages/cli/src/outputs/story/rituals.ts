@@ -16,7 +16,7 @@ import { attempt, attemptAsync, runGit, runThink, tickOutline } from "../../nove
 import type { Ritual, RitualOptions } from "../../novel/rituals";
 import type { OutputRituals } from "../types";
 import { storyBeats } from "./pack";
-import { STORY_UNIT } from "./units";
+import { STORY_ID, STORY_UNIT } from "./units";
 
 function tickBeats(workDir: string): Ritual {
   const results = storyBeats(workDir).map((beat) => tickOutline(workDir, beat));
@@ -98,11 +98,14 @@ async function afterMerge(workDir: string, _unit: number, storyPath: string, opt
     runContinuity(workDir, STORY_UNIT, stripFrontmatter(readFileSync(storyPath, "utf8")), {
       adapter: opts.extractor,
       timeoutMs: opts.continuityTimeoutMs,
+      // AGT-1671: the story files its facts in its own ledger, outputs/story/continuity.md.
+      output: STORY_ID,
+      unitNoun: "story",
     }),
   );
   const storyRel = relative(workDir, storyPath).split(sep).join("/");
   const paths = [storyRel, beatsFile(workDir), noteRel, "README.md"];
-  if (continuity.status === "ran") paths.push(continuityFile(workDir));
+  if (continuity.status === "ran") paths.push(continuityFile(workDir, STORY_ID));
   const git = attempt("git", () => runGit(workDir, paths, `${opts.slug}: draft story`));
   const think = await attemptAsync("think", () => runThink(STORY_UNIT, opts.words, opts.slug, env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "story"));
   return [outline, note, readme, continuity, git, think];

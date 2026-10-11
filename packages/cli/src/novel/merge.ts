@@ -89,6 +89,8 @@ async function ritualsFor(output: OutputDefinition, projectPath: string, chapter
     words: Number(frontmatterField(text, "words")) || 0,
     model: frontmatterField(text, "model") ?? "unknown",
     receiptLine: `merged ${branch}`,
+    output: output.id,
+    unitNoun: output.noun,
   });
 }
 

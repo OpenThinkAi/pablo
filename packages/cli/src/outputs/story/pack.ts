@@ -36,6 +36,8 @@ export function buildStoryPack(vaultRoot: string, workDir: string, unit: number,
     minScenes: options.scenes ?? DEFAULT_MIN_SCENES,
     castEndsAt: CAST_ENDS_AT,
     work: { description: "short fiction" },
+    // AGT-1671: the story's own ledger (outputs/story/continuity.md) plus facts.md, never the novel's.
+    output: STORY_ID,
   });
   const last = [inputs.beat, ...(inputs.moreBeats ?? [])].at(-1) ?? inputs.beat;
   return packFromInputs(
@@ -46,6 +48,6 @@ export function buildStoryPack(vaultRoot: string, workDir: string, unit: number,
       unitLabel: "the whole piece",
       timeline: gateTimeline(readCoreState(workDir).bible.timelineText, last.storyDate, inputs.timeline.source),
     },
-    options,
+    { ...options, output: STORY_ID },
   );
 }

@@ -244,7 +244,8 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
 /**
  * Drafting: `bin/draft-chapter`'s pack, in its order — the chapter, the prose
  * rules, the craft rules, period facts, cast, places, the timeline gated by the
- * chapter's story date, the continuity ledger, the tail of the previous
+ * chapter's story date, the promoted facts (`facts.md`), the unit's own
+ * output's continuity ledger, the tail of the previous
  * chapter, and the task.
  *
  * The timeline gate is the slice that earned its place: draft 1 of chapter 1 put
@@ -408,6 +409,17 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       minTokens: 200,
       reducible: true,
       cutOrder: 3,
+    },
+    {
+      name: "facts",
+      heading: "# Story facts every telling honours (binding)",
+      text: inputs.facts?.text.trim() ?? "",
+      source: inputs.facts?.path,
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 4,
     },
     {
       name: "continuity",

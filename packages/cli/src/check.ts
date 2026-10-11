@@ -26,7 +26,9 @@ import type { TextSource } from "@openthink/pablo-core";
 import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
 import { readMarker } from "./marker";
+import { coreCheck } from "./core-check";
 import { resolveOutput } from "./outputs/registry";
+import type { OutputDefinition } from "./outputs/types";
 import { radioCheck, radioCheckLines, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
 
@@ -51,6 +53,11 @@ export interface CheckSuccess {
   readonly code: 0;
   readonly hits: readonly Hit[];
   readonly unprovenanced: readonly string[];
+  /**
+   * `check --output <type>` (AGT-1671): the core check's hits (`core-check.ts`: `story-time`, `unknown-name`) over
+   * that output's units. Absent when no output was named.
+   */
+  readonly core?: readonly Hit[];
 }
 
 /** A resolution refusal before any scanning happens — the one case `checkWork`/`runCheck` exit non-zero (a `--file` outside the work). */
@@ -379,11 +386,13 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
   // Which output's units a whole-work scan reads (AGT-1669): `--output`, else the work's one output;
   // several outputs and none named is a refusal naming them.
   let artifactDir: string | undefined;
+  let named: OutputDefinition | undefined;
   if (file === undefined || output !== undefined) {
     const marker = readMarker(workDir);
     const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, output, "check");
     if (!resolved.ok) return { ok: false, code: 2, message: resolved.message, tried: [], missing: resolved.missing };
     artifactDir = resolved.output.artifactDir;
+    if (output !== undefined) named = resolved.output;
   }
 
   if (file !== undefined) {
@@ -427,7 +436,8 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     if (isUnprovenanced(text)) unprovenanced.push(label);
   }
 
-  return { ok: true, code: 0, hits, unprovenanced };
+  // `--output <type>` adds the core check (AGT-1671): the units against the bible, the timeline and facts.md.
+  return { ok: true, code: 0, hits, unprovenanced, ...(named !== undefined ? { core: coreCheck(workDir, named, filePaths) } : {}) };
 }
 
 /**
@@ -492,13 +502,16 @@ export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, ca
   const radioLines = hasRadio ? radioCheckLines(radioBody) : [];
 
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced, ...(hasRadio ? { radio: radioBody } : {}) }));
-  } else if (outcome.hits.length === 0 && outcome.unprovenanced.length === 0 && radioLines.length === 0) {
+    console.log(JSON.stringify({ ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}) }));
+  } else if (outcome.hits.length === 0 && outcome.unprovenanced.length === 0 && (outcome.core ?? []).length === 0 && radioLines.length === 0) {
     console.log("no hits");
   } else {
     for (const hit of outcome.hits) {
       const detail = hit.detail !== undefined ? ` (${hit.detail})` : "";
       console.log(`${hit.path}:${hit.line} ${hit.rule} — ${hit.excerpt}${detail}`);
+    }
+    for (const hit of outcome.core ?? []) {
+      console.log(`${hit.path}:${hit.line} ${hit.rule} — ${hit.excerpt}${hit.detail !== undefined ? ` (${hit.detail})` : ""}`);
     }
     for (const path of outcome.unprovenanced) {
       console.log(`unprovenanced: ${path}`);

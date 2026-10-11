@@ -65,7 +65,8 @@ export interface MigrateOutputsOptions {
   readonly now?: () => Date;
 }
 
-const FACTS_TEXT = `# Facts
+/** `facts.md`'s header: what migration creates, and what the first promotion starts from on a work without one (AGT-1671). */
+export const FACTS_TEXT = `# Facts
 
 Facts every output of this work must honour: continuity an output established
 that the author (or the harness, with the author) promoted to the story core.

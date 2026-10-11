@@ -64,6 +64,12 @@ export interface UnitPackOptions {
   readonly marker: Marker;
   /** A steer for this unit beyond its beat: its own `direction` slice. */
   readonly direction?: string | undefined;
+  /**
+   * The output the unit belongs to (AGT-1671): the pack carries that output's
+   * own continuity ledger plus `facts.md`, never another output's ledger.
+   * Callers pass the definition's `id`; absent means the novel.
+   */
+  readonly output?: string | undefined;
 }
 
 /** The writer's pack for one unit, or a refusal (a `neverSend` violation). */

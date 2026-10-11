@@ -149,6 +149,18 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 unit N (core's `planBeatsFor`). `pablo output plan` keeps the
                 existing rows (mapping untouched, status refreshed, a stale
                 undrafted row dropped) and appends rows for new beats.
+                Continuity (AGT-1671): each output keeps its own ledger
+                (core's `continuityFile(work, output)`:
+                `outputs/<type>/continuity.md`, the novel's through the
+                migration shim); a unit's pack carries its output's ledger
+                plus `facts.md`, never another output's (a slice under
+                another `outputs/<type>/` is a refusal). `check --output`
+                adds the core check (`src/core-check.ts`: story-time,
+                unknown names); `check --across` (`src/across.ts`) compares
+                the ledgers through the critic's refute step, and `pablo
+                promote` (one `VERBS` entry, as is `record_fact --promote`)
+                writes `facts.md` with `established-by` on a `plan/` branch
+                and comments the contradicting unit's line there.
                 `src/casting.ts` (AGT-1678) is the runner for the Python
                 side: `pablo doctor` reports it, and the first casting verb
                 (`audition`, `cast`, `voices`: `src/casting-verbs.ts`,

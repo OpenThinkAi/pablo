@@ -2,7 +2,10 @@
  * The harness's `record_fact(fact, where, source)` tool (AGT-1558): a fact the
  * harness learned or decided is appended, tagged with its provenance, to a
  * bible file or `continuity.md` on the session's `plan/` branch. The tag
- * (`core/facts.ts`) is what makes the judgement policy checkable. Design: the
+ * (`core/facts.ts`) is what makes the judgement policy checkable. With
+ * `promote` (AGT-1671, pm project `pablo-story-core`) the fact goes to the
+ * story core's `facts.md` instead, tagged `[established-by: <type>/<unit>]`.
+ * Design: the
  * `ai-terminal` pm doc `harness`.
  *
  * Library only, over `planWrite`; the SDK registration is AGT-1552's. Every
@@ -13,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
+  FACTS_FILE,
   LEGACY_CONTINUITY_FILE,
   NOVEL_CONTINUITY_FILE,
   continuityFile,
@@ -23,6 +27,8 @@ import {
   withProvenance,
 } from "@openthink/pablo-core";
 import { insertUnderHeading } from "./markdown";
+import { FACTS_TEXT } from "./migrate-outputs";
+import { isOutputId, outputIds } from "./outputs/registry";
 import { type PlanSession, planWrite } from "./plan";
 
 export const FACT_KINDS = ["researched", "invented", "author"] as const;
@@ -30,7 +36,10 @@ export type FactKind = (typeof FACT_KINDS)[number];
 
 export interface RecordFactArgs {
   fact: string;
-  /** `continuity` (the work's `continuity.md`) or a bible file (`bible/places.md`, or just `places`). */
+  /**
+   * `continuity` (the work's `continuity.md`) or a bible file (`bible/places.md`, or just `places`). Ignored with
+   * `promote`, which always writes `facts.md`.
+   */
   where: string;
   kind: string;
   /** Required for `researched` (the citation); ignored otherwise. */
@@ -39,7 +48,17 @@ export interface RecordFactArgs {
   heading?: string;
   /** Optional chapter tag, e.g. `ch03`, kept before the provenance tag. */
   chapter?: string;
+  /**
+   * `record_fact --promote` (AGT-1671): the fact goes to the story core's `facts.md`, which every output honours,
+   * tagged with `establishedBy`. Promotion is explicit; nothing reaches `facts.md` any other way.
+   */
+  promote?: boolean;
+  /** With `promote`: the output and unit that established the fact, `<type>/<unit tag>` (`novel/ch03`, `radio/ep05`). */
+  establishedBy?: string;
 }
+
+/** `established-by: <type>/<unit tag>`'s value. */
+const ESTABLISHED_BY = /^[a-z][a-z0-9-]*\/[a-z]{2}\d+$/;
 
 export type RecordFactResult =
   | { ok: true; path: string; line: string; branch: string; sha?: string }
@@ -94,22 +113,37 @@ export function recordFact(session: PlanSession, workPath: string, args: RecordF
   if (text === "") return refuse("the fact is empty");
   const provenance = provenanceOf(args);
   if (typeof provenance === "string") return refuse(provenance);
-  const target = resolveWhere(workPath, args.where);
+  let tags: string[];
+  let target: ReturnType<typeof resolveWhere>;
+  if (args.promote === true) {
+    const by = (args.establishedBy ?? "").trim();
+    if (!ESTABLISHED_BY.test(by)) return refuse(`a promoted fact needs established-by as <output>/<unit> (e.g. novel/ch03), got "${by}"`);
+    const type = by.split("/")[0] as string;
+    if (!isOutputId(type)) return refuse(`established-by names "${type}", which is not an output type (known: ${outputIds().join(", ")})`);
+    tags = [`established-by: ${by}`];
+    target = { ok: true, rel: FACTS_FILE };
+  } else {
+    if (args.where.trim() === "") return refuse("where is required (continuity or a bible file) unless the fact is promoted");
+    target = resolveWhere(workPath, args.where);
+    const chapter = args.chapter?.trim();
+    if (chapter !== undefined && chapter !== "" && !/^ch\d+$/.test(chapter)) return refuse(`chapter tag "${chapter}" is not chNN`);
+    tags = chapter ? [chapter] : [];
+  }
   if (!target.ok) return refuse(target.message);
-  const chapter = args.chapter?.trim();
-  if (chapter !== undefined && chapter !== "" && !/^ch\d+$/.test(chapter)) return refuse(`chapter tag "${chapter}" is not chNN`);
 
   const line = formatFactLine({
     text,
-    tags: chapter ? [chapter] : [],
+    tags,
     provenance,
     conflicting: false,
   });
   formatProvenance(provenance); // belt and braces: throws on a malformed tag before anything is written
 
   const vaultRel = `${relative(session.repo, workPath).split("\\").join("/")}/${target.rel}`.replace(/^\//, "");
-  const existing = currentText(session, workPath, target.rel, vaultRel);
+  // The first promotion on a work that has no facts.md yet (an unmigrated one) starts it from migration's header.
+  const existing = currentText(session, workPath, target.rel, vaultRel) ?? (args.promote === true ? FACTS_TEXT : undefined);
   if (existing === undefined) return refuse(`${target.rel} does not exist in this work`);
+  if (args.promote === true && existing.split("\n").includes(line)) return refuse(`facts.md already holds "${line}"`);
 
   let lines = existing.split("\n");
   const hadFinalNewline = lines[lines.length - 1] === "";

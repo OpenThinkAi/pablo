@@ -20,9 +20,9 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Adapter, ExtractedFact, Receipt } from "@openthink/pablo-core";
-import { NoToolCallError, continuityFile, estimateTokens, fileReceiptSink, hashPrompt, joinParagraphs } from "@openthink/pablo-core";
+import { NoToolCallError, continuityFile, estimateTokens, fileReceiptSink, hashPrompt, joinParagraphs, unitTag } from "@openthink/pablo-core";
 import { insertUnderHeading } from "../markdown";
 import type { Ritual } from "./rituals";
 
@@ -39,7 +39,31 @@ export interface ContinuityOptions {
   readonly adapter: Adapter | undefined;
   /** Overrides the 120s ceiling the whole extraction+apply is raced against. */
   readonly timeoutMs?: number | undefined;
+  /**
+   * The output whose ledger the facts are filed in (AGT-1671), default
+   * `novel`. Any other output's ledger is `outputs/<type>/continuity.md`,
+   * created with the ledger's headings on its first fact.
+   */
+  readonly output?: string | undefined;
+  /** What the output's unit is called, for the unit tag (`episode` → `[ep05]`). Default `chapter` (`[ch03]`). */
+  readonly unitNoun?: string | undefined;
 }
+
+/** A new output's ledger (AGT-1671): the novel ledger's headings, so facts file the same way in every telling. */
+export const LEDGER_TEMPLATE = `# Continuity
+
+Facts this telling has established. Another output never reads them; promote one
+to facts.md (\`pablo check --across\`, then its promote action) when every telling
+must honour it.
+
+## Names and ages
+
+## Dates
+
+## Objects and places
+
+## Who knows what
+`;
 
 const DEFAULT_CONTINUITY_TIMEOUT_MS = 120_000;
 
@@ -139,8 +163,9 @@ export function applyFacts(
   facts: readonly ExtractedFact[],
   chapterBody: string,
   chapter: number,
+  noun = "chapter",
 ): ApplyFactsResult {
-  const chapterTag = String(chapter).padStart(2, "0");
+  const tag = unitTag(noun, chapter);
   let lines = continuityText.split("\n");
   let placed = 0;
   let unanchored = 0;
@@ -151,7 +176,7 @@ export function applyFacts(
     // `fact.fact` is model output: a newline inside it would become a real line
     // break in continuity.md and could forge a `## ` heading, so flatten it first.
     const safeFact = fact.fact.replace(/[\r\n]+/g, " ").trim();
-    const bulletLine = anchored ? `- ${safeFact} [ch${chapterTag}]` : `- ${safeFact} [ch${chapterTag}, anchor not found]`;
+    const bulletLine = anchored ? `- ${safeFact} [${tag}]` : `- ${safeFact} [${tag}, anchor not found]`;
 
     if (lines.includes(bulletLine)) continue;
 
@@ -257,9 +282,12 @@ export async function runContinuity(
   const adapter: Adapter = opts.adapter;
   const extract: NonNullable<Adapter["extractFactsWithAnchors"]> = opts.adapter.extractFactsWithAnchors;
 
-  const rel = continuityFile(workDir);
+  const output = opts.output ?? "novel";
+  const rel = continuityFile(workDir, output);
   const path = join(workDir, rel);
-  if (!existsSync(path)) {
+  // The novel's ledger is the author's file (the vault template makes it); another output's is pablo's to start.
+  const fresh = !existsSync(path) && output !== "novel" && existsSync(dirname(path));
+  if (!existsSync(path) && !fresh) {
     return { name: "continuity", status: "skipped", detail: `${rel} not found` };
   }
 
@@ -297,8 +325,8 @@ export async function runContinuity(
       const facts = await extractWithFallback();
       writeContinuityReceipt(workDir, adapter, chapterBody, startedAt, null, factsSummaryText(facts));
 
-      const existing = readFileSync(path, "utf8");
-      const result = applyFacts(existing, facts, chapterBody, chapter);
+      const existing = fresh && !existsSync(path) ? LEDGER_TEMPLATE : readFileSync(path, "utf8");
+      const result = applyFacts(existing, facts, chapterBody, chapter, opts.unitNoun ?? "chapter");
       if (result.text === existing) {
         return { name: "continuity", status: "skipped", detail: "no new facts" };
       }
