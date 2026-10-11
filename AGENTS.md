@@ -104,3 +104,22 @@ structural problem regardless of round number — keep iterating until the denia
 addressed or the design is reconsidered.
 
 <!-- stamp:end -->
+
+## pablo: packages and required checks
+
+The workspace has three TypeScript packages (`packages/core`, `packages/tui`,
+`packages/cli`) and one Python package, `packages/casting` (AGT-1678): a Python
+3.12 `uv` project the CLI provisions lazily on the first casting verb and runs
+as `python -m pablo_casting <command> --json`. `stamp merge` runs three
+`required_checks` against the merged tree:
+
+```sh
+bun run typecheck                                   # typecheck
+bun test                                            # test (model-free, no uv needed)
+cd packages/casting && uv run --frozen pytest -q    # casting-test (model-free)
+```
+
+`casting-test` needs `uv` on the merging machine (`brew install uv`). It runs
+from the committed `uv.lock` (`--frozen`), so a dependency change means
+re-running `uv lock` and committing the lock. Tests that load real weights are
+marked `models` and run by hand only: `uv run pytest -m models`.

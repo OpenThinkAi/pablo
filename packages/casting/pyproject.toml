@@ -1,0 +1,35 @@
+[project]
+name = "pablo-casting"
+version = "0.1.0"
+description = "pablo's casting side: voices, takes and the mix. Run as `python -m pablo_casting <command> --json` by the pablo CLI, never as a user-facing binary."
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+# Runtime dependencies stay light until an engine lands: huggingface_hub is
+# only imported by `pull`, the one command that downloads weights.
+dependencies = [
+    "huggingface-hub>=0.34",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pablo_casting"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The default run (and stamp's `casting-test` check) never loads a model:
+# tests that do are marked `models` and run by hand with `-m models`.
+addopts = "-m 'not models'"
+markers = [
+    "models: loads or downloads real model weights; run by hand with `uv run pytest -m models`",
+]
