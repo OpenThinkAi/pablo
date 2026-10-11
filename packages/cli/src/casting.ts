@@ -169,7 +169,8 @@ function readStamp(layout: CastingLayout): Partial<ProvisionStamp> | undefined {
 function stampedExtras(layout: CastingLayout): readonly string[] {
   const stamp = readStamp(layout);
   if (stamp === undefined || !Array.isArray(stamp.extras)) return [];
-  return stamp.extras.filter((extra): extra is string => typeof extra === "string");
+  // Only bare extra names reach `uv sync --extra`: a hand-edited stamp cannot smuggle in a flag.
+  return stamp.extras.filter((extra): extra is string => typeof extra === "string" && /^[a-z][a-z0-9-]*$/.test(extra));
 }
 
 /**
