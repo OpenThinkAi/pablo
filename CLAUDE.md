@@ -199,6 +199,21 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 Tests inject `CastingDeps`; `bun test` never needs uv or a
                 model. `prepack` copies the casting sources into
                 `packages/cli/casting/` (gitignored) for the npm `files`.
+                The review player (`pablo review --project W [--episode N]`,
+                AGT-1693): a ui-leaf view, `views/review.tsx` (the prototype's
+                cathedral radio: a reason on each flag, the line's gate
+                scores, `by: auto` flags from `best_of_failed` takes in a
+                second colour with the failing gates named, a version
+                switcher, a chapter list that polls), mounted by
+                `src/review-host.ts`. The view never reads a file; the host
+                answers exactly `loadTrack`, `setVersion`, `flag`, `unflag`
+                and `listChapters` (`views/review-protocol.ts`) from
+                `outputs/radio/casting/` and writes only `flags.json`
+                (`{id, episode, line, reason, time, source, by, at}`; the
+                performer's auto flags are left alone). Only mixed versions
+                (manifest `audio` present on disk) are listed. CLI-only, not
+                in `VERBS`; needs Google Chrome (`UI_LEAF_NO_OPEN=1` skips
+                the check for headless runs). Tests use a fake `mount`.
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`

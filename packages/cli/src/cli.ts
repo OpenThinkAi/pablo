@@ -58,6 +58,7 @@ import { realRunner } from "./share";
 import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
 import { openReader } from "./reader-host";
+import { openReview } from "./review-host";
 import { realTrayDeps, runTray } from "./tray/cli";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
@@ -97,6 +98,7 @@ const P0_VERBS = [
   "voices",
   "perform",
   "mix",
+  "review",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -273,6 +275,13 @@ function helpText(): string {
     "                                            epNN.m4a moved to it, each line's start/end",
     "                                            written to the manifest; a mixed version remixes",
     "                                            into a new one. Generates new cues on the GPU",
+    "  pablo review --project <slug> [--episode N]",
+    "                                            the review player (needs Google Chrome): a radio",
+    "                                            work's episodes with a reason on each flag, the",
+    "                                            line's gate scores, the performer's auto-flags,",
+    "                                            a version switcher and a chapter list that fills",
+    "                                            in as chapters are published. Flags go to",
+    "                                            outputs/radio/casting/flags.json for `pablo fix`",
     "  pablo takes show <key> --project <slug>  one radio take: inputs, scores, timings and",
     "                                            receipt id (a unique key prefix is enough)",
     "  pablo takes gc --project <slug> [--yes]  list the takes no manifest references, then",
@@ -852,6 +861,30 @@ export async function runReadView(args: ParsedArgs, open: typeof openReader = op
 }
 
 /**
+ * `pablo review --project W [--episode N]` (AGT-1693): open the review player on a radio work and hold the
+ * process until the window closes. `open` is injectable so tests never start a window.
+ */
+export async function runReviewView(args: ParsedArgs, projectPath: string | undefined, open: typeof openReview = openReview): Promise<number> {
+  const episodeArg = args.values["episode"];
+  const episode = episodeArg === undefined ? undefined : Number(episodeArg);
+  if (projectPath === undefined || (episode !== undefined && (!Number.isInteger(episode) || episode < 1))) {
+    const message = projectPath === undefined ? "pablo: review requires --project <slug>" : "pablo: review: --episode expects a whole number of 1 or more";
+    emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+    return EXIT_REFUSED;
+  }
+  const marker = readMarker(projectPath);
+  const opened = await open(projectPath, marker.ok ? marker.marker.title : args.project ?? "radio", episode);
+  if (!opened.ok) {
+    emit({ ok: false, code: opened.code, message: opened.message }, args.json);
+    return opened.code;
+  }
+  if (args.json) console.log(JSON.stringify({ ok: true, url: opened.view.url }));
+  else console.log(`pablo: opened the review player${episode === undefined ? "" : ` on episode ${episode}`}; close it when you are done`);
+  await opened.closed;
+  return EXIT_OK;
+}
+
+/**
  * `pablo voice new|list|show|flag|exemplar` (AGT-1240, `flag`/`exemplar`
  * AGT-1243). `sub`/`name` are positionals (`args.rest`), as is `flag`'s
  * `<line>` and `exemplar`'s `<file>` (`args.rest[2]`) — `--global`,
@@ -1267,6 +1300,11 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return markerRefusal.code;
     }
     projectPath = resolved.path;
+  }
+
+  // `review` (AGT-1693): the radio work's review player. Holds the process until the window closes.
+  if (args.verb === "review") {
+    return await runReviewView(args, projectPath);
   }
 
   // `takes` (AGT-1681): the radio output's take store. `gc` lists, then asks
