@@ -351,7 +351,7 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 re-measures them with the aligner on the decoded final file.
                 Tests use a fake cue generator, pacer and encoder.
                 The progressive render (AGT-1697): the mix's placement is
-                `mix.Timeline`, built a line group at a time (`render` adds
+                `mix.Timeline`, built a line group at a time (`auto_timeline` adds
                 every group and finishes; its `frontier` is the first sample a
                 later line, SFX or open BED can still change). `pablo perform
                 --stream` (`stream.py`, `--extra mix` too) feeds it each pass
@@ -378,6 +378,29 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 version, and `loadSegments` hands its segments to the view,
                 which plays them gaplessly on the Web Audio clock
                 (`views/review-stream.ts`).
+                The mix document (AGT-1764, pm project `pablo-mixer`):
+                `mix.py` renders only from `renders/epNN/mix.v<m>.json`
+                (`mixdoc.py`: tracks dialogue (a lane per role) / sfx / beds
+                / music of clips `{source {kind take|cue, key}, in, out,
+                anchor {line, edge, offset} | {at}, gain, fade_in,
+                fade_out}`, track volume/mute/solo/automation, master), versioned
+                like manifests and never rewritten (`write_mix`). `pablo mix`
+                renders `--from DOC` (written `by: "human"`), else the newest
+                document whose clips voice the manifest's takes, else
+                `auto_document` (the rules above as clips) written `by:
+                "auto"`. A bad document is exit 2 with `field` naming the
+                first bad field and `problems` listing all. The gain, fade,
+                crossfade and automation formulas are `mixmath.py`'s
+                (AGT-1765, shared with the TS preview); never re-derive them.
+                One render path: `mix.Timeline` *is* the auto mix. Each `add`
+                appends the rules' clips to the document it builds and places
+                them; its `mixdown` and `render_document` both sum clips with
+                `_mix_range` and finish through `master`, so `perform
+                --stream`'s segments, its episode file (the timeline's
+                document written as the next mix version, `by: "auto"`) and a
+                later render of that document are the same samples. The auto
+                mix puts an overlapping cue on its track's next lane (`main`,
+                `2`, ...) so it sums, never crossfades.
                 The voice library (AGT-1679) is the config's `library`, else
                 `<vault>/casting`: `voices/<slug>/` holds the tracked card
                 (`card.json`, `reference.flac`, `reference.txt`,

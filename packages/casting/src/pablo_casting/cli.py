@@ -63,13 +63,16 @@ Commands:
              (`segment`, `playable` and `chapter` events), mixes the episode
              file from the same timeline at the end, and records time to first
              audio (`ttfa`) in the manifest and the receipts.
-- `mix --work W --episode N [--version k] [--cues DIR] [--vault V | --library DIR]`
-             assemble the episode's voice track from a manifest version's takes
-             (paced by the manifest), place its SFX/BED/MUSIC cues from the
-             content-addressed cue library (`<library>/cues`, or `--cues`),
-             normalise, encode `renders/epNN/epNN.v<k>.m4a`, move the `epNN.m4a`
-             link and write each line's `start`/`end` into the manifest
-             (AGT-1684, `mix.py`); mixing an already-mixed version is a new version.
+- `mix --work W --episode N [--version k] [--from DOC] [--cues DIR] [--vault V | --library DIR]`
+             render the episode from a mix document (`mixdoc.py`,
+             `renders/epNN/mix.v<m>.json`: clips of the manifest's paced takes
+             and of cues from the content-addressed cue library, `<library>/cues`
+             or `--cues`), encode `renders/epNN/epNN.v<k>.m4a`, move the
+             `epNN.m4a` link and write each line's `start`/`end` into the
+             manifest (AGT-1684, AGT-1764, `mix.py`). The document is `--from`'s
+             (written as the next mix version, `by: "human"`), else the newest
+             one that fits the manifest's takes, else the auto mix, written
+             `by: "auto"`. Mixing an already-mixed version is a new version.
 - `fix --work W --episode N [--cues DIR] [--json-lines] [--vault V | --library DIR]`
              re-record only the episode's flagged lines (`flags.json`: the player's
              and perform's automatic ones, a flag's reason may bump the engine:
@@ -837,7 +840,7 @@ def run(
         except ConfigRefusal as refusal:
             return refused(str(refusal)), args.json
         seams = mixer or Seams(generators=real_generators(), log=lambda message: print(message, file=sys.stderr, flush=True))
-        return cmd_mix(work, args.episode, args.mix_version, args.cues, args.library or configured, args.vault, seams), args.json
+        return cmd_mix(work, args.episode, args.mix_version, args.cues, args.library or configured, args.vault, seams, args.from_file), args.json
     try:
         episode = _episode_number(args.episode)
     except ValueError:
