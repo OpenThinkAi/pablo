@@ -61,6 +61,7 @@ import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./re
 import { openReader } from "./reader-host";
 import { openReview } from "./review-host";
 import { openMixer } from "./mixer-host";
+import { createNotesHost } from "./mixer-notes-host";
 import { realTrayDeps, runTray } from "./tray/cli";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
@@ -317,6 +318,11 @@ function helpText(): string {
     "                                            plays every clip with its gain, fades, crossfades",
     "                                            and track automation; volume, mute and solo are",
     "                                            live (not saved). --version opens an older mix",
+    "                                            Press M to drop a marker at the playhead (note +",
+    "                                            category); Export writes the punch list.",
+    "  pablo mixer --project <slug> --episode N --export-notes",
+    "                                            no window: write renders/epNN/punch-list.md from",
+    "                                            the episode's saved markers (notes.json)",
     "  pablo fix --project <slug> --output radio --unit N (or --episode N) [--json-lines]",
     "                                            re-record only the episode's flagged lines",
     "                                            (flags.json; a reason can bump the engine),",
@@ -991,6 +997,18 @@ export async function runMixerView(args: ParsedArgs, projectPath: string | undef
   }
   const marker = readMarker(projectPath);
   const vault = findVault(cwd, process.env);
+  // `--export-notes` (AGT-1792): no window, no Chrome, no mix document: the saved markers to a punch list.
+  if (args.values["export-notes"] !== undefined && args.values["export-notes"] !== false) {
+    try {
+      const exported = createNotesHost({ work: projectPath, title: marker.ok ? marker.marker.title : args.project ?? "radio" }).exportNotes({ episode });
+      if (args.json) console.log(JSON.stringify({ ok: true, path: exported.path, count: exported.count }));
+      else console.log(`pablo: wrote the punch list for episode ${episode} (${exported.count} ${exported.count === 1 ? "note" : "notes"}): ${exported.path}`);
+      return EXIT_OK;
+    } catch (error) {
+      emit({ ok: false, code: EXIT_REFUSED, message: `pablo: mixer: ${(error as Error).message}` }, args.json);
+      return EXIT_REFUSED;
+    }
+  }
   const library = args.values["library"];
   const opened = await open({
     work: projectPath,

@@ -52,7 +52,7 @@ export function castingDir(work: string): string {
   return join(work, "outputs", "radio", "casting");
 }
 
-function episodeDir(work: string, episode: number): string {
+export function episodeDir(work: string, episode: number): string {
   return join(castingDir(work), "renders", `ep${String(episode).padStart(2, "0")}`);
 }
 
@@ -172,13 +172,13 @@ export function episodeTitle(work: string, episode: number): string {
 // flags.json
 // ---------------------------------------------------------------------------
 
-interface FlagsFile {
+export interface FlagsFile {
   readonly raw: Record<string, unknown>;
   readonly flags: Record<string, unknown>[];
 }
 
 /** `flags.json` as written, or an empty file when it does not exist. A file that is not JSON is never touched. */
-function readFlagsFile(work: string): FlagsFile {
+export function readFlagsFile(work: string): FlagsFile {
   const path = flagsFile(work);
   if (!existsSync(path)) return { raw: {}, flags: [] };
   let parsed: unknown;
@@ -193,7 +193,7 @@ function readFlagsFile(work: string): FlagsFile {
   return { raw: parsed, flags: ((parsed["flags"] as unknown[] | undefined) ?? []).filter(isRecord) };
 }
 
-function writeFlagsFile(work: string, file: FlagsFile, flags: Record<string, unknown>[]): void {
+export function writeFlagsFile(work: string, file: FlagsFile, flags: Record<string, unknown>[]): void {
   const path = flagsFile(work);
   mkdirSync(castingDir(work), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;

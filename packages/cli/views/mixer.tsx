@@ -24,6 +24,7 @@ import {
 } from "./mixer-logic";
 import type { LaneRow, Mixer, PlacedClip, TrackRows } from "./mixer-logic";
 import { MixEngine } from "./mixer-audio";
+import { MARKERS_CSS, MarkerPins, MarkersPanel, useMarkers } from "./mixer-markers";
 
 /**
  * The mixer view (AGT-1768, `pm project show pablo-mixer`, "The mixer view"): an episode's mix document drawn
@@ -310,7 +311,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement | null)?.tagName ?? "")) return;
       if (e.code === "Space") {
         e.preventDefault();
         void toggle();
@@ -348,6 +349,32 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
 
   const label = useCallback((p: PlacedClip) => (payload === null ? p.clip.id : clipLabel(payload, p.clip)), [payload]);
 
+  const timeRef = useRef(0);
+  timeRef.current = time;
+  const getTime = useCallback(() => (engine.current?.playing === true ? engine.current.time() : timeRef.current), []);
+  const spanRef = useRef(span);
+  spanRef.current = span;
+  // A marker key pauses playback while the note is typed, and Enter / Esc resume it where it stopped.
+  const pauseForNote = useCallback(() => {
+    const eng = engine.current;
+    if (eng === null || !eng.playing) return false;
+    eng.pause();
+    setPlaying(false);
+    setTime(eng.time());
+    return true;
+  }, []);
+  const resumeAfterNote = useCallback(() => {
+    const eng = engine.current;
+    if (eng === null) return;
+    void eng
+      .play(timeRef.current >= spanRef.current ? 0 : timeRef.current, () => {
+        setPlaying(false);
+        setTime(spanRef.current);
+      })
+      .then(() => setPlaying(true));
+  }, []);
+  const markers = useMarkers({ mutate, episode: data.episode, payload, placed: placement?.placed ?? [], getTime, pause: pauseForNote, resume: resumeAfterNote });
+
   if (load.phase === "loading") {
     return (
       <div className="mixer">
@@ -372,7 +399,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
 
   return (
     <div className="mixer">
-      <style>{CSS}</style>
+      <style>{CSS + MARKERS_CSS}</style>
       <header className="top">
         <div className="titles">
           <span className="work">{data.title}</span>
@@ -457,6 +484,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
                   {t.label}
                 </div>
               ))}
+              <MarkerPins notes={markers.notes} pps={pps} onJump={(t) => void seek(t)} inRuler />
             </div>
             {rows.map((r) => (
               <div key={r.track} className={`track track-${r.track}${mixer[r.track].mute || (soloed && !mixer[r.track].solo) ? " dim" : ""}`} onClick={seekAt}>
@@ -466,9 +494,11 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
                 ))}
               </div>
             ))}
+            <MarkerPins notes={markers.notes} pps={pps} onJump={(t) => void seek(t)} inRuler={false} />
             <div className="playhead" style={{ left: time * pps }} />
           </div>
         </div>
+        <MarkersPanel api={markers} onJump={(t) => void seek(t)} />
       </div>
     </div>
   );
