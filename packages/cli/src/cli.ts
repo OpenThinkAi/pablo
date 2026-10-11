@@ -14,9 +14,10 @@
  */
 
 import { basename, dirname, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
-import { doctorText, realCastingDeps, runAudition, runDoctor } from "./casting";
+import { doctorText, realCastingDeps, runAudition, runDoctor, runTakes, takeShowText, takesGcText } from "./casting";
 import { branchDiff, fileAt, repoRoot, waitingBranches, waitingForReview } from "./branch";
 import { runCheck, screenChecks } from "./check";
 import { reviewCommentsOf } from "./critique";
@@ -84,6 +85,7 @@ const P0_VERBS = [
   "tray",
   "doctor",
   "audition",
+  "takes",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -194,6 +196,11 @@ function helpText(): string {
     "                                            configured weights) on first use, then check",
     "                                            it runs; no model is loaded. Needs uv",
     "                                            (brew install uv); writing verbs never do",
+    "  pablo takes show <key> --project <slug>  one radio take: inputs, scores, timings and",
+    "                                            receipt id (a unique key prefix is enough)",
+    "  pablo takes gc --project <slug> [--yes]  list the takes no manifest references, then",
+    "                                            ask before archiving them (moved, never",
+    "                                            deleted); without a terminal, needs --yes",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -230,6 +237,8 @@ interface ParsedArgs {
   readonly dryRun: boolean;
   /** `write --force`: overwrite an existing chapter file. */
   readonly force: boolean;
+  /** `takes gc --yes` (AGT-1681): archive the listed takes without asking. */
+  readonly yes: boolean;
   /** `write --temperature T`: sampling temperature; validated by `runWrite`. */
   readonly temperature: string | undefined;
   /** `write --seed N`: sampling seed; validated by `runWrite`. */
@@ -301,6 +310,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       new: { type: "boolean", default: false },
       list: { type: "boolean", default: false },
       "no-open": { type: "boolean", default: false },
+      yes: { type: "boolean", default: false },
     },
   });
 
@@ -324,6 +334,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     scenes: typeof values["scenes"] === "string" ? values["scenes"] : undefined,
     dryRun: values["dry-run"] === true,
     force: values["force"] === true,
+    yes: values["yes"] === true,
     temperature: typeof values["temperature"] === "string" ? values["temperature"] : undefined,
     seed: typeof values["seed"] === "string" ? values["seed"] : undefined,
     direction: typeof values["direction"] === "string" ? values["direction"] : undefined,
@@ -345,6 +356,16 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     reader: typeof values["reader"] === "string" ? values["reader"] : undefined,
     chapters: typeof values["chapters"] === "string" ? values["chapters"] : undefined,
   };
+}
+
+/** A yes/no question on the terminal (stderr, so `--json`-free stdout stays the body); anything but y/yes is no. */
+async function askYesNo(question: string): Promise<boolean> {
+  const prompt = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return /^y(es)?$/i.test((await prompt.question(question)).trim());
+  } finally {
+    prompt.close();
+  }
 }
 
 interface Result {
@@ -936,6 +957,27 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     if (args.json) console.log(JSON.stringify(result.body));
     else if (body.ok) console.log(`pablo: ${body.message ?? "audition ok"}`);
     else console.error(body.message ?? "pablo: audition failed");
+    return result.exitCode;
+  }
+
+  // `takes` (AGT-1681): the radio output's take store. `gc` lists, then asks
+  // on a terminal; without one (or with --json) it needs --yes.
+  if (args.verb === "takes") {
+    const interactive = !args.json && process.stdin.isTTY === true && process.stdout.isTTY === true;
+    const result = await runTakes(
+      { sub: args.rest[0], key: args.rest[1], yes: args.yes },
+      { env: process.env, stderr: process.stderr },
+      realCastingDeps(process.env),
+      projectPath,
+      interactive ? askYesNo : undefined,
+    );
+    const body = result.body as { ok?: boolean; message?: string; unreferenced?: unknown };
+    if (args.json) console.log(JSON.stringify(result.body));
+    else if (body.ok) console.log(args.rest[0] === "show" ? takeShowText(result.body) : takesGcText(result.body));
+    else {
+      if (body.unreferenced !== undefined) console.log(takesGcText(result.body));
+      console.error(body.message ?? "pablo: takes failed");
+    }
     return result.exitCode;
   }
 

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { castingLayout, castingState, ensureProvisioned, runAudition, runDoctor, UV_INSTALL, venvPython } from "../src/casting";
+import { castingLayout, castingState, ensureProvisioned, runAudition, runDoctor, runTakes, takeShowText, takesGcText, UV_INSTALL, venvPython } from "../src/casting";
 import type { CastingDeps, CastingLayout, CastingRun } from "../src/casting";
 import { BUNDLED, bundleCasting } from "../src/casting-bundle";
 
@@ -102,6 +102,114 @@ describe("doctor", () => {
     expect(body.casting["state"]).toBe("provisioned");
     expect(body.casting["python"]).toEqual({ ok: true, python: "3.12.13", version: "0.1.0" });
     expect(deps.calls.at(-1)?.slice(1)).toEqual(["-m", "pablo_casting", "doctor", "--json"]);
+  });
+});
+
+describe("takes (AGT-1681)", () => {
+  const KEY_A = "a".repeat(64);
+  const KEY_B = "b".repeat(64);
+  const listing = { ok: true, referenced: 3, unreferenced: [{ key: KEY_A, bytes: 10, created: "t" }, { key: KEY_B, bytes: 20, created: "t" }], archived: [] };
+
+  /** A provisioned fake whose `takes` answers come from `answer(argv)`. */
+  function takesDeps(answer: (args: readonly string[]) => object) {
+    const { layout, root } = fakeLayout();
+    const work = join(root, "work");
+    mkdirSync(work);
+    const base = fakeDeps(layout);
+    const deps: CastingDeps & { calls: string[][] } = {
+      ...base,
+      run: (argv, options) => {
+        if (argv[3] !== "takes") return base.run(argv, options);
+        base.calls.push([...argv]);
+        const body = answer(argv.slice(3)) as { ok?: boolean; code?: number };
+        return { code: body.ok === false ? (body.code ?? 1) : 0, stdout: JSON.stringify(body), stderr: "" };
+      },
+    };
+    return { deps, work, root, takesCalls: () => base.calls.filter((call) => call[3] === "takes").map((call) => call.slice(3)) };
+  }
+
+  const gcAnswer = (args: readonly string[]) =>
+    args.includes("--yes") ? { ...listing, archived: [{ key: KEY_A, to: "/w/archive/takes/s/a" }, { key: KEY_B, to: "/w/archive/takes/s/b" }] } : listing;
+
+  test("show provisions if needed and passes the key and work through", async () => {
+    const { deps, work, root, takesCalls } = takesDeps(() => ({ ok: true, key: KEY_A, receipt: "r-1" }));
+    const result = await runTakes({ sub: "show", key: "aaaa", yes: false }, ctx(root).ctx, deps, work);
+    expect(result.exitCode).toBe(0);
+    expect((result.body as { receipt: string }).receipt).toBe("r-1");
+    expect(takesCalls()).toEqual([["takes", "show", "aaaa", "--work", work, "--json"]]);
+  });
+
+  test("takes need a project; an unknown or missing subcommand is an error", async () => {
+    const { deps, root, work, takesCalls } = takesDeps(() => listing);
+    expect((await runTakes({ sub: "gc", key: undefined, yes: false }, ctx(root).ctx, deps, undefined)).exitCode).toBe(2);
+    expect((await runTakes({ sub: "burn", key: undefined, yes: false }, ctx(root).ctx, deps, work)).exitCode).toBe(1);
+    expect((await runTakes({ sub: undefined, key: undefined, yes: false }, ctx(root).ctx, deps, work)).exitCode).toBe(1);
+    expect((await runTakes({ sub: "show", key: undefined, yes: false }, ctx(root).ctx, deps, work)).exitCode).toBe(1);
+    expect(takesCalls()).toEqual([]);
+  });
+
+  test("gc without a terminal and without --yes lists, refuses (exit 2) and archives nothing", async () => {
+    const { deps, work, root, takesCalls } = takesDeps(gcAnswer);
+    const result = await runTakes({ sub: "gc", key: undefined, yes: false }, ctx(root).ctx, deps, work);
+    expect(result.exitCode).toBe(2);
+    const body = result.body as { message: string; unreferenced: unknown[]; missing: string[] };
+    expect(body.unreferenced).toHaveLength(2);
+    expect(body.missing).toEqual(["--yes"]);
+    expect(body.message).toContain("--yes");
+    expect(takesCalls()).toEqual([["takes", "gc", "--work", work, "--json"]]);
+  });
+
+  test("gc on a terminal shows the list, asks, and archives exactly the listed keys on yes", async () => {
+    const { deps, work, root, takesCalls } = takesDeps(gcAnswer);
+    const { ctx: c, err } = ctx(root);
+    const asked: string[] = [];
+    const result = await runTakes({ sub: "gc", key: undefined, yes: false }, c, deps, work, async (q) => (asked.push(q), true));
+    expect(result.exitCode).toBe(0);
+    expect(asked).toHaveLength(1);
+    expect(err.join("")).toContain(KEY_A);
+    expect(takesCalls().at(-1)).toEqual(["takes", "gc", "--work", work, "--yes", "--key", KEY_A, "--key", KEY_B, "--json"]);
+    expect(takesGcText(result.body)).toContain("archived 2 take(s)");
+  });
+
+  test("gc declined on a terminal archives nothing", async () => {
+    const { deps, work, root, takesCalls } = takesDeps(gcAnswer);
+    const result = await runTakes({ sub: "gc", key: undefined, yes: false }, ctx(root).ctx, deps, work, async () => false);
+    expect(result.exitCode).toBe(0);
+    expect((result.body as { declined: boolean }).declined).toBe(true);
+    expect(takesCalls()).toHaveLength(1);
+    expect(takesGcText(result.body)).toContain("nothing archived");
+  });
+
+  test("gc --yes archives without asking; nothing unreferenced means nothing to ask", async () => {
+    const { deps, work, root, takesCalls } = takesDeps(gcAnswer);
+    const never = async () => {
+      throw new Error("must not ask");
+    };
+    expect((await runTakes({ sub: "gc", key: undefined, yes: true }, ctx(root).ctx, deps, work, never)).exitCode).toBe(0);
+    expect(takesCalls()).toHaveLength(2);
+
+    const empty = takesDeps(() => ({ ok: true, referenced: 4, unreferenced: [], archived: [] }));
+    const result = await runTakes({ sub: "gc", key: undefined, yes: false }, ctx(empty.root).ctx, empty.deps, empty.work, never);
+    expect(result.exitCode).toBe(0);
+    expect(empty.takesCalls()).toHaveLength(1);
+    expect(takesGcText(result.body)).toBe("no unreferenced takes (4 referenced by manifests)");
+  });
+
+  test("show's text names inputs, scores, timings and the receipt", () => {
+    const text = takeShowText({
+      ok: true,
+      key: KEY_A,
+      status: "pass",
+      attempt: 0,
+      seed: 7,
+      receipt: "r-123",
+      inputs: { engine: { id: "fake", weights_sha256: "0".repeat(64), mlx_audio: "none", mlx: "none" }, voice: "card", lines: [{ speaker: "CORA", text: "Hush." }], direction: { emotion: "dry" }, params: {} },
+      scores: { wer: 0 },
+      timings: { words: [{ word: "Hush.", start: 0, end: 0.36 }], wall: 0.01, rtf: 0.02 },
+      audio: { duration: 0.54 },
+      path: "/w/takes/a",
+    });
+    for (const expected of ["r-123", "CORA: Hush.", '{"wer":0}', "Hush.@0", "wall 0.01 s", "fake"]) expect(text).toContain(expected);
   });
 });
 
