@@ -183,6 +183,8 @@ def test_no_code_path_deletes_or_rewrites_a_take() -> None:
         # AGT-1764: a mix that fails after writing its new mix document removes that document (only the one this
         # run just wrote, never an earlier version); never a take.
         ("mix.py", "mix", "unlink"),
+        # AGT-1766: the mixer's peaks cache (.pablo/casting/peaks/) is written by an atomic swap of its own staging file; never a take.
+        ("mixer.py", "cmd_peaks", "replace"),
     }
     found: set[tuple[str, str, str]] = set()
     for path in SRC.glob("*.py"):
