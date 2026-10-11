@@ -476,6 +476,9 @@ def _episode_report(work: Path, number: int, path: Path, script: Script, bound: 
         "undeclaredSpeakers": script.undeclared,
         "unboundRoles": [r for r in roles if r not in bound],
         "unknownDirections": [i.as_body() for i in script.issues],
+        "offVocabulary": script.off_vocabulary(),
+        "multipleDirections": script.multiple_directions(),
+        "undescribedRoles": script.undescribed,
     }
 
 
@@ -500,6 +503,9 @@ def cmd_check(work: Path, episode: int | None) -> Result:
             {"file": r["file"], **issue} for r in reports for issue in r["unknownDirections"]  # type: ignore[union-attr]
         ],
         "unboundRoles": [{"file": r["file"], "episode": r["episode"], "role": role} for r in reports for role in r["unboundRoles"]],  # type: ignore[union-attr]
+        "offVocabulary": [{"file": r["file"], **item} for r in reports for item in r["offVocabulary"]],  # type: ignore[union-attr]
+        "multipleDirections": [{"file": r["file"], **item} for r in reports for item in r["multipleDirections"]],  # type: ignore[union-attr]
+        "undescribedRoles": [{"file": r["file"], "episode": r["episode"], "role": role} for r in reports for role in r["undescribedRoles"]],  # type: ignore[union-attr]
     }, EXIT_OK
 
 

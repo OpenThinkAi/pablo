@@ -96,12 +96,27 @@ export function radioBind(
 
 /** Plain-text lines for the radio part of a `check` body. */
 export function radioCheckLines(body: unknown): string[] {
-  const { unknownDirections = [], unboundRoles = [] } = body as {
+  const {
+    unknownDirections = [],
+    offVocabulary = [],
+    multipleDirections = [],
+    undescribedRoles = [],
+    unboundRoles = [],
+  } = body as {
     unknownDirections?: { file: string; line: number; text: string; speaker: string; unknown: string[] }[];
+    offVocabulary?: { file: string; line: number; text: string; speaker: string; mapped: Record<string, string>; ignored: string[] }[];
+    multipleDirections?: { file: string; line: number; speaker: string; directions: string[] }[];
+    undescribedRoles?: { file: string; episode: number; role: string }[];
     unboundRoles?: { file: string; episode: number; role: string }[];
   };
   return [
     ...unknownDirections.map((d) => `${d.file}:${d.line} unknown direction ${d.text} (${d.speaker}: ${d.unknown.join(", ")})`),
+    ...offVocabulary.map((d) => {
+      const fix = Object.entries(d.mapped).map(([from, to]) => `${from} -> ${to}`);
+      return `${d.file}:${d.line} direction outside the vocabulary ${d.text} (${d.speaker}: ${[...fix, ...d.ignored.map((w) => `${w} is a sound, not a direction`)].join(", ")})`;
+    }),
+    ...multipleDirections.map((d) => `${d.file}:${d.line} more than one direction ${d.directions.join(" ")} (${d.speaker})`),
+    ...undescribedRoles.map((r) => `${r.file} undescribed role: ${r.role} (add a description on the CAST: line)`),
     ...unboundRoles.map((r) => `${r.file} unbound role: ${r.role}`),
   ];
 }
