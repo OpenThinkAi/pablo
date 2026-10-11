@@ -60,6 +60,7 @@ import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
 import { openReader } from "./reader-host";
 import { openReview } from "./review-host";
+import { openMixer } from "./mixer-host";
 import { realTrayDeps, runTray } from "./tray/cli";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
@@ -100,6 +101,7 @@ const P0_VERBS = [
   "perform",
   "mix",
   "review",
+  "mixer",
   "fix",
 ] as const;
 
@@ -308,6 +310,13 @@ function helpText(): string {
     "                                            a version switcher and a chapter list that fills",
     "                                            in as chapters are published. Flags go to",
     "                                            outputs/radio/casting/flags.json for `pablo fix`",
+    "  pablo mixer --project <slug> --episode N [--version k] [--library DIR]",
+    "                                            the mixer (needs Google Chrome): the episode's mix",
+    "                                            document as tracks (Dialogue a lane per role, SFX,",
+    "                                            Beds, Music) of clips with waveforms on a ruler;",
+    "                                            plays every clip with its gain, fades, crossfades",
+    "                                            and track automation; volume, mute and solo are",
+    "                                            live (not saved). --version opens an older mix",
     "  pablo fix --project <slug> --output radio --unit N (or --episode N) [--json-lines]",
     "                                            re-record only the episode's flagged lines",
     "                                            (flags.json; a reason can bump the engine),",
@@ -436,8 +445,10 @@ interface ParsedArgs {
  */
 export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   // `pablo mix --version k` (AGT-1684): `--version` is the global "print the version" flag everywhere
-  // else, so for the `mix` verb alone it is read as `--mix-version` and handed to the verb as `version`.
-  const mixing = argv.find((token) => !token.startsWith("-")) === "mix";
+  // else, so for the `mix` verb (and `mixer`, AGT-1768: the mix version to open) it is read as
+  // `--mix-version` and handed to the verb as `version`.
+  const first = argv.find((token) => !token.startsWith("-"));
+  const mixing = first === "mix" || first === "mixer";
   const tokens = mixing ? argv.map((token) => (token === "--version" ? "--mix-version" : token.startsWith("--version=") ? `--mix-${token.slice(2)}` : token)) : argv;
   const parsed = parseArgs({
     args: tokens as string[],
@@ -962,6 +973,45 @@ export async function runReviewView(args: ParsedArgs, projectPath: string | unde
 }
 
 /**
+ * `pablo mixer --project W --episode N [--version k] [--library DIR]` (AGT-1768): open the mixer on one episode's
+ * mix document and hold the process until the window closes. `open` is injectable so tests never start a window.
+ */
+export async function runMixerView(args: ParsedArgs, projectPath: string | undefined, cwd: string, open: typeof openMixer = openMixer): Promise<number> {
+  const whole = (value: unknown): number | undefined | null => (value === undefined ? undefined : Number.isInteger(Number(value)) && Number(value) >= 1 ? Number(value) : null);
+  const episode = whole(args.values["episode"] ?? args.unit);
+  const version = whole(args.values["version"]);
+  let message: string | undefined;
+  if (projectPath === undefined) message = "pablo: mixer requires --project <slug> and --episode N";
+  else if (episode === undefined) message = "pablo: mixer requires --episode N";
+  else if (episode === null) message = "pablo: mixer: --episode expects a whole number of 1 or more";
+  else if (version === null) message = "pablo: mixer: --version expects a whole number of 1 or more";
+  if (message !== undefined || projectPath === undefined || episode === undefined || episode === null || version === null) {
+    emit({ ok: false, code: EXIT_REFUSED, message: message ?? "pablo: mixer: bad arguments" }, args.json);
+    return EXIT_REFUSED;
+  }
+  const marker = readMarker(projectPath);
+  const vault = findVault(cwd, process.env);
+  const library = args.values["library"];
+  const opened = await open({
+    work: projectPath,
+    title: marker.ok ? marker.marker.title : args.project ?? "radio",
+    episode,
+    ...(version === undefined ? {} : { version }),
+    ...(vault.ok ? { vault: vault.path } : {}),
+    ...(typeof library === "string" ? { library } : {}),
+    casting: realCastingDeps(process.env),
+  });
+  if (!opened.ok) {
+    emit({ ok: false, code: opened.code, message: opened.message }, args.json);
+    return opened.code;
+  }
+  if (args.json) console.log(JSON.stringify({ ok: true, url: opened.view.url }));
+  else console.log(`pablo: opened the mixer on episode ${episode}; close it when you are done`);
+  await opened.closed;
+  return EXIT_OK;
+}
+
+/**
  * `pablo voice new|list|show|flag|exemplar` (AGT-1240, `flag`/`exemplar`
  * AGT-1243). `sub`/`name` are positionals (`args.rest`), as is `flag`'s
  * `<line>` and `exemplar`'s `<file>` (`args.rest[2]`) — `--global`,
@@ -1388,6 +1438,11 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // `review` (AGT-1693): the radio work's review player. Holds the process until the window closes.
   if (args.verb === "review") {
     return await runReviewView(args, projectPath);
+  }
+
+  // `mixer` (AGT-1768): one episode's mix document in the mixer view. Holds the process until the window closes.
+  if (args.verb === "mixer") {
+    return await runMixerView(args, projectPath, cwd);
   }
 
   // `takes` (AGT-1681): the radio output's take store. `gc` lists, then asks
