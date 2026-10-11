@@ -144,6 +144,9 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     by: { type: "string" }, // AGT-1679: cast --by
     "auto-admitted": { type: "boolean", default: false }, // AGT-1679: voices list --auto-admitted
     reason: { type: "string" }, // AGT-1679: voices retire --reason
+    auto: { type: "boolean", default: false }, // AGT-1698: cast --auto
+    episode: { type: "string" }, // AGT-1698: cast --auto --episode
+    all: { type: "boolean", default: false }, // AGT-1698: cast --auto --all
   });
 });
 

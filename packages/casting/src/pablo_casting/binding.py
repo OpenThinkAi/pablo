@@ -97,6 +97,20 @@ def load_card(library: Path, slug: str) -> Card:
     return Card(slug=slug, hash=card_hash(card), retired=bool(card.get("retired")))
 
 
+def pin_state(library: Path, entry: dict[str, object]) -> str:
+    """Whether a `cast.json` pin still holds: `ok` (the library card hashes to the pin, retired or not),
+    `changed` (the card was recast since), or `missing` (no such card). Retiring never breaks a pin:
+    `retired` is outside the card hash, so a story that pins a retired voice still performs."""
+    slug = entry.get("slug")
+    if not isinstance(slug, str) or not SLUG.match(slug):
+        return "missing"
+    try:
+        card = load_card(library, slug)
+    except BindingRefusal:
+        return "missing"
+    return "ok" if card.hash == entry.get("card_hash") else "changed"
+
+
 def read_cast(work: Path) -> dict[str, dict[str, object]]:
     """The bound roles; an absent or empty `cast.json` binds nothing. An unreadable one is a refusal."""
     path = cast_path(work)
