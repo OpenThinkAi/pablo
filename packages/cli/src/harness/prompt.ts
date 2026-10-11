@@ -23,7 +23,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Marker } from "../marker";
+import { outputsLabel, type Marker } from "../marker";
 import type { Refusal } from "../project";
 
 /** The judgement policy, by name, as loaded from `policies/`. */
@@ -127,7 +127,7 @@ export function loadPromptWork(
     ok: true,
     work: {
       title: marker.title,
-      format: marker.format,
+      format: outputsLabel(marker),
       slug,
       ...(policy === undefined ? {} : { policy }),
       ...(rules === undefined ? {} : { rules }),

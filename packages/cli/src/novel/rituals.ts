@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import type { Adapter } from "@openthink/pablo-core";
+import { beatsFile, continuityFile } from "@openthink/pablo-core";
 import { runContinuity } from "./continuity";
 
 export type RitualStatus = "ran" | "skipped" | "failed";
@@ -134,9 +135,10 @@ async function attemptAsync(name: string, fn: () => Promise<Ritual>): Promise<Ri
  * AC1 ("moves from `beat` to `draft`") actually require in practice.
  */
 function tickOutline(workDir: string, chapter: number): Ritual {
-  const path = join(workDir, "outline", "chapters.md");
+  const rel = beatsFile(workDir);
+  const path = join(workDir, rel);
   if (!existsSync(path)) {
-    return { name: "outline", status: "skipped", detail: "outline/chapters.md not found" };
+    return { name: "outline", status: "skipped", detail: `${rel} not found` };
   }
 
   const text = readFileSync(path, "utf8");
@@ -447,8 +449,8 @@ export async function runAfterMerge(workDir: string, chapter: number, chapterPat
   });
 
   const chapterRel = relative(workDir, chapterPath).split(sep).join("/");
-  const gitPaths = [chapterRel, "outline/chapters.md", noteRel, "README.md"];
-  if (continuity.status === "ran") gitPaths.push("continuity.md");
+  const gitPaths = [chapterRel, beatsFile(workDir), noteRel, "README.md"];
+  if (continuity.status === "ran") gitPaths.push(continuityFile(workDir));
   const git = attempt("git", () => runGit(workDir, gitPaths, `${opts.slug}: draft chapter ${chapter}`));
 
   const think = await attemptAsync("think", () => runThink(chapter, opts.words, opts.slug, env, thinkTimeoutMs, allowNvmFallback));

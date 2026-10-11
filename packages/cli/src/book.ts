@@ -36,8 +36,8 @@ export function bookStages(state: NovelState, waiting: readonly string[] = []): 
   if (cast === 0) absent.push("bible/characters/ has no character files");
   stage("bible", "bible", absent.length === 0, absent);
 
-  stage("acts", "acts", state.acts.length > 0, ["outline/chapters.md has no | Act | table"]);
-  stage("beats", state.beats.length > 0 ? `beats (${state.beats.length})` : "beats", state.beats.length > 0, ["outline/chapters.md has no beat rows"]);
+  stage("acts", "acts", state.acts.length > 0, [`${state.outlineFile} has no | Act | table`]);
+  stage("beats", state.beats.length > 0 ? `beats (${state.beats.length})` : "beats", state.beats.length > 0, [`${state.outlineFile} has no beat rows`]);
 
   const numbers = [...new Set([...state.beats.map((b) => b.chapter), ...state.chapters.map((c) => c.number)])].sort((a, b) => a - b);
   const drafted = state.chapters.length;

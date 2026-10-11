@@ -20,7 +20,16 @@
 
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { joinManuscript, splitSentences } from "@openthink/pablo-core";
+import {
+  BEATS_FILE,
+  LEGACY_BEATS_FILE,
+  LEGACY_CONTINUITY_FILE,
+  NOVEL_CONTINUITY_FILE,
+  beatsFile,
+  continuityFile,
+  joinManuscript,
+  splitSentences,
+} from "@openthink/pablo-core";
 
 export type ReadableKind = "bible" | "chapter" | "outline" | "continuity" | "research";
 
@@ -66,10 +75,23 @@ function refuse(message: string): ToolRefusal {
 
 type Resolved = { readonly ok: true; readonly abs: string; readonly rel: string; readonly kind: ReadableKind } | ToolRefusal;
 
+/**
+ * The beats file and the novel's continuity ledger answer to both their old
+ * and new names (`pablo migrate outputs`, AGT-1666), so a model that asks for
+ * `outline/chapters.md` on a migrated work, or `outputs/novel/continuity.md`
+ * on an unmigrated one, still gets the file the work has.
+ */
+function shimmed(workDir: string, value: string): string {
+  const v = value.replace(/^\.\//, "");
+  if (v === LEGACY_CONTINUITY_FILE || v === NOVEL_CONTINUITY_FILE) return continuityFile(workDir);
+  if (v === LEGACY_BEATS_FILE || v === BEATS_FILE) return beatsFile(workDir);
+  return value;
+}
+
 /** Resolves `value` against the work, refusing anything outside it or outside the readable areas. */
 function resolveReadable(workDir: string, value: string): Resolved {
   const root = realpathSync(workDir);
-  const lexical = resolve(root, value);
+  const lexical = resolve(root, shimmed(root, value));
   if (lexical !== root && !lexical.startsWith(root + sep)) {
     return refuse(`pablo: "${value}" is outside the work directory`);
   }
@@ -83,7 +105,7 @@ function resolveReadable(workDir: string, value: string): Resolved {
   }
   const rel = relative(root, abs).split(sep).join("/");
   const area = rel.split("/")[0] ?? "";
-  const kind = AREAS[area];
+  const kind = rel === NOVEL_CONTINUITY_FILE ? "continuity" : AREAS[area];
   if (rel === "" || kind === undefined) {
     return refuse(
       `pablo: "${value}" is not readable; read bible/, chapters/, outline/, research/ or continuity.md`,
@@ -208,7 +230,7 @@ export function searchTool(workDir: string, phrase: string): SearchResult {
 
   const root = realpathSync(workDir);
   const files: string[] = [];
-  for (const area of Object.keys(AREAS)) {
+  for (const area of [...Object.keys(AREAS), NOVEL_CONTINUITY_FILE]) {
     const abs = join(root, area);
     if (!existsSync(abs)) continue;
     // A symlinked area (or one pointing out of the work) is skipped, not followed.

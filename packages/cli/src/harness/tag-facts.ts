@@ -13,7 +13,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { createPlanner, loadConfig } from "@openthink/pablo-core";
+import { continuityFile, createPlanner, loadConfig } from "@openthink/pablo-core";
 import type { Adapter, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { readMarker } from "../marker";
 import { startPlanSession } from "../plan";
@@ -42,7 +42,7 @@ export interface TagFactsDeps {
 /** The files whose facts get tagged: `continuity.md` and every `.md` under `bible/`, as `where` values. */
 export function factFiles(workPath: string): string[] {
   const out: string[] = [];
-  if (existsSync(join(workPath, "continuity.md"))) out.push("continuity");
+  if (existsSync(join(workPath, continuityFile(workPath)))) out.push("continuity");
   const walk = (dir: string): void => {
     if (!existsSync(dir)) return;
     for (const name of readdirSync(dir).sort()) {

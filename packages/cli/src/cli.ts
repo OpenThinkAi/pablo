@@ -23,10 +23,11 @@ import { branchDiff, fileAt, repoRoot, waitingBranches, waitingForReview } from 
 import { runCheck, screenChecks } from "./check";
 import { reviewCommentsOf } from "./critique";
 import { migrateLines } from "./migrate";
+import { migrateOutputs } from "./migrate-outputs";
 import { mergeDraftInProject } from "./novel/merge";
 import { initAdopt, initNovel } from "./init";
 import type { InitResult } from "./init";
-import { readMarker } from "./marker";
+import { outputsLabel, readMarker } from "./marker";
 import type { Composer } from "@openthink/pablo-tui";
 import { loadConfig } from "@openthink/pablo-core";
 import { runAgent } from "./harness/agent";
@@ -128,6 +129,11 @@ function helpText(): string {
     "  pablo migrate lines --project <slug> [--dry-run]",
     "                                            one-time split of chapters/*.md to one",
     "                                            sentence per line, committed on its own",
+    "  pablo migrate outputs --project <slug> [--dry-run]",
+    "                                            one-time move of a format:novel work to a",
+    "                                            story core plus a novel output (pablo.json",
+    "                                            outputs, outputs/novel/, outline/beats.md,",
+    "                                            facts.md), committed on its own",
     "  pablo merge --project <slug> <draft/chNN>",
     "                                            merge a reviewed draft branch to main, then run",
     "                                            the after-write steps (outline, note, README,",
@@ -803,7 +809,7 @@ export function bareScreenTarget(cwd: string): { title: string; format: string; 
   let dir = resolve(cwd);
   for (;;) {
     const found = readMarker(dir);
-    if (found.ok) return { title: found.marker.title, format: found.marker.format, dir };
+    if (found.ok) return { title: found.marker.title, format: outputsLabel(found.marker), dir };
     const parent = dirname(dir);
     if (parent === dir) return undefined;
     dir = parent;
@@ -1082,13 +1088,13 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   if (args.verb === "migrate") {
     const [sub] = args.rest;
-    if (sub !== "lines") {
-      const message = `pablo: migrate: unknown migration "${sub ?? ""}" (expected lines)`;
+    if (sub !== "lines" && sub !== "outputs") {
+      const message = `pablo: migrate: unknown migration "${sub ?? ""}" (expected lines or outputs)`;
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
     if (projectPath === undefined) {
-      const message = "pablo: migrate lines requires --project <slug>";
+      const message = `pablo: migrate ${sub} requires --project <slug>`;
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
@@ -1096,6 +1102,22 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     if (!vaultResult.ok) {
       emit(refusalResult(vaultResult), args.json);
       return vaultResult.code;
+    }
+    if (sub === "outputs") {
+      const result = migrateOutputs(vaultResult.path, projectPath, { dryRun: args.dryRun });
+      if (!result.ok) {
+        emit({ ok: false, code: result.code, message: result.message }, args.json);
+        return result.code;
+      }
+      if (args.json) {
+        console.log(JSON.stringify(result));
+      } else {
+        const verb = result.dryRun ? "would change" : "changed";
+        console.log(`pablo: migrate outputs: ${verb} ${result.changes.length} path(s)${result.committed ? " (committed)" : ""}`);
+        for (const c of result.changes) console.log(c.op === "move" ? `  move    ${c.from} -> ${c.path}` : `  ${c.op.padEnd(7)} ${c.path}`);
+        if (result.notice) console.log(result.notice);
+      }
+      return EXIT_OK;
     }
     const outcome = migrateLines(vaultResult.path, projectPath, { dryRun: args.dryRun });
     if (!outcome.ok) {

@@ -123,6 +123,7 @@ including an unresolvable project), `1` error.
 | `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
 | `pablo voice rule <name> "<text>" [--example "<sentences>"] [--target voice\|work --project <slug>]` | add a rule the author typed or dictated (AGT-1594): `- <text>` as the last bullet of the target's `## Rules` section (created at EOF if missing), committed by pathspec like `voice flag`. Targets: `voice` (default) is the voice's own rules file: `style/prose.md` for `fiction`, `voice.md` for a named voice; `work` is the work's `QWEN.md` (needs `--project`; it joins an existing `## Ground rules…` section, else creates `## Rules`; refused when the work has no `QWEN.md`). `--example` adds `Flagged: "<sentences>"` under the bullet, which `check` and `write` read from `style/prose.md` (and `prose` from a named voice's rules) but not from `QWEN.md`. The same function backs the `voice_rule` MCP tool (`name`, `text`, `example?`, `target?`, `project?`) and the screen's `a v r`; the other voice subcommands (`new\|list\|show\|flag\|exemplar`) are `voice_*` tools too | `{ok, path, target, committed, notice?}` |
 | `pablo migrate lines --project <slug> [--dry-run]` | one-time split of `chapters/*.md` to one sentence per line (frontmatter untouched), committed as its own commit holding only those files; a second run changes nothing; `--dry-run` lists the files it would change (AGT-1533) | `{ok, dryRun, changed[], committed, notice?}` |
+| `pablo migrate outputs --project <slug> [--dry-run]` | one-time move of a `format: "novel"` work to a story core plus a `novel` output (AGT-1666, pm project `pablo-story-core`): `pablo.json`'s `format` becomes `outputs.novel = {dir: "chapters", added}`, `outputs/novel/plan.md` (one unit per beat) and `outputs/novel/RULES.md` (the novel-only `QWEN.md` sections, copied) are created, `continuity.md` moves to `outputs/novel/continuity.md`, `outline/chapters.md` moves to `outline/beats.md`, and an empty `facts.md` is created; one commit of exactly those paths. `chapters/`, `bible/`, `research/`, `notes/` and `QWEN.md` are never written. Each step runs only if still needed, so a second run changes nothing; old and new paths both present is a refusal. Readers resolve both shapes | `{ok, dryRun, changes[{op, path, from?}], paths[], committed, notice?}` |
 | `pablo publish --project <slug> --target draft` | the compiler (AGT-1534): every `chapters/NN-*.md` in order into one markdown file at `<work>/.pablo/out/<slug>-draft.md` — frontmatter stripped, sentence lines joined into paragraphs, straight quotes and apostrophes curled. `review`/`final` are refused (not implemented); pandoc formats are deferred | `{ok, target, where, chapters, words}`; `{ok: false, code: 2, message}` on refusal |
 | `revise_passage(file, passage, instruction)` (MCP and harness only, AGT-1563) | `revise` on the local model, then the candidate is committed on a `revise/<id>` branch authored as the model (what `a r` does when the author takes it); `main` is untouched. Returns the branch, file and receipt, never the prose | `{ok, branch, path, receipt}` / `{ok: false, code, message}` |
 | `pablo write --dry-run` (also `prose`/`revise --dry-run`) | any write or revise, assembled and priced, nothing sent; a standalone `pablo dry-run` verb is not implemented | the pack, slice by slice |
@@ -347,25 +348,27 @@ an author would want to read is markdown in the vault, tracked by git.
 ### `pablo.json`
 
 The marker that makes a directory a pablo project. `packages/cli/src/marker.ts` is
-the loader; it rejects an unknown `format` or a missing required key, naming it.
+the loader; it rejects a missing required key, an unknown output type, or a marker
+carrying both `format` and `outputs`, naming the key.
 
 ```json
 {
-  "format": "novel",
   "title": "The Valley's Shadow",
   "slug": "valleys-shadow",
   "author": "matt",
   "voice": ["../../style", "QWEN.md"],
   "neverSend": ["research/", "notes/"],
-  "publish": { "review": "artifact", "final": null }
+  "publish": { "review": "artifact", "final": null },
+  "outputs": { "novel": { "dir": "chapters", "added": "2026-09-01" } }
 }
 ```
 
 | key | required | default |
 |---|---|---|
-| `format` | yes | — (`"novel"` for P0; any other value is refused, naming it) |
 | `title` | yes | — |
 | `slug` | yes | — |
+| `outputs` | no | `{}` (a story core with nothing derived yet). Each entry is `{dir?, added, ...}`: `added` is YYYY-MM-DD; the novel's `dir` is always `"chapters"`; other keys belong to the type. `novel` is the only type until the output registry lands; any other is refused by name |
+| `format` | deprecated | `"novel"` is read as `outputs.novel = {dir: "chapters"}` for one release, with a stderr notice naming `pablo migrate outputs`; any other value is refused |
 | `author` | no | `"matt"` |
 | `voice` | no | `["../../style", "QWEN.md"]` |
 | `neverSend` | no | `["research/", "notes/"]` |

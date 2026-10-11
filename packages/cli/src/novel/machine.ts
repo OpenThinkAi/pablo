@@ -12,7 +12,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { gateTimeline, parseBeatRows, section } from "@openthink/pablo-core";
+import { beatsFile, gateTimeline, parseBeatRows, section } from "@openthink/pablo-core";
 import type { BeatRow } from "@openthink/pablo-core";
 
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
@@ -27,7 +27,7 @@ export interface PickRow {
   readonly name: string;
 }
 
-/** One row of the first `| Act | ... |` table in `outline/chapters.md`. */
+/** One row of the first `| Act | ... |` table in the beats file (`outline/beats.md`, or `outline/chapters.md` unmigrated). */
 export interface ActRow {
   readonly act: string;
   readonly years: string;
@@ -59,6 +59,12 @@ export interface NovelState {
   readonly acts: readonly ActRow[];
   readonly beats: readonly BeatRow[];
   readonly chapters: readonly ChapterFile[];
+  /**
+   * The work-relative beats file the acts and beats were read from:
+   * `outline/beats.md` on a migrated work, `outline/chapters.md` (the old
+   * name, shimmed) on an unmigrated one. Messages name it.
+   */
+  readonly outlineFile: string;
 }
 
 export interface ChapterPreconditions {
@@ -224,7 +230,8 @@ export function readNovelState(workDir: string): NovelState {
   files.push({ file: timelineLabel, exists: timelineExists });
   if (timelineExists) picks.push(...parsePicks(timelineText, timelineLabel));
 
-  const outlinePath = join(workDir, "outline", "chapters.md");
+  const outlineFile = beatsFile(workDir);
+  const outlinePath = join(workDir, outlineFile);
   const outlineText = read(outlinePath) ?? "";
   const outlineLabel = relLabel(workDir, outlinePath);
 
@@ -234,6 +241,7 @@ export function readNovelState(workDir: string): NovelState {
     acts: parseActs(outlineText),
     beats: parseBeatRows(outlineText, outlineLabel),
     chapters: readChapters(workDir),
+    outlineFile,
   };
 }
 
@@ -249,7 +257,7 @@ export function readNovelState(workDir: string): NovelState {
 export function chapterPreconditions(state: NovelState, chapter: number): ChapterPreconditions {
   const beat = state.beats.find((row) => row.chapter === chapter);
   if (beat === undefined) {
-    return { ready: false, missing: [`no beat for chapter ${chapter} in outline/chapters.md`] };
+    return { ready: false, missing: [`no beat for chapter ${chapter} in ${state.outlineFile}`] };
   }
 
   const missing: string[] = [];
