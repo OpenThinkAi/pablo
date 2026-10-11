@@ -20,8 +20,16 @@
 
 import { isAbsolute, join, relative, sep } from "node:path";
 import type { DraftingInputs, Pack, TextSource } from "@openthink/pablo-core";
-import { AGENT_SECTION_HEADING, assemblePack, DEFAULT_MIN_SCENES, readDraftingInputs } from "@openthink/pablo-core";
+import {
+  AGENT_SECTION_HEADING,
+  assemblePack,
+  DEFAULT_MIN_SCENES,
+  outputRulesFile,
+  planBeatsFor,
+  readDraftingInputs,
+} from "@openthink/pablo-core";
 import type { Marker } from "../marker";
+import { NOVEL_ID } from "../outputs/novel/units";
 
 /** `draft-chapter`'s length target, ported as pablo's default (AC2). */
 export const DEFAULT_WORD_TARGET = 1800;
@@ -72,10 +80,17 @@ export function buildChapterPack(
   const wordTarget = options.words ?? DEFAULT_WORD_TARGET;
   const minScenes = options.scenes ?? DEFAULT_MIN_SCENES;
 
+  // The output's plan maps the unit onto its beats (a row may name several);
+  // no plan, or no row for the unit, is one unit per beat. Its RULES.md, when
+  // it has one, is its own slice after the work's rules (AGT-1670).
+  const beats = planBeatsFor(workDir, NOVEL_ID, chapter);
+  const rulesPath = join(workDir, outputRulesFile(NOVEL_ID));
   const inputs = readDraftingInputs({
     vaultRoot,
     workRoot: workDir,
     chapter,
+    ...(beats !== undefined ? { beats } : {}),
+    outputRulesPath: rulesPath,
     wordTarget,
     minScenes,
     castEndsAt: CAST_ENDS_AT,

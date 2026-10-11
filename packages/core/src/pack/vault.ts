@@ -56,6 +56,13 @@ export interface ReadDraftingOptions {
   /** The work root (`<vault>/novels/<slug>`). */
   readonly workRoot: string;
   readonly chapter: number;
+  /**
+   * The core beat numbers the unit tells (AGT-1670: a plan row's `beats`), the
+   * first the primary. Defaults to `[chapter]`: one unit per beat.
+   */
+  readonly beats?: readonly number[] | undefined;
+  /** The output's `RULES.md` (absolute path), layered after the work's rules; absent or empty means none. */
+  readonly outputRulesPath?: string | undefined;
   readonly wordTarget: number;
   readonly minScenes?: number | undefined;
   readonly tailWords?: number | undefined;
@@ -78,9 +85,17 @@ export interface ReadDraftingOptions {
 export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs {
   const { vaultRoot, workRoot, chapter } = options;
   const outlinePath = join(workRoot, beatsFile(workRoot));
-  const beat = parseBeatRow(read(outlinePath) ?? "", chapter, label(vaultRoot, outlinePath));
+  const outlineText = read(outlinePath) ?? "";
+  const beatNumbers = options.beats !== undefined && options.beats.length > 0 ? options.beats : [chapter];
+  const rows = beatNumbers.map((n) => parseBeatRow(outlineText, n, label(vaultRoot, outlinePath)));
+  const beat = rows[0];
   if (beat === undefined) {
     throw new Error(`pablo: chapter ${chapter} has no row in ${outlinePath}`);
+  }
+  const moreBeats: BeatRow[] = [];
+  for (const [i, row] of rows.slice(1).entries()) {
+    if (row === undefined) throw new Error(`pablo: beat ${beatNumbers[i + 1]} has no row in ${outlinePath}`);
+    moreBeats.push(row);
   }
 
   const workRulesPath = join(workRoot, "QWEN.md");
@@ -95,8 +110,12 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
       description: options.work?.description,
     },
     beat,
+    ...(moreBeats.length > 0 ? { moreBeats } : {}),
+    ...(beat.chapter !== chapter ? { unit: chapter } : {}),
     style: readStyle(vaultRoot),
     workRules: source(vaultRoot, workRulesPath, ruleText),
+    outputRules:
+      options.outputRulesPath === undefined ? undefined : sourceOfFile(vaultRoot, options.outputRulesPath),
     periodFacts: source(
       vaultRoot,
       workRulesPath,
@@ -114,6 +133,66 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
     wordTarget: options.wordTarget,
     minScenes: options.minScenes,
   };
+}
+
+/** One row of an output's `plan.md`: `| unit | title | beats | status |`. */
+export interface PlanFileRow {
+  readonly unit: number;
+  readonly title: string;
+  /** The core beat numbers the row names, in order, deduplicated. */
+  readonly beats: readonly number[];
+  readonly status: string;
+}
+
+/** `2`, `2, 3`, `2-3`, `1, 3-4` as beat numbers; a descending or oversized range is ignored whole. */
+export function parseBeatList(cell: string): number[] {
+  const out: number[] = [];
+  for (const part of cell.split(",")) {
+    const m = /^\s*(\d+)\s*(?:[-\u2013\u2014]\s*(\d+)\s*)?$/.exec(part);
+    if (m === null) continue;
+    const from = Number(m[1]);
+    const to = m[2] === undefined ? from : Number(m[2]);
+    if (to < from || to - from > 999) continue;
+    for (let n = from; n <= to; n += 1) if (!out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+/** The rows of an output's `plan.md` text, in file order; the header, separator and prose are skipped. */
+export function parsePlanRows(text: string): PlanFileRow[] {
+  const rows: PlanFileRow[] = [];
+  for (const line of text.split("\n")) {
+    const match = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
+    if (match === null) continue;
+    // `\|` inside a cell is a literal pipe.
+    const cells = (match[2] ?? "").replace(/\\\|/g, "\u0000").split("|").map((c) => c.replace(/\u0000/g, "|").trim());
+    rows.push({ unit: Number(match[1]), title: cells[0] ?? "", beats: parseBeatList(cells[1] ?? ""), status: cells[2] ?? "" });
+  }
+  return rows;
+}
+
+/** `outputs/<id>/plan.md`, work-relative. */
+export function outputPlanFile(outputId: string): string {
+  return `outputs/${outputId}/plan.md`;
+}
+
+/** `outputs/<id>/RULES.md`, work-relative. */
+export function outputRulesFile(outputId: string): string {
+  return `outputs/${outputId}/RULES.md`;
+}
+
+/**
+ * The beats `unit` tells according to `outputs/<outputId>/plan.md`, or
+ * `undefined` when the work has no plan, the plan has no row for the unit, or
+ * its beats cell names none (the caller then uses the default: beat N for unit
+ * N). The plan's rows are the author's to edit, so an unreadable cell falls
+ * back instead of failing a draft.
+ */
+export function planBeatsFor(workRoot: string, outputId: string, unit: number): readonly number[] | undefined {
+  const text = read(join(workRoot, outputPlanFile(outputId)));
+  if (text === undefined) return undefined;
+  const row = parsePlanRows(text).find((r) => r.unit === unit);
+  return row === undefined || row.beats.length === 0 ? undefined : row.beats;
 }
 
 /** `<vault>/style/*.md`, sorted by filename so the pack is the same on every machine. */

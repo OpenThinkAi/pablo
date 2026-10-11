@@ -133,6 +133,16 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `draft_unit(output, n, direction?)` is `write` for the
                 harness beside `draft_chapter`. Tests register fixture types
                 with `registerOutput` (tests only; real types are rows).
+                The pack layers per output (AGT-1670): voice, the work's
+                rules, then `outputs/<type>/RULES.md` as its own
+                `outputRules` slice (shown in `--dry-run` with its tokens),
+                then the unit's slices. `outputs/<type>/plan.md` rows map a
+                unit onto one or several beats (`beats` cell `2-3`, `1, 4`):
+                the pack's `chapter` slice carries exactly those beat rows,
+                preconditions check each, and no plan row means beat N for
+                unit N (core's `planBeatsFor`). `pablo output plan` keeps the
+                existing rows (mapping untouched, status refreshed, a stale
+                undrafted row dropped) and appends rows for new beats.
                 `src/casting.ts` (AGT-1678) is the runner for the Python
                 side: `pablo doctor` reports it, and the first casting verb
                 (`audition`, `cast`, `voices`: `src/casting-verbs.ts`,
