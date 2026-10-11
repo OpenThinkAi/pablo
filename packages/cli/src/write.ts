@@ -32,7 +32,6 @@ import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./
 import { checkFile, loadCheckRules } from "./check";
 import type { Hit } from "./check";
 import { readMarker } from "./marker";
-import { DEFAULT_WORD_TARGET } from "./novel/pack";
 import { novelUnitFileName, slugify } from "./outputs/novel/units";
 import { resolveOutput } from "./outputs/registry";
 
@@ -289,13 +288,15 @@ export async function runWrite(
   }
   const requestedOutput = args.output ?? (args.chapter !== undefined ? "novel" : undefined);
   const unitRaw = args.unit ?? args.chapter;
-  const chapter = parsePositiveInt(unitRaw);
-  if (chapter === undefined) {
-    emitError("pablo: write requires --unit <N> (a positive integer; --chapter <N> for the novel)", undefined, 2, args.json);
+  let chapter = parsePositiveInt(unitRaw);
+  const unitMessage = "pablo: write requires --unit <N> (a positive integer; --chapter <N> for the novel)";
+  if (chapter === undefined && unitRaw !== undefined) {
+    emitError(unitMessage, undefined, 2, args.json);
     return 2;
   }
 
-  const words = parsePositiveInt(args.words) ?? DEFAULT_WORD_TARGET;
+  // The length is the request's; absent, the addressed output picks its own default.
+  const words = parsePositiveInt(args.words);
   const scenes = parsePositiveInt(args.scenes) ?? DEFAULT_MIN_SCENES;
 
   const requestedTemperature = parseTemperature(args.temperature);
@@ -325,6 +326,12 @@ export async function runWrite(
     return resolved.code;
   }
   const output = resolved.output;
+  // An output with one unit (the story) implies it: no --unit needed.
+  chapter ??= output.soleUnit;
+  if (chapter === undefined) {
+    emitError(unitMessage, undefined, 2, args.json);
+    return 2;
+  }
   const preconditions = output.preconditions(projectPath, chapter);
   if (!preconditions.ready) {
     emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);

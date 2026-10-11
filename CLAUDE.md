@@ -122,6 +122,12 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 under `src/` outside `outputs/novel/` spells `chapters/`
                 (`test/outputs.test.ts` greps for it), and every type passes
                 `src/outputs/conformance.ts` over the four-beat fixture.
+                `story` (AGT-1689, `src/outputs/story/`) is the single-unit
+                type: one unit (`soleUnit`, so `write --output story` needs
+                no `--unit`) over every beat, or the beats its `plan.md` row
+                names (a chosen act), in `outputs/story/story.md` on
+                `draft/story`; the outline is one pack slice and the length
+                is `--words`, else 600 words a beat.
                 Addressing (AGT-1669): `write`, `status --for "<type> N"`,
                 `check`, `publish` and `share` take `--output <type>`
                 (`--chapter N` is `--output novel --unit N`) and resolve it

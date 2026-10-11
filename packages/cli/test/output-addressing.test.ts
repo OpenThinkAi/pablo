@@ -1,11 +1,11 @@
 /**
- * Addressing an output (AGT-1669, pm project `pablo-story-core`, S5): the
+ * Addressing an output (AGT-1669, pm project `pablo-blog-core`, S5): the
  * default-output rule on `write`/`status`/`check`/`publish`/`share`,
  * `--output`/`--unit` with `--chapter` as the novel's sugar, receipts naming
  * `output` and `unit`, `draft_unit` reaching the same code as `write`, and
  * `pablo output list|add|remove|plan`.
  *
- * `radio` (pablo-casting) and `story` (S11) are not rows of `OUTPUTS` yet, so
+ * `radio` (pablo-casting) and `blog` (a later type) are not rows of `OUTPUTS` yet, so
  * these tests register fixture types built from the novel's machinery
  * (`registerOutput`) and remove them after. Everything runs on a temp copy of
  * the synthetic fixture vault with a fake writer: no model, never `~/writing`.
@@ -68,12 +68,12 @@ const RADIO: OutputDefinition = {
   },
 };
 
-/** Stands in for S11's story type: one directory under outputs/, its own rules. */
-const STORY: OutputDefinition = { ...RADIO, id: "story", noun: "story", plural: "stories", artifactDir: "outputs/story", rulesTemplate: "# Story rules\n\nOne piece, all the beats.\n" };
+/** Stands in for a later type's blog type: one directory under outputs/, its own rules. */
+const BLOG: OutputDefinition = { ...RADIO, id: "blog", noun: "blog", plural: "posts", artifactDir: "outputs/blog", rulesTemplate: "# Blog rules\n\nOne piece, all the beats.\n" };
 
 const unregister: (() => void)[] = [];
 beforeAll(() => {
-  unregister.push(registerOutput(RADIO), registerOutput(STORY));
+  unregister.push(registerOutput(RADIO), registerOutput(BLOG));
 });
 afterAll(() => {
   for (const off of unregister.splice(0)) off();
@@ -326,43 +326,43 @@ test("publish --output publishes that output; with several and none named it ref
 
 // --- AC2: pablo output add|remove|list|plan ----------------------------------
 
-test("AC2: output add story scaffolds outputs/story/ with plan.md and RULES.md, updates the marker and commits", () => {
+test("AC2: output add blog scaffolds outputs/blog/ with plan.md and RULES.md, updates the marker and commits", () => {
   const { vault, work } = vaultWith({ novel: { dir: "chapters", added: "2026-09-01" } });
   const before = git(vault, "rev-parse", "HEAD");
-  const added = addOutput(vault, work, "story", { now: () => new Date(2026, 9, 12) });
-  expect(added).toMatchObject({ ok: true, action: "add", type: "story", committed: true, paths: ["outputs/story/RULES.md", "outputs/story/plan.md", "pablo.json"] });
-  expect(readFileSync(join(work, "outputs", "story", "RULES.md"), "utf8")).toBe(STORY.rulesTemplate);
-  const plan = readFileSync(join(work, "outputs", "story", "plan.md"), "utf8");
-  expect(plan).toContain("# Plan: story");
+  const added = addOutput(vault, work, "blog", { now: () => new Date(2026, 9, 12) });
+  expect(added).toMatchObject({ ok: true, action: "add", type: "blog", committed: true, paths: ["outputs/blog/RULES.md", "outputs/blog/plan.md", "pablo.json"] });
+  expect(readFileSync(join(work, "outputs", "blog", "RULES.md"), "utf8")).toBe(BLOG.rulesTemplate);
+  const plan = readFileSync(join(work, "outputs", "blog", "plan.md"), "utf8");
+  expect(plan).toContain("# Plan: blog");
   expect(plan).toContain("| 3 | The Route | 3 | beat |");
   const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as { title: string; outputs: Record<string, unknown> };
-  expect(marker.outputs).toEqual({ novel: { dir: "chapters", added: "2026-09-01" }, story: { added: "2026-10-12" } });
+  expect(marker.outputs).toEqual({ novel: { dir: "chapters", added: "2026-09-01" }, blog: { added: "2026-10-12" } });
   expect(marker.title).toBe("The Ice House");
   expect(git(vault, "rev-parse", "HEAD~1")).toBe(before);
-  expect(git(vault, "log", "-1", "--format=%s")).toBe("ice-house: add the story output");
+  expect(git(vault, "log", "-1", "--format=%s")).toBe("ice-house: add the blog output");
   expect(git(vault, "status", "--porcelain")).toBe("");
 
-  const again = addOutput(vault, work, "story");
+  const again = addOutput(vault, work, "blog");
   expect(again).toMatchObject({ ok: false, code: 2 });
 });
 
-test("AC2: output remove story archives outputs/story/ under outputs/_removed/ and updates the marker", () => {
+test("AC2: output remove blog archives outputs/blog/ under outputs/_removed/ and updates the marker", () => {
   const { vault, work } = vaultWith({ novel: { dir: "chapters", added: "2026-09-01" } });
   const now = () => new Date(2026, 9, 12);
-  addOutput(vault, work, "story", { now });
-  const removed = removeOutput(vault, work, "story", { now });
-  expect(removed).toMatchObject({ ok: true, action: "remove", type: "story", committed: true, archived: "outputs/_removed/story-2026-10-12" });
-  expect(existsSync(join(work, "outputs", "story"))).toBe(false);
-  expect(readFileSync(join(work, "outputs", "_removed", "story-2026-10-12", "RULES.md"), "utf8")).toBe(STORY.rulesTemplate);
+  addOutput(vault, work, "blog", { now });
+  const removed = removeOutput(vault, work, "blog", { now });
+  expect(removed).toMatchObject({ ok: true, action: "remove", type: "blog", committed: true, archived: "outputs/_removed/blog-2026-10-12" });
+  expect(existsSync(join(work, "outputs", "blog"))).toBe(false);
+  expect(readFileSync(join(work, "outputs", "_removed", "blog-2026-10-12", "RULES.md"), "utf8")).toBe(BLOG.rulesTemplate);
   const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as { outputs: Record<string, unknown> };
   expect(Object.keys(marker.outputs)).toEqual(["novel"]);
-  expect(git(vault, "log", "-1", "--format=%s")).toBe("ice-house: remove the story output");
+  expect(git(vault, "log", "-1", "--format=%s")).toBe("ice-house: remove the blog output");
   expect(git(vault, "status", "--porcelain")).toBe("");
 
   // Removing it again is refused; a second add and remove on the same day archives beside the first.
-  expect(removeOutput(vault, work, "story", { now })).toMatchObject({ ok: false, code: 2 });
-  addOutput(vault, work, "story", { now });
-  expect(removeOutput(vault, work, "story", { now })).toMatchObject({ ok: true, archived: "outputs/_removed/story-2026-10-12-2" });
+  expect(removeOutput(vault, work, "blog", { now })).toMatchObject({ ok: false, code: 2 });
+  addOutput(vault, work, "blog", { now });
+  expect(removeOutput(vault, work, "blog", { now })).toMatchObject({ ok: true, archived: "outputs/_removed/blog-2026-10-12-2" });
 });
 
 test("AC2: add and remove refuse an unknown type by name, changing nothing", () => {
@@ -385,18 +385,18 @@ test("output add refuses while the story core is not at beats, naming what is sh
   const outline = join(work, "outline", "chapters.md");
   writeFileSync(outline, readFileSync(outline, "utf8").split("\n").filter((l) => !/^\| \d+ \|/.test(l)).join("\n"));
   git(vault, "commit", "-q", "-am", "no beats");
-  const refused = addOutput(vault, work, "story");
+  const refused = addOutput(vault, work, "blog");
   expect(refused.ok).toBe(false);
   if (!refused.ok) {
     expect(refused.message).toContain("not at beats");
     expect(refused.missing?.some((m) => m.startsWith("core beats:"))).toBe(true);
   }
-  expect(existsSync(join(work, "outputs", "story"))).toBe(false);
+  expect(existsSync(join(work, "outputs", "blog"))).toBe(false);
 });
 
 test("output add refuses a marker still on the deprecated format key, pointing at migrate outputs", () => {
   const { vault, work } = vaultWith(undefined);
-  const refused = addOutput(vault, work, "story");
+  const refused = addOutput(vault, work, "blog");
   expect(refused.ok).toBe(false);
   if (!refused.ok) expect(refused.message).toContain("pablo migrate outputs");
 });
@@ -410,7 +410,7 @@ test("output list reports each declared output and the types not yet derived; pl
       ["novel", 2, 4],
       ["radio", 0, 4],
     ]);
-    expect(listed.available).toEqual(["story"]);
+    expect(listed.available).toEqual(["story", "blog"]);
   }
   const dry = planOutput(vault, work, "radio", { dryRun: true });
   expect(dry).toMatchObject({ ok: true, dryRun: true, changed: true, committed: false, path: "outputs/radio/plan.md" });
@@ -418,15 +418,15 @@ test("output list reports each declared output and the types not yet derived; pl
   const planned = planOutput(vault, work, "radio");
   expect(planned).toMatchObject({ ok: true, changed: true, committed: true });
   expect(planOutput(vault, work, "radio")).toMatchObject({ ok: true, changed: false, committed: false });
-  expect(planOutput(vault, work, "story")).toMatchObject({ ok: false, code: 2 });
+  expect(planOutput(vault, work, "blog")).toMatchObject({ ok: false, code: 2 });
 });
 
 test("the output verb runs list/add/remove/plan off its VERBS entry", async () => {
   const { vault, home } = vaultWith({ novel: { dir: "chapters", added: "2026-09-01" } });
-  const added = await verb("output").run({ sub: "add", type: "story", project: "ice-house", "dry-run": false }, ctx(vault, home));
-  expect(added).toMatchObject({ exitCode: 0, body: { ok: true, type: "story" } });
+  const added = await verb("output").run({ sub: "add", type: "blog", project: "ice-house", "dry-run": false }, ctx(vault, home));
+  expect(added).toMatchObject({ exitCode: 0, body: { ok: true, type: "blog" } });
   const listed = await verb("output").run({ sub: "list", project: "ice-house", "dry-run": false }, ctx(vault, home));
-  expect((listed.body as { outputs: { type: string }[] }).outputs.map((o) => o.type)).toEqual(["novel", "story"]);
+  expect((listed.body as { outputs: { type: string }[] }).outputs.map((o) => o.type)).toEqual(["novel", "blog"]);
   const unknown = await verb("output").run({ sub: "remove", type: "podcast", project: "ice-house", "dry-run": false }, ctx(vault, home));
   expect(unknown.exitCode).toBe(2);
 });

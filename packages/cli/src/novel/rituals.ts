@@ -97,7 +97,7 @@ function firstLine(text: string): string {
 }
 
 /** Runs `fn`, catching anything it throws into a `"failed"` ritual — the guarantee nothing escapes `runAfterMerge`. */
-function attempt(name: string, fn: () => Ritual): Ritual {
+export function attempt(name: string, fn: () => Ritual): Ritual {
   try {
     return fn();
   } catch (err) {
@@ -105,7 +105,7 @@ function attempt(name: string, fn: () => Ritual): Ritual {
   }
 }
 
-async function attemptAsync(name: string, fn: () => Promise<Ritual>): Promise<Ritual> {
+export async function attemptAsync(name: string, fn: () => Promise<Ritual>): Promise<Ritual> {
   try {
     return await fn();
   } catch (err) {
@@ -132,7 +132,7 @@ async function attemptAsync(name: string, fn: () => Promise<Ritual>): Promise<Ri
  * design doc's "outline tick (`beat` -> `draft`)" and this ticket's own
  * AC1 ("moves from `beat` to `draft`") actually require in practice.
  */
-function tickOutline(workDir: string, chapter: number): Ritual {
+export function tickOutline(workDir: string, chapter: number): Ritual {
   const rel = beatsFile(workDir);
   const path = join(workDir, rel);
   if (!existsSync(path)) {
@@ -291,7 +291,7 @@ function tickReadme(workDir: string, chapter: number, today: string, words: numb
  * never a thrown exception, and never anything that touches the files
  * already written.
  */
-function runGit(workDir: string, candidatePaths: readonly string[], message: string): Ritual {
+export function runGit(workDir: string, candidatePaths: readonly string[], message: string): Ritual {
   const paths = candidatePaths.filter((p) => existsSync(join(workDir, p)));
   if (paths.length === 0) {
     return { name: "git", status: "skipped", detail: "no paths to commit" };
@@ -336,13 +336,15 @@ function runGit(workDir: string, candidatePaths: readonly string[], message: str
  * to the real `think` and write to the real cortex. `runAfterMerge` computes
  * this from whether `opts.env` is `undefined`, before defaulting it.
  */
-async function runThink(
+export async function runThink(
   chapter: number,
   words: number,
   slug: string,
   env: Record<string, string | undefined>,
   timeoutMs: number,
   allowNvmFallback: boolean,
+  /** What the unit is called in the sync message (`chapter`; the story output's is `story`). */
+  noun = "chapter",
 ): Promise<Ritual> {
   let thinkPath = Bun.which("think", { PATH: env["PATH"] });
   if (thinkPath === null && allowNvmFallback && existsSync(NVM_THINK_FALLBACK)) {
@@ -352,7 +354,7 @@ async function runThink(
     return { name: "think", status: "skipped", detail: "think not on PATH" };
   }
 
-  const message = `${slug}: drafted chapter ${chapter} (${words} words)`;
+  const message = `${slug}: drafted ${noun} ${chapter} (${words} words)`;
   const proc = Bun.spawn([thinkPath, "-C", "writing", "sync", message, "--topic", `repo:${slug}`], {
     stdout: "pipe",
     stderr: "pipe",

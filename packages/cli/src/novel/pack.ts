@@ -96,6 +96,20 @@ export function buildChapterPack(
     castEndsAt: CAST_ENDS_AT,
   });
 
+  return packFromInputs(vaultRoot, workDir, inputs, options);
+}
+
+/**
+ * The two pablo policies applied to read inputs, then the pack assembled and
+ * checked against `neverSend`: shared by every output's pack builder (the
+ * novel's chapter, the story's whole piece) so none re-implements them.
+ */
+export function packFromInputs(
+  vaultRoot: string,
+  workDir: string,
+  inputs: DraftingInputs,
+  options: Pick<BuildChapterPackOptions, "marker" | "direction">,
+): ChapterPackOutcome {
   const filtered: DraftingInputs = {
     ...inputs,
     style: filterVoice(inputs.style),

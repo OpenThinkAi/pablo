@@ -128,6 +128,12 @@ export interface DraftingInputs {
   readonly moreBeats?: readonly BeatRow[] | undefined;
   /** The unit's number when it differs from its beat's (a plan that maps unit 1 to beats 4-5); defaults to the beat's. */
   readonly unit?: number | undefined;
+  /**
+   * What the unit is called in the brief, replacing "chapter N" (`the whole
+   * story` for the story output, AGT-1689). Absent means a chapter, worded as
+   * every novel pack has always been.
+   */
+  readonly unitLabel?: string | undefined;
   /** `<vault>/style/*.md`. The built-in craft rules are added on top, always. */
   readonly style: readonly TextSource[];
   /**
