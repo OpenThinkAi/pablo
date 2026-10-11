@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import { readMarker } from "../src/marker";
 import { buildChapterPack } from "../src/novel/pack";
+import { buildRadioPack } from "../src/outputs/radio/pack";
 import { assembleRevise } from "../src/revise";
 
 /**
@@ -38,6 +39,19 @@ test("drafting pack never includes a research/ path or its text", () => {
   if (!m.ok) throw new Error(m.message);
   for (const neverSend of [m.marker.neverSend, []]) {
     const r = buildChapterPack(vault, work, 2, { marker: { ...m.marker, neverSend } });
+    if (!r.ok) throw new Error(r.message);
+    expect(r.pack.slices.some((s) => underResearch(s.source))).toBe(false);
+    expect(r.pack.prompt).not.toContain(CANARY);
+  }
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("AGT-1700: the radio writer's pack never includes a research/ path or its text", () => {
+  const { dir, vault, work } = plantedVault();
+  const m = readMarker(work);
+  if (!m.ok) throw new Error(m.message);
+  for (const neverSend of [m.marker.neverSend, []]) {
+    const r = buildRadioPack(vault, work, 2, { marker: { ...m.marker, neverSend } });
     if (!r.ok) throw new Error(r.message);
     expect(r.pack.slices.some((s) => underResearch(s.source))).toBe(false);
     expect(r.pack.prompt).not.toContain(CANARY);

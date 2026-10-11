@@ -172,6 +172,19 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 Merges find a draft branch's output by `outputForBranch`, so
                 `draft/story` merges on a work that also has a novel. Tests
                 use a fake `HarnessQuery` that calls pablo's own tools.
+                `--output radio` (AGT-1700) runs the radio chain after the
+                core through `src/radio-chain.ts` (imported only when radio
+                is asked for): on demand, `runProgressive` writes and
+                accepts episode N+1 while episode N is cast (`cast --auto
+                --design`), performed with `--stream` and published to the
+                listening directory; a refusal stops both queues with its
+                own body and leaves what is published. `--review` stops per
+                episode on its draft branch, its bindings (`cast:radio:N`)
+                and its render (`render:radio:N`; open flags keep it
+                waiting), and publishes only once resumed. `pablo perform
+                --output radio --all` is the same chain on a work whose
+                radio output was added later (the novel's files untouched).
+                Tests: `test/story-radio.test.ts` (fake casting machine).
                 Addressing (AGT-1669): `write`, `status --for "<type> N"`,
                 `check`, `publish` and `share` take `--output <type>`
                 (`--chapter N` is `--output novel --unit N`) and resolve it
