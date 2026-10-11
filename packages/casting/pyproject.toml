@@ -29,6 +29,10 @@ scorers = [
     "onnxruntime>=1.20",
     "librosa>=0.10",
 ]
+# funasr pulls modelscope and the Alibaba Cloud SDKs (oss2, aliyun-python-sdk-*)
+# transitively; they can reach Alibaba hosts. The scorer loads from the Hugging
+# Face hub (`hub="hf"`, `disable_update=True`), the extra is never installed by
+# default, and its gate is soft; re-check those three before depending on it.
 emotion = [
     "funasr>=1.2",
 ]

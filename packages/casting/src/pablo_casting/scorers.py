@@ -141,7 +141,8 @@ UTMOS = ScorerInfo(
     gate="naturalness",
     measures=("utmos",),
     weights="tarepan/SpeechMOS utmos22_strong",
-    revision="v1.2.0",
+    # The commit tag v1.2.0 points at (git ls-remote, 2026-10-10); an immutable pin.
+    revision="ed25eacbfa42b99156c36ebec67a733b5dbb9b79",
     license_code="MIT",
     license_weights="MIT",
     package="torch",
@@ -322,7 +323,10 @@ class UtmosScorer(_Lazy):
     def _load(self) -> object:
         import torch
 
-        # Pinned to a release tag of the SpeechMOS repo, not its default branch.
+        # torch.hub runs the repo's hubconf.py, so the ref is a full commit SHA
+        # (the v1.2.0 release's commit), never a tag or branch a force-push could
+        # move. `trust_repo=True` only skips the interactive prompt, which would
+        # hang under pablo's non-interactive subprocess; the SHA is the integrity check.
         return torch.hub.load(f"tarepan/SpeechMOS:{self.info.revision}", "utmos22_strong", trust_repo=True).eval()
 
     def score(self, take: Take) -> Mapping[str, object]:

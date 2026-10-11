@@ -361,7 +361,7 @@ def test_doctor_lists_every_scorer_with_weights_license_and_version(env: dict[st
     assert by_name["ecapa"]["cached"] is True
     assert by_name["whisper"]["cached"] is False
     assert by_name["utmos"]["cached"] is None
-    assert by_name["utmos"]["revision"] == "v1.2.0"
+    assert by_name["utmos"]["revision"] == "ed25eacbfa42b99156c36ebec67a733b5dbb9b79"  # an immutable commit, not a tag
     assert by_name["aligner"]["runs"] == "MLX"
     assert by_name["ecapa"]["runs"].startswith("CPU")
 
