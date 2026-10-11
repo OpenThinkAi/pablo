@@ -18,8 +18,11 @@ a take whose stretch is inside the pace range, then the design's composite
 its band), times 0.85 for a `slow` line and 1.15 for a `quick` one, and the
 line's pace band is the card's band scaled the same way. Neither engine has a
 native pace control, so the take is rendered at the voice's own pace and the
-stretch that brings it to the target (a sox WSOLA `tempo -s` factor; the mix
-applies it, C12) is measured from the aligner's timings. The stretch must sit
+stretch that brings it into the band (a sox WSOLA `tempo -s` factor; the mix
+applies it, C12) is measured from the aligner's timings. A line already inside
+the band is not stretched (1.0); an out-of-band one goes to the nearest band
+edge, not the exact target (`target_wps` is kept in the manifest for
+reference). A reused take is re-measured under this policy. The stretch must sit
 inside `PACE_RANGE` [0.75, 1.05]: the pace gate's `stretch_range` is held to it,
 so a take that would need more is a failed take and the line is retaken. A
 best-of take that still needs more is stretched only to the range's edge and
@@ -86,7 +89,7 @@ from pablo_casting.engines import (
     to_audio,
 )
 from pablo_casting.gate_command import run_scorers
-from pablo_casting.gates import Card, GateRefusal, derive, evaluate, load_card, target_wps, thresholds_for
+from pablo_casting.gates import Card, GateRefusal, derive, evaluate, load_card, pace_stretch, target_wps, thresholds_for
 from pablo_casting.library import card_hash
 from pablo_casting.manifest import ManifestError, episode_dir, flags_path, versions, write_version
 from pablo_casting.receipts import append_receipt, now
@@ -349,7 +352,7 @@ class Performer:
             params=params,
         )
 
-    def _score(self, attempt_no: int, inputs: TakeInputs, synthesis: Synthesis, card: Card, target: float) -> tuple[dict[str, object], float]:
+    def _score(self, attempt_no: int, inputs: TakeInputs, synthesis: Synthesis, card: Card, target: float, band: Sequence[float]) -> tuple[dict[str, object], float]:
         text = " ".join(line.text for line in inputs.lines)
         path = self.scratch / f"attempt-{uuid.uuid4().hex[:8]}.wav"
         path.write_bytes(synthesis.audio.to_wav())
@@ -360,14 +363,14 @@ class Performer:
             self.scorers,
         )
         wall = round(time.monotonic() - started, 6)
-        scores.update(derive(scores, text, synthesis.audio.duration, target))
+        scores.update(derive(scores, text, synthesis.audio.duration, target, band))
         append_receipt(
             self.work,
             {"intent": "gate", "episode": self.episode, "attempt": attempt_no, "card": card.slug, "scorers": ran, "wall": wall, "audio_seconds": round(synthesis.audio.duration, 6)},
         )
         return scores, wall
 
-    def attempt(self, attempt_no: int, base: TakeInputs, take_pass: Pass, card: Card, target: float, thresholds: Mapping[str, object]) -> Attempt:
+    def attempt(self, attempt_no: int, base: TakeInputs, take_pass: Pass, card: Card, target: float, band: Sequence[float], thresholds: Mapping[str, object]) -> Attempt:
         inputs = replace(base, seed=derive_seed(base, attempt_no))
         key = take_key(inputs)
         stored = read_take(self.work, key)
@@ -376,6 +379,10 @@ class Performer:
             record = stored.record
             scores = dict(record.get("scores") or {})  # type: ignore[call-overload]
             gate_scores = {k: v for k, v in scores.items() if k != "verdict"}
+            # The stored stretch was measured under whatever pace policy rendered it: re-measure from its wps.
+            stored_wps = gate_scores.get("wps")
+            if isinstance(stored_wps, (int, float)) and not isinstance(stored_wps, bool) and stored_wps > 0:
+                gate_scores["stretch"] = pace_stretch(float(stored_wps), target, band)
             verdict = evaluate(gate_scores, thresholds)
             audio = record.get("audio") if isinstance(record.get("audio"), dict) else {}
             return Attempt(
@@ -418,7 +425,7 @@ class Performer:
                 "ttfa": synthesis.ttfa,
             },
         )
-        scores, score_wall = self._score(attempt_no, inputs, synthesis, card, target)
+        scores, score_wall = self._score(attempt_no, inputs, synthesis, card, target, band)
         self.totals.score_wall += score_wall
         timings_words = scores.pop("timings", None)
         words = tuple(
@@ -477,7 +484,7 @@ class Performer:
         base = self.base_inputs(take_pass, spoken, reasons)
         attempts: list[Attempt] = []
         for attempt_no in range(first_attempt, first_attempt + MAX_ATTEMPTS):
-            attempt = self.attempt(attempt_no, base, take_pass, card, target, thresholds)
+            attempt = self.attempt(attempt_no, base, take_pass, card, target, band, thresholds)
             attempts.append(attempt)
             if attempt.passed:
                 break
