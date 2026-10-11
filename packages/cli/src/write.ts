@@ -34,7 +34,7 @@ import type { Hit } from "./check";
 import { readMarker } from "./marker";
 import { DEFAULT_WORD_TARGET } from "./novel/pack";
 import { novelUnitFileName, slugify } from "./outputs/novel/units";
-import { workOutput } from "./outputs/registry";
+import { resolveOutput } from "./outputs/registry";
 
 export { slugify };
 
@@ -48,7 +48,16 @@ export { slugify };
 
 /** The fields `runWrite` needs off the CLI's parsed args. `cli.ts`'s `ParsedArgs` satisfies this. */
 export interface WriteArgs {
+  /** `write --chapter N`: the novel's spelling of `--output novel --unit N`. */
   readonly chapter: string | undefined;
+  /**
+   * `write --output <type>` (AGT-1669): which of the work's outputs to draft
+   * a unit of. Optional when the work has one output (the default-output
+   * rule); a work with several refuses without it, naming them.
+   */
+  readonly output?: string | undefined;
+  /** `write --unit N` (AGT-1669): the unit of that output (a chapter, an episode). */
+  readonly unit?: string | undefined;
   readonly words: string | undefined;
   readonly scenes: string | undefined;
   readonly dryRun: boolean;
@@ -147,6 +156,8 @@ export function yamlScalar(value: string): string {
 }
 
 interface FrontmatterFields {
+  /** The frontmatter key the unit number goes under: the output's noun (`chapter` for the novel). */
+  readonly noun: string;
   readonly chapter: number;
   readonly title: string;
   readonly pov: string;
@@ -169,7 +180,7 @@ interface FrontmatterFields {
 function buildFrontmatter(fields: FrontmatterFields): string {
   return [
     "---",
-    `chapter: ${fields.chapter}`,
+    `${fields.noun}: ${fields.chapter}`,
     `title: ${yamlScalar(fields.title)}`,
     `pov: ${yamlScalar(fields.pov)}`,
     `story_date: ${yamlScalar(fields.storyDate)}`,
@@ -221,10 +232,17 @@ export interface WriteReceiptSummary {
   readonly seed?: number;
 }
 
+/** A unit write's receipt (AGT-1669): the summary plus the output and unit it drafted, also in the receipts.jsonl line. */
+export interface UnitReceiptSummary extends WriteReceiptSummary {
+  readonly output: string;
+  /** The unit drafted (the chapter number for the novel). */
+  readonly unit: number;
+}
+
 function emitWriteSuccess(
   json: boolean,
   path: string,
-  receipt: WriteReceiptSummary,
+  receipt: UnitReceiptSummary,
   hits: readonly Hit[],
   branch: DraftBranch,
 ): void {
@@ -260,9 +278,20 @@ export async function runWrite(
   projectPath: string,
   deps: RunWriteDeps = {},
 ): Promise<number> {
-  const chapter = parsePositiveInt(args.chapter);
+  // `--chapter N` is `--output novel --unit N` (AGT-1669); it never addresses another output.
+  if (args.chapter !== undefined && args.output !== undefined && args.output !== "novel") {
+    emitError(`pablo: write: --chapter is the novel's spelling; for the ${args.output} output use --unit <N>`, undefined, 2, args.json);
+    return 2;
+  }
+  if (args.chapter !== undefined && args.unit !== undefined && args.chapter.trim() !== args.unit.trim()) {
+    emitError("pablo: write: --chapter and --unit name different units; pass one", undefined, 2, args.json);
+    return 2;
+  }
+  const requestedOutput = args.output ?? (args.chapter !== undefined ? "novel" : undefined);
+  const unitRaw = args.unit ?? args.chapter;
+  const chapter = parsePositiveInt(unitRaw);
   if (chapter === undefined) {
-    emitError("pablo: write requires --chapter <N> (a positive integer)", undefined, 2, args.json);
+    emitError("pablo: write requires --unit <N> (a positive integer; --chapter <N> for the novel)", undefined, 2, args.json);
     return 2;
   }
 
@@ -289,11 +318,16 @@ export async function runWrite(
     return markerResult.code;
   }
 
-  // The work's output (the novel, today) owns the preconditions, the pack, the file's place and the branch.
-  const output = workOutput(markerResult.marker.outputs);
+  // The addressed output owns the preconditions, the pack, the file's place and the branch.
+  const resolved = resolveOutput(markerResult.marker.outputs, requestedOutput, "write");
+  if (!resolved.ok) {
+    emitError(resolved.message, resolved.missing, resolved.code, args.json);
+    return resolved.code;
+  }
+  const output = resolved.output;
   const preconditions = output.preconditions(projectPath, chapter);
   if (!preconditions.ready) {
-    emitError(`pablo: chapter ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
+    emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
     return 2;
   }
 
@@ -316,6 +350,8 @@ export async function runWrite(
       const body = {
         ok: true,
         dryRun: true,
+        output: output.id,
+        unit: chapter,
         slices: pack.slices.map((slice) => {
           const entry: Record<string, unknown> = {
             name: slice.name,
@@ -390,7 +426,7 @@ export async function runWrite(
   // Providers instance; runWrite builds one Providers per CLI invocation (one
   // call per process), so no additional serialization is needed here.
   const draftAdapter = deps.adapter ?? providers.adapter(providerId);
-  const wrapped = withReceipts(draftAdapter, fileReceiptSink(projectPath), { pack, intent: "draft" });
+  const wrapped = withReceipts(draftAdapter, fileReceiptSink(projectPath), { pack, intent: "draft", address: { output: output.id, unit: chapter } });
 
   const stderr = deps.stderr ?? process.stderr;
   const now = deps.now ?? (() => new Date());
@@ -452,6 +488,7 @@ export async function runWrite(
   const generated = now().toISOString();
 
   const frontmatter = buildFrontmatter({
+    noun: output.noun,
     chapter,
     title: packResult.inputs.beat.title,
     pov: packResult.inputs.beat.pov,
@@ -473,7 +510,9 @@ export async function runWrite(
 
   const hits = checkFile(normalized, workRelativePath, loadCheckRules(vaultRoot));
 
-  const receipt: WriteReceiptSummary = {
+  const receipt: UnitReceiptSummary = {
+    output: output.id,
+    unit: chapter,
     prompt_hash: pack.hash,
     model: draftAdapter.model,
     tokensRead: stats.tokensRead ?? pack.totalTokens,
@@ -490,7 +529,7 @@ export async function runWrite(
   // continuity, think sync) are not run here: they run when the branch is
   // merged (`novel/merge.ts`).
   const committed = commitAs(worktree, {
-    message: `${markerResult.marker.slug}: draft chapter ${chapter}`,
+    message: `${markerResult.marker.slug}: draft ${output.noun} ${chapter}`,
     author: { name: draftAdapter.model, email: `${slugify(draftAdapter.model) || "model"}@pablo.local` },
     receipt: pack.hash,
     paths: [join(projectInRepo, output.artifactDir, fileName)],

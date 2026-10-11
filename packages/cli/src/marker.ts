@@ -77,7 +77,7 @@ export interface OutputEntry {
   readonly [key: string]: unknown;
 }
 
-export type Outputs = Readonly<Partial<Record<OutputType, OutputEntry>>>;
+export type Outputs = Readonly<Record<string, OutputEntry>>;
 
 /** The typed shape of `pablo.json`. */
 export interface Marker {

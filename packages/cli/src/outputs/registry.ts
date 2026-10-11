@@ -12,6 +12,12 @@
  * conformance test (`test/outputs.test.ts`, over `./conformance.ts`) runs
  * every row end to end, so a half-wired type cannot land.
  *
+ * Addressing (AGT-1669, "Addressing an output"): a verb that acts on one
+ * output takes `--output <type>` and resolves it with `resolveOutput`, which
+ * applies the default-output rule: a work with one output needs no flag; a
+ * work with several refuses a verb that names none, listing them
+ * (`missing: ["--output: novel | radio"]`).
+ *
  * Only top-level `OUTPUTS` is evaluated at import; everything else is a
  * function, so the marker (which validates against this table and is read
  * by `outputForWork`) can import it back without an initialisation cycle.
@@ -26,28 +32,55 @@ export const OUTPUTS = {
   novel: NOVEL,
 } as const satisfies Readonly<Record<string, OutputDefinition>>;
 
-/** An output type's id: a key of `OUTPUTS`. */
-export type OutputId = keyof typeof OUTPUTS;
+/** An output type's id: a key of `OUTPUTS` (or of a type a test registered). */
+export type OutputId = string;
 
-/** Every registered type's id, in registry order. */
-export function outputIds(): OutputId[] {
-  return Object.keys(OUTPUTS) as OutputId[];
+/**
+ * Types registered at run time by `registerOutput`: tests only. A two-output
+ * work needs a second type before `radio` (pablo-casting) and `story`
+ * (pablo-story-core S11) are rows of `OUTPUTS`, so the addressing tests
+ * register fixture types here and remove them after. Production types are
+ * rows of `OUTPUTS`, never registered.
+ */
+const registered = new Map<string, OutputDefinition>();
+
+/**
+ * Tests only: makes `def` a known output type until the returned function is
+ * called. Throws on an id `OUTPUTS` or an earlier registration already holds.
+ */
+export function registerOutput(def: OutputDefinition): () => void {
+  if (Object.hasOwn(OUTPUTS, def.id) || registered.has(def.id)) throw new Error(`pablo: output type "${def.id}" is already registered`);
+  registered.set(def.id, def);
+  return () => {
+    if (registered.get(def.id) === def) registered.delete(def.id);
+  };
 }
 
-export function isOutputId(id: string): id is OutputId {
-  return Object.hasOwn(OUTPUTS, id);
+/** Every known type's id, `OUTPUTS` order first. */
+export function outputIds(): OutputId[] {
+  return [...Object.keys(OUTPUTS), ...registered.keys()];
+}
+
+export function isOutputId(id: string): boolean {
+  return Object.hasOwn(OUTPUTS, id) || registered.has(id);
+}
+
+/** The definition for `id`, or undefined for a type pablo does not know. */
+export function outputDefinition(id: string): OutputDefinition | undefined {
+  if (Object.hasOwn(OUTPUTS, id)) return OUTPUTS[id as keyof typeof OUTPUTS];
+  return registered.get(id);
 }
 
 /**
- * The output a verb acts on for a work whose marker declares `declared`:
- * the declared type when there is one, and the novel for a work that declares
- * none (every verb treated a work as a novel before outputs existed; a core
- * with nothing derived yet still drafts, checks and publishes as one until
- * `--output` addressing, pablo-story-core S5, makes the choice explicit).
+ * The output a verb acts on for a work whose marker declares `declared`, when
+ * the verb is not addressed to one: the first declared type, and the novel
+ * for a work that declares none (every verb treated a work as a novel before
+ * outputs existed). A verb addressed to one output uses `resolveOutput`.
  */
 export function workOutput(declared: Outputs): OutputDefinition {
   for (const id of Object.keys(declared)) {
-    if (isOutputId(id)) return OUTPUTS[id];
+    const def = outputDefinition(id);
+    if (def !== undefined) return def;
   }
   return OUTPUTS.novel;
 }
@@ -56,4 +89,58 @@ export function workOutput(declared: Outputs): OutputDefinition {
 export function outputForWork(workDir: string): OutputDefinition {
   const marker = readMarker(workDir);
   return workOutput(marker.ok ? marker.marker.outputs : {});
+}
+
+/** `resolveOutput`'s refusal: exit 2, naming what is missing. */
+export interface OutputRefusal {
+  readonly ok: false;
+  readonly code: 2;
+  readonly message: string;
+  readonly missing: readonly string[];
+}
+
+export type ResolvedOutput = { readonly ok: true; readonly output: OutputDefinition } | OutputRefusal;
+
+/** The item a multi-output work's refusal names: `--output: novel | radio`. */
+export function outputChoice(declared: Outputs): string {
+  return `--output: ${Object.keys(declared).join(" | ")}`;
+}
+
+/**
+ * The default-output rule (pablo-story-core, "Addressing an output"). With
+ * `requested`: it must be a known type the work declares (a work that
+ * declares none may still name the novel, which it is read as). Without:
+ * the one declared output, the novel for a work that declares none, and a
+ * refusal naming every declared type when there are several. `verb` names
+ * the verb in the message.
+ */
+export function resolveOutput(declared: Outputs, requested: string | undefined, verb: string): ResolvedOutput {
+  const types = Object.keys(declared);
+  if (requested !== undefined) {
+    const def = outputDefinition(requested);
+    if (def === undefined) {
+      return {
+        ok: false,
+        code: 2,
+        message: `pablo: ${verb}: unknown output type "${requested}" (known: ${outputIds().join(", ")})`,
+        missing: [`--output: ${outputIds().join(" | ")}`],
+      };
+    }
+    if (types.includes(requested) || (types.length === 0 && def === OUTPUTS.novel)) return { ok: true, output: def };
+    return {
+      ok: false,
+      code: 2,
+      message: `pablo: ${verb}: the work has no ${requested} output (it has: ${types.length === 0 ? "none" : types.join(", ")}); add it with \`pablo output add ${requested}\``,
+      missing: [`output ${requested} (pablo output add ${requested})`],
+    };
+  }
+  if (types.length > 1) {
+    return {
+      ok: false,
+      code: 2,
+      message: `pablo: ${verb}: the work has ${types.length} outputs (${types.join(", ")}); name one with --output`,
+      missing: [outputChoice(declared)],
+    };
+  }
+  return { ok: true, output: workOutput(declared) };
 }

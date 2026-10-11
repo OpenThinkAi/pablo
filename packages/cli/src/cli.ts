@@ -36,11 +36,11 @@ import { createComposer } from "./harness/compose";
 import { loadPromptWork } from "./harness/prompt";
 import type { HarnessSpec } from "./harness/session";
 import { runMcp } from "./mcp";
-import { chapterPreconditions, readNovelState } from "./novel/machine";
+import { readNovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
-import { OUTPUTS, workOutput } from "./outputs/registry";
+import { OUTPUTS, outputDefinition } from "./outputs/registry";
 import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
 import { readTool, searchTool } from "./harness-tools";
@@ -53,7 +53,7 @@ import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
 import { screenPuller, screenRefresh, screenRounds } from "./screen-reviews";
-import { deriveCliOptions, notesWith, parseForChapter, runVoiceRule, shareWith, VERBS, verbArgsFromCli } from "./verbs";
+import { deriveCliOptions, notesWith, publishOutput, runVoiceRule, shareWith, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
 import { realRunner } from "./share";
 import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
@@ -77,6 +77,7 @@ const P0_VERBS = [
   "publish",
   "share",
   "notes",
+  "output",
   "mcp",
   "voice",
   "prose",
@@ -125,10 +126,19 @@ function helpText(): string {
     "",
     "  pablo init <format> <slug> \"<Title>\"    scaffold a new work and write its marker",
     "  pablo init --adopt --project <slug>      write only the marker into an existing work",
-    "  pablo status --project <slug>            the novel machine's per-stage summary",
-    "  pablo status --project <slug> --for \"chapter N\"",
-    "                                            {ready, missing[]} for one chapter;",
-    "                                            exit 0 if ready, 2 if not",
+    "  pablo status --project <slug>            the story core's stages, then each output's",
+    "  pablo status --project <slug> --for \"<output> N\"",
+    "                                            {ready, missing[]} for one unit (\"chapter N\" is",
+    "                                            the novel's); exit 0 if ready, 2 if not",
+    "  pablo write --project <slug> [--output <type>] --unit N [--dry-run]",
+    "                                            draft unit N of an output on the local model;",
+    "                                            --chapter N is --output novel --unit N; a work",
+    "                                            with several outputs needs --output",
+    "  pablo output list|add|remove|plan [<type>] --project <slug>",
+    "                                            the work's outputs: list them, add one (once the",
+    "                                            core is at beats), remove one (archived under",
+    "                                            outputs/_removed/), or rewrite its plan.md",
+    "  check, publish and share take --output <type> the same way",
     "  pablo migrate lines --project <slug> [--dry-run]",
     `                                            one-time split of ${OUTPUTS.novel.artifactDir}/*.md to one`,
     "                                            sentence per line, committed on its own",
@@ -279,6 +289,10 @@ interface ParsedArgs {
   readonly file: string | undefined;
   /** `write --chapter N`; parsed and validated by `runWrite`, not here. */
   readonly chapter: string | undefined;
+  /** `--output <type>` (AGT-1669): the output `write`, `status`, `check`, `publish` and `share` act on. */
+  readonly output: string | undefined;
+  /** `write --unit N` (AGT-1669); validated by `runWrite`. */
+  readonly unit: string | undefined;
   /** `write --words W`; defaults to `DEFAULT_WORD_TARGET` when absent. */
   readonly words: string | undefined;
   /** `write --scenes S`; defaults to `DEFAULT_MIN_SCENES` when absent. */
@@ -388,6 +402,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
     file: typeof values["file"] === "string" ? values["file"] : undefined,
     chapter: typeof values["chapter"] === "string" ? values["chapter"] : undefined,
+    output: typeof values["output"] === "string" ? values["output"] : undefined,
+    unit: typeof values["unit"] === "string" ? values["unit"] : undefined,
     words: typeof values["words"] === "string" ? values["words"] : undefined,
     scenes: typeof values["scenes"] === "string" ? values["scenes"] : undefined,
     dryRun: values["dry-run"] === true,
@@ -443,6 +459,26 @@ function emit(result: Result, json: boolean): void {
   }
   if (result.ok) console.log(result.message);
   else console.error(result.message);
+}
+
+/** Plain-text output for `pablo output` (AGT-1669): the list, what a change committed, the plan's rows, or the refusal. */
+export function outputVerbText(raw: unknown): string {
+  const body = raw as Record<string, unknown>;
+  if (body["ok"] !== true) return [String(body["message"]), ...((body["missing"] as string[] | undefined) ?? []).map((m) => `  ${m}`)].join("\n");
+  if (Array.isArray(body["outputs"])) {
+    const outputs = body["outputs"] as { type: string; drafted: number; total: number; noun: string; plural: string; dir: string; next?: string }[];
+    const lines = outputs.length === 0 ? ["outputs: none"] : outputs.map((o) => `${o.type}: ${o.drafted} of ${o.total} ${o.total === 1 ? o.noun : o.plural} drafted (${o.dir}/)${o.next ? `; next: ${o.next}` : ""}`);
+    const available = body["available"] as string[];
+    return [...lines, `available: ${available.length === 0 ? "none" : available.join(", ")}`].join("\n");
+  }
+  if (Array.isArray(body["rows"])) {
+    const rows = body["rows"] as { unit: number; title: string; beats: number[]; status: string }[];
+    const head = body["dryRun"] === true ? `pablo: output plan ${String(body["type"])}: ${String(body["path"])} (dry run)` : `pablo: output plan ${String(body["type"])}: ${String(body["path"])} ${body["changed"] === true ? (body["committed"] === true ? "rewritten (committed)" : "rewritten") : "unchanged"}`;
+    return [head, ...rows.map((r) => `  ${r.unit}  ${r.title}  beats ${r.beats.join(", ")}  ${r.status}`), ...(body["notice"] ? [String(body["notice"])] : [])].join("\n");
+  }
+  const paths = (body["paths"] as string[]).map((p) => `  ${p}`);
+  const what = body["action"] === "remove" ? (body["archived"] !== undefined ? `removed, archived to ${String(body["archived"])}` : "removed") : "added";
+  return [`pablo: output ${String(body["type"])}: ${what}${body["committed"] === true ? " (committed)" : ""}`, ...paths, ...(body["notice"] ? [String(body["notice"])] : [])].join("\n");
 }
 
 /** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
@@ -627,21 +663,19 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
       return result.exitCode;
     }
 
-    const chapter = parseForChapter(args.for);
-    if (chapter === undefined) {
-      const message = 'pablo: --for expects "chapter N" or "episode N"';
-      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
-      return EXIT_REFUSED;
-    }
-
-    const result = chapterPreconditions(readNovelState(projectPath), chapter);
+    // `--for "<output> N"` (AGT-1669): the addressed output's preconditions for one unit.
+    const result = unitStatus(projectPath, args.for);
+    const body = result.body as { ready?: boolean; missing?: string[]; message?: string };
     if (args.json) {
-      console.log(JSON.stringify({ ready: result.ready, missing: result.missing }));
+      console.log(JSON.stringify(result.body));
+    } else if (body.ready !== undefined) {
+      console.log(`${result.label ?? args.for.trim()}: ${body.ready ? "ready" : "not ready"}`);
+      for (const item of body.missing ?? []) console.log(`  ${item}`);
     } else {
-      console.log(`chapter ${chapter}: ${result.ready ? "ready" : "not ready"}`);
-      for (const item of result.missing) console.log(`  ${item}`);
+      console.error(body.message ?? "pablo: status failed");
+      for (const item of body.missing ?? []) console.error(`  ${item}`);
     }
-    return result.ready ? EXIT_OK : EXIT_REFUSED;
+    return result.exitCode;
   }
 
   const status = readWorkStatus(projectPath);
@@ -1252,22 +1286,19 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
-    const markerResult = readMarker(projectPath);
-    if (!markerResult.ok) {
-      emit(refusalResult(markerResult), args.json);
-      return markerResult.code;
-    }
-    const outcome = workOutput(markerResult.marker.outputs).publish.run(projectPath, markerResult.marker.slug, markerResult.marker.title, args.target);
-    if (!outcome.ok) {
-      emit(refusalResult(outcome), args.json);
-      return outcome.code;
-    }
+    // `--output <type>` (AGT-1669): the addressed output's own publish targets.
+    const result = publishOutput(projectPath, args.target, args.output);
+    const body = result.body as { ok: boolean; message?: string; missing?: string[]; output?: string; target?: string; where?: string; chapters?: number; words?: number };
     if (args.json) {
-      console.log(JSON.stringify({ ok: true, target: outcome.target, where: outcome.where, chapters: outcome.chapters, words: outcome.words }));
+      console.log(JSON.stringify(body));
+    } else if (body.ok) {
+      const def = outputDefinition(body.output ?? "") ?? OUTPUTS.novel;
+      console.log(`pablo: published ${body.target}: ${body.where} (${body.chapters} ${def.plural}, ${body.words} words)`);
     } else {
-      console.log(`pablo: published ${outcome.target}: ${outcome.where} (${outcome.chapters} chapters, ${outcome.words} words)`);
+      console.error(body.message);
+      for (const item of body.missing ?? []) console.error(`  ${item}`);
     }
-    return EXIT_OK;
+    return result.exitCode;
   }
 
   if (args.verb === "share") {
@@ -1294,7 +1325,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return EXIT_REFUSED;
     }
     const outcome = await shareWith(
-      { project: args.project as string, reader: args.reader, chapters: args.chapters },
+      { project: args.project as string, reader: args.reader, chapters: args.chapters, output: args.output },
       { cwd, env: process.env, stderr: process.stderr },
       realRunner,
     );
@@ -1308,6 +1339,25 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       console.error(String(body["message"]));
     }
     return outcome.exitCode;
+  }
+
+  // `output list|add|remove|plan` (AGT-1669) runs off its one `VERBS` entry, as `pablo mcp` does.
+  if (args.verb === "output") {
+    if (projectPath === undefined) {
+      emit({ ok: false, code: EXIT_REFUSED, message: "pablo: output requires --project <slug>" }, args.json);
+      return EXIT_REFUSED;
+    }
+    const verb = VERBS.find((v) => v.name === "output") as (typeof VERBS)[number];
+    const built = verbArgsFromCli(verb, args.values, args.rest);
+    if (!built.ok) {
+      emit({ ok: false, code: EXIT_REFUSED, message: `${built.message} (pablo output list|add|remove|plan [<type>] --project <slug>)` }, args.json);
+      return EXIT_REFUSED;
+    }
+    const result = await verb.run(built.args as never, { cwd, env: process.env, stderr: process.stderr });
+    if (args.json) console.log(JSON.stringify(result.body));
+    else if ((result.body as { ok?: boolean }).ok === true) console.log(outputVerbText(result.body));
+    else console.error(outputVerbText(result.body));
+    return result.exitCode;
   }
 
   if (args.verb === "notes") {

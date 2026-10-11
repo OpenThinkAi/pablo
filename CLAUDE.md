@@ -122,6 +122,17 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 under `src/` outside `outputs/novel/` spells `chapters/`
                 (`test/outputs.test.ts` greps for it), and every type passes
                 `src/outputs/conformance.ts` over the four-beat fixture.
+                Addressing (AGT-1669): `write`, `status --for "<type> N"`,
+                `check`, `publish` and `share` take `--output <type>`
+                (`--chapter N` is `--output novel --unit N`) and resolve it
+                with the registry's `resolveOutput`: one output is implied,
+                several and none named is a refusal naming them. `pablo
+                output list|add|remove|plan` is `src/output-verbs.ts` (one
+                `VERBS` entry; `remove` archives under `outputs/_removed/`,
+                never deletes). Write receipts carry `output` and `unit`;
+                `draft_unit(output, n, direction?)` is `write` for the
+                harness beside `draft_chapter`. Tests register fixture types
+                with `registerOutput` (tests only; real types are rows).
                 `src/casting.ts` (AGT-1678) is the runner for the Python
                 side: `pablo doctor` reports it, and the first casting verb
                 (`audition`, `cast`, `voices`: `src/casting-verbs.ts`,

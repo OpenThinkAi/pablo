@@ -29,7 +29,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ReaderConfig } from "@openthink/pablo-core";
 import { NOVEL_UNIT_PATH } from "./outputs/novel/units";
-import { outputForWork } from "./outputs/registry";
+import { readMarker } from "./marker";
+import { OUTPUTS, resolveOutput } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
 
 /** The GitHub org the reading repos live under (private; confirmed 2026-10-02). */
@@ -229,6 +230,8 @@ export interface ShareOptions {
   readonly reader: string | undefined;
   /** `--chapters 3` or `3-5`. */
   readonly chapters: string | undefined;
+  /** `--output <type>` (AGT-1669): the output whose units are shared; optional when the work has one. */
+  readonly output?: string | undefined;
   /** The config's `readers` map. */
   readonly readers: ReadonlyMap<string, ReaderConfig>;
   readonly run: Runner;
@@ -265,6 +268,8 @@ export interface ShareFailure {
   /** 2 = refused (a precondition), 1 = error (git/gh failed). */
   readonly code: 1 | 2;
   readonly message: string;
+  /** `--output` was needed (a work with several outputs) or names one the work lacks (AGT-1669). */
+  readonly missing?: readonly string[];
 }
 
 export type ShareOutcome = ShareSuccess | ShareFailure;
@@ -345,8 +350,15 @@ export function shareRound(options: ShareOptions): ShareOutcome {
   if (mainResult.code !== 0) return refuse("pablo: share: the vault has no main branch to share from");
   const vaultCommit = mainResult.stdout.trim();
 
+  // The addressed output (AGT-1669): `--output`, else the work's one output. A reading round carries
+  // chapters only: `read` and `notes pull` take nothing back from a round but the novel's unit paths.
+  const marker = readMarker(options.projectPath);
+  const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, options.output, "share");
+  if (!resolved.ok) return { ok: false, code: 2, message: resolved.message, missing: resolved.missing };
+  const output = resolved.output;
+  if (output.id !== OUTPUTS.novel.id) return refuse(`pablo: share: reading rounds carry the novel's chapters; the ${output.id} output has no reading round`);
+
   // Every shared chapter must be on main, as committed there.
-  const output = outputForWork(options.projectPath);
   const onMain = chaptersOnMain(run, gitRoot, prefix, output);
   if (!(onMain instanceof Map)) return onMain;
   const chapters: RoundChapter[] = [];

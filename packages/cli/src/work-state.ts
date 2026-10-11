@@ -19,7 +19,7 @@ import type { CoreStage, CoreState } from "./core/machine";
 import { waitingForReview } from "./branch";
 import type { Outputs } from "./marker";
 import { readMarker } from "./marker";
-import { isOutputId, OUTPUTS } from "./outputs/registry";
+import { outputDefinition } from "./outputs/registry";
 import type { OutputReport } from "./outputs/types";
 
 export type { OutputReport };
@@ -53,7 +53,8 @@ export function readWorkReport(workDir: string, declared: Outputs): WorkReport {
   const core = readCoreState(workDir);
   const outputs: Record<string, OutputReport> = {};
   for (const type of Object.keys(declared)) {
-    if (isOutputId(type)) outputs[type] = OUTPUTS[type].report(workDir, core);
+    const def = outputDefinition(type);
+    if (def !== undefined) outputs[type] = def.report(workDir, core);
   }
   return { core: { ...core, stages: coreStages(core) }, outputs, next: workNext(core, outputs) };
 }

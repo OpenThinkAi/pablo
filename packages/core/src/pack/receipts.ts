@@ -74,6 +74,10 @@ export interface Receipt {
   readonly proposal: ReceiptProposal | null;
   /** The error a failed call ended in; null when it succeeded. */
   readonly error: string | null;
+  /** The output type the call drafted for (`novel`, `radio`, ...); present only on an output's unit write (AGT-1669). */
+  readonly output?: string;
+  /** The unit of that output (chapter 3, episode 5); present with `output`. */
+  readonly unit?: number;
 }
 
 export type ReceiptSink = (receipt: Receipt) => void | Promise<void>;
@@ -83,6 +87,8 @@ export interface WithReceiptsOptions {
   readonly pack?: Pack | undefined;
   /** Names the call in the log when the request carries no intent. */
   readonly intent?: string | undefined;
+  /** The output and unit the calls draft for: written into every receipt as `output` and `unit` (AGT-1669). */
+  readonly address?: { readonly output: string; readonly unit: number } | undefined;
   readonly estimate?: TokenEstimator | undefined;
   readonly now?: (() => number) | undefined;
   readonly clock?: (() => Date) | undefined;
@@ -134,6 +140,7 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
       wall_ms: wallMs,
       proposal: null,
       error: null,
+      ...(options.address === undefined ? {} : { output: options.address.output, unit: options.address.unit }),
     };
   }
 

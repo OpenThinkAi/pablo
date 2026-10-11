@@ -60,22 +60,23 @@
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
+import type { Adapter } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
-import { checkWork } from "./check";
+import { checkWork, radioScriptsChecked } from "./check";
 import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
 import { mergeDraftInProject } from "./novel/merge";
 import { readMarker } from "./marker";
-import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { readTool, searchTool } from "./harness-tools";
+import { addOutput, listOutputs, planOutput, removeOutput } from "./output-verbs";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { parseForEpisode, radioBind, radioCheck, radioStatus, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
-import { OUTPUTS, workOutput } from "./outputs/registry";
+import { isOutputId, OUTPUTS, outputIds, resolveOutput } from "./outputs/registry";
 import { realRunner, shareRound } from "./share";
 import { listRoundStatus, notesPull } from "./notes";
 import type { Runner } from "./share";
@@ -117,6 +118,11 @@ export interface VerbContext {
    * once a radio work actually needs it.
    */
   readonly casting?: CastingDeps;
+  /**
+   * AGT-1669: the writer `write`, `draft_chapter` and `draft_unit` draft with. Tests inject a fake adapter so a
+   * draft never reaches a model; left `undefined`, the routed provider is used, as on the CLI.
+   */
+  readonly writer?: Adapter;
 }
 
 /** `run`'s return: `body` is the exact `--json` object; `exitCode` is the CLI's exit-code contract (0 ok, 2 refused, 1 error). */
@@ -234,6 +240,60 @@ export function parseForChapter(raw: string): number | undefined {
   return undefined;
 }
 
+/**
+ * `--for`'s value as an output and a unit (AGT-1669): `"<type> N"` (or
+ * `"<type>-N"`) names the output, `chapter N` / `chapter-N` / `ch N` are the
+ * novel's spelling, and a bare `N` leaves the output to the default-output
+ * rule (`output` undefined). `"episode N"` is the radio casting check
+ * (`parseForEpisode`), matched before this. Anything else is `undefined`.
+ */
+export function parseForUnit(raw: string): { readonly output: string | undefined; readonly unit: number } | undefined {
+  const trimmed = raw.trim();
+  const bare = /^(\d+)$/.exec(trimmed);
+  if (bare) return { output: undefined, unit: Number(bare[1]) };
+  const chapter = parseForChapter(trimmed);
+  if (chapter !== undefined) return { output: OUTPUTS.novel.id, unit: chapter };
+  const typed = /^([a-z][a-z0-9_]*)(?:\s+|-)(\d+)$/i.exec(trimmed);
+  if (typed) return { output: (typed[1] as string).toLowerCase(), unit: Number(typed[2]) };
+  return undefined;
+}
+
+/** The refusal `--for` gives a value it cannot read. */
+export const FOR_USAGE = 'pablo: --for expects "chapter N" (the novel), "<output> N" (e.g. "novel 3"), a bare "N" on a work with one output, or "episode N"';
+
+/**
+ * `status --for <type> N` (AGT-1669), for the CLI and the `status` verb alike:
+ * the addressed output's preconditions for unit N, `{ready, missing}`, exit 0
+ * when ready and 2 when not; a work with several outputs and no type named,
+ * or a type it does not have, is a refusal naming them.
+ */
+export function unitStatus(projectPath: string, raw: string): VerbResult & { readonly label?: string } {
+  const parsed = parseForUnit(raw);
+  if (parsed === undefined) return { body: { ok: false, code: 2, message: FOR_USAGE }, exitCode: 2 };
+  if (parsed.output !== undefined && !isOutputId(parsed.output)) {
+    const message = `${FOR_USAGE}; "${parsed.output}" is not an output type (known: ${outputIds().join(", ")})`;
+    return { body: { ok: false, code: 2, message, missing: [`--for: ${outputIds().map((id) => `"${id} N"`).join(" | ")}`] }, exitCode: 2 };
+  }
+  const marker = readMarker(projectPath);
+  const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, parsed.output, "status");
+  if (!resolved.ok) return { body: { ok: false, code: resolved.code, message: resolved.message, missing: resolved.missing }, exitCode: resolved.code };
+  const preconditions = resolved.output.preconditions(projectPath, parsed.unit);
+  const label = `${resolved.output.noun} ${parsed.unit}`;
+  return { body: { ready: preconditions.ready, missing: preconditions.missing }, exitCode: preconditions.ready ? 0 : 2, label };
+}
+
+/** A zod field naming one of the work's outputs; the CLI's `--output <type>`. */
+const outputField = z
+  .string()
+  .describe(
+    'The output to act on, e.g. "novel" or "radio": one of the work\'s pablo.json outputs. Optional when the work has one output; a work with several refuses without it, naming them.',
+  );
+
+/** The CLI's and MCP's refusal body for an output that did not resolve. */
+function outputRefusalBody(refusal: { readonly code: number; readonly message: string; readonly missing: readonly string[] }): VerbResult {
+  return { body: { ok: false, code: refusal.code, message: refusal.message, missing: refusal.missing }, exitCode: refusal.code };
+}
+
 // ---------------------------------------------------------------------------
 // resume
 // ---------------------------------------------------------------------------
@@ -258,7 +318,7 @@ const STATUS_ARGS = z.object({
     .string()
     .optional()
     .describe(
-      'A chapter target, e.g. "chapter 3" (also accepts "chapter-3", "ch 3", or a bare "3"), or a radio episode, e.g. "episode 3": ready only when every role in its script is bound to a voice. Omit for the whole work: {core: {stages, ...}, outputs: {<type>: {units, drafted, total, next?}}, waiting, next}, where next names the layer that is short.',
+      'A unit of one output, "<output> N", e.g. "novel 3" (the novel also takes "chapter 3", "chapter-3", "ch 3"; a bare "3" names the work\'s one output): {ready, missing[]} for drafting it. A radio episode, e.g. "episode 3", is ready only when every role in its script is bound to a voice. Omit for the whole work: {core: {stages, ...}, outputs: {<type>: {units, drafted, total, next?}}, waiting, next}, where next names the layer that is short.',
     ),
 });
 
@@ -275,13 +335,7 @@ async function runStatusVerb(args: z.infer<typeof STATUS_ARGS>, ctx: VerbContext
     return radioStatus({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath, episode);
   }
 
-  const chapter = parseForChapter(args.for);
-  if (chapter === undefined) {
-    return { body: { ok: false, code: 2, message: 'pablo: --for expects "chapter N" or "episode N"' }, exitCode: 2 };
-  }
-
-  const preconditions = chapterPreconditions(readNovelState(resolved.projectPath), chapter);
-  return { body: { ready: preconditions.ready, missing: preconditions.missing }, exitCode: preconditions.ready ? 0 : 2 };
+  return unitStatus(resolved.projectPath, args.for);
 }
 
 // ---------------------------------------------------------------------------
@@ -355,7 +409,9 @@ async function runCritiqueVerb(args: z.infer<typeof CRITIQUE_ARGS>, ctx: VerbCon
 
 const WRITE_ARGS = z.object({
   project: projectField,
-  chapter: z.number().int().positive().optional().describe("The chapter number to draft."),
+  output: outputField.optional(),
+  unit: z.number().int().positive().optional().describe("The unit of the output to draft (a chapter of the novel, an episode of the radio show)."),
+  chapter: z.number().int().positive().optional().describe("The chapter number to draft: the novel's spelling of output novel, unit N."),
   words: z.number().int().positive().optional().describe("Target word count (defaults to the format's own target)."),
   scenes: z.number().int().positive().optional().describe("Minimum scene count (defaults to the format's own minimum)."),
   "dry-run": z.boolean().optional().default(false).describe("Assemble and render the pack; send nothing to the model."),
@@ -423,6 +479,8 @@ async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext):
   if (!resolved.ok) return resolved.result;
 
   const writeArgs: WriteArgs = {
+    output: args.output,
+    unit: args.unit !== undefined ? String(args.unit) : undefined,
     chapter: args.chapter !== undefined ? String(args.chapter) : undefined,
     words: args.words !== undefined ? String(args.words) : undefined,
     scenes: args.scenes !== undefined ? String(args.scenes) : undefined,
@@ -433,7 +491,7 @@ async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext):
     seed: args.seed !== undefined ? String(args.seed) : undefined,
     direction: args.direction,
   };
-  const deps: RunWriteDeps = { stderr: ctx.stderr, env: ctx.env };
+  const deps: RunWriteDeps = { stderr: ctx.stderr, env: ctx.env, ...(ctx.writer ? { adapter: ctx.writer } : {}) };
 
   const { exitCode, text } = await withWriteLock(() =>
     captureConsoleLog(() => runWrite(writeArgs, resolved.vaultRoot, resolved.projectPath, deps)),
@@ -467,6 +525,34 @@ const DRAFT_CHAPTER_ARGS = z.object({
  */
 async function runDraftChapterVerb(args: z.infer<typeof DRAFT_CHAPTER_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const result = await runWriteVerb({ ...args, "dry-run": false }, ctx);
+  return { body: draftChapterBody(result.body), exitCode: result.exitCode };
+}
+
+// ---------------------------------------------------------------------------
+// draft_unit (AGT-1669)
+// ---------------------------------------------------------------------------
+
+const DRAFT_UNIT_ARGS = z.object({
+  project: projectField,
+  output: z.string().describe('The output to draft a unit of, e.g. "novel" or "radio": one of the work\'s pablo.json outputs.'),
+  n: z.number().int().positive().describe("The unit number to draft (chapter N of the novel, episode N of the radio show)."),
+  direction: z.string().optional().describe("A steer for this unit beyond its beat row, e.g. \"slower, stay on Cora\". Goes into the pack as its own slice."),
+  words: WRITE_ARGS.shape.words,
+  scenes: WRITE_ARGS.shape.scenes,
+  force: WRITE_ARGS.shape.force,
+  temperature: WRITE_ARGS.shape.temperature,
+  seed: WRITE_ARGS.shape.seed,
+});
+
+/**
+ * AGT-1669: `draft_chapter` for any output. The same `write` verb with
+ * `--output <output> --unit <n>` (preconditions, pack, local model, the
+ * output's draft branch), narrowed the same way: branch, path and receipt
+ * (which names `output` and `unit`), never the prose.
+ */
+async function runDraftUnitVerb(args: z.infer<typeof DRAFT_UNIT_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const { n, ...rest } = args;
+  const result = await runWriteVerb({ ...rest, unit: n, "dry-run": false }, ctx);
   return { body: draftChapterBody(result.body), exitCode: result.exitCode };
 }
 
@@ -532,7 +618,11 @@ async function runSaveVerb(args: z.infer<typeof SAVE_ARGS>, ctx: VerbContext): P
 
 const CHECK_ARGS = z.object({
   project: projectField,
-  file: z.string().optional().describe(`Work-relative or absolute path to scan; omit to scan every ${OUTPUTS.novel.artifactDir}/*.md file.`),
+  file: z
+    .string()
+    .optional()
+    .describe(`Work-relative or absolute path to scan; omit to scan every unit of the output (the novel's ${OUTPUTS.novel.artifactDir}/*.md).`),
+  output: outputField.optional(),
 });
 
 async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext): Promise<VerbResult> {
@@ -553,13 +643,16 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
   }
 
-  const outcome = checkWork(resolved.vaultRoot, resolved.projectPath, args.file);
+  const outcome = checkWork(resolved.vaultRoot, resolved.projectPath, args.file, args.output);
   if (!outcome.ok) {
-    return { body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried }, exitCode: outcome.code };
+    return {
+      body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried, ...(outcome.missing ? { missing: outcome.missing } : {}) },
+      exitCode: outcome.code,
+    };
   }
   const body: Record<string, unknown> = { ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced };
   // A radio work also gets its scripts read: unknown directions and unbound roles (AGT-1680).
-  const radio = args.file === undefined ? radioCheck({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath) : undefined;
+  const radio = radioScriptsChecked(args.file, args.output) ? radioCheck({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath) : undefined;
   if (radio !== undefined) {
     if (radio.exitCode !== 0) return radio;
     const { ok: _ok, ...rest } = radio.body as Record<string, unknown>;
@@ -637,18 +730,32 @@ async function runMergeVerb(args: z.infer<typeof MERGE_ARGS>, ctx: VerbContext):
 const PUBLISH_ARGS = z.object({
   project: projectField,
   target: z.string().describe("draft|review|final — the publish target. Only draft is implemented: one compiled markdown file under .pablo/out/."),
+  output: outputField.optional(),
 });
+
+/**
+ * `publish [--output <type>] --target T` for the CLI and the verb alike: the
+ * addressed output's own publish targets (AGT-1669). Success is `{ok,
+ * output, target, where, chapters, words}`; an output that does not resolve
+ * is a refusal naming the work's outputs.
+ */
+export function publishOutput(projectPath: string, target: string | undefined, output: string | undefined): VerbResult {
+  const marker = readMarker(projectPath);
+  if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
+  const resolved = resolveOutput(marker.marker.outputs, output, "publish");
+  if (!resolved.ok) return outputRefusalBody(resolved);
+  const outcome = resolved.output.publish.run(projectPath, marker.marker.slug, marker.marker.title, target);
+  if (!outcome.ok) return { body: refusalBody(outcome), exitCode: outcome.code };
+  return {
+    body: { ok: true, output: resolved.output.id, target: outcome.target, where: outcome.where, chapters: outcome.chapters, words: outcome.words },
+    exitCode: 0,
+  };
+}
 
 async function runPublishVerb(args: z.infer<typeof PUBLISH_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
-
-  const marker = readMarker(resolved.projectPath);
-  if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
-
-  const outcome = workOutput(marker.marker.outputs).publish.run(resolved.projectPath, marker.marker.slug, marker.marker.title, args.target);
-  if (!outcome.ok) return { body: refusalBody(outcome), exitCode: outcome.code };
-  return { body: { ok: true, target: outcome.target, where: outcome.where, chapters: outcome.chapters, words: outcome.words }, exitCode: 0 };
+  return publishOutput(resolved.projectPath, args.target, args.output);
 }
 
 // ---------------------------------------------------------------------------
@@ -659,6 +766,7 @@ const SHARE_ARGS = z.object({
   project: projectField,
   reader: z.string().optional().describe('A reader named in pablo\'s config "readers" (e.g. "atara"). Required to open a round.'),
   chapters: z.string().optional().describe('The chapters to share, all on main: "3" or "3-5". Required to open a round.'),
+  output: outputField.optional(),
 });
 
 /**
@@ -691,11 +799,14 @@ export async function shareWith(args: z.infer<typeof SHARE_ARGS> & { readonly li
     title: marker.marker.title,
     reader: args.reader,
     chapters: args.chapters,
+    output: args.output,
     readers,
     run,
     ...(acceptUrl ? { acceptUrl } : {}),
   });
-  if (!outcome.ok) return { body: { ok: false, code: outcome.code, message: outcome.message }, exitCode: outcome.code };
+  if (!outcome.ok) {
+    return { body: { ok: false, code: outcome.code, message: outcome.message, ...(outcome.missing ? { missing: outcome.missing } : {}) }, exitCode: outcome.code };
+  }
   return { body: { ok: true, ...outcome.round, record: outcome.recordPath, notices: outcome.notices }, exitCode: 0 };
 }
 
@@ -1341,6 +1452,36 @@ async function runSearchVerb(args: z.infer<typeof SEARCH_ARGS>, ctx: VerbContext
 }
 
 // ---------------------------------------------------------------------------
+// output (AGT-1669) — the work's outputs: list, add, remove, plan
+// (`output-verbs.ts`).
+// ---------------------------------------------------------------------------
+
+const OUTPUT_ARGS = z.object({
+  sub: z
+    .enum(["list", "add", "remove", "plan"])
+    .describe(
+      "list: the work's outputs with units drafted and next step. add <type>: declare the output in pablo.json and scaffold outputs/<type>/ (plan.md, RULES.md), refused until the story core is at beats. remove <type>: undeclare it and archive outputs/<type>/ under outputs/_removed/. plan <type>: rewrite outputs/<type>/plan.md from the beats. Each write is one commit.",
+    ),
+  type: z.string().optional().describe("The output type for add, remove and plan, e.g. \"novel\" or \"radio\"."),
+  project: projectField,
+  "dry-run": z.boolean().optional().default(false).describe("plan: show the rows; write and commit nothing."),
+});
+
+async function runOutputVerb(args: z.infer<typeof OUTPUT_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const outcome =
+    args.sub === "list"
+      ? listOutputs(resolved.projectPath)
+      : args.sub === "add"
+        ? addOutput(resolved.vaultRoot, resolved.projectPath, args.type)
+        : args.sub === "remove"
+          ? removeOutput(resolved.vaultRoot, resolved.projectPath, args.type)
+          : planOutput(resolved.vaultRoot, resolved.projectPath, args.type, { dryRun: args["dry-run"] });
+  return { body: outcome, exitCode: outcome.ok ? 0 : outcome.code };
+}
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -1353,7 +1494,8 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "status",
-    description: "The novel machine's per-stage state, or (with `for`) one chapter's draft preconditions and which are unmet.",
+    description:
+      "The work in both layers: the story core's stages, then each output's units, or (with `for`, e.g. \"novel 3\") one unit's draft preconditions and which are unmet.",
     args: STATUS_ARGS,
     run: runStatusVerb,
   },
@@ -1373,9 +1515,25 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "write",
-    description: "Draft one chapter on the configured local model: check preconditions, assemble the pack, send, write, receipt.",
+    description:
+      "Draft one unit of an output (`output` and `unit`; `chapter` is the novel's spelling) on the configured local model: check preconditions, assemble the pack, send, write, receipt (naming output and unit). A work with several outputs needs `output`.",
     args: WRITE_ARGS,
     run: runWriteVerb,
+  },
+  {
+    name: "draft_unit",
+    description:
+      "Draft unit n of an output (e.g. output \"novel\", n 3 is chapter 3) on the local model (Gemma) from its beat, steered by an optional direction. The draft lands on the output's draft branch for the author to review. Returns the branch, path and receipt (naming output and unit), never the prose; read the unit to see it.",
+    args: DRAFT_UNIT_ARGS,
+    run: runDraftUnitVerb,
+  },
+  {
+    name: "output",
+    description:
+      "The work's outputs (novel, radio, ...) derived from its story core: `list` them, `add <type>` (pablo.json plus outputs/<type>/ plan.md and RULES.md, once the core is at beats), `remove <type>` (archived under outputs/_removed/, never deleted), or regenerate a type's `plan`. Each write is one commit.",
+    args: OUTPUT_ARGS,
+    run: runOutputVerb,
+    positionalArgs: ["sub", "type"],
   },
   {
     name: "draft_chapter",

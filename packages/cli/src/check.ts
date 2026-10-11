@@ -25,7 +25,8 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { TextSource } from "@openthink/pablo-core";
 import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
-import { outputForWork } from "./outputs/registry";
+import { readMarker } from "./marker";
+import { resolveOutput } from "./outputs/registry";
 import { radioCheck, radioCheckLines, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
 
@@ -58,6 +59,8 @@ export interface CheckRefusal {
   readonly code: 2;
   readonly message: string;
   readonly tried: readonly string[];
+  /** `--output` was needed (a work with several outputs) or names one the work lacks (AGT-1669). */
+  readonly missing?: readonly string[];
 }
 
 export type CheckOutcome = CheckSuccess | CheckRefusal;
@@ -370,8 +373,18 @@ export function isUnprovenanced(text: string): boolean {
  * calls this (or `checkFile` directly) to put a chapter's hits in its
  * receipt.
  */
-export function checkWork(vaultRoot: string, workDir: string, file?: string): CheckOutcome {
+export function checkWork(vaultRoot: string, workDir: string, file?: string, output?: string): CheckOutcome {
   let filePaths: string[];
+
+  // Which output's units a whole-work scan reads (AGT-1669): `--output`, else the work's one output;
+  // several outputs and none named is a refusal naming them.
+  let artifactDir: string | undefined;
+  if (file === undefined || output !== undefined) {
+    const marker = readMarker(workDir);
+    const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, output, "check");
+    if (!resolved.ok) return { ok: false, code: 2, message: resolved.message, tried: [], missing: resolved.missing };
+    artifactDir = resolved.output.artifactDir;
+  }
 
   if (file !== undefined) {
     const resolved = isAbsolute(file) ? resolve(file) : resolve(workDir, file);
@@ -394,7 +407,7 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string): Ch
     }
     filePaths = [resolved];
   } else {
-    const chaptersDir = join(workDir, outputForWork(workDir).artifactDir);
+    const chaptersDir = join(workDir, artifactDir as string);
     filePaths = existsSync(chaptersDir)
       ? readdirSync(chaptersDir)
           .filter((name) => name.endsWith(".md"))
@@ -431,6 +444,13 @@ export function screenChecks(vaultRoot: string): (file: string, text: string) =>
 export interface CheckArgs {
   readonly json: boolean;
   readonly file: string | undefined;
+  /** `check --output <type>` (AGT-1669): scan that output's units. */
+  readonly output?: string | undefined;
+}
+
+/** Whether a check also reads radio scripts: not for a single `--file`, nor when `--output` names another output. */
+export function radioScriptsChecked(file: string | undefined, output: string | undefined): boolean {
+  return file === undefined && (output === undefined || output === "radio");
 }
 
 /**
@@ -447,19 +467,20 @@ export interface CheckArgs {
  * scan skips it. `casting` is injectable so tests never reach `uv`.
  */
 export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, casting?: CastingDeps): number {
-  const outcome = checkWork(vaultRoot, workDir, args.file);
+  const outcome = checkWork(vaultRoot, workDir, args.file, args.output);
 
   if (!outcome.ok) {
     if (args.json) {
-      console.log(JSON.stringify({ ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried }));
+      console.log(JSON.stringify({ ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried, ...(outcome.missing ? { missing: outcome.missing } : {}) }));
     } else {
       console.error(outcome.message);
+      for (const item of outcome.missing ?? []) console.error(`  ${item}`);
     }
     return outcome.code;
   }
 
   const radio =
-    args.file === undefined ? radioCheck({ env: process.env, stderr: process.stderr }, casting ?? realCastingDeps(process.env), workDir) : undefined;
+    radioScriptsChecked(args.file, args.output) ? radioCheck({ env: process.env, stderr: process.stderr }, casting ?? realCastingDeps(process.env), workDir) : undefined;
   if (radio !== undefined && radio.exitCode !== 0) {
     const failure = radio.body as { message?: string };
     if (args.json) console.log(JSON.stringify(radio.body));
