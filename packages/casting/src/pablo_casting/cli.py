@@ -136,7 +136,7 @@ Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix", "mixer")
 VOICES_SUBCOMMANDS = ("list", "show", "retire")
 DEFAULT_CANDIDATES = 6
 
@@ -208,6 +208,10 @@ def _parser() -> _Parser:
     # mix
     parser.add_argument("--version", type=int, dest="mix_version")
     parser.add_argument("--cues", help="the cue library directory (default <library>/cues)")
+    # mixer
+    parser.add_argument("--source", help="mixer peaks/audio: take:<key> or cue:<key>")
+    parser.add_argument("--stretch", type=float)
+    parser.add_argument("--base", type=int, help="mixer save: the mix version the edit started from")
     # perform
     parser.add_argument("--engine")
     parser.add_argument("--json-lines", action="store_true", dest="json_lines")
@@ -718,7 +722,7 @@ def run(
         return error(f"a command is required: one of {', '.join(COMMANDS)}"), args.json
     if args.command not in COMMANDS:
         return error(f'unknown command "{args.command}": one of {", ".join(COMMANDS)}'), args.json
-    if args.rest and args.command not in ("takes", "manifest", "gate", "voices"):
+    if args.rest and args.command not in ("takes", "manifest", "gate", "voices", "mixer"):
         return error(f"usage: unexpected argument(s) for {args.command}: {' '.join(args.rest)}"), args.json
 
     work: Path | None = None
@@ -830,6 +834,20 @@ def run(
 
         return cmd_fix(
             env, work, args.episode, args.vault, args.library, configured, args.json_lines, engines or real_engine, scorers or real_scorers, remix
+        ), args.json
+    if args.command == "mixer":
+        from pablo_casting.cues import real_generators
+        from pablo_casting.mix import Seams, cues_dir_for
+        from pablo_casting.mixer import cmd_mixer
+
+        try:
+            configured = load_config(env).library
+        except ConfigRefusal as refusal:
+            return refused(str(refusal)), args.json
+        mixer_seams = mixer or Seams(generators=real_generators())
+        cues_dir = cues_dir_for(work, args.cues, args.library or configured, args.vault)
+        return cmd_mixer(
+            args.rest[0] if args.rest else None, work, args.episode, args.mix_version, args.source, args.stretch, args.base, args.from_file, cues_dir, mixer_seams
         ), args.json
     if args.command == "mix":
         from pablo_casting.cues import real_generators

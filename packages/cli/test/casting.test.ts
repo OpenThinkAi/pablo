@@ -507,6 +507,7 @@ describe("packaging", () => {
 // still never touches packages/casting.
 // AGT-1679: `casting-verbs.ts` holds the `audition`/`cast`/`voices` VERBS entries; the runner only runs
 // inside their `run`, never at import, so `verbs.ts` importing them provisions nothing.
+// AGT-1766: `mixer-host.ts` (the mixer window's host) runs it only inside a mutation the window calls.
 test("only cli.ts, radio.ts and the casting verbs reach the casting runner: a writing verb never touches packages/casting", () => {
   const src = fileURLToPath(new URL("../src", import.meta.url));
   const importers: string[] = [];
@@ -518,5 +519,5 @@ test("only cli.ts, radio.ts and the casting verbs reach the casting runner: a wr
     }
   };
   walk(src);
-  expect(importers.sort()).toEqual(["casting-verbs.ts", "cli.ts", "radio.ts"]);
+  expect(importers.sort()).toEqual(["casting-verbs.ts", "cli.ts", "mixer-host.ts", "radio.ts"]);
 });

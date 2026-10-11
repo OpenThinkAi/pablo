@@ -146,7 +146,7 @@ function liveLines(live: LiveStream): ReviewLine[] {
 const versionInfo = (m: Manifest): VersionInfo => ({ version: m.version, duration: m.duration, created: m.created, changedLines: m.changed });
 
 /** The episode's title from its script (`title:` in the frontmatter, else the first `# ` heading), else "Episode N". */
-function episodeTitle(work: string, episode: number): string {
+export function episodeTitle(work: string, episode: number): string {
   const fallback = `Episode ${episode}`;
   try {
     const dir = radioScriptDir(work);
