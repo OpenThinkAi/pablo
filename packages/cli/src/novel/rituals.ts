@@ -193,7 +193,7 @@ function notePath(workDir: string, chapter: number, today: string): { readonly a
 }
 
 /** The author's comments as a note section: one bullet per comment with the line it was on, then the comment. Empty when there are none. */
-function authorSection(notes: readonly AuthorNote[]): string {
+export function authorSection(notes: readonly AuthorNote[]): string {
   if (notes.length === 0) return "";
   const at = (n: AuthorNote) => (n.line === undefined ? "chapter" : n.startLine !== undefined && n.startLine < n.line ? `lines ${n.startLine}-${n.line}` : `line ${n.line}`);
   const oneLine = (t: string) => t.replace(/\s+/g, " ").trim();
@@ -353,6 +353,8 @@ export async function runThink(
   allowNvmFallback: boolean,
   /** What the unit is called in the sync message (`chapter`; the story output's is `story`). */
   noun = "chapter",
+  /** What happened to it, in the sync message (`drafted`; a revision's is `revised`). */
+  verb = "drafted",
 ): Promise<Ritual> {
   let thinkPath = Bun.which("think", { PATH: env["PATH"] });
   if (thinkPath === null && allowNvmFallback && existsSync(NVM_THINK_FALLBACK)) {
@@ -362,7 +364,7 @@ export async function runThink(
     return { name: "think", status: "skipped", detail: "think not on PATH" };
   }
 
-  const message = `${slug}: drafted ${noun} ${chapter} (${words} words)`;
+  const message = verb === "drafted" ? `${slug}: drafted ${noun} ${chapter} (${words} words)` : `${slug}: ${verb} ${noun} ${chapter}`;
   const proc = Bun.spawn([thinkPath, "-C", "writing", "sync", message, "--topic", `repo:${slug}`], {
     stdout: "pipe",
     stderr: "pipe",

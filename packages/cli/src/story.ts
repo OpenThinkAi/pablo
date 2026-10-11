@@ -95,12 +95,42 @@ export function defaultOutput(prompt: string): "story" | "novel" {
   return NOVEL_CUE.test(prompt) ? "novel" : "story";
 }
 
-/** A working title from the prompt: its first clause, at most eight words, capitalised. */
+const capitalised = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** "... write me a story about X": X is the subject; the request's own verb phrase is not a title. */
+const REQUEST_TAIL = /\b(?:write|tell|draft|compose|give)\b(?:\s+me)?(?:\s+(?:an?|the))?(?:\s+(?:short|long|new))*\s+(?:story|novel|novella|tale|book|fable|piece)\s+(?:about|of|on|where)\s+(.+)$/i;
+
+/**
+ * A working title from the prompt, used until the premise stage supplies the
+ * real one: the subject after a "write me a story about ..." request when
+ * there is one, else the first clause; at most eight words, capitalised.
+ */
 export function titleFromPrompt(prompt: string): string {
-  const clause = (prompt.split(/[.;:!?\n]/)[0] ?? prompt).trim();
+  const first = (prompt.split(/[.;:!?\n]/)[0] ?? prompt).trim();
+  const clause = REQUEST_TAIL.exec(first)?.[1]?.trim() ?? first;
   const words = clause.split(/\s+/).filter((w) => w !== "").slice(0, 8).join(" ");
-  const title = words === "" ? "Untitled story" : words;
-  return title.charAt(0).toUpperCase() + title.slice(1);
+  return capitalised(words === "" ? "Untitled story" : words);
+}
+
+/** The words of a logline up to its main verb or clause: "A fishing family in 1900 Camogli is offered ..." -> "A fishing family in 1900 Camogli". */
+const LOGLINE_CUT = /\s+(?:is|are|was|were|has|have|must|decides?|faces?|finds?|discovers?|learns?|wants?|tries|returns?|who|that|when|after|while|as)\b/i;
+
+/**
+ * The work's title from its premise (AGT-1705): the `## Title` section of
+ * `bible/overview.md` when the premise stage wrote one, else the subject of
+ * its logline (the words up to the main verb). Undefined when the overview
+ * says neither, so the caller keeps the title it has.
+ */
+export function titleFromPremise(overviewText: string): string | undefined {
+  const heading = /^##[ \t]+Title[ \t]*\r?\n+([^\r\n#][^\r\n]*)/im.exec(overviewText)?.[1];
+  const given = heading?.replace(/^["'“”*_\s]+|["'“”*_.\s]+$/g, "").trim();
+  if (given !== undefined && given !== "") return given;
+  const logline = /^##[ \t]+Logline[ \t]*\r?\n+([^\r\n#][^\r\n]*)/im.exec(overviewText)?.[1]?.trim();
+  if (logline === undefined || logline === "") return undefined;
+  const subject = (LOGLINE_CUT.test(logline) ? logline.slice(0, logline.search(LOGLINE_CUT)) : logline).split(/[,.;:]/)[0] ?? "";
+  const words = subject.split(/\s+/).filter((w) => w !== "");
+  if (words.length < 2) return undefined;
+  return capitalised(words.slice(0, 8).join(" "));
 }
 
 export interface StoryArgs {
@@ -158,6 +188,8 @@ interface StoryState {
   review: boolean;
   readonly words?: number;
   readonly started: string;
+  /** The work's title is settled: `--title` was given, or the premise stage has supplied it (AGT-1705). */
+  titled?: boolean;
   /** Steps finished: `core:<stage>`, `output:<type>`, `draft:<type>:<unit>`, `publish:<type>`. */
   done: string[];
   /** The branch a review run waits on. */
@@ -260,7 +292,7 @@ const STAGE_TEXT: Readonly<Record<StoryCoreStage, string>> = {
   research:
     "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice) and keep each finding with save_research, with its sources. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
   premise:
-    'Stage 2 of 5, premise. Read the research notes (read, search) and propose the premise with propose (stage "premise"): bible/overview.md with ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure.',
+    'Stage 2 of 5, premise. Read the research notes (read, search) and propose the premise with propose (stage "premise"): bible/overview.md with ## Title (the work\'s own short title, two to six words, about the story and not the request), ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure.',
   bible:
     'Stage 3 of 5, bible. Propose the cast (propose stage "cast", one character per call, with a lowercase-hyphen name) and the places (stage "places"), and the timeline (stage "timeline": a | Year | Real events | In the story | table with a row for every year a beat will be set in). Record any other fact the story stands on with record_fact, tagged researched with its source, or invented.',
   acts: 'Stage 4 of 5, acts. Propose the acts table with propose (stage "acts"): rows of | Act | Years | What it accomplishes |.',
@@ -308,7 +340,7 @@ interface Run {
   readonly repo: string;
   readonly work: string;
   readonly slug: string;
-  readonly title: string;
+  title: string;
   readonly state: StoryState;
   readonly ctx: VerbContext;
   readonly deps: StoryDeps;
@@ -332,6 +364,43 @@ function waiting(run: Run, step: string, branch: string): VerbResult {
 function markDone(run: Run, step: string): void {
   if (!run.state.done.includes(step)) run.state.done.push(step);
   saveState(run.work, run.state);
+}
+
+/** One progress line on stderr per stage (AGT-1705): a run takes minutes and prints nothing else until it ends. */
+function progress(run: Run, line: string): void {
+  run.ctx.stderr.write(`pablo story: ${line}\n`);
+}
+
+/**
+ * Once the premise is on `main`, names the work from it (AGT-1705): the
+ * working title came from the request, which reads badly. The title in
+ * `pablo.json` and the README's heading change and are committed on their
+ * own; the slug and directory stay (every branch and the run's state name
+ * them). A given `--title` is never replaced.
+ */
+function retitleFromPremise(run: Run): void {
+  if (run.state.titled === true || !run.state.done.includes("core:premise")) return;
+  run.state.titled = true;
+  saveState(run.work, run.state);
+  const overview = join(run.work, "bible", "overview.md");
+  const title = existsSync(overview) ? titleFromPremise(readFileSync(overview, "utf8")) : undefined;
+  if (title === undefined || title === run.title) return;
+  const markerFile = join(run.work, "pablo.json");
+  const raw = JSON.parse(readFileSync(markerFile, "utf8")) as Record<string, unknown>;
+  writeFileSync(markerFile, `${JSON.stringify({ ...raw, title }, null, 2)}\n`, "utf8");
+  const paths = [markerFile];
+  // The headings scaffolded with the working title follow it.
+  for (const [name, suffix] of [["README.md", ""], ["QWEN.md", ": the work's rules"]] as const) {
+    const file = join(run.work, name);
+    if (!existsSync(file)) continue;
+    const text = readFileSync(file, "utf8");
+    const old = `# ${run.title}${suffix}\n`;
+    if (!text.startsWith(old)) continue;
+    writeFileSync(file, `# ${title}${suffix}\n${text.slice(old.length)}`, "utf8");
+    paths.push(file);
+  }
+  gitCommit(run.vault, `${run.slug}: title from the premise`, paths);
+  run.title = title;
 }
 
 function harnessAuthFor(run: Run): HarnessAuth | VerbResult {
@@ -404,7 +473,8 @@ async function draftUnit(run: Run, def: OutputDefinition, unit: number): Promise
         },
         run.vault,
         run.work,
-        { stderr: run.ctx.stderr, env: run.ctx.env, ...(run.deps.writer ? { adapter: run.deps.writer } : {}), ...(run.deps.now ? { now: run.deps.now } : {}) },
+        // The run's own stage line is its progress (AGT-1705): `write`'s token-by-token lines would bury it.
+        { stderr: { write: () => {} }, env: run.ctx.env, ...(run.deps.writer ? { adapter: run.deps.writer } : {}), ...(run.deps.now ? { now: run.deps.now } : {}) },
       ),
     ),
   );
@@ -437,8 +507,10 @@ async function advance(run: Run): Promise<VerbResult> {
   const env = run.ctx.env;
 
   for (const stage of STORY_CORE_STAGES) {
+    retitleFromPremise(run);
     const step = `core:${stage}`;
     if (state.done.includes(step)) continue;
+    progress(run, `${stage} (core stage ${STORY_CORE_STAGES.indexOf(stage) + 1} of ${STORY_CORE_STAGES.length})`);
     const ran = await runCoreStage(run, stage);
     if (!ran.ok) return ran.result;
     if (ran.branch === undefined) {
@@ -466,12 +538,15 @@ async function advance(run: Run): Promise<VerbResult> {
     markDone(run, step);
   }
 
+  retitleFromPremise(run);
+
   for (const id of state.outputs) {
     const def = outputDefinition(id);
     if (def === undefined) return refuse(`pablo: story: there is no ${id} output on this machine (pablo has: ${outputIds().join(", ")})`, [`output ${id}`]);
 
     const addStep = `output:${id}`;
     if (!state.done.includes(addStep)) {
+      progress(run, `${id}: adding the output`);
       const marker = readMarker(run.work);
       if (!marker.ok) return refuse(marker.message);
       if (marker.marker.outputs[id] === undefined) {
@@ -486,7 +561,9 @@ async function advance(run: Run): Promise<VerbResult> {
       .units.filter((u) => u.file === undefined)
       .map((u) => u.unit)
       .sort((a, b) => a - b);
+    const totalUnits = def.report(run.work, readCoreState(run.work)).total;
     for (const unit of units) {
+      progress(run, `${id}: drafting ${def.noun} ${unit} of ${totalUnits}`);
       const drafted = await draftUnit(run, def, unit);
       if (!drafted.ok) return drafted.result;
       const step = `draft:${id}:${unit}`;
@@ -510,6 +587,7 @@ async function advance(run: Run): Promise<VerbResult> {
     const publishStep = `publish:${id}`;
     if (!state.done.includes(publishStep)) {
       const target = def.publish.targets[0] as string;
+      progress(run, `${id}: publishing (${target})`);
       const marker = readMarker(run.work);
       if (!marker.ok) return refuse(marker.message);
       const published = def.publish.run(run.work, marker.marker.slug, marker.marker.title, target);
@@ -628,6 +706,7 @@ export async function runStory(args: StoryArgs, ctx: VerbContext, deps: StoryDep
     review: args.review === true,
     ...(words === undefined ? {} : { words }),
     started: now().toISOString(),
+    ...(args.title?.trim() ? { titled: true } : {}),
     done: [],
     plan: [],
     drafts: {},

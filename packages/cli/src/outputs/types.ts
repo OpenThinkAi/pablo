@@ -85,8 +85,8 @@ export interface OutputRituals {
   readonly afterRevision: (
     workDir: string,
     unit: number,
-    opts: Pick<RitualOptions, "slug" | "authorNotes" | "now"> & { readonly branch: string },
-  ) => Ritual[];
+    opts: Pick<RitualOptions, "slug" | "authorNotes" | "now" | "env" | "thinkTimeoutMs"> & { readonly branch: string },
+  ) => Ritual[] | Promise<Ritual[]>;
 }
 
 export type PublishOutcome =

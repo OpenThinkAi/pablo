@@ -12,11 +12,11 @@ import { dirname, join, relative, sep } from "node:path";
 import { beatsFile, continuityFile } from "@openthink/pablo-core";
 import { stripFrontmatter } from "../../publish";
 import { runContinuity } from "../../novel/continuity";
-import { attempt, attemptAsync, runGit, runThink, tickOutline } from "../../novel/rituals";
+import { attempt, attemptAsync, authorSection, runGit, runThink, tickOutline } from "../../novel/rituals";
 import type { Ritual, RitualOptions } from "../../novel/rituals";
 import type { OutputRituals } from "../types";
 import { storyBeats } from "./pack";
-import { STORY_ID, STORY_UNIT } from "./units";
+import { STORY_ID, STORY_UNIT, storyUnitOfPath } from "./units";
 
 function tickBeats(workDir: string): Ritual {
   const results = storyBeats(workDir).map((beat) => tickOutline(workDir, beat));
@@ -111,8 +111,44 @@ async function afterMerge(workDir: string, _unit: number, storyPath: string, opt
   return [outline, note, readme, continuity, git, think];
 }
 
+/**
+ * After a non-draft branch (revise/, edit/, reader/) that changed or
+ * commented on the story is merged (AGT-1705): the story was not drafted, so
+ * the drafted steps (outline tick, README bullet, continuity) do not run. The
+ * revision is written down in the story's dated note ("revised", with the
+ * author's own comments), committed on its own, and synced with think, as the
+ * novel's after-revision note and commit are and `afterMerge`'s sync is.
+ */
+async function afterRevision(workDir: string, _unit: number, opts: AfterRevisionOptions): Promise<Ritual[]> {
+  const today = (opts.now ?? (() => new Date()))().toISOString().slice(0, 10);
+  const rel = join("notes", `${today}-story.md`).split(sep).join("/");
+  const notes = (opts.authorNotes ?? []).filter((n) => storyUnitOfPath(n.path) === STORY_UNIT);
+  const note = attempt("note", () => {
+    const abs = join(workDir, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    const body = `Revised on ${opts.branch}.${authorSection(notes)}`;
+    if (existsSync(abs)) {
+      const existing = readFileSync(abs, "utf8");
+      writeFileSync(abs, `${existing}${existing.endsWith("\n") ? "" : "\n"}\n${body}\n`, "utf8");
+      return { name: "note", status: "ran", detail: `appended to ${rel}` };
+    }
+    writeFileSync(abs, `# ${today} — story revised\n\n${body}\n`, "utf8");
+    return { name: "note", status: "ran", detail: `created ${rel}` };
+  });
+  const git =
+    note.status === "ran"
+      ? attempt("git", () => runGit(workDir, [rel], `${opts.slug}: notes on the story (${opts.branch})`))
+      : { name: "git", status: "skipped" as const, detail: "no note written" };
+  const allowNvmFallback = opts.env === undefined;
+  const think = await attemptAsync("think", () =>
+    runThink(STORY_UNIT, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "story", "revised"),
+  );
+  return [note, git, think];
+}
+
+type AfterRevisionOptions = Parameters<OutputRituals["afterRevision"]>[2];
+
 export const STORY_RITUALS: OutputRituals = {
   afterMerge,
-  // A revision of the story changes the text only; there is nothing to tick or note.
-  afterRevision: () => [],
+  afterRevision,
 };
