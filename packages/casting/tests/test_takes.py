@@ -176,6 +176,10 @@ def test_no_code_path_deletes_or_rewrites_a_take() -> None:
         ("cues.py", "ensure", "unlink"),
         # AGT-1685: fix moves applied flags between flags.json and flags-done.json by atomic swaps; never a take.
         ("fix.py", "_write_atomic", "replace"),
+        # AGT-1697: the stream swaps its own index and moves a staged segment into place, under .pablo/out/stream/;
+        # never a take.
+        ("stream.py", "_write_atomic", "replace"),
+        ("stream.py", "_write_segment", "replace"),
     }
     found: set[tuple[str, str, str]] = set()
     for path in SRC.glob("*.py"):

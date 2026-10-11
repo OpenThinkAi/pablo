@@ -59,6 +59,26 @@ export function flagsOnLine(flags: readonly ReviewFlag[], line: number): ReviewF
   return flags.filter((f) => f.line === line).sort((a, b) => Number(b.source === "auto") - Number(a.source === "auto"));
 }
 
+/** Seconds of lead a segment is scheduled ahead of the audio clock, so it never starts in the past. */
+export const SCHEDULE_LEAD = 0.05;
+
+/**
+ * Where a streamed segment plays on the audio clock (AGT-1697). Segments are laid at `origin + start`, back
+ * to back, so they join without a gap; one that arrives after its moment (the performance fell behind the
+ * listener) starts `lead` from now and moves the origin on with it: a pause in the stream, never an overlap.
+ */
+export function scheduleSegment(origin: number, start: number, now: number, lead: number = SCHEDULE_LEAD): { readonly at: number; readonly origin: number } {
+  const at = origin + start;
+  if (at >= now + lead) return { at, origin };
+  return { at: now + lead, origin: now + lead - start };
+}
+
+/** The listener's place in a streamed chapter: the clock since the origin, never past what has been scheduled. */
+export function streamPosition(origin: number | null, now: number, scheduled: number): number {
+  if (origin === null) return 0;
+  return Math.max(0, Math.min(scheduled, now - origin));
+}
+
 /** Episodes in `next` that `prev` did not have: what just arrived while the player was open. */
 export function arrivals(prev: readonly ChapterRow[], next: readonly ChapterRow[]): number[] {
   const had = new Set(prev.map((c) => c.episode));

@@ -793,7 +793,7 @@ const PUBLISH_ARGS = z.object({
   target: z
     .string()
     .describe(
-      "The publish target, by output: novel and story draft|review|final (one compiled markdown file under .pablo/out/; the novel builds only draft); radio bundle|player|stream (bundle: every episode's script plus its newest mixed audio and manifest in one directory, .pablo/out/<slug>-radio-bundle/; player is `pablo review`; stream is not built yet).",
+      "The publish target, by output: novel and story draft|review|final (one compiled markdown file under .pablo/out/; the novel builds only draft); radio bundle|player|stream (bundle: every episode's script plus its newest mixed audio and manifest in one directory, .pablo/out/<slug>-radio-bundle/; player is `pablo review`; stream: each episode's newest mixed audio and manifest, with its time to first audio, in the listening directory .pablo/out/stream/ where the review player finds it).",
     ),
   output: outputField.optional(),
 });
@@ -1700,7 +1700,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "publish",
     description:
-      "Publish one of the work's outputs to a target. The novel and the story compile into one markdown file (frontmatter stripped, sentence lines joined into paragraphs, quotes curled) under .pablo/out/; the radio output's bundle copies every episode's script and, for each mixed episode, its audio and manifest into one directory (episodes not yet mixed are listed in notes).",
+      "Publish one of the work's outputs to a target. The novel and the story compile into one markdown file (frontmatter stripped, sentence lines joined into paragraphs, quotes curled) under .pablo/out/; the radio output's bundle copies every episode's script and, for each mixed episode, its audio and manifest into one directory (episodes not yet mixed are listed in notes); its stream target publishes each mixed episode (newest version's audio and manifest, with its time to first audio) to the listening directory .pablo/out/stream/, where the review player finds it.",
     args: PUBLISH_ARGS,
     run: runPublishVerb,
   },

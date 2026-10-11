@@ -405,11 +405,20 @@ describe("perform (AGT-1683)", () => {
     expect(lastPython(calls)).toEqual(["perform", "--episode=1", "--engine=dia", `--vault=${vault}`, "--work", work(vault), "--json"]);
   });
 
-  test("needs a project and an episode; an unknown project is a refusal that runs nothing", async () => {
+  test("needs a project and an episode (or --all, not both); an unknown project is a refusal that runs nothing", async () => {
     const perform = VERBS.find((v) => v.name === "perform")!;
     expect(perform.args.safeParse({ episode: 1 }).success).toBe(false);
     const { deps, calls } = fakeMachine();
-    const result = await verbsOver(deps)["perform"]!.run({ project: "nope", episode: 1, "json-lines": false }, ctxIn(vaultCopy()));
+    const vault = vaultCopy();
+    for (const [args, says] of [
+      [{ project: "ice-house" }, "needs --episode N"],
+      [{ project: "ice-house", episode: 1, all: true }, "or --all, not both"],
+    ] as const) {
+      const result = await verbsOver(deps)["perform"]!.run({ "json-lines": false, all: false, stream: false, ...args }, ctxIn(vault));
+      expect(result.exitCode).toBe(2);
+      expect((result.body as { message: string }).message).toContain(says);
+    }
+    const result = await verbsOver(deps)["perform"]!.run({ project: "nope", episode: 1, "json-lines": false }, ctxIn(vault));
     expect(result.exitCode).toBe(2);
     // AGT-1686: the episode may be `--episode N` or `--output radio --unit N`, so naming neither is a refusal at run time.
     const none = await verbsOver(deps)["perform"]!.run({ project: "ice-house", "json-lines": false }, ctxIn(vaultCopy()));
@@ -467,7 +476,7 @@ describe("perform (AGT-1683)", () => {
   test("the CLI parses --episode and --json-lines for perform", () => {
     const parsed = parseCliArgs(["perform", "--project", "ice-house", "--episode", "3", "--json-lines"]);
     const built = verbArgsFromCli(VERBS.find((v) => v.name === "perform")!, parsed.values, parsed.rest);
-    expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, "json-lines": true } });
+    expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, "json-lines": true, all: false, stream: false } });
   });
 });
 

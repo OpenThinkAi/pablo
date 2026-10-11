@@ -10,7 +10,9 @@
  *            it is rendered. Re-publishing replaces the directory's files.
  *   player   the review player: `pablo review --project <slug>` (a window,
  *            not a file), so the target is a refusal naming it.
- *   stream   the progressive render (pablo-casting C19), not built yet.
+ *   stream   the progressive render (AGT-1697): each newest mixed version to the
+ *            listening directory `.pablo/out/stream/` (`radio-stream.ts`), as
+ *            `pablo perform --stream` does the moment an episode is mixed.
  *
  * The audio and manifests are copied, never moved: the casting directory is
  * the Python side's and stays as it was.
@@ -20,6 +22,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { basename, join, sep } from "node:path";
 import { stripFrontmatter } from "../../publish";
 import type { PublishOutcome } from "../types";
+import { publishStream } from "../../radio-stream";
 import { radioUnitFiles } from "./plan";
 import { renderVersions } from "./state";
 import { episodeTag, RADIO_PUBLISH_TARGETS } from "./units";
@@ -87,7 +90,16 @@ export function publishRadio(workDir: string, slug: string, title: string, targe
     return refuse(`pablo: publish: unknown --target "${target}" for the radio output (expected ${RADIO_PUBLISH_TARGETS.join("|")})`);
   }
   if (target === "player") return refuse(`pablo: publish: the radio output's player is the review player; open it with \`pablo review --project ${slug}\``);
-  if (target === "stream") return refuse("pablo: publish: the stream target (episodes published as they render) is not built yet; use --target bundle");
   if (!existsSync(workDir)) return refuse(`pablo: publish: no work at ${workDir}`, [workDir]);
+  if (target === "stream") return publishStreamTarget(workDir);
   return publishBundle(workDir, slug, title);
+}
+
+/** `--target stream` (AGT-1697): each episode's newest mixed version to the listening directory (`radio-stream.ts`). */
+function publishStreamTarget(workDir: string): PublishOutcome {
+  const outcome = publishStream(workDir);
+  if (!outcome.ok) return outcome;
+  const files = outcome.published.flatMap((c) => [c.audio, c.manifest]);
+  const notes = outcome.unchanged.map((episode) => `episode ${episode}: its newest mixed version is already published`);
+  return { ok: true, code: 0, target: "stream", where: outcome.where, chapters: outcome.chapters.length, words: 0, files, ...(notes.length > 0 ? { notes } : {}) };
 }

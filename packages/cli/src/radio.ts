@@ -39,11 +39,18 @@ export function radioScriptDir(work: string): string {
 
 /** Whether any `NN-*.md` in the script directory carries a `CAST:` line, i.e. the work has radio scripts. */
 export function hasRadioScripts(work: string): boolean {
+  return radioEpisodes(work).length > 0;
+}
+
+/** The numbers of the episode scripts (`NN-*.md` carrying a `CAST:` line), ascending (AGT-1697: `perform --all`). */
+export function radioEpisodes(work: string): number[] {
   const dir = radioScriptDir(work);
-  if (!existsSync(dir)) return false;
-  return readdirSync(dir)
+  if (!existsSync(dir)) return [];
+  const numbers = readdirSync(dir)
     .filter((name) => EPISODE_FILE.test(name))
-    .some((name) => /^\s*\**CAST:/im.test(readFileSync(join(dir, name), "utf8")));
+    .filter((name) => /^\s*\**CAST:/im.test(readFileSync(join(dir, name), "utf8")))
+    .map((name) => Number(/^(\d+)-/.exec(name)?.[1]));
+  return [...new Set(numbers)].sort((a, b) => a - b);
 }
 
 /**

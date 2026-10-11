@@ -235,8 +235,9 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 second colour with the failing gates named, a version
                 switcher, a chapter list that polls), mounted by
                 `src/review-host.ts`. The view never reads a file; the host
-                answers exactly `loadTrack`, `setVersion`, `flag`, `unflag`
-                and `listChapters` (`views/review-protocol.ts`) from
+                answers exactly `loadTrack`, `setVersion`, `flag`, `unflag`,
+                `listChapters` and `loadSegments` (AGT-1697)
+                (`views/review-protocol.ts`) from
                 `outputs/radio/casting/` and writes only `flags.json`
                 (`{id, episode, line, reason, time, source, by, at}`; the
                 performer's auto flags are left alone). Only mixed versions
@@ -337,6 +338,34 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 pace, plus where the mix put the take; `mix.check_timings`
                 re-measures them with the aligner on the decoded final file.
                 Tests use a fake cue generator, pacer and encoder.
+                The progressive render (AGT-1697): the mix's placement is
+                `mix.Timeline`, built a line group at a time (`render` adds
+                every group and finishes; its `frontier` is the first sample a
+                later line, SFX or open BED can still change). `pablo perform
+                --stream` (`stream.py`, `--extra mix` too) feeds it each pass
+                as it is decided and cuts 6 s 16-bit WAV segments of the final
+                samples into the listening directory `<work>/.pablo/out/stream/
+                epNN/` (`stream.json`, `playlist.m3u8`, `segments/`; playable
+                once 30 s of the episode have passed the gates), then finishes
+                the same timeline into the episode file through `mix.mix(...,
+                timeline=)`, so the file is the segments times the one
+                normalising gain. Time to first audio (`ttfa`: first segment,
+                playable, episode file, seconds from the start of perform) is
+                in the manifest (a `PROPOSED_FIELDS` entry), the `perform` and
+                `stream` receipts. Takes, `changed_lines` and `write_version`
+                are untouched. `src/radio-stream.ts` owns the rest of that
+                directory: `publishStream` (`pablo publish --output radio
+                --target stream`, the radio type's `stream` target in
+                `outputs/radio/publish.ts`) copies each newest mixed version and writes
+                `index.json`; `perform --stream` calls it the moment an episode
+                is mixed, and `perform --all` runs the episodes through
+                `src/progressive.ts` (`runProgressive`: a writer queue and an
+                engine queue, each serial, so unit N+1 is written while N
+                performs; the story pipeline supplies `write`). The review
+                host lists a playable stream as a chapter with `stream` and no
+                version, and `loadSegments` hands its segments to the view,
+                which plays them gaplessly on the Web Audio clock
+                (`views/review-stream.ts`).
                 The voice library (AGT-1679) is the config's `library`, else
                 `<vault>/casting`: `voices/<slug>/` holds the tracked card
                 (`card.json`, `reference.flac`, `reference.txt`,
