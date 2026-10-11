@@ -32,6 +32,7 @@ from pathlib import Path
 from pablo_casting.calibrate import CalibrationRefusal, calibrate, read_records, scores_of
 from pablo_casting.config import ConfigRefusal, load_config
 from pablo_casting.gates import Card, GateRefusal, derive, evaluate, load_card, target_wps, thresholds_for, validate_gates
+from pablo_casting.library import LibraryRefusal, resolve_root
 from pablo_casting.receipts import append_receipt
 from pablo_casting.scorers import Scorer, ScorerFactory, ScorerUnavailable, Take
 
@@ -90,14 +91,19 @@ def _load_centroid(path: str | None) -> tuple[list[float] | None, int]:
     return [float(v) for v in embedding], takes
 
 
-def _card(ref: str | None, env: Mapping[str, str]) -> Card:
+def _card(ref: str | None, env: Mapping[str, str], library: str | None = None, vault: str | None = None) -> Card:
+    """The card for `--card`: a directory, or a slug in the library (`--library`, else the config's, else `<vault>/casting`)."""
     if ref is None:
         raise GateRefusal("--card <slug|dir> is required: the gates judge a take against a cast card")
     try:
         config = load_config(env)
     except ConfigRefusal as refusal:
         raise GateRefusal(str(refusal)) from refusal
-    return load_card(ref, config.library)
+    try:
+        root: Path | None = resolve_root(library or config.library, vault)
+    except LibraryRefusal:
+        root = None
+    return load_card(ref, root)
 
 
 def _sha256(path: Path) -> str:
@@ -139,6 +145,8 @@ def cmd_gate(
     env: Mapping[str, str],
     work: Path | None,
     scorer_factory: ScorerFactory,
+    library: str | None = None,
+    vault: str | None = None,
 ) -> Result:
     if len(rest) > 1:
         return _error(f"gate takes one take, got {len(rest)}: {' '.join(rest)}")
@@ -149,7 +157,7 @@ def cmd_gate(
     if scores_path is None and not line:
         return _error('gate <take.wav> needs --line "<the script line>"')
     try:
-        card = _card(card_ref, env)
+        card = _card(card_ref, env, library, vault)
         centroid, centroid_takes = _load_centroid(centroid_path)
     except GateRefusal as refusal:
         return _refused(str(refusal))
@@ -259,13 +267,15 @@ def cmd_calibrate(
     card_ref: str | None,
     apply: bool,
     env: Mapping[str, str],
+    library: str | None = None,
+    vault: str | None = None,
 ) -> Result:
     if approved_dir is None:
         return _error("gate calibrate needs --approved <dir> (score records of approved takes)")
     if apply and card_ref is None:
         return _refused("--apply writes the proposed gates into a card: name it with --card <slug|dir>")
     try:
-        card = _card(card_ref, env) if card_ref is not None else None
+        card = _card(card_ref, env, library, vault) if card_ref is not None else None
         approved = read_records(Path(approved_dir))
         others = read_records(Path(others_dir)) if others_dir is not None else []
     except (GateRefusal, CalibrationRefusal) as refusal:

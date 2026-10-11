@@ -181,6 +181,47 @@ describe("argv to the Python side", () => {
     expect(lastPython(calls)).toEqual(["voices", "list", "--json"]);
   });
 
+  test("--library and --vault reach the Python side, resolved against the cwd (AGT-1709)", async () => {
+    const { deps, calls, root } = fakeMachine();
+    const cwd = join(root, "casting");
+    const verbs = verbsOver(deps);
+    await verbs["voices"]!.run({ sub: "list", "auto-admitted": false, library: "lib" }, ctxIn(cwd));
+    expect(lastPython(calls)).toEqual(["voices", "list", `--library=${join(cwd, "lib")}`, "--json"]);
+    await verbs["cast"]!.run({ role: "CORA", candidate: 1, recast: false, library: "/abs/lib", vault: "v" }, ctxIn(cwd));
+    expect(lastPython(calls)).toEqual(["cast", "--role=CORA", "--candidate=1", `--vault=${join(cwd, "v")}`, "--library=/abs/lib", "--json"]);
+    await verbs["audition"]!.run({ role: "CORA", describe: "a voice", "dry-run": false, library: "/abs/lib" }, ctxIn(cwd));
+    expect(lastPython(calls)).toEqual(["audition", "--role=CORA", "--describe=a voice", "--library=/abs/lib", "--json"]);
+  });
+
+  test("the CLI flags --library and --vault parse into the verbs' args", () => {
+    for (const name of ["audition", "cast", "voices"]) {
+      const verb = VERBS.find((v) => v.name === name)!;
+      const parsed = parseCliArgs([name, "list", "--library", "/lib", "--vault", "/v"]);
+      const built = verbArgsFromCli(verb, parsed.values, parsed.rest);
+      expect(built).toMatchObject({ ok: true, args: { library: "/lib", vault: "/v" } });
+    }
+  });
+
+  test("a real audition and cast provision with the scorers extra; dry-run, cast --auto and voices do not (AGT-1709)", async () => {
+    const real = (name: string, args: Record<string, unknown>) => {
+      const machine = fakeMachine();
+      return verbsOver(machine.deps)[name]!.run(args as never, ctxIn(machine.root)).then(() => machine.calls.find((call) => call[1] === "sync"));
+    };
+    expect(await real("audition", { role: "CORA", describe: "a voice", "dry-run": false })).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]);
+    expect(await real("cast", { role: "CORA", candidate: 1, recast: false, auto: false, all: false })).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]);
+    expect(await real("audition", { "dry-run": true })).toEqual(["/fake/bin/uv", "sync", "--frozen"]);
+    expect(await real("voices", { sub: "list", "auto-admitted": false })).toEqual(["/fake/bin/uv", "sync", "--frozen"]);
+    expect(await real("cast", { auto: true, all: true, recast: false, project: undefined })).toBeUndefined(); // refused before provisioning
+  });
+
+  test("the extra is stamped, so a later dry-run does not strip it", async () => {
+    const machine = fakeMachine();
+    const verbs = verbsOver(machine.deps);
+    await verbs["audition"]!.run({ role: "CORA", describe: "a voice", "dry-run": false } as never, ctxIn(machine.root));
+    await verbs["audition"]!.run({ "dry-run": true } as never, ctxIn(machine.root));
+    expect(machine.calls.filter((call) => call[1] === "sync")).toHaveLength(1);
+  });
+
   test("an unknown --project is a refusal and runs nothing", async () => {
     const { deps, calls } = fakeMachine();
     const result = await verbsOver(deps)["cast"]!.run({ role: "CORA", candidate: 1, recast: false, project: "nope" }, ctxIn(vaultCopy()));
