@@ -293,3 +293,83 @@ describe("the CLI", () => {
     expect(auto).toContain("RAMON: needs a designed voice (the best match, tom, scored 0.143, below 0.6)");
   });
 });
+
+describe("perform (AGT-1683)", () => {
+  const work = (vault: string) => join(vault, "novels", "ice-house");
+
+  test("is one VERBS entry and one MCP tool", () => {
+    expect(VERBS.filter((v) => v.name === "perform")).toHaveLength(1);
+    expect(mcpTools().filter((t) => t.name === "perform")).toHaveLength(1);
+  });
+
+  test("provisions with the scorers extra and passes the episode, engine, vault and work", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    const result = await verbsOver(deps)["perform"]!.run({ project: "ice-house", episode: 1, engine: "dia", "json-lines": false }, ctxIn(vault));
+    expect(result.exitCode).toBe(0);
+    expect(calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]);
+    expect(lastPython(calls)).toEqual(["perform", "--episode=1", "--engine=dia", `--vault=${vault}`, "--work", work(vault), "--json"]);
+  });
+
+  test("needs a project and an episode; an unknown project is a refusal that runs nothing", async () => {
+    const perform = VERBS.find((v) => v.name === "perform")!;
+    expect(perform.args.safeParse({ episode: 1 }).success).toBe(false);
+    expect(perform.args.safeParse({ project: "ice-house" }).success).toBe(false);
+    const { deps, calls } = fakeMachine();
+    const result = await verbsOver(deps)["perform"]!.run({ project: "nope", episode: 1, "json-lines": false }, ctxIn(vaultCopy()));
+    expect(result.exitCode).toBe(2);
+    expect(calls).toEqual([]);
+  });
+
+  test("--json-lines relays each progress event to stdout as it arrives, never the body", async () => {
+    const { deps } = fakeMachine();
+    const vault = vaultCopy();
+    const events = [{ event: "start", lines: 1 }, { event: "line", i: 0, take: "ab" }, { event: "done" }].map((e) => JSON.stringify(e));
+    const body = { ok: true, episode: 1, manifest: "/m/v1.json" };
+    const seen: string[][] = [];
+    const streaming: CastingDeps = {
+      ...deps,
+      stream: async (argv, _options, onLine) => {
+        seen.push([...argv]);
+        for (const line of [...events, JSON.stringify(body)]) onLine(line);
+        return { code: 0, stdout: [...events, JSON.stringify(body)].join("\n"), stderr: "" };
+      },
+    };
+    const written: string[] = [];
+    const ctx = { ...ctxIn(vault), stdout: { write: (text: string) => void written.push(text) } };
+    const result = await verbsOver(streaming)["perform"]!.run({ project: "ice-house", episode: 1, "json-lines": true }, ctx);
+    expect(result.exitCode).toBe(0);
+    expect(result.body).toMatchObject(body);
+    expect(written).toEqual(events.map((e) => `${e}\n`));
+    expect(seen[0]).toContain("--json-lines");
+  });
+
+  test("without a stdout to relay to (pablo mcp), --json-lines stays on stderr only", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    await verbsOver(deps)["perform"]!.run({ project: "ice-house", episode: 2, "json-lines": true }, ctxIn(vault));
+    expect(lastPython(calls)).not.toContain("--json-lines");
+  });
+
+  test("castingText summarises a perform body", () => {
+    const text = castingText("perform", {
+      ok: true,
+      message: "episode 1 v1: 4 lines, 3 pass, 1 best-of (flagged), 6 takes rendered, rtf_total 0.9",
+      manifest: "/w/outputs/radio/casting/renders/ep01/v1.json",
+      wall: 12.5,
+      audioSeconds: 14.2,
+      rtfTotal: 0.9,
+      rtfEngine: 0.4,
+      flags: ["f-auto-1"],
+    });
+    expect(text).toContain("manifest: /w/outputs/radio/casting/renders/ep01/v1.json");
+    expect(text).toContain("rtf_total 0.9, engine 0.4");
+    expect(text).toContain("1 line(s) auto-flagged");
+  });
+
+  test("the CLI parses --episode and --json-lines for perform", () => {
+    const parsed = parseCliArgs(["perform", "--project", "ice-house", "--episode", "3", "--json-lines"]);
+    const built = verbArgsFromCli(VERBS.find((v) => v.name === "perform")!, parsed.values, parsed.rest);
+    expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, "json-lines": true } });
+  });
+});

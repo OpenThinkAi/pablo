@@ -6,6 +6,7 @@ and every library is a tmp directory, never a real vault.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -206,6 +207,7 @@ def test_the_config_library_wins_over_the_vault(vault: Path, env: dict[str, str]
     assert (tmp_path / "shared" / "voices" / "cora" / "auditions" / "1.json").exists()
 
 
+@pytest.mark.skipif(importlib.util.find_spec("mlx_audio") is not None, reason="the `scorers` extra is installed (gate/perform provision it), so the real designer would load")
 def test_the_real_toolkit_is_a_refusal_until_the_model_stacks_are_installed(vault: Path, env: dict[str, str]) -> None:
     # No toolkit override: the real one. Its designer imports mlx-audio lazily, which this venv lacks.
     (body, code), _ = run(["audition", "--role", "CORA", "--describe", DESCRIPTION, "--vault", str(vault), "--json"], env)

@@ -95,6 +95,7 @@ const P0_VERBS = [
   "gate",
   "cast",
   "voices",
+  "perform",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -257,6 +258,12 @@ function helpText(): string {
     "  pablo voices list [--auto-admitted] | show <slug> | retire <slug> [--reason \"...\"]",
     "                                            the shared voice library; retire keeps the",
     "                                            card hash, so pinned stories still perform",
+    "  pablo perform --project <slug> --episode N [--engine chatterbox-turbo|dia] [--json-lines]",
+    "                                            render the episode's lines in their bound voices",
+    "                                            (gates, up to 4 takes a line, pace stretch within",
+    "                                            0.75-1.05) into takes and renders/epNN/v1.json;",
+    "                                            one JSON line per line on stderr as it lands",
+    "                                            (and stdout with --json-lines). Uses the GPU",
     "  pablo takes show <key> --project <slug>  one radio take: inputs, scores, timings and",
     "                                            receipt id (a unique key prefix is enough)",
     "  pablo takes gc --project <slug> [--yes]  list the takes no manifest references, then",
@@ -543,7 +550,7 @@ async function runVerbEntry(name: string, args: ParsedArgs, cwd: string, text: (
 }
 
 /** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
-const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices"]);
+const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform"]);
 
 /** Plain-text output for a casting verb's body. */
 export function castingText(verb: string, body: Record<string, unknown>): string {
@@ -590,6 +597,12 @@ export function castingText(verb: string, body: Record<string, unknown>): string
       lines.push(`  ${String(n["role"])}: needs a designed voice (${String(n["reason"])})`);
     }
   }
+  if (verb === "perform" && typeof body["manifest"] === "string") {
+    lines.push(`  manifest: ${body["manifest"]}`);
+    lines.push(`  wall ${String(body["wall"])} s for ${String(body["audioSeconds"])} s of audio; rtf_total ${String(body["rtfTotal"])}, engine ${String(body["rtfEngine"])}`);
+    const flags = (body["flags"] as readonly string[] | undefined) ?? [];
+    if (flags.length > 0) lines.push(`  ${flags.length} line(s) auto-flagged for pablo fix`);
+  }
   if (verb === "voices" && body["card"] !== undefined) {
     lines.push(`${String(body["slug"])}  ${String(body["hash"])}${body["retired"] ? "  (retired)" : ""}${body["reference_intact"] ? "" : "  REFERENCE CHANGED"}`);
     lines.push(JSON.stringify(body["card"], null, 2));
@@ -610,7 +623,7 @@ async function runCastingVerb(args: ParsedArgs, cwd: string): Promise<number> {
     emit({ ok: false, code: EXIT_ERROR, message: built.message }, args.json);
     return EXIT_ERROR;
   }
-  const result = await verb.run(built.args as never, { cwd, env: process.env, stderr: process.stderr });
+  const result = await verb.run(built.args as never, { cwd, env: process.env, stderr: process.stderr, stdout: process.stdout });
   const body = result.body as Record<string, unknown>;
   if (args.json) console.log(JSON.stringify(body));
   else if (body["ok"] === true) console.log(castingText(verb.name, body));

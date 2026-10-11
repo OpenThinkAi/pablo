@@ -327,7 +327,16 @@ class UtmosScorer(_Lazy):
         # (the v1.2.0 release's commit), never a tag or branch a force-push could
         # move. `trust_repo=True` only skips the interactive prompt, which would
         # hang under pablo's non-interactive subprocess; the SHA is the integrity check.
-        return torch.hub.load(f"tarepan/SpeechMOS:{self.info.revision}", "utmos22_strong", trust_repo=True).eval()
+        import sys
+
+        before = {name for name in sys.modules if name == "speechmos" or name.startswith("speechmos.")}
+        model = torch.hub.load(f"tarepan/SpeechMOS:{self.info.revision}", "utmos22_strong", trust_repo=True).eval()
+        # The hub repo's own package is also named `speechmos` and stays in sys.modules after the
+        # load, shadowing the pip `speechmos` DNSMOS imports (`cannot import name 'dnsmos'`), so
+        # forget it once the model is built. AGT-1683 found this on the first real perform.
+        for name in [n for n in sys.modules if (n == "speechmos" or n.startswith("speechmos.")) and n not in before]:
+            del sys.modules[name]
+        return model
 
     def score(self, take: Take) -> Mapping[str, object]:
         import torch
@@ -347,7 +356,12 @@ class AudioboxScorer(_Lazy):
         return initialize_predictor()
 
     def score(self, take: Take) -> Mapping[str, object]:
-        result = self.model().forward([{"path": str(take.audio)}])  # type: ignore[attr-defined]
+        import torch
+
+        # Hand it the samples: given a path it loads through torchaudio, which now needs
+        # torchcodec (not in the extra). AGT-1683 found this on the first real perform.
+        audio, sr = _load_mono(take.audio)
+        result = self.model().forward([{"path": torch.from_numpy(audio)[None], "sample_rate": sr}])  # type: ignore[attr-defined]
         return {"pq": round(float(result[0]["PQ"]), 3)}
 
 

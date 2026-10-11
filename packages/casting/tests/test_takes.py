@@ -167,6 +167,8 @@ def test_no_code_path_deletes_or_rewrites_a_take() -> None:
         # AGT-1679: a cast card's staging discard and its file moves (into place, or the old card into recast/).
         ("cards.py", "_discard_staging", "rmtree"),
         ("cards.py", "_move", "replace"),
+        # AGT-1683: perform's auto flags swap flags.json atomically; never a take.
+        ("perform.py", "_write_auto_flags", "replace"),
     }
     found: set[tuple[str, str, str]] = set()
     for path in SRC.glob("*.py"):

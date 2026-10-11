@@ -17,6 +17,11 @@
  *   roles with no fit come back as `needsDesign`.
  * - `voices list|show|retire` reads the library; `retire` marks a voice
  *   unmatchable without changing its card hash.
+ * - `perform --project W --episode N [--engine chatterbox-turbo|dia]
+ *   [--json-lines]` (AGT-1683) renders the episode through the decided engine
+ *   with the gates, retakes and pace policy into takes and `v1.json`; it
+ *   provisions the `scorers` extra, and with `--json-lines` relays each line's
+ *   progress event to stdout as it lands (always on stderr).
  *
  * Each `run` resolves what it can from `ctx` (the vault, for the library's
  * default `<vault>/casting`; the work, when `project` is given, for receipts)
@@ -29,7 +34,7 @@
  */
 
 import { z } from "zod";
-import { realCastingDeps, runCasting } from "./casting";
+import { ensureProvisioned, realCastingDeps, runCasting, runPython, runPythonStreaming, SCORERS_EXTRA } from "./casting";
 import type { CastingDeps } from "./casting";
 import { readMarker } from "./marker";
 import { findVault, resolveProject } from "./project";
@@ -82,6 +87,24 @@ const CAST_ARGS = z.object({
   slug: slugField,
 });
 
+const PERFORM_ARGS = z.object({
+  project: z.string().describe("The work whose radio episode to perform."),
+  episode: z
+    .number()
+    .int()
+    .positive()
+    .describe("The episode number: its script is outputs/radio/episodes/NN-*.md, else the novel's chapter file NN-*.md carrying a CAST: line."),
+  engine: z
+    .enum(["chatterbox-turbo", "dia"])
+    .optional()
+    .describe("The performance engine: chatterbox-turbo (the decided engine, default) or dia (the radio prototype's, for A/B against old renders only)."),
+  "json-lines": z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Also write each line's progress event (take key, path, status, stretch) to stdout as a JSON line as it lands; they always go to stderr."),
+});
+
 const VOICES_ARGS = z.object({
   sub: z.enum(["list", "show", "retire"]).describe("`list` the library, `show` one card, `retire` a voice so it is never matched again."),
   name: z.string().optional().describe("The voice slug, for show and retire."),
@@ -127,7 +150,7 @@ function run(args: readonly string[], project: string | undefined, ctx: VerbCont
   return runCasting([...args, ...flag("--vault", where.vault)], { env: ctx.env, stderr: ctx.stderr }, deps(ctx.env), where.work);
 }
 
-/** The three casting verbs, over `deps` (the real machine by default). */
+/** The casting verbs (audition, cast, voices, perform), over `deps` (the real machine by default). */
 export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps): readonly Verb[] {
   const audition: Verb<typeof AUDITION_ARGS.shape> = {
     name: "audition",
@@ -201,5 +224,52 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     positionalArgs: ["sub", "name"],
   };
 
-  return [audition, cast, voices] as readonly Verb[];
+  const perform: Verb<typeof PERFORM_ARGS.shape> = {
+    name: "perform",
+    description:
+      "Perform a radio episode: every spoken line is rendered through the decided engine (Chatterbox-Turbo; `dia` for A/B only) in its bound voice, scored by the quality gates, and retaken up to 4 times with derived seeds (first passing take kept, else the best kept and flagged automatically); the pace policy stretches each take to its role's pace (slow/quick directions scale it) within 0.75-1.05, retaking lines that would need more. Writes immutable takes and the episode's v1 manifest (with rtf_total) and a receipt per engine pass; each line's take is reported as it lands. Refuses an unbound role, a changed card pin, or an episode that already has a manifest (use fix). Loads models and uses the GPU.",
+    args: PERFORM_ARGS,
+    run: async (args, ctx) => {
+      const where = locate(ctx, args.project);
+      if ("exitCode" in where) return where;
+      const work = where.work as string;
+      const machine = deps(ctx.env);
+      const casting = { env: ctx.env, stderr: ctx.stderr };
+      // A real engine and the gates' scorers: the `scorers` extra (mlx-audio included).
+      const ready = ensureProvisioned(casting, machine, work, [SCORERS_EXTRA]);
+      if (!ready.ok) return ready.result;
+      const relay = args["json-lines"] ? ctx.stdout : undefined;
+      const pythonArgs = [
+        "perform",
+        ...flag("--episode", args.episode),
+        ...flag("--engine", args.engine),
+        ...(relay !== undefined ? ["--json-lines"] : []),
+        ...flag("--vault", where.vault),
+        "--work",
+        work,
+      ];
+      const result =
+        relay === undefined
+          ? runPython(ready.layout, machine, casting, pythonArgs)
+          : await runPythonStreaming(ready.layout, machine, casting, pythonArgs, (line) => {
+              if (isProgressEvent(line)) relay.write(`${line}\n`);
+            });
+      return {
+        body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) },
+        exitCode: result.exitCode,
+      };
+    },
+  };
+
+  return [audition, cast, voices, perform] as readonly Verb[];
+}
+
+/** A `perform` progress line (`{"event": ...}`), as opposed to the final body. */
+function isProgressEvent(line: string): boolean {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    return typeof parsed === "object" && parsed !== null && typeof (parsed as { event?: unknown }).event === "string";
+  } catch {
+    return false;
+  }
 }
