@@ -35,7 +35,7 @@ import { NOVEL_ID } from "../outputs/novel/units";
 export const DEFAULT_WORD_TARGET = 1800;
 
 /** The real vault's family tree ends its cast facts here; open questions after it are not facts. */
-const CAST_ENDS_AT = "## Decisions for Matt";
+export const CAST_ENDS_AT = "## Decisions for Matt";
 
 /**
  * Distinct from `./project`'s `Refusal` (which always carries `tried`, a

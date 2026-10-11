@@ -10,17 +10,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { beatsFile, continuityFile } from "@openthink/pablo-core";
+import { stripFrontmatter } from "../../publish";
 import { runContinuity } from "../../novel/continuity";
 import { attempt, attemptAsync, runGit, runThink, tickOutline } from "../../novel/rituals";
 import type { Ritual, RitualOptions } from "../../novel/rituals";
 import type { OutputRituals } from "../types";
 import { storyBeats } from "./pack";
 import { STORY_UNIT } from "./units";
-
-function stripFrontmatter(text: string): string {
-  const match = text.match(/^---\n[\s\S]*?\n---\n\n?/);
-  return match ? text.slice(match[0].length) : text;
-}
 
 function tickBeats(workDir: string): Ritual {
   const results = storyBeats(workDir).map((beat) => tickOutline(workDir, beat));

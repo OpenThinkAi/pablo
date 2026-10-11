@@ -9,7 +9,7 @@
 import { join } from "node:path";
 import { gateTimeline, outputRulesFile, planBeatsFor, readDraftingInputs, DEFAULT_MIN_SCENES } from "@openthink/pablo-core";
 import { readCoreState } from "../../core/machine";
-import { DEFAULT_WORD_TARGET, packFromInputs } from "../../novel/pack";
+import { CAST_ENDS_AT, DEFAULT_WORD_TARGET, packFromInputs } from "../../novel/pack";
 import type { UnitPackOptions, UnitPackOutcome } from "../types";
 import { STORY_ID, STORY_UNIT } from "./units";
 
@@ -34,7 +34,7 @@ export function buildStoryPack(vaultRoot: string, workDir: string, unit: number,
     outputRulesPath: join(workDir, outputRulesFile(STORY_ID)),
     wordTarget: options.words ?? Math.max(DEFAULT_WORD_TARGET, beats.length * WORDS_PER_BEAT),
     minScenes: options.scenes ?? DEFAULT_MIN_SCENES,
-    castEndsAt: "## Decisions for Matt",
+    castEndsAt: CAST_ENDS_AT,
     work: { description: "short fiction" },
   });
   const last = [inputs.beat, ...(inputs.moreBeats ?? [])].at(-1) ?? inputs.beat;
