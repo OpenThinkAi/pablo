@@ -227,6 +227,8 @@ export interface State {
   readonly saved: SavedSettings | null;
   /** The chapter being written (`a w`) while the writer runs; one at a time. */
   readonly writing: number | null;
+  /** The output of that write (`radio`) when it is not the novel's chapter. */
+  readonly writingOutput: string | null;
   /** The revise in progress (`a r`), and the count that numbers them so a late answer to a cancelled one is ignored. */
   readonly revise: Revise | null;
   readonly reviseSeq: number;
@@ -318,7 +320,7 @@ export type Action =
   | { type: "revise.taken"; id: number; branch: string; lines: readonly string[] }
   | { type: "revise.failed"; id: number; message: string }
   | { type: "revise.cancel" }
-  | { type: "write.start"; chapter: number }
+  | { type: "write.start"; chapter: number; output?: string }
   | { type: "write.progress"; line: string }
   | { type: "write.done"; branch: string; lines: readonly string[] }
   | { type: "write.failed"; message: string; missing: readonly string[] }
@@ -389,6 +391,8 @@ export type Dispatch = (action: Action) => void;
 /** A write streams a progress line every couple of seconds; the content area keeps the latest few, so the newest is always in view. */
 const PROGRESS_LINES = 5;
 const voiceContent = (title: string, body: string): Content => ({ title, body, kind: "voice" });
+/** What a write is called while it runs and in its receipt: `chapter 3` for the novel, `radio 3` for another output. */
+const writingName = (output: string | undefined, unit: number) => (output === undefined || output === "novel" ? `chapter ${unit}` : `${output} ${unit}`);
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
@@ -444,7 +448,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
   tick: 0, rounds: [], roundsNote: null, pulling: null,
 });
 
@@ -772,14 +776,14 @@ export function reduce(s: State, a: Action): State {
     }
     case "write.start":
       if (s.writing !== null || s.revise !== null) return s;
-      return { ...s, writing: a.chapter, content: writeContent(`Writing chapter ${a.chapter}`, "starting…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      return { ...s, writing: a.chapter, writingOutput: a.output ?? null, content: writeContent(`Writing ${writingName(a.output, a.chapter)}`, "starting…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "write.progress":
       return s.writing === null || s.content?.kind !== "write" ? s : { ...s, content: { ...s.content, body: s.content.body === "starting…" ? a.line : `${s.content.body}\n${a.line}`.split("\n").slice(-PROGRESS_LINES).join("\n") } };
     case "write.done": {
       const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
-      const next = reduce({ ...s, writing: null, written }, { type: "review.open", branch: a.branch });
+      const next = reduce({ ...s, writing: null, writingOutput: null, written }, { type: "review.open", branch: a.branch });
       // The receipt stays up beside the review it led to; Esc takes it down.
-      return next.mode.kind === "review" ? { ...next, content: writeContent(`Wrote ${s.writing === null ? "" : `chapter ${s.writing} `}on ${a.branch}`, a.lines.join("\n")) } : next;
+      return next.mode.kind === "review" ? { ...next, content: writeContent(`Wrote ${s.writing === null ? "" : `${writingName(s.writingOutput ?? undefined, s.writing)} `}on ${a.branch}`, a.lines.join("\n")) } : next;
     }
     case "tick": return { ...s, tick: s.tick + 1 };
     case "rounds.loaded": return { ...s, rounds: a.rounds, roundsNote: a.note ?? null };
@@ -795,7 +799,7 @@ export function reduce(s: State, a: Action): State {
     case "pull.failed":
       return { ...s, pulling: null, content: writeContent("Not pulled", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "write.failed":
-      return { ...s, writing: null, content: writeContent("Not written", [a.message, ...a.missing.map((m) => `- ${m}`)].join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      return { ...s, writing: null, writingOutput: null, content: writeContent("Not written", [a.message, ...a.missing.map((m) => `- ${m}`)].join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "review.mark": {
       const row = s.mode.kind === "review" ? railRow(s.review.rail) : undefined;
       if (!row || !isFinding(row.id)) return s;

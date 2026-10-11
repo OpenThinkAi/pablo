@@ -20,8 +20,8 @@ function work(name: string): string {
 test("the stages follow the machine: premise, bible, acts, beats, then each chapter drafted, ready or missing", () => {
   const state = readNovelState(work("a"));
   const stages = bookStages(state);
-  expect(stages.slice(0, 5).map((s) => [s.id, s.status])).toEqual([
-    ["premise", "ready"], ["bible", "ready"], ["acts", "ready"], ["beats", "ready"], ["chapters", "ready"],
+  expect(stages.slice(0, 6).map((s) => [s.id, s.status])).toEqual([
+    ["premise", "ready"], ["research", "missing"], ["bible", "ready"], ["acts", "ready"], ["beats", "ready"], ["chapters", "ready"],
   ]);
   expect(stages.find((s) => s.id === "chapters")?.group).toBe(true);
   const chapters = stages.filter((s) => s.depth === 1);
