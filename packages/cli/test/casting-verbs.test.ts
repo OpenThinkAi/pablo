@@ -496,3 +496,52 @@ describe("mix (AGT-1684)", () => {
     expect(text).toContain("12 cue(s) generated, 0 reused (/lib/cues)");
   });
 });
+
+describe("fix (AGT-1685)", () => {
+  const work = (vault: string) => join(vault, "novels", "ice-house");
+
+  test("is one VERBS entry and one MCP tool", () => {
+    expect(VERBS.filter((v) => v.name === "fix")).toHaveLength(1);
+    expect(mcpTools().filter((t) => t.name === "fix")).toHaveLength(1);
+  });
+
+  test("provisions the scorers and mix extras and passes the episode, vault and work", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    const result = await verbsOver(deps)["fix"]!.run({ project: "ice-house", episode: 2, "json-lines": false }, ctxIn(vault));
+    expect(result.exitCode).toBe(0);
+    expect(calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "mix", "--extra", "scorers"]);
+    expect(lastPython(calls)).toEqual(["fix", "--episode=2", `--vault=${vault}`, "--work", work(vault), "--json"]);
+  });
+
+  test("a project and an episode are required, and an unknown project runs nothing", async () => {
+    const fix = VERBS.find((v) => v.name === "fix")!;
+    expect(fix.args.safeParse({ project: "ice-house", episode: 1 }).success).toBe(true);
+    expect(fix.args.safeParse({ episode: 1 }).success).toBe(false);
+    expect(fix.args.safeParse({ project: "ice-house" }).success).toBe(false);
+    const { deps, calls } = fakeMachine();
+    const result = await verbsOver(deps)["fix"]!.run({ project: "nope", episode: 1, "json-lines": false }, ctxIn(vaultCopy()));
+    expect(result.exitCode).toBe(2);
+    expect(calls).toEqual([]);
+  });
+
+  test("the CLI parses --episode and --json-lines for fix", () => {
+    const parsed = parseCliArgs(["fix", "--project", "ice-house", "--episode", "3", "--json-lines"]);
+    const built = verbArgsFromCli(VERBS.find((v) => v.name === "fix")!, parsed.values, parsed.rest);
+    expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, "json-lines": true } });
+  });
+
+  test("castingText summarises a fix body", () => {
+    const text = castingText("fix", {
+      ok: true,
+      message: "episode 1 v2: re-recorded line(s) 7, 41",
+      manifest: "/w/outputs/radio/casting/renders/ep01/v2.json",
+      changedLines: [7, 41],
+      audio: "/w/outputs/radio/casting/renders/ep01/ep01.v2.m4a",
+      flags: ["f-auto-x"],
+    });
+    expect(text).toContain("changed lines: 7, 41");
+    expect(text).toContain("audio: /w/outputs/radio/casting/renders/ep01/ep01.v2.m4a");
+    expect(text).toContain("1 line(s) flagged again automatically");
+  });
+});

@@ -82,6 +82,7 @@ from pablo_casting.engines import (
     from_audio,
     group_dia,
     group_lines,
+    retake_pace,
     to_audio,
 )
 from pablo_casting.gate_command import run_scorers
@@ -258,9 +259,13 @@ def _direction(line: SpokenLine) -> ScriptDirection | None:
     return line.direction
 
 
-def pace_for(card: Card, thresholds: Mapping[str, object], direction: ScriptDirection | None) -> tuple[float, list[float]]:
-    """The line's target words/s and its pace band (the role's, scaled by `slow` / `quick`)."""
-    multiplier = PACE_MULTIPLIER.get(direction.pace if direction is not None and direction.pace else "", 1.0)
+def pace_for(card: Card, thresholds: Mapping[str, object], direction: ScriptDirection | None, reasons: Sequence[str] = ()) -> tuple[float, list[float]]:
+    """The line's target words/s and its pace band (the role's, scaled by `slow` / `quick`).
+
+    `reasons` are a retake's flag reasons: `rushed` asks for one step slower (AGT-1685).
+    """
+    pace = retake_pace(direction.pace if direction is not None else None, reasons)
+    multiplier = PACE_MULTIPLIER.get(pace or "", 1.0)
     low, high = thresholds["wps_band"]  # type: ignore[misc]
     return round(target_wps(thresholds, card) * multiplier, 3), [round(float(low) * multiplier, 3), round(float(high) * multiplier, 3)]
 
@@ -326,11 +331,11 @@ class Performer:
         # The pace policy holds the stretch the gate allows to [0.75, 1.05], whatever a card calibrated.
         return {**thresholds_for(card), "stretch_range": [PACE_RANGE[0], PACE_RANGE[1]]}
 
-    def base_inputs(self, take_pass: Pass, spoken: Sequence[SpokenLine]) -> TakeInputs:
+    def base_inputs(self, take_pass: Pass, spoken: Sequence[SpokenLine], reasons: Sequence[str] = ()) -> TakeInputs:
         first = spoken[take_pass.lines[0].i]
         direction = _direction(first)
         voices = {line.speaker: self.roles[line.speaker].voice for line in take_pass.lines}
-        params = adapt(self.spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None)
+        params = adapt(self.spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, reasons)
         return TakeInputs(
             engine=self.engine.identity,
             voice="+".join(dict.fromkeys(self.roles[line.speaker].voice.card_hash for line in take_pass.lines)),
@@ -339,7 +344,7 @@ class Performer:
             direction=Direction(
                 emotion=direction.emotion if direction else None,
                 intensity=direction.intensity if direction and direction.emotion else None,
-                pace=direction.pace if direction else None,
+                pace=retake_pace(direction.pace if direction else None, reasons),
             ),
             params=params,
         )
@@ -455,15 +460,23 @@ class Performer:
                 timings=timings,
             )
 
-    def perform_pass(self, take_pass: Pass, spoken: Sequence[SpokenLine]) -> tuple[Attempt, list[Attempt], float, list[float], dict[str, object]]:
+    def perform_pass(
+        self,
+        take_pass: Pass,
+        spoken: Sequence[SpokenLine],
+        *,
+        first_attempt: int = 0,
+        reasons: Sequence[str] = (),
+    ) -> tuple[Attempt, list[Attempt], float, list[float], dict[str, object]]:
+        """Up to `MAX_ATTEMPTS` attempts numbered from `first_attempt` (a fix starts past the attempts already made)."""
         first = take_pass.lines[0]
         card = self.roles[first.speaker].card
         thresholds = self.thresholds(card)
         direction = _direction(spoken[first.i])
-        target, band = pace_for(card, thresholds, direction)
-        base = self.base_inputs(take_pass, spoken)
+        target, band = pace_for(card, thresholds, direction, reasons)
+        base = self.base_inputs(take_pass, spoken, reasons)
         attempts: list[Attempt] = []
-        for attempt_no in range(MAX_ATTEMPTS):
+        for attempt_no in range(first_attempt, first_attempt + MAX_ATTEMPTS):
             attempt = self.attempt(attempt_no, base, take_pass, card, target, thresholds)
             attempts.append(attempt)
             if attempt.passed:

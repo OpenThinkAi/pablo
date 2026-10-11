@@ -45,6 +45,7 @@ test("VERBS exposes exactly the twenty-eight verbs, each project-required verb r
     "critique",
     "draft_chapter",
     "draft_unit",
+    "fix", // AGT-1685
     "merge",
     "migrate",
     "mix", // AGT-1684
