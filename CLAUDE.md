@@ -243,6 +243,14 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 (manifest `audio` present on disk) are listed. CLI-only, not
                 in `VERBS`; needs Google Chrome (`UI_LEAF_NO_OPEN=1` skips
                 the check for headless runs). Tests use a fake `mount`.
+                `views/mixmath.ts` (AGT-1765) is the mixer's preview
+                maths: dB<->gain, fade curves (linear|scurve|log|exp),
+                `applyFade`, `equalPowerCrossfade`, automation
+                interpolation (`automationDbAt`/`automationGainAt`/
+                `sampleAutomation`). It is the twin of casting's
+                `mixmath.py` (spec in its docstring); change one and you
+                change both plus `packages/casting/tests/fixtures/
+                mixmath-golden.json`, which both suites assert within 1e-4.
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`
