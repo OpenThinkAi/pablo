@@ -35,7 +35,7 @@ import { NOVEL_ID } from "../outputs/novel/units";
 export const DEFAULT_WORD_TARGET = 1800;
 
 /** The real vault's family tree ends its cast facts here; open questions after it are not facts. */
-const CAST_ENDS_AT = "## Decisions for Matt";
+export const CAST_ENDS_AT = "## Decisions for Matt";
 
 /**
  * Distinct from `./project`'s `Refusal` (which always carries `tried`, a
@@ -96,6 +96,20 @@ export function buildChapterPack(
     castEndsAt: CAST_ENDS_AT,
   });
 
+  return packFromInputs(vaultRoot, workDir, inputs, options);
+}
+
+/**
+ * The two pablo policies applied to read inputs, then the pack assembled and
+ * checked against `neverSend`: shared by every output's pack builder (the
+ * novel's chapter, the story's whole piece) so none re-implements them.
+ */
+export function packFromInputs(
+  vaultRoot: string,
+  workDir: string,
+  inputs: DraftingInputs,
+  options: Pick<BuildChapterPackOptions, "marker" | "direction">,
+): ChapterPackOutcome {
   const filtered: DraftingInputs = {
     ...inputs,
     style: filterVoice(inputs.style),

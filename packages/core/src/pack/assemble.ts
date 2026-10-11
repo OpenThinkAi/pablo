@@ -257,9 +257,12 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
   const beats = [beat, ...(inputs.moreBeats ?? [])];
   const form = inputs.work.description ?? "a novel";
 
+  const label = inputs.unitLabel;
   const brief = [
-    `You are drafting chapter ${inputs.unit ?? beat.chapter} of ${form}, working title "${inputs.work.title}".`,
-    "This is a first draft the author will cut and reshape. Write the chapter and nothing",
+    `You are drafting ${label ?? `chapter ${inputs.unit ?? beat.chapter}`} of ${form}, working title "${inputs.work.title}".`,
+    label === undefined
+      ? "This is a first draft the author will cut and reshape. Write the chapter and nothing"
+      : "This is a first draft the author will cut and reshape. Write the whole piece and nothing",
     "else: no title, no notes, no summary, no questions.",
   ].join("\n");
 
@@ -276,7 +279,7 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
         ].join("\n")
       : [
           `- Working title: ${beat.title}`,
-          `- This chapter tells ${beats.length} beats, in order; tell all of them and nothing beyond them:`,
+          `- ${label === undefined ? "This chapter" : "This piece"} tells ${beats.length} beats, in order; tell all of them and nothing beyond them:`,
           ...beats.map(
             (b, i) =>
               `  ${i + 1}. Story date: ${b.storyDate}. Title: ${b.title}. Point of view: ${b.pov} (close third person, one point-of-view character per scene). Beat: ${b.beat}`,

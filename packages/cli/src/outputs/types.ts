@@ -113,6 +113,8 @@ export interface OutputDefinition {
   readonly artifactDir: string;
   /** The `outputs/<id>/RULES.md` scaffold: the type's own rules, layered after the work's voice. */
   readonly rulesTemplate: string;
+  /** For an output with exactly one unit (the story), its number: `write` needs no `--unit`. Absent for multi-unit outputs. */
+  readonly soleUnit?: number;
   /** The output's stage machine after the core, in order. */
   readonly stages: readonly string[];
   /** The default plan: how units map onto the core's beats. Pure over the work directory. */

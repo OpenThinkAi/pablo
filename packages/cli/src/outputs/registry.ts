@@ -26,10 +26,12 @@
 import type { Outputs } from "../marker";
 import { readMarker } from "../marker";
 import { NOVEL } from "./novel";
+import { STORY } from "./story";
 import type { OutputDefinition } from "./types";
 
 export const OUTPUTS = {
   novel: NOVEL,
+  story: STORY,
 } as const satisfies Readonly<Record<string, OutputDefinition>>;
 
 /** An output type's id: a key of `OUTPUTS` (or of a type a test registered). */
