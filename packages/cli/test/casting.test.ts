@@ -352,6 +352,16 @@ describe("gate (AGT-1682)", () => {
     expect(castingState(layout, ["scorers"])).toBe("provisioned");
   });
 
+  test("--library and --vault are passed (absolute) so a slug resolves where cast wrote it (AGT-1709)", () => {
+    const { layout, root } = fakeLayout();
+    const deps = fakeDeps(layout, { answers: { gate: answer(passing) } });
+    runGate(["--scores", "r.json", "--card", "cora", "--library", "lib", "--vault", "/v"], ctx(root).ctx, deps, root, undefined);
+    expect(deps.calls.at(-1)).toEqual([
+      venvPython(layout), "-m", "pablo_casting", "gate", "--scores", join(root, "r.json"),
+      "--library", join(root, "lib"), "--vault", "/v", "--card", "cora", "--json",
+    ]);
+  });
+
   test("a venv provisioned without the extra is topped up once, keeping what it had", () => {
     const { layout, root } = fakeLayout();
     const deps = fakeDeps(layout, { answers: { gate: answer(passing) } });

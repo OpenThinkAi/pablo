@@ -33,6 +33,7 @@
  * a fake `CastingDeps` and never needs uv, Python or a model.
  */
 
+import { resolve } from "node:path";
 import { z } from "zod";
 import { ensureProvisioned, realCastingDeps, runCasting, runPython, runPythonStreaming, SCORERS_EXTRA } from "./casting";
 import type { CastingDeps } from "./casting";
@@ -46,6 +47,11 @@ const projectField = z
   .string()
   .optional()
   .describe("Optional work slug: receipts for the model calls go under <work>/.pablo/casting/. The voice library is shared across works.");
+const libraryField = z
+  .string()
+  .optional()
+  .describe("The voice library root (default: the casting config's `library`, else <vault>/casting). Cards live under <library>/voices/<slug>/.");
+const vaultField = z.string().optional().describe("The vault whose <vault>/casting is the library, when it is not the one found from the current directory.");
 const roleField = z.string().describe('The role, as the script names it (e.g. "CORA"); its voice slug is the role lowercased.');
 const slugField = z.string().optional().describe("The voice's slug in the library, when it should differ from the role's.");
 const traitsField = z
@@ -57,6 +63,8 @@ const traitsField = z
 
 const AUDITION_ARGS = z.object({
   project: projectField,
+  library: libraryField,
+  vault: vaultField,
   role: roleField.optional(),
   describe: z.string().optional().describe("The voice in words, 15-40 words: gender, age, pitch, pace, manner (the designer's instruct)."),
   designer: z.enum(["qwen3", "voxcpm2"]).optional().describe("Which designer renders the candidates (default qwen3)."),
@@ -69,6 +77,8 @@ const AUDITION_ARGS = z.object({
 
 const CAST_ARGS = z.object({
   project: projectField,
+  library: libraryField,
+  vault: vaultField,
   role: roleField.optional(),
   candidate: z.number().int().positive().optional().describe("The audition candidate to freeze, as `audition` numbered it (required unless `auto`)."),
   auto: z
@@ -111,6 +121,8 @@ const VOICES_ARGS = z.object({
   "auto-admitted": z.boolean().optional().default(false).describe("list: only the voices the product admitted on its own."),
   reason: z.string().optional().describe("retire: why, recorded on the card."),
   project: projectField,
+  library: libraryField,
+  vault: vaultField,
 });
 
 /** `<vault>` for the library default, and the work directory when `project` names one. */
@@ -144,10 +156,29 @@ function autoRefusal(args: z.infer<typeof CAST_ARGS>): VerbResult | undefined {
   return undefined;
 }
 
-function run(args: readonly string[], project: string | undefined, ctx: VerbContext, deps: (env: Env) => CastingDeps): VerbResult {
-  const where = locate(ctx, project);
-  if ("exitCode" in where) return where;
-  return runCasting([...args, ...flag("--vault", where.vault)], { env: ctx.env, stderr: ctx.stderr }, deps(ctx.env), where.work);
+/** The options every casting verb shares: the work (receipts) and where the library is (`--library`, `--vault`). */
+interface Where {
+  readonly project?: string | undefined;
+  readonly library?: string | undefined;
+  readonly vault?: string | undefined;
+}
+
+/**
+ * `extras` are the optional Python extras the command needs: a real `audition`
+ * and `cast` render and score audio, so they provision with `scorers` (AGT-1709);
+ * `voices`, `cast --auto` and `audition --dry-run` need none.
+ */
+function run(args: readonly string[], where: Where, ctx: VerbContext, deps: (env: Env) => CastingDeps, extras: readonly string[] = []): VerbResult {
+  // The library and vault are the author's to aim: a model (or text it read) must not redirect where `cast` writes cards.
+  // Only the CLI (caller unset or "cli") may; `pablo mcp` and the harness (harness/agent.ts) both set "mcp".
+  if (ctx.caller !== undefined && ctx.caller !== "cli" && (where.library !== undefined || where.vault !== undefined)) {
+    return refuse("pablo: --library and --vault are CLI options; through MCP the library is the vault's <vault>/casting or the casting config's `library`");
+  }
+  const located = locate(ctx, where.project);
+  if ("exitCode" in located) return located;
+  const vault = where.vault === undefined ? located.vault : resolve(ctx.cwd, where.vault);
+  const library = where.library === undefined ? undefined : resolve(ctx.cwd, where.library);
+  return runCasting([...args, ...flag("--vault", vault), ...flag("--library", library)], { env: ctx.env, stderr: ctx.stderr }, deps(ctx.env), located.work, extras);
 }
 
 /** The casting verbs (audition, cast, voices, perform), over `deps` (the real machine by default). */
@@ -158,7 +189,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       "Audition voices for a role: the designer (Qwen3-TTS VoiceDesign or VoxCPM2) renders n candidates reading the shared audition passage from a description, each scored (naturalness, pitch, words/s, speaker similarity to the others, near duplicates marked) into the voice library's auditions/. Listen, then `cast` one. Loads models; `dry-run` only checks the casting side.",
     args: AUDITION_ARGS,
     run: async (args, ctx) => {
-      if (args["dry-run"]) return run(["audition", "--dry-run"], args.project, ctx, deps);
+      if (args["dry-run"]) return run(["audition", "--dry-run"], args, ctx, deps);
       return run(
         [
           "audition",
@@ -170,9 +201,10 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
           ...flag("--traits", args.traits),
           ...flag("--slug", args.slug),
         ],
-        args.project,
+        args,
         ctx,
         deps,
+        [SCORERS_EXTRA],
       );
     },
   };
@@ -186,7 +218,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       if (args.auto) {
         const refusal = autoRefusal(args);
         if (refusal !== undefined) return refusal;
-        return run(["cast", "--auto", ...flag("--episode", args.episode), ...(args.all ? ["--all"] : [])], args.project, ctx, deps);
+        return run(["cast", "--auto", ...flag("--episode", args.episode), ...(args.all ? ["--all"] : [])], args, ctx, deps);
       }
       if (args.role === undefined || args.candidate === undefined) {
         return refuse("pablo cast needs --role R and --candidate n (or --auto --project <slug> to match the work's roles from the library)");
@@ -202,9 +234,10 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
           ...flag("--by", args.by),
           ...flag("--slug", args.slug),
         ],
-        args.project,
+        args,
         ctx,
         deps,
+        [SCORERS_EXTRA],
       );
     },
   };
@@ -217,7 +250,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     run: async (args, ctx) =>
       run(
         ["voices", args.sub, ...(args.name === undefined ? [] : [args.name]), ...(args["auto-admitted"] ? ["--auto-admitted"] : []), ...flag("--reason", args.reason)],
-        args.project,
+        args,
         ctx,
         deps,
       ),

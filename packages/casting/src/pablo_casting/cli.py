@@ -600,7 +600,7 @@ def run(
         if args.rest[:1] == ["calibrate"]:
             if len(args.rest) > 1:
                 return error(f"gate calibrate takes no positional arguments, got: {' '.join(args.rest[1:])}"), args.json
-            return cmd_calibrate(approved_dir=args.approved, others_dir=args.others, card_ref=args.card, apply=args.apply, env=env), args.json
+            return cmd_calibrate(approved_dir=args.approved, others_dir=args.others, card_ref=args.card, apply=args.apply, env=env, library=args.library, vault=args.vault), args.json
         return cmd_gate(
             args.rest,
             line=args.line,
@@ -611,6 +611,8 @@ def run(
             env=env,
             work=work,
             scorer_factory=scorers or real_scorers,
+            library=args.library,
+            vault=args.vault,
         ), args.json
     toolkit_factory = toolkits or _default_toolkit
     try:

@@ -156,6 +156,8 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     all: { type: "boolean", default: false }, // AGT-1698: cast --auto --all
     output: { type: "string" }, // AGT-1669: write/check/publish/share --output
     unit: { type: "string" }, // AGT-1669: write --unit
+    library: { type: "string" }, // AGT-1709: audition/cast/voices --library
+    vault: { type: "string" }, // AGT-1709: audition/cast/voices --vault
     across: { type: "boolean", default: false }, // AGT-1671: check --across
     finding: { type: "string" }, // AGT-1671: promote --finding
     keep: { type: "string" }, // AGT-1671: promote --keep

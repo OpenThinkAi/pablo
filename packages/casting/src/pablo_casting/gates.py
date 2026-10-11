@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from pablo_casting.library import Library, LibraryRefusal
 from pablo_casting.words import script_word_count
 
 DEFAULT_GATES: dict[str, object] = {
@@ -100,19 +101,23 @@ class Card:
     reference: Path | None
 
 
-def load_card(ref: str, library: str | None) -> Card:
-    """Reads `card.json` for `ref`: a voice slug in the configured library, or a card directory."""
+def load_card(ref: str, root: Path | None) -> Card:
+    """Reads `card.json` for `ref`: a card directory, or a voice slug in the library at `root`.
+
+    A slug resolves through `library.py` (`<root>/voices/<slug>/card.json`), the one place that
+    knows where `cast` writes a card."""
     as_dir = Path(ref)
     if (as_dir / "card.json").is_file():
         card_dir = as_dir
     else:
-        if library is None:
+        if root is None:
             raise GateRefusal(
-                f'card "{ref}" is not a card directory and no voice library is configured (`library` in casting.json)'
+                f'card "{ref}" is not a card directory and no voice library is known (pass --library or --vault, or set `library` in casting.json)'
             )
-        if "/" in ref or ref in (".", "..") or not ref:
-            raise GateRefusal(f'card "{ref}" is not a voice slug')
-        card_dir = Path(library) / ref
+        try:
+            card_dir = Library(root).voice_dir(ref)
+        except LibraryRefusal as refusal:
+            raise GateRefusal(f'card "{ref}" is not a voice slug') from refusal
     path = card_dir / "card.json"
     if not path.is_file():
         raise GateRefusal(f'no card "{ref}": {path} does not exist')

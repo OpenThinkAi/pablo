@@ -44,8 +44,8 @@ def library(env: Mapping[str, str]) -> Path:
 
 
 def make_card(env: Mapping[str, str], slug: str = "cora", gates: dict[str, object] | None = None, pace: dict[str, object] | None = None) -> Path:
-    card_dir = library(env) / slug
-    card_dir.mkdir()
+    card_dir = library(env) / "voices" / slug
+    card_dir.mkdir(parents=True)
     (card_dir / "embedding.ecapa.npy").write_bytes(b"fake")
     card = {
         "slug": slug,
@@ -255,7 +255,7 @@ def test_scores_rejudges_a_stored_body_without_any_scorer(env: dict[str, str], t
     record = tmp_path / "take-gate.json"
     record.write_text(json.dumps(stored), encoding="utf-8")
     # Calibration tightened the card: the same scores now fail identity.
-    (Path(library(env)) / "cora" / "card.json").write_text(json.dumps({"slug": "cora", "gates": {"sim_min": 0.80}}), encoding="utf-8")
+    (Path(library(env)) / "voices" / "cora" / "card.json").write_text(json.dumps({"slug": "cora", "gates": {"sim_min": 0.80}}), encoding="utf-8")
 
     def no_scorers() -> list[Fake]:
         raise AssertionError("--scores must not load a scorer")
@@ -370,3 +370,46 @@ def test_the_stack_order_is_the_design_order() -> None:
     assert SCORERS == (WHISPER, ALIGNER, ECAPA, UTMOS, AUDIOBOX, DNSMOS, EMOTION)
     assert [info.name for info in SCORERS if info.soft] == ["emotion"]
     assert replace(EMOTION, soft=False).soft is False
+
+
+# --- one card path for cast and gate (AGT-1709) ------------------------------------
+
+
+def cast_cora(argv_library: list[str], env: dict[str, str]) -> None:
+    """Auditions and casts CORA with the fake toolkit; the library is wherever `argv_library` (or the env's config) says."""
+    from pablo_casting.fakes import fake_toolkit
+
+    traits = '{"gender":"f","age":"30s","pitch":"low-medium","register":"dry","roles":["lead"]}'
+    description = "a warm, dry woman in her thirties, low-medium pitch, measured pace, speaking plainly"
+    for argv in (
+        ["audition", "--role", "CORA", "--describe", description, "--traits", traits, "--seed", "100", "-n", "2", *argv_library, "--json"],
+        ["cast", "--role", "CORA", "--candidate", "1", *argv_library, "--json"],
+    ):
+        (body, code), _ = run(argv, env, toolkits=lambda e, c: fake_toolkit(None))
+        assert code == 0, body
+
+
+def test_gate_resolves_the_card_cast_wrote_by_slug(env: dict[str, str], tmp_path: Path) -> None:
+    cast_cora([], env)  # the library is the config's
+    assert (library(env) / "voices" / "cora" / "card.json").is_file()
+    take = make_wav(tmp_path / "take.wav")
+    body, code = gate(env, [str(take), "--line", LINE, "--card", "cora"], good_stack())
+    assert code == 0, body
+    assert body["card"] == "cora"
+
+
+def test_gate_takes_library_and_vault_like_cast_does(tmp_path: Path) -> None:
+    env = {"HOME": str(tmp_path / "home"), "XDG_CONFIG_HOME": str(tmp_path / "config"), "HF_HUB_CACHE": str(tmp_path / "hf")}
+    take = make_wav(tmp_path / "take.wav")
+    explicit = tmp_path / "elsewhere"
+    cast_cora(["--library", str(explicit)], env)
+    body, code = gate(env, [str(take), "--line", LINE, "--card", "cora", "--library", str(explicit)], good_stack())
+    assert code == 0, body
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    cast_cora(["--vault", str(vault)], env)
+    body, code = gate(env, [str(take), "--line", LINE, "--card", "cora", "--vault", str(vault)], good_stack())
+    assert code == 0, body
+    # Neither known: a refusal that names the options, not a guess at a directory.
+    body, code = gate(env, [str(take), "--line", LINE, "--card", "cora"], good_stack())
+    assert code == 2 and "--library" in str(body["message"])

@@ -270,7 +270,7 @@ function helpText(): string {
     "                                            ask before archiving them (moved, never",
     "                                            deleted); without a terminal, needs --yes",
     '  pablo gate <take.wav> --line "<line>" --card <slug|dir> [--centroid <file>]',
-    "             [--emotion <class>] [--project <slug>] [--json]",
+    "             [--emotion <class>] [--library DIR] [--vault DIR] [--project <slug>] [--json]",
     "                                            score a take (Whisper WER + tail, aligner",
     "                                            pace, ECAPA, UTMOS, Audiobox, DNSMOS,",
     "                                            emotion2vec) against the card's gates; exit 0",

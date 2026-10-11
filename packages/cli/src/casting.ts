@@ -42,6 +42,11 @@
  * engine and judges every take with the gates, so it provisions with the
  * `scorers` extra too (mlx-audio is in it), and relays its progress events
  * live through `runPythonStreaming` when asked for JSON lines.
+ *
+ * A real `audition` and `cast` render and score audio too, so they provision
+ * with the same extra (AGT-1709); `--library`/`--vault` aim every casting verb,
+ * `gate` included, at the same library, and a card slug resolves through
+ * `library.py` on the Python side.
  */
 
 import { createHash } from "node:crypto";
@@ -421,10 +426,19 @@ interface ScorerRow {
  * ...]`, `["voices", "list"]`): provisions the Python side when needed, then
  * runs `python -m pablo_casting <args> [--work <work>] --json` and returns its
  * body as pablo's own, with whether this call provisioned. Every casting verb
- * (`casting-verbs.ts`) comes through here.
+ * (`casting-verbs.ts`) comes through here. `extras` are the optional extras the
+ * command needs (a real `audition` and `cast` render and score audio, so they
+ * ask for `scorers`, AGT-1709); the stamp records them, so a venv is never
+ * downgraded by a command that needs fewer.
  */
-export function runCasting(args: readonly string[], ctx: CastingContext, deps: CastingDeps, work: string | undefined): VerbResult {
-  const ready = ensureProvisioned(ctx, deps, work);
+export function runCasting(
+  args: readonly string[],
+  ctx: CastingContext,
+  deps: CastingDeps,
+  work: string | undefined,
+  extras: readonly string[] = [],
+): VerbResult {
+  const ready = ensureProvisioned(ctx, deps, work, extras);
   if (!ready.ok) return ready.result;
   const result = runPython(ready.layout, deps, ctx, [...args, ...(work === undefined ? [] : ["--work", work])]);
   return { body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) }, exitCode: result.exitCode };
@@ -554,6 +568,9 @@ function parseGateArgs(argv: readonly string[]) {
       approved: { type: "string" },
       others: { type: "string" },
       apply: { type: "boolean" },
+      // Where a card slug is looked up: the same two options `cast` takes (AGT-1709).
+      library: { type: "string" },
+      vault: { type: "string" },
       // Resolved by cli.ts before `runGate` is called; accepted here so strict parsing allows them.
       project: { type: "string" },
       json: { type: "boolean" },
@@ -571,7 +588,9 @@ function parseGateArgs(argv: readonly string[]) {
  *
  * `argv` is everything after the verb. Paths are made absolute against `cwd`;
  * a card given as a path (it holds a `/` or starts with `.`) is too, a bare
- * word is a library slug. Scoring audio provisions with the `scorers` extra;
+ * word is a library slug, looked up where `cast` writes it
+ * (`<library>/voices/<slug>`; the library is `--library`, else `--vault`'s
+ * `<vault>/casting`, else the config's: `library.py`'s one rule). Scoring audio provisions with the `scorers` extra;
  * calibrate and `--scores` need none. A failing take is exit 0 with
  * `pass: false`; `calibrate` writes nothing without `--apply`.
  */
@@ -604,6 +623,8 @@ export function runGate(argv: readonly string[], ctx: CastingContext, deps: Cast
     if (values.emotion !== undefined) args.push("--emotion", values.emotion);
     if (work !== undefined) args.push("--work", work);
   }
+  if (values.library !== undefined) args.push("--library", absolute(cwd, values.library));
+  if (values.vault !== undefined) args.push("--vault", absolute(cwd, values.vault));
   if (values.card !== undefined) {
     const card = values.card;
     args.push("--card", card.includes("/") || card.startsWith(".") ? absolute(cwd, card) : card);
