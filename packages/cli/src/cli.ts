@@ -96,6 +96,7 @@ const P0_VERBS = [
   "cast",
   "voices",
   "perform",
+  "mix",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -264,6 +265,14 @@ function helpText(): string {
     "                                            0.75-1.05) into takes and renders/epNN/v1.json;",
     "                                            one JSON line per line on stderr as it lands",
     "                                            (and stdout with --json-lines). Uses the GPU",
+    "  pablo mix --project <slug> --episode N [--version k]",
+    "                                            mix a performed episode: its takes (paced by the",
+    "                                            manifest) and the script's cues from the cue",
+    "                                            library (<library>/cues; the same description is",
+    "                                            the same asset) into renders/epNN/epNN.v<k>.m4a,",
+    "                                            epNN.m4a moved to it, each line's start/end",
+    "                                            written to the manifest; a mixed version remixes",
+    "                                            into a new one. Generates new cues on the GPU",
     "  pablo takes show <key> --project <slug>  one radio take: inputs, scores, timings and",
     "                                            receipt id (a unique key prefix is enough)",
     "  pablo takes gc --project <slug> [--yes]  list the takes no manifest references, then",
@@ -385,8 +394,12 @@ interface ParsedArgs {
  * flags no verb's contract includes, so they're added on top.
  */
 export function parseCliArgs(argv: readonly string[]): ParsedArgs {
-  const { values, positionals } = parseArgs({
-    args: argv as string[],
+  // `pablo mix --version k` (AGT-1684): `--version` is the global "print the version" flag everywhere
+  // else, so for the `mix` verb alone it is read as `--mix-version` and handed to the verb as `version`.
+  const mixing = argv.find((token) => !token.startsWith("-")) === "mix";
+  const tokens = mixing ? argv.map((token) => (token === "--version" ? "--mix-version" : token.startsWith("--version=") ? `--mix-${token.slice(2)}` : token)) : argv;
+  const parsed = parseArgs({
+    args: tokens as string[],
     allowPositionals: true,
     strict: false,
     options: {
@@ -405,8 +418,11 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       // Declared only so `cast --from-wav` is refused by name (synthetic voices only);
       // no verb's schema has it, so it never reaches a verb's args.
       "from-wav": { type: "string" },
+      "mix-version": { type: "string" },
     },
   });
+  const { positionals } = parsed;
+  const values: Record<string, unknown> = mixing ? { ...parsed.values, version: parsed.values["mix-version"] } : parsed.values;
 
   return {
     verb: positionals[0],
@@ -550,7 +566,7 @@ async function runVerbEntry(name: string, args: ParsedArgs, cwd: string, text: (
 }
 
 /** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
-const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform"]);
+const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix"]);
 
 /** Plain-text output for a casting verb's body. */
 export function castingText(verb: string, body: Record<string, unknown>): string {
@@ -602,6 +618,12 @@ export function castingText(verb: string, body: Record<string, unknown>): string
     lines.push(`  wall ${String(body["wall"])} s for ${String(body["audioSeconds"])} s of audio; rtf_total ${String(body["rtfTotal"])}, engine ${String(body["rtfEngine"])}`);
     const flags = (body["flags"] as readonly string[] | undefined) ?? [];
     if (flags.length > 0) lines.push(`  ${flags.length} line(s) auto-flagged for pablo fix`);
+  }
+  if (verb === "mix" && typeof body["audio"] === "string") {
+    lines.push(`  audio: ${body["audio"]}`);
+    lines.push(`  manifest: ${String(body["manifest"])}`);
+    lines.push(`  ${String(body["duration"])} s, ${String(body["cuesGenerated"])} cue(s) generated, ${String(body["cuesReused"])} reused (${String(body["cueLibrary"])})`);
+    if (body["linkMoved"] === false) lines.push("  epNN.m4a was left on the newer version that already has audio");
   }
   if (verb === "voices" && body["card"] !== undefined) {
     lines.push(`${String(body["slug"])}  ${String(body["hash"])}${body["retired"] ? "  (retired)" : ""}${body["reference_intact"] ? "" : "  REFERENCE CHANGED"}`);

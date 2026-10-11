@@ -204,7 +204,7 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 Run only as `python -m pablo_casting <command> --json`
                 (`version`, `doctor`, `pull`, `audition`, `cast`, `voices`,
                 `takes`, `manifest`, `script`, `check`, `status`, `bind`,
-                `gate`, `gate calibrate`, `perform`),
+                `gate`, `gate calibrate`, `perform`, `mix`),
                 never a user-facing binary; same body and exit codes as
                 pablo. The script reader (`script.py`), the direction
                 grammar (`directions.py`), the `CAST:` traits mapper and the
@@ -264,6 +264,27 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 unbound roles, changed pins and already-rendered episodes,
                 and resumes a stopped run without re-rendering stored takes.
                 Tests use `engines.RecordingEngine` and fake scorers.
+                Mix (AGT-1684, `pablo mix --project W --episode N
+                [--version k]`, a `casting-verbs.ts` entry that provisions
+                `--extra mix`; `--version` is read as `--mix-version` by
+                `parseCliArgs` for this verb only): `mix.py` ports
+                `radio/produce.py:463-573`: takes in line order paced by the
+                manifest `stretch` (sox WSOLA), cues placed from the
+                content-addressed cue library (`cues.py`: key = sha256 of kind
+                + case-folded description, `<library>/cues/<key>.wav` + a
+                `.json` sidecar, written once, never regenerated; MUSIC is
+                the numpy tonewheel organ `organ.py`, SFX/BED are Stable Audio
+                Open on MPS with the BrownianTree patch, lazily imported from
+                the `mix` extra), -1 dBFS, AAC via afconvert/ffmpeg. An
+                unmixed manifest is completed in place (`manifest.attach_mix`:
+                audio, line `start`/`end`, cue assets, `duration`, `mix`; the
+                takes are checked unchanged); mixing a version that has
+                audio is a new version with identical takes (`write_version`,
+                `changed_lines: []`), and the `epNN.m4a` link moves. Line
+                `start`/`end` are the take's own word timings scaled by the
+                pace, plus where the mix put the take; `mix.check_timings`
+                re-measures them with the aligner on the decoded final file.
+                Tests use a fake cue generator, pacer and encoder.
                 The voice library (AGT-1679) is the config's `library`, else
                 `<vault>/casting`: `voices/<slug>/` holds the tracked card
                 (`card.json`, `reference.flac`, `reference.txt`,

@@ -169,6 +169,11 @@ def test_no_code_path_deletes_or_rewrites_a_take() -> None:
         ("cards.py", "_move", "replace"),
         # AGT-1683: perform's auto flags swap flags.json atomically; never a take.
         ("perform.py", "_write_auto_flags", "replace"),
+        # AGT-1684: the link swap moved out of write_version; a mix completes an unmixed manifest by an atomic
+        # swap of that one file; the cue library drops only its own staging name after linking the asset. Never a take.
+        ("manifest.py", "move_link", "replace"),
+        ("manifest.py", "attach_mix", "replace"),
+        ("cues.py", "ensure", "unlink"),
     }
     found: set[tuple[str, str, str]] = set()
     for path in SRC.glob("*.py"):

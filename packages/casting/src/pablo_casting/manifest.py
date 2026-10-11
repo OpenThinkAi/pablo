@@ -37,7 +37,7 @@ VERSION_RE = re.compile(r"^v(\d+)\.json$")
 
 # Fields a caller proposes; the writer computes episode, version, parent,
 # changed_lines, flags_applied, audio, created and by itself.
-PROPOSED_FIELDS = ("script_sha256", "cast_hash", "engine", "pace_policy", "cues", "duration", "rtf_total", "render")
+PROPOSED_FIELDS = ("script_sha256", "cast_hash", "engine", "pace_policy", "cues", "duration", "rtf_total", "render", "mix")
 
 
 class ManifestError(Exception):
@@ -230,8 +230,74 @@ def write_version(
     with manifest_path.open("x", encoding="utf-8") as out:  # never overwrites a version
         out.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     if audio_path is not None:
-        link = root / f"ep{episode:02d}{suffix}"
-        temporary = root / f".{link.name}.{uuid.uuid4().hex[:8]}"
-        os.symlink(audio_name, temporary)
-        os.replace(temporary, link)  # swaps the link only; every version's audio stays
+        link = move_link(root, episode, audio_name)
     return Written(path=manifest_path, manifest=manifest, audio=audio_path, link=link)
+
+
+def move_link(root: Path, episode: int, audio_name: str) -> Path:
+    """Points `epNN.<ext>` at `audio_name` (atomically); every version's audio stays where it is."""
+    link = root / f"ep{episode:02d}{Path(audio_name).suffix}"
+    temporary = root / f".{link.name}.{uuid.uuid4().hex[:8]}"
+    os.symlink(audio_name, temporary)
+    os.replace(temporary, link)
+    return link
+
+
+def audio_versions(work: Path, episode: int) -> list[int]:
+    """The versions that have mixed audio, ascending."""
+    return [v for v in versions(work, episode) if read_version(work, episode, v).get("audio")]
+
+
+def attach_mix(
+    work: Path,
+    episode: int,
+    version: int,
+    completed: Mapping[str, object],
+    audio: Path,
+    *,
+    link: bool,
+) -> Written:
+    """Completes the unmixed `v<version>` in place with what the mix measured (AGT-1684).
+
+    `perform` writes `v<k>.json` with `audio: null` and no line timings; this is
+    the one write back into a manifest, and it only fills those gaps: the audio
+    name, each line's `start`/`end`, the cues' assets and positions, the final
+    `duration` and the `mix` block. A version that already has audio is refused
+    (a remix is a new version, `write_version`), and every other field, above
+    all each line's `take`, is carried over unchanged and checked.
+    """
+    manifest = read_version(work, episode, version)
+    if manifest.get("audio"):
+        raise ManifestError(f"episode {episode} v{version} already has audio ({manifest['audio']}); a remix is a new version")
+    if not audio.is_file():
+        raise ManifestError(f"audio {audio} is not a file")
+    timed = takes_by_line(_lines(completed))
+    old = takes_by_line(_lines(manifest))
+    if timed != old:
+        raise ManifestError(f"the mix would change v{version}'s takes (lines {changed_lines(old, timed)}); a mix only adds timings")
+    by_line = {int(line["i"]): line for line in _lines(completed)}  # type: ignore[call-overload]
+    merged: list[dict[str, object]] = [
+        {**line, "start": by_line[int(line["i"])]["start"], "end": by_line[int(line["i"])]["end"]}  # type: ignore[call-overload]
+        for line in _lines(manifest)
+    ]
+    suffix = audio.suffix or ".m4a"
+    audio_name = f"ep{episode:02d}.v{version}{suffix}"
+    root = episode_dir(work, episode)
+    audio_path = root / audio_name
+    if audio_path.exists():
+        # Audio a crashed earlier attempt left for a manifest that never learned of it: set aside, never deleted.
+        audio_path.rename(root / f"{audio_path.stem}.superseded-{uuid.uuid4().hex[:8]}{suffix}")
+    ensure_gitignore(work)
+    with audio_path.open("xb") as out:
+        out.write(audio.read_bytes())
+    updated: dict[str, object] = {
+        **manifest,
+        "lines": merged,
+        "audio": audio_name,
+        **{name: completed[name] for name in ("cues", "duration", "mix") if name in completed},
+    }
+    manifest_path = root / f"v{version}.json"
+    temporary = root / f".v{version}.json.{uuid.uuid4().hex[:8]}"
+    temporary.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(temporary, manifest_path)
+    return Written(path=manifest_path, manifest=updated, audio=audio_path, link=move_link(root, episode, audio_name) if link else None)

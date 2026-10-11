@@ -47,6 +47,13 @@ Commands:
              engine with the gates, retakes and pace policy, into takes and
              `renders/epNN/v1.json` (AGT-1683, `perform.py`); one JSON line per
              line on stderr as each lands (also on stdout with `--json-lines`).
+- `mix --work W --episode N [--version k] [--cues DIR] [--vault V | --library DIR]`
+             assemble the episode's voice track from a manifest version's takes
+             (paced by the manifest), place its SFX/BED/MUSIC cues from the
+             content-addressed cue library (`<library>/cues`, or `--cues`),
+             normalise, encode `renders/epNN/epNN.v<k>.m4a`, move the `epNN.m4a`
+             link and write each line's `start`/`end` into the manifest
+             (AGT-1684, `mix.py`); mixing an already-mixed version is a new version.
 - `gate`     score a take with the scorer stack and judge it against a card's
              thresholds; `gate calibrate` fits thresholds from approved takes
              (see `gate_command.py`). Writes nothing but a receipt unless
@@ -71,6 +78,7 @@ from pablo_casting import __version__
 from pablo_casting.binding import BindingRefusal, bind, episode_files, library_dir, read_cast, read_episode
 from pablo_casting.config import CastingConfig, ConfigRefusal, load_config
 from pablo_casting.engines import EngineFactory, real_engine
+from pablo_casting.mix import Seams
 from pablo_casting.gate_command import cmd_calibrate, cmd_gate
 from pablo_casting.hfcache import hub_cache, is_cached
 from pablo_casting.library import Library, LibraryRefusal, card_hash, check_slug, resolve_root, slugify
@@ -102,7 +110,7 @@ Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "cast", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix")
 VOICES_SUBCOMMANDS = ("list", "show", "retire")
 DEFAULT_CANDIDATES = 6
 
@@ -168,6 +176,9 @@ def _parser() -> _Parser:
     parser.add_argument("--approved")
     parser.add_argument("--others")
     parser.add_argument("--apply", action="store_true")
+    # mix
+    parser.add_argument("--version", type=int, dest="mix_version")
+    parser.add_argument("--cues", help="the cue library directory (default <library>/cues)")
     # perform
     parser.add_argument("--engine")
     parser.add_argument("--json-lines", action="store_true", dest="json_lines")
@@ -556,6 +567,7 @@ def run(
     scorers: ScorerFactory | None = None,
     toolkits: ToolkitFactory | None = None,
     engines: EngineFactory | None = None,
+    mixer: Seams | None = None,
 ) -> tuple[Result, bool]:
     """Parse and run one command. Returns `(result, json)`; never raises for a bad argv."""
     env = os.environ if env is None else env
@@ -653,6 +665,16 @@ def run(
             engines or real_engine,
             scorers or real_scorers,
         ), args.json
+    if args.command == "mix":
+        from pablo_casting.cues import real_generators
+        from pablo_casting.mix import Seams, cmd_mix
+
+        try:
+            configured = load_config(env).library
+        except ConfigRefusal as refusal:
+            return refused(str(refusal)), args.json
+        seams = mixer or Seams(generators=real_generators(), log=lambda message: print(message, file=sys.stderr, flush=True))
+        return cmd_mix(work, args.episode, args.mix_version, args.cues, args.library or configured, args.vault, seams), args.json
     try:
         episode = _episode_number(args.episode)
     except ValueError:
@@ -671,8 +693,9 @@ def main(
     scorers: ScorerFactory | None = None,
     toolkits: ToolkitFactory | None = None,
     engines: EngineFactory | None = None,
+    mixer: Seams | None = None,
 ) -> int:
-    (body, code), wants_json = run(argv, env, downloader, scorers, toolkits, engines)
+    (body, code), wants_json = run(argv, env, downloader, scorers, toolkits, engines, mixer)
     if wants_json:
         print(json.dumps(body))
     elif body.get("ok"):

@@ -37,6 +37,19 @@ scorers = [
     "onnxruntime>=1.20",
     "librosa>=0.10",
 ]
+# The mix's SFX and BED cues (AGT-1684): Stable Audio Open 1.0 through diffusers
+# on MPS, imported only when a cue is not already in the content-addressed cue
+# library (`cues.py`). torchsde is imported by diffusers' cosine scheduler even
+# though the MPS patch replaces its noise sampler. MUSIC cues are the numpy
+# organ and need none of this; pacing and encoding need the `sox` binary and
+# afconvert (macOS) or ffmpeg, not a Python package.
+mix = [
+    "diffusers>=0.35",
+    "transformers>=4.50",
+    "accelerate>=1.0",
+    "torch>=2.6",
+    "torchsde>=0.2.6",
+]
 # funasr pulls modelscope and the Alibaba Cloud SDKs (oss2, aliyun-python-sdk-*)
 # transitively; they can reach Alibaba hosts. The scorer loads from the Hugging
 # Face hub (`hub="hf"`, `disable_update=True`), the extra is never installed by

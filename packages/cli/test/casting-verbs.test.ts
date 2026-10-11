@@ -429,3 +429,70 @@ describe("perform (AGT-1683)", () => {
     expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, "json-lines": true } });
   });
 });
+
+describe("mix (AGT-1684)", () => {
+  const work = (vault: string) => join(vault, "novels", "ice-house");
+
+  test("is one VERBS entry and one MCP tool", () => {
+    expect(VERBS.filter((v) => v.name === "mix")).toHaveLength(1);
+    expect(mcpTools().filter((t) => t.name === "mix")).toHaveLength(1);
+  });
+
+  test("provisions with the mix extra and passes the episode, version, vault and work", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    const result = await verbsOver(deps)["mix"]!.run({ project: "ice-house", episode: 2, version: 3 }, ctxIn(vault));
+    expect(result.exitCode).toBe(0);
+    expect(calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "mix"]);
+    expect(lastPython(calls)).toEqual(["mix", "--episode=2", "--version=3", `--vault=${vault}`, "--work", work(vault), "--json"]);
+  });
+
+  test("the version is optional, and a project and an episode are required", async () => {
+    const mix = VERBS.find((v) => v.name === "mix")!;
+    expect(mix.args.safeParse({ project: "ice-house", episode: 1 }).success).toBe(true);
+    expect(mix.args.safeParse({ episode: 1 }).success).toBe(false);
+    expect(mix.args.safeParse({ project: "ice-house" }).success).toBe(false);
+    const { deps, calls } = fakeMachine();
+    await verbsOver(deps)["mix"]!.run({ project: "ice-house", episode: 1 }, ctxIn(vaultCopy()));
+    expect(lastPython(calls).some((arg) => arg.startsWith("--version"))).toBe(false);
+  });
+
+  test("an unknown project is a refusal that runs nothing", async () => {
+    const { deps, calls } = fakeMachine();
+    const result = await verbsOver(deps)["mix"]!.run({ project: "nope", episode: 1 }, ctxIn(vaultCopy()));
+    expect(result.exitCode).toBe(2);
+    expect(calls).toEqual([]);
+  });
+
+  test("the CLI reads --version k as the mix version, and --version alone elsewhere still prints the version", () => {
+    for (const argv of [
+      ["mix", "--project", "ice-house", "--episode", "3", "--version", "2"],
+      ["mix", "--project", "ice-house", "--episode", "3", "--version=2"],
+    ]) {
+      const parsed = parseCliArgs(argv);
+      expect(parsed.version).toBe(false);
+      const built = verbArgsFromCli(VERBS.find((v) => v.name === "mix")!, parsed.values, parsed.rest);
+      expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, version: 2 } });
+    }
+    const bare = parseCliArgs(["mix", "--project", "ice-house", "--episode", "3"]);
+    expect(verbArgsFromCli(VERBS.find((v) => v.name === "mix")!, bare.values, bare.rest)).toEqual({ ok: true, args: { project: "ice-house", episode: 3 } });
+    expect(parseCliArgs(["--version"]).version).toBe(true);
+    expect(parseCliArgs(["perform", "-v"]).version).toBe(true);
+  });
+
+  test("castingText summarises a mix body", () => {
+    const text = castingText("mix", {
+      ok: true,
+      message: "episode 1 v1: 345.7 s, 60 lines, 19 cues (12 generated, 0 reused) -> ep01.v1.m4a",
+      audio: "/w/outputs/radio/casting/renders/ep01/ep01.v1.m4a",
+      manifest: "/w/outputs/radio/casting/renders/ep01/v1.json",
+      duration: 345.7,
+      cuesGenerated: 12,
+      cuesReused: 0,
+      cueLibrary: "/lib/cues",
+      linkMoved: true,
+    });
+    expect(text).toContain("audio: /w/outputs/radio/casting/renders/ep01/ep01.v1.m4a");
+    expect(text).toContain("12 cue(s) generated, 0 reused (/lib/cues)");
+  });
+});
