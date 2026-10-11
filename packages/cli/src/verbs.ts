@@ -1526,6 +1526,27 @@ async function runOutputVerb(args: z.infer<typeof OUTPUT_ARGS>, ctx: VerbContext
 }
 
 // ---------------------------------------------------------------------------
+// story (AGT-1690): `story.ts`, loaded on first use (it brings the harness)
+// ---------------------------------------------------------------------------
+
+const STORY_ARGS = z.object({
+  prompt: z.string().optional().describe("What to write, in the author's words. Starts a new work; omit it with `project` to continue a run."),
+  output: z
+    .array(z.string())
+    .optional()
+    .describe('Outputs to make from the core, repeatable (e.g. "story", "novel", "radio"). Default: one written output, story or novel by the prompt\'s length cue.'),
+  review: z.boolean().optional().default(false).describe("Human in the loop: stop on every stage's branch for the author to accept, then continue with `project`."),
+  title: z.string().optional().describe("The work's title (default: a working title from the prompt)."),
+  words: z.number().int().positive().optional().describe("The story's length in words (default: the prompt's word cue, else the story output's own)."),
+  project: z.string().optional().describe("Continue the `pablo story` run recorded in this work (its slug)."),
+});
+
+async function runStoryVerb(args: z.infer<typeof STORY_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const { runStory } = await import("./story");
+  return runStory(args, ctx, ctx.writer === undefined ? {} : { writer: ctx.writer });
+}
+
+// ---------------------------------------------------------------------------
 // VERBS — the single source of truth `cli.ts` and `mcp.ts` both read
 // ---------------------------------------------------------------------------
 
@@ -1578,6 +1599,18 @@ export const VERBS: readonly Verb[] = [
     args: OUTPUT_ARGS,
     run: runOutputVerb,
     positionalArgs: ["sub", "type"],
+  },
+  {
+    name: "story",
+    description:
+      "Write a story from a prompt, end to end: create the work, build its story core through the harness (research, premise, bible, acts, beats, each on a plan/ branch), then draft, merge and publish each requested output (default: a written story or novel by the prompt's length cue). On demand every branch is accepted as it lands and the harness's questions are answered by stated assumptions; with `review` the run stops on each branch and `project` resumes it.",
+    args: STORY_ARGS,
+    run: runStoryVerb,
+    positionalArgs: ["prompt"],
+    // A story run accepts its own branches and starts its own harness session:
+    // like `merge`, it is the author's act, so it registers no MCP tool (and so
+    // is never one of the harness's own tools).
+    mcpTools: [],
   },
   {
     name: "draft_chapter",

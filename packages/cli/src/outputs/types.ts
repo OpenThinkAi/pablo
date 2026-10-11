@@ -109,6 +109,11 @@ export interface OutputPublish {
   readonly run: (workDir: string, slug: string, title: string, target: string | undefined) => PublishOutcome;
 }
 
+/** `ensure()`'s answer (AGT-1690): the type can run on this machine, or what it is missing. */
+export type EnsureOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string; readonly missing?: readonly string[] };
+
 export interface OutputDefinition {
   /** The key in `pablo.json`'s `outputs` and in `OUTPUTS`. */
   readonly id: string;
@@ -141,4 +146,13 @@ export interface OutputDefinition {
   readonly branch: (unit: number) => string;
   /** The unit a draft branch of this type drafts, or undefined for any other branch. */
   readonly unitOfBranch: (branch: string) => number | undefined;
+  /**
+   * For a type with dependencies beyond pablo itself (the radio output's
+   * casting side, provisioned lazily): makes the type runnable, or says by
+   * name what is missing (AGT-1690). Called only when a run names the type
+   * (`pablo story --output radio`), never by a run that does not, so a
+   * written-only run never loads what it does not use. Absent: the type
+   * needs nothing beyond pablo.
+   */
+  readonly ensure?: () => EnsureOutcome | Promise<EnsureOutcome>;
 }

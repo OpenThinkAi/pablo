@@ -21,7 +21,7 @@ export function proposeTool(session: PlanSession, workPath: string): McpToolSpec
   const tool: McpToolSpec<typeof ProposeArgs.shape> = {
     name: "propose",
     description:
-      "Propose planning output for the author to accept in review mode: stage is premise, acts, beats, cast or places. acts and beats take table rows; cast also takes a name (lowercase-hyphen). Staged on this session's plan branch, not applied: the proposal changes nothing in the book until the author accepts the branch in review mode (the branch is merged then).",
+      "Propose planning output for the author to accept in review mode: stage is premise, acts, beats, cast, places or timeline (bible/timeline.md whole: | Year | Real events | In the story | rows, which date the beats). acts and beats take table rows; cast also takes a name (lowercase-hyphen). Staged on this session's plan branch, not applied: the proposal changes nothing in the book until the author accepts the branch in review mode (the branch is merged then).",
     // stage is a plain string, not an enum, so an unknown stage is refused with pablo's own list of valid stages.
     args: ProposeArgs,
     async run(args): Promise<VerbResult> {

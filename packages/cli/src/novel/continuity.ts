@@ -216,6 +216,8 @@ export function parseFactLines(lines: readonly string[]): ExtractedFact[] {
  */
 function writeContinuityReceipt(
   workDir: string,
+  /** The output and unit the facts were extracted from (AGT-1690): every model call's receipt names its output. */
+  address: { readonly output: string; readonly unit: number },
   adapter: Adapter,
   chapterBody: string,
   startedAt: number,
@@ -239,6 +241,8 @@ function writeContinuityReceipt(
     measurement: "wall",
     proposal: null,
     error,
+    output: address.output,
+    unit: address.unit,
   };
   fileReceiptSink(workDir)(receipt);
 }
@@ -323,7 +327,7 @@ export async function runContinuity(
   async function attemptExtraction(): Promise<Ritual> {
     try {
       const facts = await extractWithFallback();
-      writeContinuityReceipt(workDir, adapter, chapterBody, startedAt, null, factsSummaryText(facts));
+      writeContinuityReceipt(workDir, { output, unit: chapter }, adapter, chapterBody, startedAt, null, factsSummaryText(facts));
 
       const existing = fresh && !existsSync(path) ? LEDGER_TEMPLATE : readFileSync(path, "utf8");
       const result = applyFacts(existing, facts, chapterBody, chapter, opts.unitNoun ?? "chapter");
@@ -335,7 +339,7 @@ export async function runContinuity(
       return { name: "continuity", status: "ran", detail: `placed ${result.placed}, ${result.unanchored} to Check` };
     } catch (err) {
       const message = firstLine(errMessage(err));
-      writeContinuityReceipt(workDir, adapter, chapterBody, startedAt, message, undefined);
+      writeContinuityReceipt(workDir, { output, unit: chapter }, adapter, chapterBody, startedAt, message, undefined);
       return { name: "continuity", status: "failed", detail: message };
     }
   }
@@ -344,7 +348,7 @@ export async function runContinuity(
   const timedOut = new Promise<Ritual>((resolve) => {
     timer = setTimeout(() => {
       const detail = `timed out after ${Math.round(timeoutMs / 1000)}s`;
-      writeContinuityReceipt(workDir, adapter, chapterBody, startedAt, detail, undefined);
+      writeContinuityReceipt(workDir, { output, unit: chapter }, adapter, chapterBody, startedAt, detail, undefined);
       resolve({ name: "continuity", status: "failed", detail });
     }, timeoutMs);
   });
