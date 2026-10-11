@@ -31,6 +31,8 @@ import type { ClipAudioPayload, ManifestCue, ManifestLine, MixDiff, MixPayload, 
 import { runCasting } from "./casting";
 import type { CastingDeps } from "./casting";
 import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./reader-host";
+import { createNotesHost } from "./mixer-notes-host";
+import type { NotesHost } from "./mixer-notes-host";
 import { REVIEW_CSP, castingDir, episodeTitle } from "./review-host";
 
 type Env = Record<string, string | undefined>;
@@ -40,6 +42,9 @@ export interface MixerHostOptions {
   readonly work: string;
   /** The vault the work lives in; the cue library defaults to `<vault>/casting/cues`. */
   readonly vault?: string;
+  /** The work's title, for the punch list. */
+  readonly title?: string;
+  readonly now?: () => Date;
   /** `--library DIR`: the library root whose `cues/` hold the cue audio (over the config and the vault). */
   readonly library?: string;
   readonly env: Env;
@@ -48,7 +53,7 @@ export interface MixerHostOptions {
   readonly stderr?: { write(text: string): unknown };
 }
 
-export interface MixerHost {
+export interface MixerHost extends NotesHost {
   loadMix(args: unknown): MixPayload;
   peaks(args: unknown): PeaksPayload;
   clipAudio(args: unknown): ClipAudioPayload;
@@ -87,6 +92,7 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
   const { work } = options;
   const ctx = { env: options.env, stderr: options.stderr ?? { write: () => undefined } };
   const peakCache = new Map<string, PeaksPayload>();
+  const notes = createNotesHost({ work, title: options.title ?? "radio", ...(options.now === undefined ? {} : { now: options.now }) });
 
   /** One `mixer` call; a refusal or error is thrown with the Python side's own words. */
   function call(op: string, args: readonly string[]): Record<string, unknown> {
@@ -103,6 +109,7 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
   const versionRows = (rows: unknown): MixVersionInfo[] => (Array.isArray(rows) ? (rows as MixVersionInfo[]) : []);
 
   return {
+    ...notes,
     loadMix(args) {
       const episode = positiveInt(args, "episode", true);
       const version = positiveInt(args, "version", false);
@@ -171,6 +178,11 @@ export function mixerMutations(host: MixerHost): Record<string, MutationHandler>
     peaks: async (args) => host.peaks(args),
     clipAudio: async (args) => host.clipAudio(args),
     saveMix: async (args) => host.saveMix(args),
+    listNotes: async (args) => host.listNotes(args),
+    saveNote: async (args) => host.saveNote(args),
+    deleteNote: async (args) => host.deleteNote(args),
+    exportNotes: async (args) => host.exportNotes(args),
+    notesToFlags: async (args) => host.notesToFlags(args),
   };
   return handlers;
 }
@@ -241,6 +253,7 @@ export async function openMixer(request: OpenMixerRequest, signal?: AbortSignal,
 
   const host = createMixerHost({
     work,
+    title,
     env: deps.env,
     casting: request.casting,
     ...(request.vault === undefined ? {} : { vault: request.vault }),

@@ -72,7 +72,7 @@ test("a clip that cannot be placed is listed by field, and the rest of the mix s
   expect((html.match(/class="clip"/g) ?? []).length).toBe(7);
 });
 
-test("the view bundles the way the ui-leaf binary bundles it and calls only loadMix, peaks and clipAudio", async () => {
+test("the view bundles the way the ui-leaf binary bundles it and calls only loadMix, peaks, clipAudio and the marker mutations", async () => {
   const result = await Bun.build({
     entrypoints: [new URL("../views/mixer.tsx", import.meta.url).pathname],
     external: ["react", "react/jsx-runtime", "react-dom", "react-dom/client"],
@@ -82,6 +82,6 @@ test("the view bundles the way the ui-leaf binary bundles it and calls only load
   expect(result.success).toBe(true);
   const text = (await result.outputs[0]?.text()) ?? "";
   const called = new Set([...text.matchAll(/mutate\(\s*"([A-Za-z]+)"/g)].map((m) => m[1]));
-  expect([...called].sort()).toEqual(["clipAudio", "loadMix", "peaks"]);
+  expect([...called].sort()).toEqual(["clipAudio", "deleteNote", "exportNotes", "listNotes", "loadMix", "notesToFlags", "peaks", "saveNote"]);
   expect(text).not.toContain("saveMix"); // read-only: saving is M5
 });

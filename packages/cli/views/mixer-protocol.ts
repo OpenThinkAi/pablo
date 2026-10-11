@@ -8,7 +8,7 @@
  */
 
 /** The mutation names the host registers (and ui-leaf declares); anything else is a 404 from ui-leaf. */
-export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix"] as const;
+export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags"] as const;
 
 export type TrackName = "dialogue" | "sfx" | "beds" | "music";
 export type FadeCurve = "linear" | "scurve" | "log" | "exp";
@@ -181,4 +181,30 @@ export interface SavedMixPayload {
   readonly summary: MixDiff;
   readonly document: MixDocument;
   readonly versions: readonly MixVersionInfo[];
+}
+
+// ---------------------------------------------------------------------------
+// Markers (AGT-1792): `renders/epNN/notes.json`, never inside the mix document
+// ---------------------------------------------------------------------------
+
+/** The answer to `listNotes`, `saveNote` and `deleteNote`: the episode's markers, in time order. */
+export interface NotesPayload {
+  readonly episode: number;
+  readonly notes: readonly import("./mixer-notes").Marker[];
+}
+
+/** The answer to `exportNotes({episode})`: the punch list, also written next to `notes.json`. */
+export interface ExportPayload {
+  readonly episode: number;
+  readonly count: number;
+  readonly path: string;
+  readonly markdown: string;
+}
+
+/** The answer to `notesToFlags({episode, ids?})`: dialogue markers written to `flags.json`; the rest skipped by id. */
+export interface ToFlagsPayload {
+  readonly episode: number;
+  readonly written: readonly string[];
+  readonly skipped: readonly string[];
+  readonly path: string;
 }

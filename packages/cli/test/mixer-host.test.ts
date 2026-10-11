@@ -284,7 +284,7 @@ test("the window may call the four mixer mutations and nothing else", async () =
   const { m, work } = machine();
   const handlers = mixerMutations(host(m, work));
   expect(Object.keys(handlers).sort()).toEqual([...MUTATIONS].sort());
-  expect([...MUTATIONS]).toEqual(["loadMix", "peaks", "clipAudio", "saveMix"]);
+  expect([...MUTATIONS]).toEqual(["loadMix", "peaks", "clipAudio", "saveMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags"]);
   m.respond = () => ({ code: 2, body: { ok: false, code: 2, message: "nope" } });
   await expect((handlers["loadMix"] as (a: unknown) => Promise<unknown>)({ episode: 1 })).rejects.toThrow("nope");
 });
