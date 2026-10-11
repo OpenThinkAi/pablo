@@ -1,10 +1,24 @@
-"""`mix --work W --episode N [--version k]`: the episode file (AGT-1684).
+"""`mix --work W --episode N [--version k] [--from DOC]`: the episode file (AGT-1684, AGT-1764).
 
-Assembles an episode's voice track from a manifest version's takes, places the
-script's SFX, BED and MUSIC cues from the cue library (`cues.py`), normalises,
-encodes `renders/epNN/epNN.v<k>.m4a`, moves the `epNN.m4a` link and writes each
-line's `start`/`end` back into the manifest. The behaviour is the prototype's
-(`radio/produce.py:463-573` in the Valley's Shadow sandbox):
+Renders an episode from a **mix document** (`mixdoc.py`, `renders/epNN/mix.v<m>.json`:
+tracks of clips anchored to lines, with gain, fades, crossfades, automation and
+a master), encodes `renders/epNN/epNN.v<k>.m4a`, moves the `epNN.m4a` link and
+writes each line's `start`/`end` back into the manifest. Which document:
+
+- `--from DOC`: a hand-made document, validated, checked against the manifest
+  and written as the next mix version with `by: "human"`;
+- else the newest mix version, when it voices exactly the manifest's lines with
+  the manifest's takes (a remix keeps it, hand edits to it included);
+- else the auto mix (`auto_document`), written as the next mix version with
+  `by: "auto"` (`mix.v1` on a first mix). After `fix` re-takes a line the
+  newest document no longer fits; a human one is then named in
+  `supersededMix` (carrying its edits over is AGT-1772's rebase, M8).
+
+The auto mix is a `Timeline` (AGT-1697's progressive render builds the same
+one line by line and streams its settled samples): its clips are the document
+it writes, and its mixdown and a document's render are one function
+(`_mix_range`, then `master`). Its rules are the prototype's (`radio/produce.py:463-573` in the
+Valley's Shadow sandbox), expressed as clips:
 
 - the voice track is the takes in line order, each paced by its manifest
   `stretch` (a sox WSOLA `tempo -s`; takes themselves are never paced on disk),
@@ -35,11 +49,17 @@ only while it is unmixed; the link then moves only if no newer version has audio
 
 Refusals (exit 2, nothing written): no manifest for the episode, an unknown
 version, a take missing from the store, an older version that already has
-audio, a missing generator (`mix` extra, sox) or encoder (afconvert, ffmpeg).
+audio, a missing generator (`mix` extra, sox) or encoder (afconvert, ffmpeg),
+a mix document that is not one or does not fit the manifest (the body's
+`field` and `problems` name each field).
+
+The gain, fade, crossfade and automation formulas are `mixmath.py`'s
+(AGT-1765's shared spec, which the mixer's preview follows too).
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import tempfile
@@ -52,8 +72,23 @@ import numpy as np
 import soundfile as sf
 
 from pablo_casting.audio import read_audio, resample
-from pablo_casting.cues import CUE_RATE, CueAsset, CueLibrary, CueUnavailable, GeneratorFactory, is_stop
-from pablo_casting.manifest import ManifestError, attach_mix, audio_versions, read_version, versions, write_version
+from pablo_casting.cues import CUE_RATE, CueAsset, CueLibrary, CueUnavailable, GeneratorFactory, cue_key, is_stop
+from pablo_casting.manifest import ManifestError, attach_mix, audio_versions, episode_dir, read_version, versions, write_version
+from pablo_casting.mixdoc import (
+    CUE_TRACK,
+    TRACKS,
+    MixDocError,
+    Problem,
+    check_against,
+    clip_field,
+    compatible,
+    clips,
+    mix_versions,
+    read_mix,
+    validate,
+    write_mix,
+)
+from pablo_casting.mixmath import apply_fade, automation_gain_at, db_to_gain, equal_power_crossfade, gain_to_db
 from pablo_casting.library import LibraryRefusal, resolve_root
 from pablo_casting.organ import SoxUnavailable, require_sox
 from pablo_casting.receipts import append_receipt
@@ -132,13 +167,6 @@ class Rendered:
     cues_generated: int
     cues_reused: int
     peak_before: float
-
-
-@dataclass
-class _Bed:
-    start: int
-    audio: np.ndarray
-    placement: dict[str, object]
 
 
 @dataclass
@@ -229,64 +257,305 @@ def warp_times(raw: np.ndarray, paced: np.ndarray, rate: int, times: Sequence[fl
     return out
 
 
-def _fade_loop(loop: np.ndarray, span: int) -> np.ndarray:
-    reps = np.tile(loop, span // len(loop) + 1)[:span].copy()
-    fade = min(int(SR * BED_FADE_SECONDS), span // 4)
-    if fade > 0:
-        reps[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)
-        reps[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
-    return reps
+@dataclass
+class _Paced:
+    take: _Take
+    paced: np.ndarray  # at the take's own rate
+    audio: np.ndarray  # at SR: what the timeline plays
 
 
-def render(
-    work: Path,
-    manifest: Mapping[str, object],
-    library: CueLibrary,
-    pacer: Pacer,
+class Sources:
+    """Every clip source of one mix run, loaded once: paced takes and cue assets, both at `SR`."""
+
+    def __init__(self, work: Path, library: CueLibrary, pacer: Pacer, log: Callable[[str], None] = lambda message: None) -> None:
+        self.work, self.library, self.pacer, self.log = work, library, pacer, log
+        self._takes: dict[str, _Take | None] = {}
+        self._paced: dict[tuple[str, float], _Paced] = {}
+        self._cues: dict[str, np.ndarray] = {}
+        self.generated = 0
+        self.reused = 0
+
+    def take(self, key: str) -> _Take | None:
+        if key not in self._takes:
+            stored = read_take(self.work, key)
+            if stored is None or not (stored.path / "take.wav").is_file():
+                self._takes[key] = None
+            else:
+                audio, rate = read_audio(stored.path / "take.wav")
+                self._takes[key] = _Take(audio=audio, rate=rate, words=_words(stored.record))
+        return self._takes[key]
+
+    def paced(self, key: str, stretch: float) -> _Paced | None:
+        """The take paced by `stretch` (pacing happens before the timeline), or None when the store lacks it."""
+        if (key, stretch) not in self._paced:
+            take = self.take(key)
+            if take is None:
+                return None
+            paced = self.pacer(take.audio, take.rate, stretch)
+            self._paced[(key, stretch)] = _Paced(take=take, paced=paced, audio=resample(paced, take.rate, SR))
+        return self._paced[(key, stretch)]
+
+    def ensure(self, kind: str, desc: str) -> tuple[CueAsset, np.ndarray]:
+        """A cue by description, generated once into the library and counted per ask (the auto mix's path)."""
+        asset = self.library.ensure(kind, desc)
+        if asset.generated:
+            self.generated += 1
+        else:
+            self.reused += 1
+        self.log(f"cue {asset.kind} {'generated' if asset.generated else 'reused'}: {asset.desc}")
+        if asset.key not in self._cues:
+            self._cues[asset.key] = self.library.load(asset)
+        return asset, self._cues[asset.key]
+
+    def cue(self, key: str, hint: tuple[str, str] | None) -> np.ndarray | None:
+        """A cue by key. A missing asset is generated only from `hint` (the manifest cue the clip places) when its key matches."""
+        if key in self._cues:
+            return self._cues[key]
+        if self.library.path(key).is_file():
+            audio, rate = read_audio(self.library.path(key))
+            self._cues[key] = resample(audio, rate, SR)
+            self.reused += 1
+            return self._cues[key]
+        if hint is not None and hint[0] in CUE_TRACK and cue_key(*hint) == key:
+            return self.ensure(*hint)[1]
+        return None
+
+
+def _lines(manifest: Mapping[str, object]) -> list[Mapping[str, object]]:
+    raw = manifest.get("lines")
+    return sorted((l for l in raw if isinstance(l, Mapping)), key=lambda l: int(l["i"])) if isinstance(raw, list) else []  # type: ignore[call-overload]
+
+
+def _cues(manifest: Mapping[str, object]) -> list[Mapping[str, object]]:
+    raw = manifest.get("cues")
+    return [c for c in raw if isinstance(c, Mapping)] if isinstance(raw, list) else []
+
+
+def _samples(seconds: object) -> int:
+    return int(round(float(seconds) * SR))  # type: ignore[arg-type]
+
+
+# --- clips on the timeline ------------------------------------------------------------------------
+
+
+def _clip(
+    clip_id: str,
+    source: dict[str, object],
+    length: int,
+    anchor: dict[str, object],
+    gain: float,
     *,
-    log: Callable[[str], None] = lambda message: None,
-) -> Rendered:
-    raw_lines = manifest.get("lines")
-    lines = sorted((l for l in raw_lines if isinstance(l, Mapping)), key=lambda l: int(l["i"])) if isinstance(raw_lines, list) else []  # type: ignore[call-overload]
-    raw_cues = manifest.get("cues")
-    cues = [c for c in raw_cues if isinstance(c, Mapping)] if isinstance(raw_cues, list) else []
+    fade_in: int = 0,
+    fade_out: int = 0,
+    **extra: object,
+) -> dict[str, object]:
+    return {
+        "id": clip_id,
+        "source": source,
+        **extra,
+        "in": 0.0,
+        "out": length / SR,
+        "anchor": anchor,
+        "gain": round(gain_to_db(gain), 6),
+        "fade_in": {"len": fade_in / SR, "curve": "linear"},
+        "fade_out": {"len": fade_out / SR, "curve": "linear"},
+    }
 
-    takes: dict[str, _Take] = {}
-    missing: list[str] = []
-    for line in lines:
-        key = str(line["take"])
-        if key in takes:
-            continue
-        stored = read_take(work, key)
-        if stored is None or not (stored.path / "take.wav").is_file():
-            missing.append(key)
-            continue
-        audio, rate = read_audio(stored.path / "take.wav")
-        takes[key] = _Take(audio=audio, rate=rate, words=_words(stored.record))
-    if missing:
-        raise MixRefusal(f"take(s) not in the store: {', '.join(sorted(set(missing)))}", missing_takes=sorted(set(missing)))
 
-    timeline = Timeline(work, cues, library, pacer, log=log, takes=takes)
-    for group in _group_lines(lines):
-        timeline.add(group)
-    return rendered_from(timeline)
+@dataclass
+class _Placed:
+    track: str
+    lane: str
+    field: str
+    clip: Mapping[str, object]
+    audio: np.ndarray  # the slice of the source that plays, before gain and fades
+    start: int = -1  # samples on the timeline, once resolved
+
+    @property
+    def end(self) -> int:
+        return self.start + len(self.audio)
+
+
+def _shape(p: _Placed) -> np.ndarray:
+    """The clip's audio with its gain and fades."""
+    clip = p.clip
+    audio = p.audio.astype(np.float32) * np.float32(db_to_gain(float(clip.get("gain", 0.0))))  # type: ignore[arg-type]
+    for name, direction in (("fade_in", "in"), ("fade_out", "out")):
+        fade = clip.get(name)
+        if isinstance(fade, Mapping) and float(fade["len"]) > 0:  # type: ignore[arg-type]
+            audio = apply_fade(audio, str(fade.get("curve", "linear")), _samples(fade["len"]), direction)
+    return np.asarray(audio, dtype=np.float32)
+
+
+def _crossfade_gains(n: int) -> np.ndarray:
+    """`(n, 2)`: the outgoing and incoming equal-power gains over an `n`-sample overlap."""
+    return np.array([equal_power_crossfade(j / n) for j in range(n)], dtype=np.float32).reshape(n, 2)
+
+
+def _clip_audio(members: Sequence[_Placed], k: int) -> np.ndarray:
+    """Clip `k` of a lane (sorted by start) as it sounds: gain, fades, and an equal-power crossfade over any overlap with its neighbours."""
+    p = members[k]
+    audio = _shape(p)
+    if k > 0:
+        a = members[k - 1]
+        n = min(a.end, p.end) - p.start
+        if n > 0:
+            audio[:n] *= _crossfade_gains(n)[:, 1]
+    if k + 1 < len(members):
+        b = members[k + 1]
+        n = min(p.end, b.end) - b.start
+        if n > 0:
+            offset = b.start - p.start
+            audio[offset : offset + n] *= _crossfade_gains(n)[:, 0]
+    return audio
+
+
+AUTOMATION_STEP = 64
+"""Automation is evaluated on a grid of 64 samples (1.45 ms at 44.1 kHz) and interpolated linearly between: per sample is too slow for an episode."""
+
+
+def _mix_range(
+    placed: Sequence[_Placed],
+    tracks: Mapping[str, Mapping[str, object]],
+    when: Callable[[Mapping[str, object]], int | None],
+    start: int,
+    end: int,
+) -> np.ndarray:
+    """The summed tracks over `[start, end)`, before the master: the one mixdown both a document's render and the streamed `Timeline` use."""
+    out = np.zeros(max(0, end - start), np.float32)
+    if end <= start:
+        return out
+    lanes: dict[tuple[str, str], list[_Placed]] = {}
+    for p in placed:
+        lanes.setdefault((p.track, p.lane), []).append(p)
+    soloed = any(bool(tracks.get(name, {}).get("solo")) for name in TRACKS)
+    for name in TRACKS:
+        track = tracks.get(name, {})
+        if track.get("mute") or (soloed and not track.get("solo")):
+            continue
+        bus = np.zeros(len(out), np.float32)
+        for (owner, _), members in lanes.items():
+            if owner != name:
+                continue
+            members.sort(key=lambda p: p.start)
+            for k, p in enumerate(members):
+                lo, hi = max(start, p.start), min(end, p.end)
+                if lo < hi:
+                    bus[lo - start : hi - start] += _clip_audio(members, k)[lo - p.start : hi - p.start]
+        automation = track.get("automation") or []
+        if automation:
+            points = [{"t": (when(point["anchor"]) or 0) / SR, "db": float(point["db"]), "curve": point.get("curve", "linear")} for point in automation]  # type: ignore[union-attr,index]
+            grid = np.arange(start // AUTOMATION_STEP * AUTOMATION_STEP, end + AUTOMATION_STEP, AUTOMATION_STEP)
+            values = np.array([automation_gain_at(points, g / SR) for g in grid], dtype=np.float64)
+            bus *= np.interp(np.arange(start, end), grid, values).astype(np.float32)
+        out += bus * np.float32(db_to_gain(float(track.get("volume", 0.0))))  # type: ignore[arg-type]
+    return out
+
+
+AUTO_MASTER: dict[str, object] = {"gain": 0.0, "peak_db": FINAL_PEAK_DB, "target_lufs": None}
+
+
+def master(buffer: np.ndarray, settings: Mapping[str, object] = AUTO_MASTER) -> tuple[np.ndarray, float, float]:
+    """The master: its gain, then the one gain that puts the peak at `peak_db` dBFS. Returns `(audio, peak_before, gain)`."""
+    peak = float(np.abs(buffer).max()) if len(buffer) else 0.0
+    gain = db_to_gain(float(settings.get("gain", 0.0)))  # type: ignore[arg-type]
+    peak_db = settings.get("peak_db", FINAL_PEAK_DB)
+    if peak_db is not None and peak * gain > 0:
+        gain = db_to_gain(float(peak_db)) / peak  # type: ignore[arg-type]
+    return (buffer * np.float32(gain)).astype(np.float32), peak, gain
+
+
+def _line_spans(p: _Placed, by_id: Mapping[int, Mapping[str, object]], sources: Sources) -> list[tuple[int, tuple[float, float, float, float, float]]]:
+    """For each line a take clip voices: (line id, (clip start, in, length, first word, last word)), seconds of the paced take."""
+    source = p.clip["source"]
+    assert isinstance(source, Mapping)
+    paced = sources.paced(str(source["key"]), float(source.get("stretch", 1.0)))
+    assert paced is not None
+    take = paced.take
+    group = [by_id[int(i)] for i in sorted(p.clip["lines"])]  # type: ignore[union-attr]
+    span = (0.0, len(take.audio) / take.rate)
+    # The stored word times come from the aligner on the untrimmed attempt, so the last word can end after
+    # the take (trimmed at the last word plus the tail air) does: nothing is audible past the take's end.
+    bounds = [(min(begin, span[1]), min(end, span[1])) for begin, end in _split_words(take.words, group, span)]
+    warped = warp_times(take.audio, paced.paced, take.rate, [t for pair in bounds for t in pair])
+    clip_in = _samples(p.clip["in"]) / SR
+    return [(int(line["i"]), (p.start / SR, clip_in, len(p.audio) / SR, warped[2 * k], warped[2 * k + 1])) for k, line in enumerate(group)]  # type: ignore[call-overload]
+
+
+def _timed(line: Mapping[str, object], options: Sequence[tuple[float, float, float, float, float]]) -> dict[str, object]:
+    """The line with `start`/`end`: its first and last word through the clip(s) that hold them."""
+
+    def place(word: float, last: bool) -> float:
+        inside = [s for s in options if s[1] <= word <= s[1] + s[2]]
+        start, lo, length = (inside[-1] if last else inside[0])[:3] if inside else (options[-1] if last else options[0])[:3]
+        return start + min(max(word - lo, 0.0), length)
+
+    return {**line, "start": round(place(options[0][3], False), 3), "end": round(place(options[-1][4], True), 3)}
+
+
+def _line_timings(lines: Sequence[Mapping[str, object]], placed: Sequence[_Placed], sources: Sources) -> list[dict[str, object]]:
+    by_id = {int(line["i"]): line for line in lines}  # type: ignore[call-overload]
+    spans: dict[int, list[tuple[float, float, float, float, float]]] = {}
+    for p in sorted((p for p in placed if p.track == "dialogue"), key=lambda p: p.start):
+        for i, entry in _line_spans(p, by_id, sources):
+            spans.setdefault(i, []).append(entry)
+    return [_timed(line, spans[int(line["i"])]) for line in lines]  # type: ignore[call-overload]
+
+
+def _cue_places(cues: Sequence[Mapping[str, object]], placed: Sequence[_Placed]) -> list[dict[str, object]]:
+    """Where each cue landed: the span of the clips that place it; a `[BED: off]` sits where the bed it stops ends."""
+    out: list[dict[str, object]] = []
+    for k, cue in enumerate(cues):
+        base: dict[str, object] = {"kind": cue.get("kind"), "desc": cue.get("desc"), "after": cue.get("after"), "line": cue.get("line")}
+        mine = [p for p in placed if p.clip.get("cue") == k]
+        if mine:
+            key = str(mine[0].clip["source"]["key"])  # type: ignore[index]
+            start, end = min(p.start for p in mine) / SR, max(p.end for p in mine) / SR
+            out.append({**base, "asset": f"cues/{key}.wav", "key": key, "start": round(start, 3), "end": round(end, 3)})
+            continue
+        stops_at: float | None = None
+        if cue.get("kind") == "BED" and is_stop(str(cue.get("desc", ""))):
+            for j in range(k - 1, -1, -1):
+                bed = [p for p in placed if p.clip.get("cue") == j and p.track == "beds"]
+                if bed:
+                    stops_at = round(max(p.end for p in bed) / SR, 3)
+                    break
+        out.append({**base, "asset": None, "start": stops_at, "end": stops_at})
+    return out
+
+
+# --- the auto mix: the Timeline -----------------------------------------------------------------------
+
+
+def _no_anchor(anchor: Mapping[str, object]) -> int | None:
+    return None
 
 
 class Timeline:
-    """The episode's timeline, built one line group at a time (AGT-1697).
+    """The automatic mix, built one line group at a time (AGT-1697), as the mix document it writes (AGT-1764).
 
-    `render` adds every group and finishes; `perform --stream` (`stream.py`)
-    adds each group as its take passes the gates and cuts segments from the
-    audio that is already final. Both run this one placement code, so a
-    streamed episode's segments are the final mix's samples before its one
-    normalising gain, and the line timings the stream reports are the final
-    file's.
+    It is the AGT-1684 rules expressed as clips: each take group follows the
+    one before it by its length plus 0.35 s of air; an SFX starts 0.4 s early at
+    0.75 gain and MUSIC at once at 0.9, both holding the next line for their
+    length plus 0.2 s; a BED is tiled back to back from its cue to the next BED
+    cue (or the end of the speech) at 0.16 gain with 1.5 s linear fades (a
+    quarter of its span at most). Each clip is anchored to the end of the line
+    group before it (a free `{at}` before the first line), so a re-timed line
+    carries what follows it along; a bed's tiles all hang off its cue's anchor.
+    A cue that would overlap the last clip on its lane goes on the next lane
+    (`main`, `2`, ...), so the auto mix never crossfades: it sums as it always did.
+
+    `add` places each clip twice over, as document data (`document()`, written
+    as `mix.v<m>` with `by: "auto"`) and at its sample position; `mixdown` sums
+    them with the same `_mix_range` a document's render uses, so `perform
+    --stream`'s segments (`stream.py`), the episode file and a later render of
+    the written document are the same samples.
 
     A sample is final once nothing still to come can write to it
     (`frontier`): a voice take or MUSIC starts at `t`, an SFX up to
-    `SFX_OVERLAP_SECONDS` before it, and an open BED's fade-out ends where it
-    closes (no earlier than `t`) and lasts at most `BED_FADE_SECONDS`; while a
-    BED is shorter than four fades its fade-in is not settled either.
+    `SFX_OVERLAP_SECONDS` before it, and an open BED's last tile fades out where
+    it closes (no earlier than `t`) over at most `BED_FADE_SECONDS`; while a BED
+    is shorter than four fades its fade-in is not settled either.
     """
 
     def __init__(
@@ -297,71 +566,93 @@ class Timeline:
         pacer: Pacer,
         *,
         log: Callable[[str], None] = lambda message: None,
-        takes: dict[str, _Take] | None = None,
+        sources: Sources | None = None,
+        manifest_version: object = None,
     ) -> None:
-        self.work = work
+        self.sources = sources if sources is not None else Sources(work, library, pacer, log)
         self.cues = [c for c in cues if isinstance(c, Mapping)]
-        self.library = library
-        self.pacer = pacer
-        self.log = log
-        self.takes: dict[str, _Take] = takes if takes is not None else {}
+        self.manifest_version = manifest_version
         self.pending = sorted(range(len(self.cues)), key=lambda k: (int(self.cues[k].get("after", -1)), k))  # type: ignore[call-overload]
-        self.voice: list[tuple[int, np.ndarray]] = []
-        self.beds: list[tuple[int, int, np.ndarray]] = []
-        self.placed_cues: list[dict[str, object]] = [{} for _ in self.cues]
+        self.lanes: dict[str, dict[str, dict[str, list[dict[str, object]]]]] = {name: {} for name in TRACKS}
+        self.placed: list[_Placed] = []
         self.lines: list[dict[str, object]] = []
         self.t = 0
-        self.generated = 0
-        self.reused = 0
-        self.bed: _Bed | None = None
         self.total: int | None = None
-        self._faded: dict[int, np.ndarray] = {}
+        self._ref: tuple[int, int] | None = None  # (last line id of the previous group, its clip's end)
+        self._bed: tuple[int, str, int, np.ndarray, tuple[int, int] | None] | None = None  # (cue, key, start, loop, anchor ref)
 
-    def _asset(self, cue: Mapping[str, object]) -> tuple[CueAsset, np.ndarray]:
-        asset = self.library.ensure(str(cue["kind"]), str(cue["desc"]))
-        if asset.generated:
-            self.generated += 1
-        else:
-            self.reused += 1
-        self.log(f"cue {asset.kind} {'generated' if asset.generated else 'reused'}: {asset.desc}")
-        return asset, self.library.load(asset)
+    @property
+    def generated(self) -> int:
+        return self.sources.generated
+
+    @property
+    def reused(self) -> int:
+        return self.sources.reused
+
+    def _anchor(self, at: int, base: tuple[int, int] | None) -> dict[str, object]:
+        if base is None:
+            return {"at": at / SR}
+        return {"line": base[0], "edge": "end", "offset": round((at - base[1]) / SR, 6)}
+
+    def _put(self, track: str, lane: str, clip: dict[str, object], start: int, audio: np.ndarray) -> None:
+        clips = self.lanes[track].setdefault(lane, {"clips": []})["clips"]
+        clips.append(clip)
+        self.placed.append(_Placed(track=track, lane=lane, field=clip_field(track, lane, len(clips) - 1), clip=clip, audio=audio, start=start))
+
+    def _free_lane(self, track: str, start: int) -> str:
+        for n in range(1, len(self.lanes[track]) + 2):
+            name = "main" if n == 1 else str(n)
+            if not any(p.track == track and p.lane == name and p.end > start for p in self.placed):
+                return name
+        raise AssertionError("unreachable")
+
+    def _tiles(self, at: int, *, closing: bool) -> list[tuple[dict[str, object], int, np.ndarray]]:
+        """The open bed's tiles up to `at`: with its fade-out when it closes there, else the settled part only."""
+        assert self._bed is not None
+        k, key, start, loop, base = self._bed
+        span = at - start
+        if span <= 0 or not len(loop):
+            return []
+        fade = min(int(SR * BED_FADE_SECONDS), span // 4) if closing else int(SR * BED_FADE_SECONDS)
+        tiles = (span + len(loop) - 1) // len(loop)
+        out = []
+        for n in range(tiles):
+            length = min(len(loop), span - n * len(loop))
+            clip = _clip(
+                f"bed-{k}-{n}",
+                {"kind": "cue", "key": key},
+                length,
+                self._anchor(start + n * len(loop), base),
+                BED_GAIN,
+                fade_in=min(fade, length) if n == 0 else 0,
+                fade_out=min(fade, length) if closing and n == tiles - 1 else 0,
+                cue=k,
+            )
+            out.append((clip, start + n * len(loop), loop[:length]))
+        return out
 
     def _close_bed(self, at: int) -> None:
-        if self.bed is not None:
-            self.beds.append((self.bed.start, at, self.bed.audio))
-            self.bed.placement["end"] = round(at / SR, 3)
-            self.bed = None
+        if self._bed is not None:
+            for clip, start, audio in self._tiles(at, closing=True):
+                self._put("beds", "main", clip, start, audio)
+            self._bed = None
 
     def _place(self, k: int) -> None:
         cue = self.cues[k]
-        kind, t = str(cue["kind"]), self.t
-        base: dict[str, object] = {"kind": kind, "desc": cue["desc"], "after": cue.get("after"), "line": cue.get("line")}
+        kind = str(cue["kind"])
         if kind == "BED":
-            self._close_bed(t)
+            self._close_bed(self.t)
             if is_stop(str(cue["desc"])):
-                self.placed_cues[k] = {**base, "asset": None, "start": round(t / SR, 3), "end": round(t / SR, 3)}
                 return
-            asset, audio = self._asset(cue)
-            self.placed_cues[k] = {**base, "asset": asset.ref, "key": asset.key, "start": round(t / SR, 3), "end": None}
-            self.bed = _Bed(start=t, audio=audio * BED_GAIN, placement=self.placed_cues[k])
+            asset, audio = self.sources.ensure(kind, str(cue["desc"]))
+            self._bed = (k, asset.key, self.t, audio, self._ref)
             return
-        asset, audio = self._asset(cue)
-        overlap = int(SR * SFX_OVERLAP_SECONDS) if kind == "SFX" else 0
-        start = max(0, t - overlap)
-        self.voice.append((start, audio * CUE_GAIN.get(kind, 0.75)))
-        end = start + len(audio)
-        self.placed_cues[k] = {**base, "asset": asset.ref, "key": asset.key, "start": round(start / SR, 3), "end": round(end / SR, 3)}
-        self.t = end + int(SR * CUE_TAIL_SECONDS)
-
-    def _take(self, key: str) -> _Take:
-        take = self.takes.get(key)
-        if take is None:
-            stored = read_take(self.work, key)
-            if stored is None or not (stored.path / "take.wav").is_file():
-                raise MixRefusal(f"take(s) not in the store: {key}", missing_takes=[key])
-            audio, rate = read_audio(stored.path / "take.wav")
-            take = self.takes[key] = _Take(audio=audio, rate=rate, words=_words(stored.record))
-        return take
+        asset, audio = self.sources.ensure(kind, str(cue["desc"]))
+        start = max(0, self.t - (int(SR * SFX_OVERLAP_SECONDS) if kind == "SFX" else 0))
+        track = CUE_TRACK.get(kind, "sfx")
+        clip = _clip(f"cue-{k}", {"kind": "cue", "key": asset.key}, len(audio), self._anchor(start, self._ref), CUE_GAIN.get(kind, 0.75), cue=k)
+        self._put(track, self._free_lane(track, start), clip, start, audio)
+        self.t = start + len(audio) + int(SR * CUE_TAIL_SECONDS)
 
     def add(self, group: Sequence[Mapping[str, object]]) -> None:
         """Places the cues due before `group` (consecutive lines sharing one take, in line order), then its take."""
@@ -370,21 +661,19 @@ class Timeline:
         first = int(group[0]["i"])  # type: ignore[call-overload]
         while self.pending and int(self.cues[self.pending[0]].get("after", -1)) < first:  # type: ignore[call-overload]
             self._place(self.pending.pop(0))
-        take = self._take(str(group[0]["take"]))
+        key = str(group[0]["take"])
         stretch = float(group[0].get("stretch") or 1.0)  # type: ignore[arg-type]
-        paced = self.pacer(take.audio, take.rate, stretch)
-        at = self.t
-        clip = resample(paced, take.rate, SR)
-        self.voice.append((at, clip))
-        span = (0.0, len(take.audio) / take.rate)
-        # The stored word times come from the aligner on the untrimmed attempt, so the last word can end after
-        # the take (trimmed at the last word plus the tail air) does: nothing is audible past the take's end.
-        bounds = [(min(begin, span[1]), min(end, span[1])) for begin, end in _split_words(take.words, group, span)]
-        warped = warp_times(take.audio, paced, take.rate, [t for pair in bounds for t in pair])
-        for k, line in enumerate(group):
-            start, end = at / SR + warped[2 * k], at / SR + warped[2 * k + 1]
-            self.lines.append({**line, "start": round(start, 3), "end": round(end, 3)})
-        self.t = at + len(clip) + int(SR * GAP_SECONDS)
+        paced = self.sources.paced(key, stretch)
+        if paced is None:
+            raise MixRefusal(f"take(s) not in the store: {key}", missing_takes=[key])
+        ids = [int(line["i"]) for line in group]  # type: ignore[call-overload]
+        source: dict[str, object] = {"kind": "take", "key": key, "stretch": stretch}
+        clip = _clip(f"line-{ids[0]}", source, len(paced.audio), self._anchor(self.t, self._ref), 1.0, lines=ids)
+        self._put("dialogue", str(group[0].get("speaker") or "VOICE"), clip, self.t, paced.audio)
+        by_id = {int(line["i"]): line for line in group}  # type: ignore[call-overload]
+        self.lines.extend(_timed(by_id[i], [entry]) for i, entry in _line_spans(self.placed[-1], by_id, self.sources))
+        self._ref = (ids[-1], self.t + len(paced.audio))
+        self.t = self.t + len(paced.audio) + int(SR * GAP_SECONDS)
 
     def finish(self) -> int:
         """Places the cues after the last line and closes the bed; returns the episode's length in samples."""
@@ -392,7 +681,7 @@ class Timeline:
             while self.pending:
                 self._place(self.pending.pop(0))
             self._close_bed(self.t)
-            self.total = self.t + int(SR * END_PAD_SECONDS)
+            self.total = max((p.end for p in self.placed), default=0) + int(SR * END_PAD_SECONDS)
         return self.total
 
     def frontier(self) -> int:
@@ -400,63 +689,154 @@ class Timeline:
         if self.total is not None:
             return self.total
         final = self.t - int(SR * SFX_OVERLAP_SECONDS)
-        if self.bed is not None:
-            if self.t - self.bed.start < 4 * int(SR * BED_FADE_SECONDS):
-                final = min(final, self.bed.start)
+        if self._bed is not None:
+            if self.t - self._bed[2] < 4 * int(SR * BED_FADE_SECONDS):
+                final = min(final, self._bed[2])
             else:
                 final = min(final, self.t - int(SR * BED_FADE_SECONDS))
         return max(0, final)
 
     def mixdown(self, start: int, end: int) -> np.ndarray:
-        """The summed, unnormalised samples `[start, end)`: voice and cues first, then the beds, as the mix adds them."""
+        """The summed, unnormalised samples `[start, end)`; an open bed's settled part is its tiles so far, faded in."""
         total = self.total if self.total is not None else end
         end = min(end, total)
-        out = np.zeros(max(0, end - start), np.float32)
-        if end <= start:
-            return out
-        for at, clip in self.voice:
-            clip = clip[: max(0, total - at)]
-            lo, hi = max(start, at), min(end, at + len(clip))
-            if lo < hi:
-                out[lo - start : hi - start] += clip[lo - at : hi - at]
-        for k, (b_start, b_end, loop) in enumerate(self.beds):
-            if b_end <= b_start or not len(loop):
+        placed = list(self.placed)
+        if self._bed is not None and end > self._bed[2]:
+            for clip, at, audio in self._tiles(end, closing=False):
+                placed.append(_Placed(track="beds", lane="main", field="(open bed)", clip=clip, audio=audio, start=at))
+        return _mix_range(placed, {}, _no_anchor, start, end)
+
+    def document(self) -> dict[str, object]:
+        """The auto mix as a document proposal (`write_mix`, `by: "auto"`)."""
+        return {
+            "manifest_version": self.manifest_version,
+            "tracks": {name: {"lanes": self.lanes[name], "volume": 0.0, "mute": False, "solo": False, "automation": []} for name in TRACKS},
+            "master": dict(AUTO_MASTER),
+        }
+
+    def rendered(self) -> Rendered:
+        """The finished timeline as the mix's result: every line timed, the cues placed, through the master."""
+        total = self.finish()
+        audio, peak, _ = master(self.mixdown(0, total))
+        timed = sorted(self.lines, key=lambda line: int(line["i"]))  # type: ignore[call-overload]
+        return Rendered(audio=audio, lines=timed, cues=_cue_places(self.cues, self.placed), cues_generated=self.generated, cues_reused=self.reused, peak_before=peak)
+
+
+def auto_timeline(manifest: Mapping[str, object], sources: Sources) -> Timeline:
+    """Every line group of `manifest` added to a fresh `Timeline`, finished."""
+    lines = _lines(manifest)
+    missing = sorted({str(l["take"]) for l in lines if sources.take(str(l["take"])) is None})
+    if missing:
+        raise MixRefusal(f"take(s) not in the store: {', '.join(missing)}", missing_takes=missing)
+    timeline = Timeline(sources.work, _cues(manifest), sources.library, sources.pacer, sources=sources, manifest_version=manifest.get("version"))
+    for group in _group_lines(lines):
+        timeline.add(group)
+    timeline.finish()
+    return timeline
+
+
+def auto_document(manifest: Mapping[str, object], sources: Sources) -> dict[str, object]:
+    """The automatic mix as a document proposal (what `pablo mix` writes as `mix.v<m>` with `by: "auto"`)."""
+    return auto_timeline(manifest, sources).document()
+
+
+# --- rendering a mix document ------------------------------------------------------------------------
+
+
+def _load(doc: Mapping[str, object], manifest: Mapping[str, object], sources: Sources) -> list[_Placed]:
+    cues = _cues(manifest)
+    placed: list[_Placed] = []
+    problems: list[Problem] = []
+    missing: list[str] = []
+    for track, lane, k, clip in clips(doc):
+        at = clip_field(track, lane, k)
+        source = clip["source"]
+        assert isinstance(source, Mapping)
+        key = str(source["key"])
+        audio: np.ndarray | None
+        if source["kind"] == "take":
+            paced = sources.paced(key, float(source.get("stretch", 1.0)))
+            if paced is None:
+                missing.append(key)
                 continue
-            lo, hi = max(start, b_start), min(end, b_end)
-            if lo < hi:
-                faded = self._faded.get(k)
-                if faded is None:
-                    faded = self._faded[k] = _fade_loop(loop, b_end - b_start)
-                out[lo - start : hi - start] += faded[lo - b_start : hi - b_start]
-        bed = self.bed
-        if bed is not None and len(bed.audio) and end > bed.start:
-            # Still open: only its settled part is ever asked for (`frontier`), the loop with its full fade-in.
-            lo = max(start, bed.start)
-            reps = np.tile(bed.audio, (end - bed.start) // len(bed.audio) + 1)[: end - bed.start].copy()
-            fade = int(SR * BED_FADE_SECONDS)
-            reps[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)[: len(reps)]
-            out[lo - start : end - start] += reps[lo - bed.start :]
-        return out
+            audio = paced.audio
+        else:
+            hint = None
+            if "cue" in clip and int(clip["cue"]) < len(cues):  # type: ignore[call-overload]
+                cue = cues[int(clip["cue"])]  # type: ignore[call-overload]
+                hint = (str(cue.get("kind")), str(cue.get("desc")))
+            audio = sources.cue(key, hint)
+            if audio is None:
+                problems.append(Problem(f"{at}.source.key", f"cue {key[:12]}... is not in the cue library ({sources.library.root})"))
+                continue
+        lo, hi = _samples(clip["in"]), _samples(clip["out"])
+        if hi > len(audio) + 1:  # one sample of rounding is not past the end
+            problems.append(Problem(f"{at}.out", f"{clip['out']} s is past the end of the source ({len(audio) / SR:.3f} s)"))
+            continue
+        placed.append(_Placed(track=track, lane=lane, field=at, clip=clip, audio=audio[lo:hi]))
+    if missing:
+        raise MixRefusal(f"take(s) not in the store: {', '.join(sorted(set(missing)))}", missing_takes=sorted(set(missing)))
+    if problems:
+        raise MixDocError(problems)
+    return placed
 
 
-def normalise(buffer: np.ndarray) -> tuple[np.ndarray, float, float]:
-    """The prototype's two steps (under 0.95 peak, then to -1 dBFS) as the one gain they amount to.
+def _resolve(placed: Sequence[_Placed]) -> Callable[[Mapping[str, object]], int | None]:
+    """Gives every clip its start (samples) from its anchor; returns the anchor resolver (for automation)."""
+    voicing: dict[int, list[_Placed]] = {}
+    for p in placed:
+        if p.track == "dialogue":
+            for i in p.clip["lines"]:  # type: ignore[union-attr]
+                voicing.setdefault(int(i), []).append(p)
 
-    Returns `(audio, peak_before, gain)`.
-    """
-    peak = float(np.abs(buffer).max()) if len(buffer) else 0.0
-    gain = 1.0 / max(1.0, peak / PEAK)
-    if peak * gain > 0:
-        gain *= 10 ** (FINAL_PEAK_DB / 20) / (peak * gain)
-    return (buffer * np.float32(gain)).astype(np.float32), peak, gain
+    def when(anchor: Mapping[str, object]) -> int | None:
+        if "at" in anchor:
+            return _samples(anchor["at"])
+        group = voicing.get(int(anchor["line"]), [])  # type: ignore[call-overload]
+        if not group or any(p.start < 0 for p in group):
+            return None
+        edge = min(p.start for p in group) if anchor["edge"] == "start" else max(p.end for p in group)
+        return edge + _samples(anchor.get("offset", 0.0))
+
+    unresolved = list(placed)
+    while unresolved:
+        waiting: list[_Placed] = []
+        for p in unresolved:
+            start = when(p.clip["anchor"])  # type: ignore[arg-type]
+            if start is None:
+                waiting.append(p)
+            elif start < 0:
+                raise MixDocError([Problem(f"{p.field}.anchor", f"puts the clip {-start / SR:.3f} s before the start of the episode")])
+            else:
+                p.start = start
+        if len(waiting) == len(unresolved):
+            raise MixDocError([Problem(f"{waiting[0].field}.anchor", "the anchors form a cycle: this clip is anchored, through others, to itself")])
+        unresolved = waiting
+    return when
 
 
-def rendered_from(timeline: Timeline) -> Rendered:
-    """The finished timeline as the mix's result: every line timed, the cues placed, normalised."""
-    total = timeline.finish()
-    audio, peak, _ = normalise(timeline.mixdown(0, total))
-    timed = sorted(timeline.lines, key=lambda line: int(line["i"]))  # type: ignore[call-overload]
-    return Rendered(audio=audio, lines=timed, cues=timeline.placed_cues, cues_generated=timeline.generated, cues_reused=timeline.reused, peak_before=peak)
+def render_document(manifest: Mapping[str, object], doc: Mapping[str, object], sources: Sources) -> Rendered:
+    """Renders `doc` with `manifest`'s lines and cues; raises `MixDocError` naming any field it cannot use."""
+    problems = validate(doc)
+    if not problems:
+        problems = check_against(doc, manifest)
+    if problems:
+        raise MixDocError(problems)
+    placed = _load(doc, manifest, sources)
+    when = _resolve(placed)
+    total = max((p.end for p in placed), default=0) + int(SR * END_PAD_SECONDS)
+    tracks = doc["tracks"]
+    settings = doc["master"]
+    assert isinstance(tracks, Mapping) and isinstance(settings, Mapping)
+    audio, peak, _ = master(_mix_range(placed, tracks, when, 0, total), settings)
+    return Rendered(
+        audio=audio,
+        lines=_line_timings(_lines(manifest), placed, sources),
+        cues=_cue_places(_cues(manifest), placed),
+        cues_generated=0,
+        cues_reused=0,
+        peak_before=peak,
+    )
 
 
 # --- the command --------------------------------------------------------------------------------
@@ -468,6 +848,8 @@ class MixRequest:
     episode: int
     cues_dir: Path
     version: int | None = None
+    document: Mapping[str, object] | None = None
+    """A hand-made mix document (`--from`): rendered, then written as the next mix version, `by: "human"`."""
 
 
 @dataclass
@@ -490,9 +872,10 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
     """Mixes a version into its episode file.
 
     `timeline` is a streamed episode's (AGT-1697): already built from this
-    version's takes as they passed, so it is finished and normalised rather
-    than built again; `extra` joins the manifest's `mix` block (the stream's
-    segments and time to first audio).
+    version's takes as they passed, so it is finished and put through the
+    master rather than built again, and its document is written as the next
+    mix version (`by: "auto"`); `extra` joins the manifest's `mix` block (the
+    stream's segments and time to first audio).
     """
     work, episode = request.work, request.episode
     found = versions(work, episode)
@@ -512,9 +895,44 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
             latest=found[-1],
         )
     started = time.monotonic()
-    library = CueLibrary(request.cues_dir, seams.generators)
+    sources = timeline.sources if timeline is not None else Sources(work, CueLibrary(request.cues_dir, seams.generators), seams.pacer, seams.log)
+    existing = mix_versions(work, episode)
+    superseded: int | None = None
+    new_doc: tuple[Mapping[str, object], str] | None = None  # (proposal, by) to write once the mix succeeds
     try:
-        rendered = render(work, manifest, library, seams.pacer, log=seams.log) if timeline is None else rendered_from(timeline)
+        if timeline is not None:
+            newest = read_mix(work, episode, existing[-1]) if existing else None
+            if newest is not None and newest.get("by") == "human":
+                superseded = existing[-1]
+            timeline.finish()
+            doc = {**timeline.document(), "manifest_version": version}
+            new_doc = (doc, "auto")
+            doc_name = f"mix.v{(existing[-1] if existing else 0) + 1}.json"
+        elif request.document is not None:
+            doc: Mapping[str, object] = {**request.document, "manifest_version": version}
+            new_doc = (doc, "human")
+            doc_name = f"mix.v{(existing[-1] if existing else 0) + 1}.json"
+        else:
+            newest = read_mix(work, episode, existing[-1]) if existing else None
+            if newest is not None:
+                problems = validate(newest)
+                if problems:
+                    raise MixDocError(problems, where=f"mix.v{existing[-1]}.json")
+            # An invalid newest document is refused above (a broken hand edit is never silently replaced); a valid
+            # one that no longer fits the manifest (its takes, or a line it anchors to) gives way to the auto mix.
+            if newest is not None and compatible(newest, manifest):
+                doc, doc_name = newest, f"mix.v{existing[-1]}.json"
+            else:
+                if newest is not None and newest.get("by") == "human":
+                    superseded = existing[-1]
+                doc = auto_document(manifest, sources)
+                new_doc = (doc, "auto")
+                doc_name = f"mix.v{(existing[-1] if existing else 0) + 1}.json"
+        # The stream's segments came from the timeline's own mixdown, which is `_mix_range` over the very clips the
+        # document holds: the episode file is that mixdown through the master, a document render of it the same.
+        rendered = timeline.rendered() if timeline is not None else render_document(manifest, doc, sources)
+        # The auto mix counts each cue it asks for; a document's render counts each asset it loads.
+        rendered.cues_generated, rendered.cues_reused = sources.generated, sources.reused
         duration = round(len(rendered.audio) / SR, 3)
         with tempfile.TemporaryDirectory(prefix="pablo-mix-") as scratch:
             wav = Path(scratch) / f"ep{episode:02d}.wav"
@@ -529,23 +947,39 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
                 "codec": f"aac {AAC_BITRATE // 1000} kb/s",
                 "cues_generated": rendered.cues_generated,
                 "cues_reused": rendered.cues_reused,
-                "wall": round(time.monotonic() - started, 3),
+                "document": doc_name,
                 **(extra or {}),
+                "wall": round(time.monotonic() - started, 3),
             }
             completed: dict[str, object] = {**manifest, "lines": rendered.lines, "cues": rendered.cues, "duration": duration, "mix": info}
-            if remix:
-                written = write_version(
-                    work,
-                    episode,
-                    {name: completed[name] for name in ("script_sha256", "cast_hash", "engine", "pace_policy", "cues", "duration", "rtf_total", "render", "ttfa", "mix", "lines") if name in completed},
-                    audio=encoded,
-                )
-                link_moved = True
-            else:
-                link_moved = not any(v > version for v in mixed)
-                written = attach_mix(work, episode, version, completed, encoded, link=link_moved)
+            # The document first (exclusively: a racing writer fails here, before any manifest changes), then the manifest.
+            try:
+                written_doc = write_mix(work, episode, new_doc[0], by=new_doc[1]) if new_doc is not None else None
+            except FileExistsError:
+                return _error(f"another mix of episode {episode} wrote {doc_name} first; run the mix again")
+            if written_doc is not None and written_doc.path.name != doc_name:
+                written_doc.path.unlink()
+                return _error(f"another mix of episode {episode} wrote {doc_name} first; run the mix again")
+            try:
+                if remix:
+                    written = write_version(
+                        work,
+                        episode,
+                        {name: completed[name] for name in ("script_sha256", "cast_hash", "engine", "pace_policy", "cues", "duration", "rtf_total", "render", "ttfa", "mix", "lines") if name in completed},
+                        audio=encoded,
+                    )
+                    link_moved = True
+                else:
+                    link_moved = not any(v > version for v in mixed)
+                    written = attach_mix(work, episode, version, completed, encoded, link=link_moved)
+            except BaseException:
+                if written_doc is not None:
+                    written_doc.path.unlink()  # this run's own new version, never one that was there before
+                raise
     except MixRefusal as refusal:
         return _refused(str(refusal), **refusal.extra)
+    except MixDocError as invalid:
+        return _refused(str(invalid), **invalid.extra)
     except (CueUnavailable, SoxUnavailable) as missing:
         return _refused(str(missing))
     except ManifestError as failure:
@@ -572,10 +1006,15 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
         "cuesGenerated": rendered.cues_generated,
         "cuesReused": rendered.cues_reused,
         "cueLibrary": str(request.cues_dir),
+        "mixDocument": str(written_doc.path if written_doc is not None else episode_dir(work, episode) / doc_name),
+        "mixBy": new_doc[1] if new_doc is not None else doc.get("by"),
+        "mixWritten": written_doc is not None,
+        "supersededMix": superseded,
         "wall": info["wall"],
         "message": (
             f"episode {episode} v{out_version}: {duration:.1f} s, {len(rendered.lines)} lines, {len(rendered.cues)} cues "
-            f"({rendered.cues_generated} generated, {rendered.cues_reused} reused) -> {audio_name}"
+            f"({rendered.cues_generated} generated, {rendered.cues_reused} reused) from {doc_name} -> {audio_name}"
+            + (f"; mix.v{superseded}.json (by: human) does not fit this version's takes and was not used" if superseded else "")
         ),
     }, EXIT_OK
 
@@ -667,6 +1106,7 @@ def cmd_mix(
     library: str | None,
     vault: str | None,
     seams: Seams,
+    document: str | None = None,
 ) -> Result:
     if work is None:
         return _refused("mix needs --work <dir> (the work whose episode to mix)")
@@ -680,8 +1120,21 @@ def cmd_mix(
         return _error(f"--episode must be a positive integer, got {number}")
     if version is not None and version < 1:
         return _error(f"--version must be a positive integer, got {version}")
+    doc: Mapping[str, object] | None = None
+    if document is not None:
+        try:
+            loaded = json.loads(Path(document).read_text(encoding="utf-8"))
+        except OSError as unreadable:
+            return _error(f"--from {document}: {unreadable}")
+        except json.JSONDecodeError as broken:
+            return _refused(f"--from {document} is not JSON: {broken}", field="(document)")
+        problems = validate(loaded)
+        if problems:
+            invalid = MixDocError(problems, where=f"--from {document}")
+            return _refused(str(invalid), **invalid.extra)
+        doc = loaded
     root = cues_dir_for(work, cues, library, vault)
-    return mix(MixRequest(work=work, episode=number, cues_dir=root, version=version), seams)
+    return mix(MixRequest(work=work, episode=number, cues_dir=root, version=version, document=doc), seams)
 
 
-__all__ = ["MixRequest", "Seams", "check_timings", "cmd_mix", "mix", "render"]
+__all__ = ["MixRequest", "Seams", "Sources", "Timeline", "auto_document", "auto_timeline", "check_timings", "cmd_mix", "master", "mix", "render_document"]
