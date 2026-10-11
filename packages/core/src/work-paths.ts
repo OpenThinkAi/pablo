@@ -31,7 +31,12 @@ export function beatsFile(workRoot: string): string {
   return existsSync(join(workRoot, BEATS_FILE)) ? BEATS_FILE : LEGACY_BEATS_FILE;
 }
 
-/** The work-relative (forward-slash) path of the novel's continuity ledger. */
+/**
+ * The work-relative (forward-slash) path of the **novel** output's continuity
+ * ledger. Novel-only on purpose: per-output ledgers for other types
+ * (`outputs/<type>/continuity.md`) come with pablo-story-core S7, which gives
+ * this an output parameter; until then no other output has a ledger to find.
+ */
 export function continuityFile(workRoot: string): string {
   return existsSync(join(workRoot, NOVEL_CONTINUITY_FILE)) ? NOVEL_CONTINUITY_FILE : LEGACY_CONTINUITY_FILE;
 }

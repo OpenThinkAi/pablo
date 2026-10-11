@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readDraftingInputs } from "@openthink/pablo-core";
-import { readTool } from "../src/harness-tools";
+import { readTool, searchTool } from "../src/harness-tools";
 import { readMarker } from "../src/marker";
 import { MIGRATE_OUTPUTS_COMMIT_MESSAGE, migrateOutputs, novelRules, type OutputsChange } from "../src/migrate-outputs";
 import { chapterPreconditions, readNovelState } from "../src/novel/machine";
@@ -304,6 +304,11 @@ test("after migration status, preconditions, resume, the pack and the harness re
     const read = readTool(work, asked);
     expect(read.ok && read.kind).toBe("continuity");
   }
+  // search walks the moved ledger (a file, not a directory, among its areas) and the renamed beats file.
+  const search = searchTool(work, "Dorcas");
+  expect(search.ok && search.matches.map((m) => m.file)).toContain("outputs/novel/continuity.md");
+  const beatsHit = searchTool(work, "Black Ice");
+  expect(beatsHit.ok && beatsHit.matches.map((m) => m.file)).toContain("outline/beats.md");
 
   const dry = runCli(["write", "--project", "ice-house", "--chapter", "2", "--dry-run", "--json"], vault);
   expect(dry.exitCode).toBe(0);
