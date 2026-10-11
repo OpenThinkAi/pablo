@@ -23,6 +23,7 @@ export function activityOf(tool: string, input: unknown): string {
     case "WebSearch": return `researching${about("", a["query"])}`;
     case "WebFetch": return `researching${about("", a["url"])}`;
     case "draft_chapter": case "write": return `drafting${chapterOf(a) || " prose"} on Gemma`;
+    case "draft_unit": return `drafting ${text(a["output"]) || "an output"} ${String(a["n"] ?? "")}`.trimEnd() + " on Gemma";
     case "revise": return `revising${chapterOf(a) || " a passage"} on Gemma`;
     case "check": return "checking the prose";
     case "save": return "saving";

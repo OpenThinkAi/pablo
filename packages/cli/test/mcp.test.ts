@@ -61,7 +61,7 @@ function parseTextBody(result: unknown): unknown {
 // already an MCP tool before this ticket (AGT-1241); AC1's "five existing
 // tools" are resume/status/write/save/check. AGT-1264 adds `revise`, also
 // project-scoped.
-const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search"]);
+const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search"]);
 
 test("listTools returns the project-scoped verbs, prose, and the five narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
@@ -73,7 +73,9 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "check",
     "critique",
     "draft_chapter",
+    "draft_unit",
     "migrate",
+    "output",
     "prose",
     "publish",
     "read",
@@ -97,6 +99,19 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     const properties = (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
     expect("project" in properties).toBe(true);
   }
+});
+
+// AGT-1669 AC3: the MCP `write` tool's schema shows `output` (and `unit`), straight off `verbs.ts`;
+// `draft_unit` takes the output and the unit number, and `draft_chapter` stays.
+test("the write tool's schema carries output and unit; draft_unit carries output and n", async () => {
+  const { tools } = await client.listTools();
+  const propsOf = (name: string): string[] =>
+    Object.keys((tools.find((t) => t.name === name)?.inputSchema as { properties?: Record<string, unknown> }).properties ?? {});
+  expect(propsOf("write")).toEqual(expect.arrayContaining(["output", "unit", "chapter"]));
+  expect(propsOf("draft_unit")).toEqual(expect.arrayContaining(["project", "output", "n", "direction"]));
+  expect(propsOf("draft_chapter")).toContain("chapter");
+  expect(propsOf("check")).toContain("output");
+  expect(propsOf("publish")).toContain("output");
 });
 
 // AC1: each voice_* tool's schema carries ONLY its own arguments — not a

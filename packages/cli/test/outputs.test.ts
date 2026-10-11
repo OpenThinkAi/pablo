@@ -13,7 +13,7 @@ import { join, relative, sep } from "node:path";
 import { readMarker } from "../src/marker";
 import { ConformanceError, missingFields, runConformance } from "../src/outputs/conformance";
 import { NOVEL } from "../src/outputs/novel";
-import { OUTPUTS, outputForWork, outputIds, workOutput } from "../src/outputs/registry";
+import { OUTPUTS, outputDefinition, outputForWork, outputIds, workOutput } from "../src/outputs/registry";
 import type { OutputDefinition } from "../src/outputs/types";
 
 const FIXTURE = join(import.meta.dir, "fixtures", "conformance");
@@ -62,7 +62,7 @@ async function conform(def: unknown) {
 
 for (const id of outputIds()) {
   test(`OUTPUTS.${id} passes the conformance run over the four-beat fixture`, async () => {
-    const report = await conform(OUTPUTS[id]);
+    const report = await conform(outputDefinition(id));
     expect(report.units).toEqual([1, 2, 3, 4]);
     expect(existsSync(report.published)).toBe(true);
   });
