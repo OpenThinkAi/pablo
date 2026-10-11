@@ -313,3 +313,105 @@ export function runAudition(args: { readonly dryRun: boolean }, ctx: CastingCont
   const result = runPython(ready.layout, deps, ctx, ["audition", "--dry-run"]);
   return { body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) }, exitCode: result.exitCode };
 }
+
+/** Asks the author a yes/no question on the terminal; the CLI passes one only when stdin and stdout are a TTY. */
+export type Confirm = (question: string) => Promise<boolean>;
+
+interface GcEntry {
+  readonly key: string;
+  readonly bytes?: number;
+  readonly created?: string;
+}
+
+/**
+ * `pablo takes show <key>` and `pablo takes gc` (AGT-1681): the take store of
+ * the work's radio output (`outputs/radio/casting/takes/`). Both need a work.
+ *
+ * `gc` always lists first: the takes no manifest version references. With
+ * `yes` (`--yes`) it archives exactly the listed keys; otherwise, with a
+ * terminal (`confirm`), it asks; without one it refuses (exit 2) and names
+ * `--yes`. Archiving moves a take into `archive/takes/<stamp>/`; nothing is
+ * deleted.
+ */
+export async function runTakes(
+  args: { readonly sub: string | undefined; readonly key: string | undefined; readonly yes: boolean },
+  ctx: CastingContext,
+  deps: CastingDeps,
+  work: string | undefined,
+  confirm?: Confirm,
+): Promise<VerbResult> {
+  if (args.sub !== "show" && args.sub !== "gc") {
+    return failure(`pablo: takes needs a subcommand: \`takes show <key>\` or \`takes gc\`${args.sub ? ` (got "${args.sub}")` : ""}`);
+  }
+  if (work === undefined) return refusal(`pablo: takes ${args.sub} needs --project <slug>: takes live in the work's outputs/radio/casting/`, ["--project"]);
+  if (args.sub === "show" && !args.key) return failure("pablo: usage: pablo takes show <key> --project <slug>");
+
+  const ready = ensureProvisioned(ctx, deps, work);
+  if (!ready.ok) return ready.result;
+  if (args.sub === "show") return runPython(ready.layout, deps, ctx, ["takes", "show", args.key as string, "--work", work]);
+
+  const listed = runPython(ready.layout, deps, ctx, ["takes", "gc", "--work", work]);
+  if (listed.exitCode !== EXIT_OK) return listed;
+  const keys = ((listed.body as { unreferenced?: readonly GcEntry[] }).unreferenced ?? []).map((entry) => entry.key);
+  if (keys.length === 0) return listed;
+
+  if (!args.yes) {
+    if (confirm === undefined) {
+      return {
+        body: {
+          ...(listed.body as object),
+          ok: false,
+          code: EXIT_REFUSED,
+          message: `pablo: ${keys.length} take(s) no manifest references; pass --yes to archive them (moved to archive/takes/, never deleted)`,
+          missing: ["--yes"],
+        },
+        exitCode: EXIT_REFUSED,
+      };
+    }
+    ctx.stderr.write(`${takesGcText(listed.body)}\n`);
+    if (!(await confirm(`Archive these ${keys.length} take(s) into archive/takes/? [y/N] `))) {
+      return { body: { ...(listed.body as object), declined: true }, exitCode: EXIT_OK };
+    }
+  }
+  // Exactly the keys the author saw: a take referenced since the listing is skipped, not moved.
+  return runPython(ready.layout, deps, ctx, ["takes", "gc", "--work", work, "--yes", ...keys.flatMap((key) => ["--key", key])]);
+}
+
+/** Plain-text `pablo takes show`. */
+export function takeShowText(body: unknown): string {
+  const take = body as Record<string, unknown>;
+  const inputs = (take["inputs"] ?? {}) as Record<string, unknown>;
+  const engine = (inputs["engine"] ?? {}) as Record<string, unknown>;
+  const lines = (inputs["lines"] ?? []) as readonly { speaker: string; text: string }[];
+  const timings = (take["timings"] ?? {}) as Record<string, unknown>;
+  const words = (timings["words"] ?? []) as readonly { word: string; start: number; end: number }[];
+  const audio = (take["audio"] ?? {}) as Record<string, unknown>;
+  return [
+    `take ${String(take["key"])}`,
+    `  status:    ${String(take["status"])} (attempt ${String(take["attempt"])}, seed ${String(take["seed"])})`,
+    `  receipt:   ${String(take["receipt"])}`,
+    `  created:   ${String(take["created"])}`,
+    `  engine:    ${String(engine["id"])} (weights ${String(engine["weights_sha256"]).slice(0, 12)}, mlx-audio ${String(engine["mlx_audio"])}, mlx ${String(engine["mlx"])})`,
+    `  voice:     ${String(inputs["voice"])}`,
+    `  direction: ${JSON.stringify(inputs["direction"] ?? {})}`,
+    `  params:    ${JSON.stringify(inputs["params"] ?? {})}`,
+    "  lines:",
+    ...lines.map((line) => `    ${line.speaker}: ${line.text}`),
+    `  scores:    ${JSON.stringify(take["scores"] ?? {})}`,
+    `  timings:   wall ${String(timings["wall"])} s, audio ${String(audio["duration"])} s, rtf ${String(timings["rtf"])}`,
+    `  words:     ${words.map((w) => `${w.word}@${w.start}`).join(" ")}`,
+    `  path:      ${String(take["path"])}`,
+  ].join("\n");
+}
+
+/** Plain-text `pablo takes gc`. */
+export function takesGcText(body: unknown): string {
+  const gc = body as { unreferenced?: readonly GcEntry[]; archived?: readonly { key: string; to: string }[]; referenced?: number; declined?: boolean };
+  const archived = gc.archived ?? [];
+  if (archived.length > 0) return [`archived ${archived.length} take(s):`, ...archived.map((entry) => `  ${entry.key} -> ${entry.to}`)].join("\n");
+  const unreferenced = gc.unreferenced ?? [];
+  if (unreferenced.length === 0) return `no unreferenced takes (${gc.referenced ?? 0} referenced by manifests)`;
+  const listing = [`${unreferenced.length} take(s) no manifest references:`, ...unreferenced.map((entry) => `  ${entry.key}  ${entry.bytes ?? "?"} bytes  ${entry.created ?? ""}`)];
+  if (gc.declined) listing.push("nothing archived");
+  return listing.join("\n");
+}

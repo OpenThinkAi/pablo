@@ -133,6 +133,17 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `<work>/.pablo/casting/receipts.jsonl`. Its tests are pytest;
                 the default run is model-free, `-m models` marks the
                 hand-run ones.
+                The take store (`takes.py`, AGT-1681): takes are
+                content-addressed (`takes/<key>/take.wav` + `take.json`,
+                key = sha256 of the canonical inputs), written once through
+                a staging rename and read-only after; nothing deletes or
+                rewrites one, and `pablo takes gc` only *moves* unreferenced
+                takes into `archive/takes/<stamp>/` after listing them and
+                asking (`--yes` without a terminal). `manifest.py` is the
+                only writer of `renders/epNN/v<k>.json`: it refuses (exit 1,
+                nothing written) a version whose changed takes are not a
+                subset of the applied flags' lines. `fake_engine.py` is the
+                model-free engine (silence of the right shape) until C11.
 ```
 
 `packages/core/test/tty-free.test.ts` enforces the split — it walks
