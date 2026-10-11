@@ -204,6 +204,55 @@ describe("argv to the Python side", () => {
     expect(calls).toEqual([]);
   });
 
+  test("cast --auto --design (AGT-1699) provisions the scorers extra and passes the harness's role traits", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    const verb = verbsOver(deps)["cast"]!;
+    const traits = '{"RAMON":{"gender":"m","age":"70s"}}';
+    const result = await verb.run({ auto: true, design: true, "role-traits": traits, all: false, recast: false, project: "ice-house" }, ctxIn(vault));
+    expect(result.exitCode).toBe(0);
+    expect(calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]);
+    expect(lastPython(calls)).toEqual([
+      "cast",
+      "--auto",
+      "--design",
+      `--role-traits=${traits}`,
+      `--vault=${vault}`,
+      "--work",
+      join(vault, "novels", "ice-house"),
+      "--json",
+    ]);
+  });
+
+  test("--design and --role-traits without --auto (or role-traits without design) are refused; nothing runs", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    const verb = verbsOver(deps)["cast"]!;
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ auto: false, design: true, all: false, recast: false, role: "CORA", candidate: 1 }, "with --auto"],
+      [{ auto: true, design: false, "role-traits": "{}", all: false, recast: false, project: "ice-house" }, "only applies with --auto --design"],
+    ];
+    for (const [args, message] of cases) {
+      const result = await verb.run(args as never, ctxIn(vault));
+      expect(result.exitCode).toBe(2);
+      expect((result.body as { message: string }).message).toContain(message);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test("describe_voice (AGT-1699) is one VERBS entry and MCP tool, and passes the description and gender", async () => {
+    expect(VERBS.filter((v) => v.name === "describe_voice")).toHaveLength(1);
+    expect(mcpTools().filter((t) => t.name === "describe_voice")).toHaveLength(1);
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    const result = await verbsOver(deps)["describe_voice"]!.run({ describe: "seventies, smells of the sea", gender: "m", role: "RAMON" }, ctxIn(vault));
+    expect(result.exitCode).toBe(0);
+    expect(lastPython(calls)).toEqual(["describe", "--describe=seventies, smells of the sea", "--gender=m", "--role=RAMON", `--vault=${vault}`, "--json"]);
+    const text = castingText("describe_voice", { ok: true, message: "not in the vocabulary: smells of the sea", traits: { gender: "m", age: "70s" }, instruct: "A man in his seventies." });
+    expect(text).toContain("traits: gender=m age=70s");
+    expect(text).toContain("instruct: A man in his seventies.");
+  });
+
   test("voices passes its subcommand and slug as positionals", async () => {
     const { deps, calls } = fakeMachine();
     const vault = vaultCopy();
@@ -320,7 +369,15 @@ describe("CLI argv to verb args", () => {
     const parsed = parseCliArgs(["cast", "--auto", "--project", "ice-house", "--episode", "3"]);
     expect(verbArgsFromCli(verb("cast"), parsed.values, parsed.rest)).toEqual({
       ok: true,
-      args: { project: "ice-house", auto: true, episode: 3, all: false, recast: false },
+      args: { project: "ice-house", auto: true, design: false, episode: 3, all: false, recast: false },
+    });
+  });
+
+  test("cast --auto --design --role-traits parses to the verb's args (AGT-1699)", () => {
+    const parsed = parseCliArgs(["cast", "--auto", "--design", "--project", "ice-house", "--role-traits", '{"RAMON":{"gender":"m"}}']);
+    expect(verbArgsFromCli(verb("cast"), parsed.values, parsed.rest)).toEqual({
+      ok: true,
+      args: { project: "ice-house", auto: true, design: true, "role-traits": '{"RAMON":{"gender":"m"}}', all: false, recast: false },
     });
   });
 
@@ -385,6 +442,15 @@ describe("the CLI", () => {
     expect(auto).toContain("NELL -> maren (match, score 0.667)  REVIEW");
     expect(auto).toContain("EDWIN -> edwin (manual)  PIN CHANGED");
     expect(auto).toContain("RAMON: needs a designed voice (the best match, tom, scored 0.143, below 0.6)");
+    const designed = castingText("cast", {
+      ok: true,
+      message: "designed and admitted RAMON -> ramon",
+      bindings: [{ role: "RAMON", slug: "ramon", by: "design", score: null, runnerUp: null, review: false, new: true }],
+      needsDesign: [],
+      designed: [{ role: "RAMON", slug: "ramon", hash: "fedcba9876543210", round: 2, candidate: 9 }],
+    });
+    expect(designed).toContain("RAMON -> ramon (design)");
+    expect(designed).toContain("RAMON: designed ramon (round 2, candidate 9), card fedcba987654");
   });
 });
 

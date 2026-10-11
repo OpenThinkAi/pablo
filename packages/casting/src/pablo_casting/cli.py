@@ -26,6 +26,17 @@ Commands:
              `matching.py`): bind every unbound described role to the best
              distinct non-retired library voice, `review` in the middle band;
              the rest come back as `needsDesign`. No model is loaded.
+- `cast --auto --design --work W [-n 6] [--designer qwen3|voxcpm2]
+             [--engine chatterbox-turbo|dia] [--seed S] [--role-traits JSON]`
+             design on demand (AGT-1699, `design.py`): every role the matcher
+             could not fill gets a voice auditioned unattended, screened,
+             trialled through the engine and the full gate stack, admitted with
+             `admitted.by: auto` and bound `by: design`; one retry with a
+             re-phrased instruct, then a refusal (exit 2) naming the role.
+- `describe --describe "..." [--role R] [--gender f|m|x]`  the `CAST:`
+             mapper's traits for a description, the phrases it could not
+             normalise, the traits vocabulary and the designer instruct it
+             becomes (the harness's `describe_voice`). No model is loaded.
 - `voices list [--auto-admitted]`, `voices show <slug>`, `voices retire <slug>
              [--reason T]`  read the library; retire marks a voice unmatchable
              without changing its card hash.
@@ -122,7 +133,7 @@ Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "cast", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix")
 VOICES_SUBCOMMANDS = ("list", "show", "retire")
 DEFAULT_CANDIDATES = 6
 
@@ -172,6 +183,9 @@ def _parser() -> _Parser:
     parser.add_argument("--candidate", type=int)
     parser.add_argument("--recast", action="store_true")
     parser.add_argument("--auto", action="store_true")
+    parser.add_argument("--design", action="store_true")
+    parser.add_argument("--role-traits", dest="role_traits")
+    parser.add_argument("--gender")
     parser.add_argument("--all", action="store_true", dest="all_episodes")
     parser.add_argument("--notes")
     parser.add_argument("--by")
@@ -325,6 +339,8 @@ def cmd_cast(env: Mapping[str, str], args: argparse.Namespace, work: Path | None
             "pablo cast has no --from-wav: voices are synthetic only, and a card's reference comes from "
             "a designer (`pablo audition`), never from a recording"
         )
+    if args.design or args.role_traits is not None:
+        return refused("--design and --role-traits design voices for an auto-cast: pass them with cast --auto")
     if not args.role and not args.slug:
         return refused("cast needs --role (or --slug)", missing=["--role"])
     if args.candidate is None:
@@ -342,7 +358,55 @@ def cmd_cast(env: Mapping[str, str], args: argparse.Namespace, work: Path | None
     return cast(library, request, toolkits(env, config), config.engines, now, work), EXIT_OK
 
 
-def cmd_auto_cast(env: Mapping[str, str], args: argparse.Namespace, work: Path | None) -> Result:
+def _role_traits(raw: str | None) -> dict[str, dict[str, object]]:
+    """`--role-traits '{"RAMON": {"gender": "m", ...}}'`: the harness's traits for roles the mapper could not normalise."""
+    if raw is None:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as bad:
+        raise TraitsError(f"--role-traits is not valid JSON: {bad}") from bad
+    if not isinstance(value, dict) or not all(isinstance(k, str) and isinstance(v, dict) for k, v in value.items()):
+        raise TraitsError('--role-traits must map role names to traits blocks, e.g. {"RAMON": {"gender": "m", "age": "70s"}}')
+    return {name.strip().upper(): dict(block) for name, block in value.items()}
+
+
+def cmd_describe(args: argparse.Namespace) -> Result:
+    """The harness's `describe_voice`: what the deterministic mapper makes of a description, and the vocabulary."""
+    from pablo_casting.traits import describe_traits, normalise, vocabulary_body
+
+    if not args.describe or not args.describe.strip():
+        return refused("describe needs --describe \"...\" (the role's description)", missing=["--describe"])
+    if args.gender is not None and args.gender not in ("f", "m", "x"):
+        return refused(f"--gender must be f, m or x (got {args.gender!r})")
+    mapped = normalise(args.role or "", args.gender, args.describe)
+    traits = dict(mapped.traits)
+    if "gender" not in traits and args.gender is not None:
+        traits = {"gender": args.gender, **traits}
+    return {
+        "ok": True,
+        "description": args.describe.strip(),
+        "traits": traits,
+        "freeText": list(mapped.free_text),
+        "normalised": not mapped.free_text,
+        "instruct": describe_traits(traits, mapped.free_text),
+        "vocabulary": vocabulary_body(),
+        "message": (
+            "every phrase maps to the traits vocabulary"
+            if not mapped.free_text
+            else f"not in the vocabulary: {'; '.join(mapped.free_text)}. Choose traits for them and pass them to `cast --auto --design` as role-traits"
+        ),
+    }, EXIT_OK
+
+
+def cmd_auto_cast(
+    env: Mapping[str, str],
+    args: argparse.Namespace,
+    work: Path | None,
+    toolkits: ToolkitFactory,
+    engines: EngineFactory | None,
+    scorers: ScorerFactory | None,
+) -> Result:
     from pablo_casting.matching import auto_cast, thresholds_from
 
     manual = [flag for flag, given in (("--role", args.role is not None), ("--candidate", args.candidate is not None), ("--recast", args.recast), ("--from-wav", args.from_wav is not None)) if given]
@@ -352,16 +416,70 @@ def cmd_auto_cast(env: Mapping[str, str], args: argparse.Namespace, work: Path |
         return refused("cast --auto needs --work <dir> (the work whose scripts name the roles)", missing=["--work"])
     if args.episode is not None and args.all_episodes:
         return refused("cast --auto takes --episode N or --all, not both")
+    design_only = [
+        flag
+        for flag, given in (
+            ("--role-traits", args.role_traits is not None),
+            ("-n", args.n is not None),
+            ("--designer", args.designer is not None),
+            ("--seed", args.seed is not None),
+            ("--engine", args.engine is not None),
+        )
+        if given
+    ]
+    if design_only and not args.design:
+        return refused(f"{', '.join(design_only)} only apply with cast --auto --design")
     try:
         episode = None if args.episode is None else int(args.episode)
     except ValueError:
         return error(f"--episode must be an integer, got {args.episode!r}")
     config = load_config(env)
     thresholds = thresholds_from(config.matching)
+    library = _library(config, args)
+    if not args.design:
+        try:
+            return auto_cast(work, library, episode, thresholds, now), EXIT_OK
+        except BindingRefusal as refusal:
+            return refused(str(refusal))
+
+    from pablo_casting.audition import MAX_CANDIDATES
+    from pablo_casting.design import DEFAULT_CANDIDATES, DesignRefusal, DesignSettings, Machine, design_needed
+    from pablo_casting.engines import DEFAULT_ENGINE, ENGINE_SPECS
+
+    designer = args.designer or DEFAULT_DESIGNER
+    if designer not in DESIGNER_NAMES:
+        return refused(f'unknown designer "{designer}": one of {", ".join(DESIGNER_NAMES)}')
+    engine = args.engine or DEFAULT_ENGINE
+    if engine not in ENGINE_SPECS:
+        return refused(f'unknown engine "{engine}": one of {", ".join(ENGINE_SPECS)}')
+    n = DEFAULT_CANDIDATES if args.n is None else args.n
+    if not 1 <= n <= MAX_CANDIDATES:
+        return refused(f"-n must be between 1 and {MAX_CANDIDATES} (got {n})")
+    if args.seed is not None and args.seed < 0:
+        return refused(f"--seed must be a non-negative integer (got {args.seed})")
+    overrides = _role_traits(args.role_traits)
+    settings = DesignSettings(
+        designer=designer,
+        engine=engine,
+        seed=args.seed if args.seed is not None else int.from_bytes(os.urandom(3), "big"),
+        n=n,
+        distinct=thresholds.distinct,
+    )
+    machine = Machine(
+        toolkit=toolkits(env, config),
+        engine_factory=engines or real_engine,
+        scorer_factory=scorers or real_scorers,
+        engines_config=config.engines,
+        env=env,
+        now=now,
+    )
     try:
-        return auto_cast(work, _library(config, args), episode, thresholds, now), EXIT_OK
+        body = auto_cast(work, library, episode, thresholds, now)
+        return design_needed(work, library, body, overrides, settings, machine)
     except BindingRefusal as refusal:
         return refused(str(refusal))
+    except DesignRefusal as refusal:
+        return refused(str(refusal), **refusal.extra)
 
 
 def cmd_voices(env: Mapping[str, str], args: argparse.Namespace) -> Result:
@@ -644,7 +762,9 @@ def run(
         if args.command == "audition":
             return cmd_audition(env, args, work, toolkit_factory), args.json
         if args.command == "cast" and args.auto:
-            return cmd_auto_cast(env, args, work), args.json
+            return cmd_auto_cast(env, args, work, toolkit_factory, engines, scorers), args.json
+        if args.command == "describe":
+            return cmd_describe(args), args.json
         if args.command == "cast":
             return cmd_cast(env, args, work, toolkit_factory), args.json
         if args.command == "voices":

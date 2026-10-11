@@ -214,3 +214,82 @@ def parse_traits(raw: str | Mapping[str, object] | None) -> dict[str, object]:
 def require_gender(traits: Mapping[str, object]) -> None:
     if "gender" not in traits:
         raise TraitsError('a card\'s traits need at least a gender (matching filters on it): pass --traits \'{"gender": "f", ...}\'')
+
+
+# ---------------------------------------------------------------------------
+# Traits -> a designer instruct (AGT-1699): the reverse of the mapper above.
+# Design on demand describes a voice to the designer from its traits block, so
+# the instruct is written in the same vocabulary the card will carry. Two
+# phrasings: the first round uses variant 0, the retry re-phrases (variant 1).
+# ---------------------------------------------------------------------------
+
+_GENDER_NOUN = {"f": ("woman", "her", "female"), "m": ("man", "his", "male"), "x": ("person", "their", "androgynous")}
+_AGE_PHRASE = {
+    "teen": "in {pos} teens",
+    "20s": "in {pos} twenties",
+    "30s": "in {pos} thirties",
+    "40s": "in {pos} forties",
+    "50s": "in {pos} fifties",
+    "60s": "in {pos} sixties",
+    "70s": "in {pos} seventies",
+}
+_AGE_ADJECTIVE = {
+    "child": "child's", "teen": "teenage", "20s": "young", "30s": "thirty-something",
+    "40s": "forty-something", "50s": "middle-aged", "60s": "older", "70s": "elderly",
+}  # fmt: skip
+_ERA_PHRASE = {"period": "an old-fashioned, period manner", "modern": "a contemporary manner"}
+
+INSTRUCT_VARIANTS = 2
+"""How many phrasings `describe_traits` has: one per design round (the first try and the one retry)."""
+
+
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def describe_traits(traits: Mapping[str, object], free_text: tuple[str, ...] | list[str] = (), variant: int = 0) -> str:
+    """A designer instruct from a traits block, in plain words. Deterministic; `variant` re-phrases.
+
+    Free-text phrases the mapper could not normalise are carried through as they
+    were written, so nothing the writer asked for is dropped.
+    """
+    noun, pos, adjective = _GENDER_NOUN.get(str(traits.get("gender") or "x"), _GENDER_NOUN["x"])
+    age, pitch, energy = _text(traits.get("age")), _text(traits.get("pitch")), _text(traits.get("energy"))
+    warmth, register, era = _text(traits.get("warmth")), _text(traits.get("register")), _text(traits.get("era"))
+    raw_roles = traits.get("roles")
+    roles = [r for r in raw_roles if isinstance(r, str) and r] if isinstance(raw_roles, list) else []
+    extra = [phrase.strip() for phrase in free_text if phrase.strip()]
+
+    if variant % INSTRUCT_VARIANTS == 0:
+        head = "A child" if age == "child" else f"A {noun}" + (f" {_AGE_PHRASE[age].format(pos=pos)}" if age in _AGE_PHRASE else "")
+        parts = [head + (f", with a {pitch}-pitched voice" if pitch else "")]
+        manner = [v for v in (energy, warmth) if v] + ([f"{register} in delivery"] if register else [])
+        if manner:
+            parts.append(", ".join(manner))
+        if era in _ERA_PHRASE:
+            parts.append(_ERA_PHRASE[era])  # type: ignore[index]
+        if roles:
+            parts.append(f"suited to a {' or '.join(roles)}")
+        parts.extend(extra)
+        return "; ".join(parts) + "."
+
+    # The re-phrase: a different order and different words over the same vocabulary.
+    lead = " ".join(w for w in (_AGE_ADJECTIVE.get(age or "", ""), adjective, "voice") if w)
+    sentences = [lead[0].upper() + lead[1:] + (f", {pitch} in pitch" if pitch else "") + "."]
+    how = ([f"a {register} delivery"] if register else []) + ([f"{warmth} in tone"] if warmth else []) + ([f"{energy} in pace"] if energy else [])
+    if how:
+        sentences.append("Speaks " + ("with " if register else "") + ", ".join(how) + ".")
+    if era is not None:
+        sentences.append("Sounds of another era." if era == "period" else "Sounds of today.")
+    if roles:
+        sentences.append(f"Cast as the {' and '.join(roles)}.")
+    sentences.extend(phrase[0].upper() + phrase[1:] + ("" if phrase.endswith(".") else ".") for phrase in extra)
+    return " ".join(sentences)
+
+
+def vocabulary_body() -> dict[str, object]:
+    """The traits vocabulary as the harness's `describe_voice` tool returns it: the closed fields and the one open one."""
+    return {
+        **{name: list(values) for name, values in TRAIT_VOCABULARY.items()},
+        "roles": "open: short lowercase role kinds, e.g. lead, bookkeeper",
+    }

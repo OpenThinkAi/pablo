@@ -36,13 +36,14 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the twenty-eight verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the thirty-one verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "audition",
     "bind",
     "cast",
     "check",
     "critique",
+    "describe_voice", // AGT-1699
     "draft_chapter",
     "draft_unit",
     "fix", // AGT-1685
@@ -71,6 +72,7 @@ test("VERBS exposes exactly the twenty-eight verbs, each project-required verb r
   ]);
   for (const v of VERBS) {
     if (v.name === "voice" || v.name === "prose") continue; // neither resolves via a --project slug (AGT-1240, AGT-1241)
+    if (v.name === "describe_voice") continue; // a pure mapping of a description to the traits vocabulary: no work (AGT-1699)
     // The voice library is shared across works (AGT-1679): project is optional, for receipts only.
     // `story` (AGT-1690) creates its work from a prompt; project only resumes a run.
     if (v.name === "audition" || v.name === "cast" || v.name === "voices" || v.name === "story") {
@@ -167,6 +169,9 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     "json-lines": { type: "boolean", default: false }, // AGT-1683: perform --json-lines
     version: { type: "string" }, // AGT-1684: mix --version k (cli.ts reads it as --mix-version; elsewhere --version prints the version)
     stream: { type: "boolean", default: false }, // AGT-1697: perform --stream (perform --all reuses `all`)
+    design: { type: "boolean", default: false }, // AGT-1699: cast --auto --design
+    "role-traits": { type: "string" }, // AGT-1699: cast --auto --design --role-traits
+    gender: { type: "string" }, // AGT-1699: describe_voice --gender
   });
 });
 
