@@ -26,23 +26,23 @@
 import type { Outputs } from "../marker";
 import { readMarker } from "../marker";
 import { NOVEL } from "./novel";
+import { RADIO } from "./radio";
 import { STORY } from "./story";
 import type { OutputDefinition } from "./types";
 
 export const OUTPUTS = {
   novel: NOVEL,
   story: STORY,
+  radio: RADIO,
 } as const satisfies Readonly<Record<string, OutputDefinition>>;
 
 /** An output type's id: a key of `OUTPUTS` (or of a type a test registered). */
 export type OutputId = string;
 
 /**
- * Types registered at run time by `registerOutput`: tests only. A two-output
- * work needs a second type before `radio` (pablo-casting) and `story`
- * (pablo-story-core S11) are rows of `OUTPUTS`, so the addressing tests
- * register fixture types here and remove them after. Production types are
- * rows of `OUTPUTS`, never registered.
+ * Types registered at run time by `registerOutput`: tests only (a fixture
+ * type such as a `blog`, to exercise a type pablo does not ship). Production
+ * types are rows of `OUTPUTS` (`novel`, `story`, `radio`), never registered.
  */
 const registered = new Map<string, OutputDefinition>();
 

@@ -16,13 +16,17 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ensureProvisioned, realCastingDeps, runPython } from "./casting";
+import { castingState, ensureProvisioned, realCastingDeps, runPython, UV_INSTALL } from "./casting";
 import { OUTPUTS } from "./outputs/registry";
 import type { CastingContext, CastingDeps } from "./casting";
 import type { VerbResult } from "./verbs";
 
-/** The one way the rest of the cli gets the real runner and its types: through here, so only a radio work reaches it. */
-export { realCastingDeps };
+/**
+ * The one way the rest of the cli gets the real runner and its types: through here, so only a radio work reaches it.
+ * The radio output type (`outputs/radio/casting-side.ts`, AGT-1686) reads the venv's state through `castingState`,
+ * which only reads a stamp file.
+ */
+export { castingState, realCastingDeps, UV_INSTALL };
 export type { CastingDeps };
 
 const EPISODE_FILE = /^\d+-.*\.md$/;

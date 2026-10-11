@@ -1,7 +1,6 @@
 /**
  * Per-output continuity, `facts.md` promotion and `pablo check --across` (AGT-1671, pm project `pablo-story-core`,
- * S7). `radio` is not a row of `OUTPUTS` yet (pablo-casting brings it), so a fixture type on the novel's machinery
- * stands in for it (`registerOutput`, removed after). Everything runs on a temp copy of the synthetic fixture vault;
+ * S7), over the real `radio` output (AGT-1686). Everything runs on a temp copy of the synthetic fixture vault;
  * the critic is a fake `Ask` and the extractor a fake adapter: no model, never `~/writing`.
  *
  * AC1: a novel ledger saying "bay" and a radio ledger saying "grey" are reported by `--across` with both sources;
@@ -10,7 +9,7 @@
  * AC3: the story-time gate still refuses a mention dated after the unit's year.
  */
 
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -23,8 +22,7 @@ import { branchDiff, fileAt } from "../src/branch";
 import { checkWork } from "../src/check";
 import { continuityReference, critiqueModel, reviewCommentsOf } from "../src/critique";
 import { runContinuity } from "../src/novel/continuity";
-import { NOVEL } from "../src/outputs/novel";
-import { OUTPUTS, registerOutput } from "../src/outputs/registry";
+import { OUTPUTS } from "../src/outputs/registry";
 import type { OutputDefinition } from "../src/outputs/types";
 import { startPlanSession } from "../src/plan";
 import { recordFact } from "../src/record-fact";
@@ -37,32 +35,8 @@ import { readMarker } from "../src/marker";
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
 
-/** Stands in for pablo-casting's radio: the novel's machinery, its own directory, branches and units. */
-const RADIO: OutputDefinition = {
-  ...NOVEL,
-  id: "radio",
-  noun: "episode",
-  plural: "episodes",
-  artifactDir: "outputs/radio/episodes",
-  rulesTemplate: "# Radio rules\n",
-  branch: (n) => `draft/radio-ep${String(n).padStart(2, "0")}`,
-  unitOfBranch: (b) => {
-    const m = /^draft\/radio-ep(\d+)(?:-v\d+)?$/.exec(b);
-    return m ? Number(m[1]) : undefined;
-  },
-  unitOfPath: (p) => {
-    const m = /(?:^|\/)outputs\/radio\/episodes\/(\d+)-[^/]*\.md$/.exec(p);
-    return m ? Number(m[1]) : undefined;
-  },
-  // Episode 1 needs nothing before it; the novel's per-beat gates still apply.
-  preconditions: (workDir, unit) => NOVEL.preconditions(workDir, unit),
-};
-
-let unregister: () => void = () => {};
-beforeAll(() => {
-  unregister = registerOutput(RADIO);
-});
-afterAll(() => unregister());
+/** pablo-casting's radio output (AGT-1686), the real registry row: its own directory, branches, units and ledger. */
+const RADIO: OutputDefinition = OUTPUTS.radio;
 
 const dirs: string[] = [];
 afterEach(() => {

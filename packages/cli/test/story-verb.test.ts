@@ -9,7 +9,7 @@
  */
 
 import { afterAll, afterEach, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,9 +24,11 @@ import { main, repeatedFlag } from "../src/cli";
 import { harnessAuth } from "../src/harness/auth";
 import type { HarnessQuery } from "../src/harness/session";
 import { mergeChanges, mergeDraftInProject } from "../src/novel/merge";
-import { registerOutput } from "../src/outputs/registry";
+import { radioMachine } from "../src/outputs/radio/casting-side";
+import { OUTPUTS, registerOutput } from "../src/outputs/registry";
 import { STORY } from "../src/outputs/story";
 import type { EnsureOutcome } from "../src/outputs/types";
+import type { CastingDeps } from "../src/radio";
 import { defaultOutput, runStory, titleFromPrompt, wordsCue } from "../src/story";
 import type { StoryDeps } from "../src/story";
 import { captureConsoleLog, VERBS } from "../src/verbs";
@@ -316,14 +318,15 @@ test("AC2: --output novel --output story builds one core and both outputs", asyn
 // AC3: an output nobody asked for is never ensured; one that cannot run is refused by name, before anything
 // ---------------------------------------------------------------------------
 
-function stubRadio(outcome: EnsureOutcome): { calls: () => number; dispose: () => void } {
+/** A fixture type with an `ensure()` that counts its calls (`radio` is a real row since AGT-1686, so this is `podcast`). */
+function stubType(outcome: EnsureOutcome): { calls: () => number; dispose: () => void } {
   let calls = 0;
   const dispose = registerOutput({
     ...STORY,
-    id: "radio",
+    id: "podcast",
     noun: "episode",
     plural: "episodes",
-    artifactDir: "outputs/radio/episodes",
+    artifactDir: "outputs/podcast/episodes",
     ensure: () => {
       calls += 1;
       return outcome;
@@ -332,32 +335,68 @@ function stubRadio(outcome: EnsureOutcome): { calls: () => number; dispose: () =
   return { calls: () => calls, dispose };
 }
 
-test("AC3: a run that names no radio output never calls the radio type's ensure()", async () => {
-  const radio = stubRadio({ ok: false, message: "the casting side is not provisioned" });
+/**
+ * The real radio type's machine (AGT-1686, `outputs/radio/casting-side.ts`), faked: casting sources present, the
+ * venv never provisioned, and `uv` on PATH or not. Counts how often the radio type looked at it.
+ */
+function fakeRadioMachine(uv: boolean): { looks: () => number; restore: () => void } {
+  const source = mkdtempSync(join(tmpdir(), "pablo-story-casting-"));
+  writeFileSync(join(source, "pyproject.toml"), '[project]\nname = "pablo-casting"\n');
+  writeFileSync(join(source, "uv.lock"), "version = 1\n");
+  const saved = { deps: radioMachine.deps, env: radioMachine.env };
+  let looks = 0;
+  const deps: CastingDeps = {
+    layout: { source, venv: join(source, ".venv"), install: "checkout" },
+    which: () => (uv ? "/fake/bin/uv" : undefined),
+    run: () => {
+      throw new Error("the radio type must never run anything to ensure itself");
+    },
+    now: () => new Date("2026-10-11T12:00:00Z"),
+  };
+  radioMachine.deps = () => {
+    looks += 1;
+    return deps;
+  };
+  radioMachine.env = () => ({ PATH: "/nowhere" });
+  return {
+    looks: () => looks,
+    restore: () => {
+      radioMachine.deps = saved.deps;
+      radioMachine.env = saved.env;
+      rmSync(source, { recursive: true, force: true });
+    },
+  };
+}
+
+test("AC3: a run that names no podcast output never calls the podcast type's ensure(), nor looks at radio's casting side", async () => {
+  const podcast = stubType({ ok: false, message: "the podcast side is not provisioned" });
+  const machine = fakeRadioMachine(false);
   try {
     const { env, ctx } = tempVault();
     const result = await runStory({ prompt: SPEC }, ctx, depsFor(env, fakeHarness().query, fakeWriter()));
     expect(result.exitCode).toBe(0);
-    expect(radio.calls()).toBe(0);
+    expect(podcast.calls()).toBe(0);
+    expect(machine.looks()).toBe(0);
   } finally {
-    radio.dispose();
+    podcast.dispose();
+    machine.restore();
   }
 });
 
-test("AC3: --output radio on a machine without it is refused by name before any writing", async () => {
-  const radio = stubRadio({ ok: false, message: "the casting side is not provisioned", missing: ["casting: uv sync (pablo doctor)"] });
+test("AC3: --output podcast on a machine without it is refused by name before any writing", async () => {
+  const podcast = stubType({ ok: false, message: "the podcast side is not provisioned", missing: ["podcast: its side (pablo doctor)"] });
   try {
     const { vault, env, ctx } = tempVault();
     const head = git(vault, "rev-parse", "main");
     const harness = fakeHarness();
     const writer = fakeWriter();
-    const result = await runStory({ prompt: SPEC, output: ["story", "radio"] }, ctx, depsFor(env, harness.query, writer));
+    const result = await runStory({ prompt: SPEC, output: ["story", "podcast"] }, ctx, depsFor(env, harness.query, writer));
     expect(result.exitCode).toBe(2);
     const body = result.body as Record<string, any>;
-    expect(body.message).toContain("the radio output cannot run on this machine");
+    expect(body.message).toContain("the podcast output cannot run on this machine");
     expect(body.message).toContain("nothing was written");
-    expect(body.missing).toEqual(["casting: uv sync (pablo doctor)"]);
-    expect(radio.calls()).toBe(1);
+    expect(body.missing).toEqual(["podcast: its side (pablo doctor)"]);
+    expect(podcast.calls()).toBe(1);
     // Nothing started: no harness, no writer, no work, no commit, no branch.
     expect(harness.stages).toEqual([]);
     expect(writer.drafts).toBe(0);
@@ -365,33 +404,63 @@ test("AC3: --output radio on a machine without it is refused by name before any 
     expect(git(vault, "rev-parse", "main")).toBe(head);
     expect(changeBranches(vault)).toEqual([]);
   } finally {
-    radio.dispose();
+    podcast.dispose();
   }
 });
 
-test("AC3: --output radio with no radio type registered is refused by name, nothing written", async () => {
+test("AC3: an output type pablo does not have is refused by name, nothing written", async () => {
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
-  const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, harness.query, fakeWriter()));
+  const result = await runStory({ prompt: SPEC, output: ["podcast"] }, ctx, depsFor(env, harness.query, fakeWriter()));
   expect(result.exitCode).toBe(2);
-  expect((result.body as { message: string }).message).toContain("there is no radio output on this machine");
-  expect((result.body as { missing: string[] }).missing).toEqual(["output radio"]);
+  expect((result.body as { message: string }).message).toContain("there is no podcast output on this machine");
+  expect((result.body as { missing: string[] }).missing).toEqual(["output podcast"]);
   expect(harness.stages).toEqual([]);
   expect(existsSync(join(vault, "stories"))).toBe(false);
   expect(existsSync(join(vault, "novels", "ice-house"))).toBe(true);
 });
 
+test("AGT-1686: the real radio type's ensure() refuses --output radio by name when its Python side cannot be provisioned (no uv), having run nothing", async () => {
+  const machine = fakeRadioMachine(false);
+  try {
+    const { vault, env, ctx } = tempVault();
+    const harness = fakeHarness();
+    const result = await runStory({ prompt: SPEC, output: ["story", "radio"] }, ctx, depsFor(env, harness.query, fakeWriter()));
+    expect(result.exitCode).toBe(2);
+    const body = result.body as Record<string, any>;
+    expect(body.message).toContain("the radio output cannot run on this machine");
+    expect(body.missing).toEqual(["uv (brew install uv)"]);
+    expect(machine.looks()).toBe(1);
+    expect(harness.stages).toEqual([]);
+    expect(existsSync(join(vault, "stories"))).toBe(false);
+  } finally {
+    machine.restore();
+  }
+});
+
+test("AGT-1686: with uv on PATH the radio type's ensure() passes without provisioning: the first casting verb does that", async () => {
+  const { ensure } = OUTPUTS.radio;
+  const machine = fakeRadioMachine(true);
+  try {
+    expect(await ensure?.()).toEqual({ ok: true });
+  } finally {
+    machine.restore();
+  }
+});
+
 test("AC3 through the CLI: pablo story --output radio --json refuses by name", async () => {
   const { vault } = tempVault();
+  const machine = fakeRadioMachine(false);
   const saved = { vault: process.env["PABLO_VAULT"], home: process.env["PABLO_HOME"] };
   process.env["PABLO_VAULT"] = vault;
   process.env["PABLO_HOME"] = join(vault, "..", "pablo-home");
   try {
     const { exitCode, text } = await captureConsoleLog(() => main(["story", SPEC, "--output", "story", "--output", "radio", "--json"], vault));
     expect(exitCode).toBe(2);
-    expect(JSON.parse(text)).toMatchObject({ ok: false, code: 2, missing: ["output radio"] });
+    expect(JSON.parse(text)).toMatchObject({ ok: false, code: 2, missing: ["uv (brew install uv)"] });
     expect(existsSync(join(vault, "stories"))).toBe(false);
   } finally {
+    machine.restore();
     if (saved.vault === undefined) delete process.env["PABLO_VAULT"];
     else process.env["PABLO_VAULT"] = saved.vault;
     if (saved.home === undefined) delete process.env["PABLO_HOME"];

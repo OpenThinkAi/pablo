@@ -128,6 +128,35 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 names (a chosen act), in `outputs/story/story.md` on
                 `draft/story`; the outline is one pack slice and the length
                 is `--words`, else 600 words a beat.
+                `radio` (AGT-1686, `src/outputs/radio/`) is the third row:
+                one episode per beat in `outputs/radio/episodes/NN-slug.md`
+                on `draft/radio-epNN`, `rulesTemplate` the radio rules
+                (`rules.ts`), stages script -> cast -> perform -> mix -> fix
+                -> publish. Its `preconditions` are the script stage
+                (episode N-1, the beats, picks, timeline); its pack is the
+                core slices plus `outputs/radio/RULES.md`, its own ledger
+                and the previous episode's summary (never a novel chapter,
+                never research); `manuscript: "lines"` makes `write` store
+                a script line for line (never sentence-split). The stages
+                after the script are `state.ts`'s `radioStageCheck`, read
+                from disk with no Python (`script.ts` reads role names the
+                way `script.py` does; `packages/casting/tests/fixtures/
+                role_names.json` holds both to it): `perform`, `mix`, `fix`
+                and `cast --auto --episode N` take `--output radio --unit N`
+                (or `--episode N`) and refuse an unmet stage
+                (`missing: ["role NED is not cast"]`) before provisioning
+                or running anything; `pablo review --episode N` refuses an
+                unmixed one. `status --for "radio N"` (the type's
+                `unitStatus`) lists what the episode still needs (unbound
+                roles, render, mix, open flags, an unprovisioned casting
+                side) with its stage; `resume`/`status` units carry
+                `render` and `openFlags`. Publish targets: `bundle`
+                (`.pablo/out/<slug>-radio-bundle/`: scripts, each mixed
+                episode's newest m4a and manifest, `bundle.json`), `player`
+                (refused: it is `pablo review`), `stream` (not built).
+                `ensure()` only looks (venv stamp, `uv` on PATH) through
+                `casting-side.ts`'s `radioMachine` seam, which tests
+                replace; the first casting verb still provisions.
                 `pablo story "<prompt>"` (AGT-1690, `src/story.ts`, one
                 `VERBS` entry with no MCP tool) creates a work under
                 `stories/` (`novels/` when a novel is asked for), runs each

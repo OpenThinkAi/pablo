@@ -68,10 +68,48 @@ function lastPython(calls: string[][]): string[] {
   return (calls.at(-1) ?? []).slice(3);
 }
 
+/** An invented two-role episode script, as the radio rules lay one out. */
+function script(episode: number): string {
+  return [
+    "---",
+    `episode: ${episode}`,
+    `title: Invented Episode ${episode}`,
+    "---",
+    "",
+    'CAST: CORA=f "thirties, dry, exact", NED=m "forties, slow, gruff"',
+    "[SFX: a kettle on the boil]",
+    "CORA: (dry) The ice came in at dawn.",
+    "NED: Then we cut it before noon.",
+    "",
+  ].join("\n");
+}
+
+/**
+ * The fixture vault with ice-house's radio episodes 1-3 written and both roles bound (AGT-1686: the casting
+ * verbs check the radio output's stage before they run). Renders and flags are added per test with `performed`.
+ */
 function vaultCopy(): string {
   const vault = join(temp("pablo-casting-vault-"), "vault");
   cpSync(FIXTURE_VAULT, vault, { recursive: true });
+  const work = join(vault, "novels", "ice-house");
+  mkdirSync(join(work, "outputs", "radio", "episodes"), { recursive: true });
+  for (const n of [1, 2, 3]) writeFileSync(join(work, "outputs", "radio", "episodes", `0${n}-invented-episode-${n}.md`), script(n));
+  mkdirSync(join(work, "outputs", "radio", "casting"), { recursive: true });
+  const bound = { slug: "x", card_hash: "h", by: "manual", at: "2026-10-10T00:00:00Z" };
+  writeFileSync(join(work, "outputs", "radio", "casting", "cast.json"), JSON.stringify({ version: 1, roles: { CORA: bound, NED: { ...bound, slug: "y" } } }));
   return vault;
+}
+
+/** Gives ice-house's episode a performed manifest (v1), and with `flags` that many open flags on it. */
+function performed(vault: string, episode: number, flags = 0): void {
+  const casting = join(vault, "novels", "ice-house", "outputs", "radio", "casting");
+  const dir = join(casting, "renders", `ep0${episode}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "v1.json"), JSON.stringify({ version: 1, lines: [] }));
+  if (flags > 0) {
+    const entries = Array.from({ length: flags }, (_, i) => ({ id: `f${i}`, episode, line: i, reason: "flat" }));
+    writeFileSync(join(casting, "flags.json"), JSON.stringify({ flags: entries }));
+  }
 }
 
 describe("one VERBS entry each (AC4)", () => {
@@ -370,10 +408,13 @@ describe("perform (AGT-1683)", () => {
   test("needs a project and an episode; an unknown project is a refusal that runs nothing", async () => {
     const perform = VERBS.find((v) => v.name === "perform")!;
     expect(perform.args.safeParse({ episode: 1 }).success).toBe(false);
-    expect(perform.args.safeParse({ project: "ice-house" }).success).toBe(false);
     const { deps, calls } = fakeMachine();
     const result = await verbsOver(deps)["perform"]!.run({ project: "nope", episode: 1, "json-lines": false }, ctxIn(vaultCopy()));
     expect(result.exitCode).toBe(2);
+    // AGT-1686: the episode may be `--episode N` or `--output radio --unit N`, so naming neither is a refusal at run time.
+    const none = await verbsOver(deps)["perform"]!.run({ project: "ice-house", "json-lines": false }, ctxIn(vaultCopy()));
+    expect(none.exitCode).toBe(2);
+    expect((none.body as { message: string }).message).toContain("needs --episode N (or --output radio --unit N)");
     expect(calls).toEqual([]);
   });
 
@@ -441,6 +482,7 @@ describe("mix (AGT-1684)", () => {
   test("provisions with the mix extra and passes the episode, version, vault and work", async () => {
     const { deps, calls } = fakeMachine();
     const vault = vaultCopy();
+    performed(vault, 2);
     const result = await verbsOver(deps)["mix"]!.run({ project: "ice-house", episode: 2, version: 3 }, ctxIn(vault));
     expect(result.exitCode).toBe(0);
     expect(calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "mix"]);
@@ -451,9 +493,13 @@ describe("mix (AGT-1684)", () => {
     const mix = VERBS.find((v) => v.name === "mix")!;
     expect(mix.args.safeParse({ project: "ice-house", episode: 1 }).success).toBe(true);
     expect(mix.args.safeParse({ episode: 1 }).success).toBe(false);
-    expect(mix.args.safeParse({ project: "ice-house" }).success).toBe(false);
     const { deps, calls } = fakeMachine();
-    await verbsOver(deps)["mix"]!.run({ project: "ice-house", episode: 1 }, ctxIn(vaultCopy()));
+    const none = await verbsOver(deps)["mix"]!.run({ project: "ice-house" }, ctxIn(vaultCopy()));
+    expect(none.exitCode).toBe(2);
+    expect(calls).toEqual([]);
+    const vault = vaultCopy();
+    performed(vault, 1);
+    await verbsOver(deps)["mix"]!.run({ project: "ice-house", episode: 1 }, ctxIn(vault));
     expect(lastPython(calls).some((arg) => arg.startsWith("--version"))).toBe(false);
   });
 
@@ -508,6 +554,7 @@ describe("fix (AGT-1685)", () => {
   test("provisions the scorers and mix extras and passes the episode, vault and work", async () => {
     const { deps, calls } = fakeMachine();
     const vault = vaultCopy();
+    performed(vault, 2, 1);
     const result = await verbsOver(deps)["fix"]!.run({ project: "ice-house", episode: 2, "json-lines": false }, ctxIn(vault));
     expect(result.exitCode).toBe(0);
     expect(calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "mix", "--extra", "scorers"]);
@@ -518,10 +565,11 @@ describe("fix (AGT-1685)", () => {
     const fix = VERBS.find((v) => v.name === "fix")!;
     expect(fix.args.safeParse({ project: "ice-house", episode: 1 }).success).toBe(true);
     expect(fix.args.safeParse({ episode: 1 }).success).toBe(false);
-    expect(fix.args.safeParse({ project: "ice-house" }).success).toBe(false);
     const { deps, calls } = fakeMachine();
     const result = await verbsOver(deps)["fix"]!.run({ project: "nope", episode: 1, "json-lines": false }, ctxIn(vaultCopy()));
     expect(result.exitCode).toBe(2);
+    const none = await verbsOver(deps)["fix"]!.run({ project: "ice-house", "json-lines": false }, ctxIn(vaultCopy()));
+    expect(none.exitCode).toBe(2);
     expect(calls).toEqual([]);
   });
 
