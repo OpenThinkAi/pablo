@@ -223,6 +223,11 @@ function helpText(): string {
     "                                            embedding); prints the card hash. --recast",
     "                                            archives the old card under recast/. No",
     "                                            --from-wav: voices are synthetic only",
+    "  pablo cast --auto --project <slug> [--episode N | --all]",
+    "                                            match every unbound CAST: role to a distinct,",
+    "                                            active library voice (by: match, score,",
+    "                                            runner-up; review in the middle band); roles",
+    "                                            with no fit are listed as needing design",
     "  pablo voices list [--auto-admitted] | show <slug> | retire <slug> [--reason \"...\"]",
     "                                            the shared voice library; retire keeps the",
     "                                            card hash, so pinned stories still perform",
@@ -472,6 +477,20 @@ export function castingText(verb: string, body: Record<string, unknown>): string
         .join(" ");
       const status = [row["retired"] ? "retired" : "", row["admitted_by"] === "auto" ? "auto-admitted" : ""].filter(Boolean).join(", ");
       lines.push(`${String(row["slug"])}  ${String(row["hash"]).slice(0, 12)}  ${traits}${status ? `  (${status})` : ""}`);
+    }
+  }
+  if (verb === "cast" && Array.isArray(body["bindings"])) {
+    for (const b of body["bindings"] as Array<Record<string, unknown>>) {
+      const runner = b["runnerUp"] as { slug?: unknown; score?: unknown } | null | undefined;
+      const score = typeof b["score"] === "number" ? `, score ${String(b["score"])}` : "";
+      lines.push(
+        `  ${String(b["role"])} -> ${String(b["slug"])} (${String(b["by"])}${score}` +
+          (runner ? `, runner-up ${String(runner.slug)} ${String(runner.score)}` : "") +
+          `)${b["review"] ? "  REVIEW" : ""}${b["pin"] !== undefined && b["pin"] !== "ok" ? `  PIN ${String(b["pin"]).toUpperCase()}` : ""}`,
+      );
+    }
+    for (const n of (body["needsDesign"] as Array<Record<string, unknown>> | undefined) ?? []) {
+      lines.push(`  ${String(n["role"])}: needs a designed voice (${String(n["reason"])})`);
     }
   }
   if (verb === "voices" && body["card"] !== undefined) {

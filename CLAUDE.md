@@ -157,7 +157,15 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 traits vocabulary cards validate against (`traits.py`) and
                 the `cast.json` binding (`binding.py`, which takes the card
                 hash and the library root from `library.py`) are pure
-                Python, model-free. The gate's scorers sit behind
+                Python, model-free. So is auto-casting (`matching.py`,
+                AGT-1698, `pablo cast --auto --project W [--episode N |
+                --all]`): gender filters, weighted trait agreement scores,
+                a voice whose stored ECAPA embedding is within the
+                distinctness cut of one already bound is skipped, retired
+                cards are never candidates; bindings carry `by: match`,
+                the score, the runner-up and `review`, and the rest come
+                back as `needsDesign`. Thresholds are the config's
+                `matching` block over the design's 0.8 / 0.6 / 0.75. The gate's scorers sit behind
                 `scorers.py`'s `Scorer` interface with their heavy imports
                 inside each backend, so `doctor` lists weights, licenses and
                 versions from metadata alone; the backends need the optional

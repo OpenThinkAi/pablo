@@ -1,7 +1,9 @@
 """The casting config: `$XDG_CONFIG_HOME/pablo/casting.json`.
 
-It names the engines, the model weights to pull, the voice library's path and
-the pace defaults. No weights are configured by default, so a fresh machine
+It names the engines, the model weights to pull, the voice library's path,
+the pace defaults and the auto-casting thresholds (`matching`, AGT-1698: any
+of `bind`, `review`, `distinct` and `weights`, each defaulting to the design's
+starting value; `matching.py` validates them). No weights are configured by default, so a fresh machine
 downloads nothing until the author (or a later ticket) names some.
 """
 
@@ -26,6 +28,7 @@ class CastingConfig:
     weights: list[str] = field(default_factory=list)
     library: str | None = None
     pace: dict[str, float] = field(default_factory=lambda: {"default": 1.0})
+    matching: dict[str, object] = field(default_factory=dict)
 
     def as_body(self) -> dict[str, object]:
         return {
@@ -35,6 +38,7 @@ class CastingConfig:
             "weights": self.weights,
             "library": self.library,
             "pace": self.pace,
+            "matching": self.matching,
         }
 
 
@@ -70,6 +74,9 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
         isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in pace.values()
     ):
         raise ConfigRefusal(f"{path}: `pace` must map names to positive numbers")
+    matching = raw.get("matching", {})
+    if not isinstance(matching, dict):
+        raise ConfigRefusal(f"{path}: `matching` must be an object (bind, review, distinct, weights)")
 
     return CastingConfig(
         path=path,
@@ -78,4 +85,5 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
         weights=list(weights),
         library=library,
         pace={k: float(v) for k, v in pace.items()},
+        matching=dict(matching),
     )

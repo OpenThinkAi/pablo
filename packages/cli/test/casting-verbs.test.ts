@@ -136,6 +136,36 @@ describe("argv to the Python side", () => {
     ]);
   });
 
+  test("cast --auto (AGT-1698) passes the work and the episode scope, nothing to hand-cast", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    const verb = verbsOver(deps)["cast"]!;
+    const result = await verb.run({ auto: true, episode: 2, all: false, recast: false, project: "ice-house" }, ctxIn(vault));
+    expect(result.exitCode).toBe(0);
+    expect(lastPython(calls)).toEqual(["cast", "--auto", "--episode=2", `--vault=${vault}`, "--work", join(vault, "novels", "ice-house"), "--json"]);
+    await verb.run({ auto: true, all: true, recast: false, project: "ice-house" }, ctxIn(vault));
+    expect(lastPython(calls)).toEqual(["cast", "--auto", "--all", `--vault=${vault}`, "--work", join(vault, "novels", "ice-house"), "--json"]);
+  });
+
+  test("cast --auto refuses without a project, with hand-casting fields, or with --episode and --all; nothing runs", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    const verb = verbsOver(deps)["cast"]!;
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ auto: true, all: false, recast: false }, "needs --project"],
+      [{ auto: true, all: false, recast: false, project: "ice-house", candidate: 2 }, "no --candidate"],
+      [{ auto: true, all: false, recast: true, project: "ice-house", role: "CORA" }, "no --role, --recast"],
+      [{ auto: true, all: true, episode: 1, recast: false, project: "ice-house" }, "not both"],
+      [{ auto: false, all: false, recast: false, role: "CORA" }, "needs --role R and --candidate n"],
+    ];
+    for (const [args, message] of cases) {
+      const result = await verb.run(args as never, ctxIn(vault));
+      expect(result.exitCode).toBe(2);
+      expect((result.body as { message: string }).message).toContain(message);
+    }
+    expect(calls).toEqual([]);
+  });
+
   test("voices passes its subcommand and slug as positionals", async () => {
     const { deps, calls } = fakeMachine();
     const vault = vaultCopy();
@@ -192,6 +222,14 @@ describe("CLI argv to verb args", () => {
     expect(!result.ok && result.message).toContain("designer");
   });
 
+  test("cast --auto --episode N parses to the verb's args", () => {
+    const parsed = parseCliArgs(["cast", "--auto", "--project", "ice-house", "--episode", "3"]);
+    expect(verbArgsFromCli(verb("cast"), parsed.values, parsed.rest)).toEqual({
+      ok: true,
+      args: { project: "ice-house", auto: true, episode: 3, all: false, recast: false },
+    });
+  });
+
   test("voices reads its subcommand and slug from positionals", () => {
     const parsed = parseCliArgs(["voices", "show", "cora"]);
     expect(verbArgsFromCli(verb("voices"), parsed.values, parsed.rest)).toEqual({
@@ -239,5 +277,19 @@ describe("the CLI", () => {
     });
     expect(voices).toContain("cora  0123456789ab  gender=f roles=lead/bookkeeper  (retired)");
     expect(voices).toContain("edwin  not cast (3 auditions)");
+    const auto = castingText("cast", {
+      ok: true,
+      message: "auto-cast 2 roles; NELL marked review; RAMON needs a designed voice",
+      bindings: [
+        { role: "CORA", slug: "cora", by: "match", score: 1, runnerUp: { slug: "cora-twin", score: 0.824 }, review: false, new: true },
+        { role: "NELL", slug: "maren", by: "match", score: 0.667, runnerUp: null, review: true, new: true },
+        { role: "EDWIN", slug: "edwin", by: "manual", score: null, runnerUp: null, review: false, new: false, pin: "changed" },
+      ],
+      needsDesign: [{ role: "RAMON", reason: "the best match, tom, scored 0.143, below 0.6" }],
+    });
+    expect(auto).toContain("CORA -> cora (match, score 1, runner-up cora-twin 0.824)");
+    expect(auto).toContain("NELL -> maren (match, score 0.667)  REVIEW");
+    expect(auto).toContain("EDWIN -> edwin (manual)  PIN CHANGED");
+    expect(auto).toContain("RAMON: needs a designed voice (the best match, tom, scored 0.143, below 0.6)");
   });
 });

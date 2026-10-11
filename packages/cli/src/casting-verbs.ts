@@ -11,6 +11,10 @@
  *   voice's card (`card.json`, `reference.flac`/`.txt`, `embedding.ecapa.npy`)
  *   and returns the card hash. There is no `--from-wav`: voices are synthetic
  *   only, and `cli.ts` refuses the flag by name.
+ * - `cast --auto --project W [--episode N | --all]` (AGT-1698) auto-casts
+ *   the work's described `CAST:` roles from the library (`matching.py`):
+ *   `cast.json` gets `by: match`, the score, the runner-up and `review`;
+ *   roles with no fit come back as `needsDesign`.
  * - `voices list|show|retire` reads the library; `retire` marks a voice
  *   unmatchable without changing its card hash.
  *
@@ -60,8 +64,17 @@ const AUDITION_ARGS = z.object({
 
 const CAST_ARGS = z.object({
   project: projectField,
-  role: roleField,
-  candidate: z.number().int().positive().describe("The audition candidate to freeze, as `audition` numbered it."),
+  role: roleField.optional(),
+  candidate: z.number().int().positive().optional().describe("The audition candidate to freeze, as `audition` numbered it (required unless `auto`)."),
+  auto: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Auto-cast the work's scripts instead (needs `project`): every unbound described role in `CAST:` is matched to the best distinct, non-retired library voice and pinned with by: match, its score and the runner-up; a middle-band match is marked review; roles with no fit or no distinct candidate come back as needsDesign.",
+    ),
+  episode: z.number().int().positive().optional().describe("auto: only the roles of episode N (default: every episode)."),
+  all: z.boolean().optional().default(false).describe("auto: every episode's roles (the default; not with `episode`)."),
   recast: z.boolean().optional().default(false).describe("Replace an existing card; the old one is archived under recast/<timestamp>/."),
   traits: traitsField,
   notes: z.string().optional().describe('Why this candidate, e.g. "picked over 1 and 5; 2 too young".'),
@@ -92,6 +105,20 @@ function locate(ctx: Pick<VerbContext, "cwd" | "env">, project: string | undefin
 /** `--name=value`, one argv token, so a value that starts with a dash is never read as a flag. */
 function flag(name: string, value: string | number | undefined): string[] {
   return value === undefined ? [] : [`${name}=${String(value)}`];
+}
+
+function refuse(message: string): VerbResult {
+  return { body: { ok: false, code: 2, message }, exitCode: 2 };
+}
+
+/** `cast --auto` binds a work's roles: it needs the work, and none of the hand-casting fields. */
+function autoRefusal(args: z.infer<typeof CAST_ARGS>): VerbResult | undefined {
+  if (args.project === undefined) return refuse("pablo cast --auto needs --project <slug>: the work whose scripts name the roles");
+  const manual: string[] = (["role", "candidate", "traits", "notes", "by", "slug"] as const).filter((key) => args[key] !== undefined);
+  if (args.recast) manual.push("recast");
+  if (manual.length > 0) return refuse(`pablo cast --auto matches from the library; it takes no ${manual.map((key) => `--${key}`).join(", ")}`);
+  if (args.episode !== undefined && args.all) return refuse("pablo cast --auto takes --episode N or --all, not both");
+  return undefined;
 }
 
 function run(args: readonly string[], project: string | undefined, ctx: VerbContext, deps: (env: Env) => CastingDeps): VerbResult {
@@ -130,10 +157,18 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
   const cast: Verb<typeof CAST_ARGS.shape> = {
     name: "cast",
     description:
-      "Freeze an audition candidate as the role's cast card in the shared voice library (24 kHz mono FLAC reference trimmed by the aligner, its transcript, an ECAPA embedding, the traits block and the designer's provenance) and return the card hash a story pins. Refuses to replace an existing card unless `recast`, which archives the old one. Voices are synthetic only: there is no way to cast from a recording.",
+      "Freeze an audition candidate as the role's cast card in the shared voice library (24 kHz mono FLAC reference trimmed by the aligner, its transcript, an ECAPA embedding, the traits block and the designer's provenance) and return the card hash a story pins. Refuses to replace an existing card unless `recast`, which archives the old one. Voices are synthetic only: there is no way to cast from a recording. With `auto` (and `project`), cast the work's script roles from the library instead: each unbound role is matched by its CAST: description (gender a hard filter, weighted trait agreement, never a voice that sounds like one already in the story, never a retired voice), bound with its score and runner-up, marked review in the middle band, or returned in needsDesign.",
     args: CAST_ARGS,
-    run: async (args, ctx) =>
-      run(
+    run: async (args, ctx) => {
+      if (args.auto) {
+        const refusal = autoRefusal(args);
+        if (refusal !== undefined) return refusal;
+        return run(["cast", "--auto", ...flag("--episode", args.episode), ...(args.all ? ["--all"] : [])], args.project, ctx, deps);
+      }
+      if (args.role === undefined || args.candidate === undefined) {
+        return refuse("pablo cast needs --role R and --candidate n (or --auto --project <slug> to match the work's roles from the library)");
+      }
+      return run(
         [
           "cast",
           ...flag("--role", args.role),
@@ -147,7 +182,8 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
         args.project,
         ctx,
         deps,
-      ),
+      );
+    },
   };
 
   const voices: Verb<typeof VOICES_ARGS.shape> = {

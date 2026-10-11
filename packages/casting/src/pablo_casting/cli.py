@@ -22,6 +22,10 @@ Commands:
              freeze a candidate into the voice's card; prints the card hash.
              There is no `--from-wav`: a card's reference only comes from a
              designer.
+- `cast --auto --work W [--episode N | --all]`  auto-casting (AGT-1698,
+             `matching.py`): bind every unbound described role to the best
+             distinct non-retired library voice, `review` in the middle band;
+             the rest come back as `needsDesign`. No model is loaded.
 - `voices list [--auto-admitted]`, `voices show <slug>`, `voices retire <slug>
              [--reason T]`  read the library; retire marks a voice unmatchable
              without changing its card hash.
@@ -141,6 +145,8 @@ def _parser() -> _Parser:
     parser.add_argument("--traits")
     parser.add_argument("--candidate", type=int)
     parser.add_argument("--recast", action="store_true")
+    parser.add_argument("--auto", action="store_true")
+    parser.add_argument("--all", action="store_true", dest="all_episodes")
     parser.add_argument("--notes")
     parser.add_argument("--by")
     parser.add_argument("--reason")
@@ -301,6 +307,28 @@ def cmd_cast(env: Mapping[str, str], args: argparse.Namespace, work: Path | None
         notes=args.notes,
     )
     return cast(library, request, toolkits(env, config), config.engines, now, work), EXIT_OK
+
+
+def cmd_auto_cast(env: Mapping[str, str], args: argparse.Namespace, work: Path | None) -> Result:
+    from pablo_casting.matching import auto_cast, thresholds_from
+
+    manual = [flag for flag, given in (("--role", args.role is not None), ("--candidate", args.candidate is not None), ("--recast", args.recast), ("--from-wav", args.from_wav is not None)) if given]
+    if manual:
+        return refused(f"cast --auto matches from the library; it takes no {', '.join(manual)}")
+    if work is None:
+        return refused("cast --auto needs --work <dir> (the work whose scripts name the roles)", missing=["--work"])
+    if args.episode is not None and args.all_episodes:
+        return refused("cast --auto takes --episode N or --all, not both")
+    try:
+        episode = None if args.episode is None else int(args.episode)
+    except ValueError:
+        return error(f"--episode must be an integer, got {args.episode!r}")
+    config = load_config(env)
+    thresholds = thresholds_from(config.matching)
+    try:
+        return auto_cast(work, _library(config, args), episode, thresholds, now), EXIT_OK
+    except BindingRefusal as refusal:
+        return refused(str(refusal))
 
 
 def cmd_voices(env: Mapping[str, str], args: argparse.Namespace) -> Result:
@@ -572,6 +600,8 @@ def run(
     try:
         if args.command == "audition":
             return cmd_audition(env, args, work, toolkit_factory), args.json
+        if args.command == "cast" and args.auto:
+            return cmd_auto_cast(env, args, work), args.json
         if args.command == "cast":
             return cmd_cast(env, args, work, toolkit_factory), args.json
         if args.command == "voices":
