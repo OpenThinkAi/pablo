@@ -667,6 +667,8 @@ export function castingText(verb: string, body: Record<string, unknown>): string
       .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join("/") : String(v)}`)
       .join(" ");
     lines.push(`  traits: ${traits || "(none)"}`);
+    const free = (body["freeText"] as readonly string[] | undefined) ?? [];
+    if (free.length > 0) lines.push(`  not normalised: ${free.join("; ")} (choose traits for these and pass --role-traits to cast --auto --design)`);
     lines.push(`  instruct: ${String(body["instruct"])}`);
   }
   if (verb === "perform" && typeof body["manifest"] === "string") {
@@ -720,8 +722,7 @@ async function runCastingVerb(args: ParsedArgs, cwd: string): Promise<number> {
   else console.error(typeof body["message"] === "string" ? (body["message"].startsWith("pablo") ? body["message"] : `pablo: ${body["message"]}`) : "pablo: failed");
   // A partly failed design (AGT-1699): one line per refused role, and the roles that were designed and bound.
   if (!args.json && body["ok"] !== true && Array.isArray(body["refused"])) {
-    const detail = castingText(verb.name, { ...body, message: undefined });
-    if (detail.trim().startsWith("{") === false) console.error(detail);
+    console.error(castingText(verb.name, { ...body, message: undefined }));
   }
   return result.exitCode;
 }

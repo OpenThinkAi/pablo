@@ -291,6 +291,10 @@ def test_no_natural_candidate_retries_once_then_refuses_naming_the_role(env: dic
     assert len(designer.calls) == 12 and len(instructs) == 2 and instructs[0] != instructs[1]
     assert sorted({seed for _, _, seed in designer.calls}) == list(range(40, 52))
     assert all(c["screen"]["failing"] == ["naturalness"] for r in refused["rounds"] for c in r["candidates"])
+    # The refusal says which gate turned them away and what to do next.
+    assert refused["failures"] == {"naturalness": 12}
+    assert "failures: naturalness 12" in str(body["message"]) and "auditions" in str(body["message"])
+    assert "pablo cast --role RAMON --slug ramon --candidate N" in str(body["message"])
     assert engines.made == []  # nothing passed the screen, so nothing reached the engine
     _assert_nothing_admitted(vault, work)
     # The candidates stay on disk for a human to hear.
@@ -305,6 +309,7 @@ def test_a_failing_trial_retries_once_then_refuses(env: dict[str, str], vault: P
         for candidate in summary["candidates"]:
             assert candidate["screen"]["pass"] is True and candidate["trial"]["pass"] is False
             assert "identity" in candidate["trial"]["lines"][-1]["failing"]
+    assert refused["failures"] == {"trial:identity": 12}
     assert len(engines.made) == 2  # one trial engine per round
     _assert_nothing_admitted(vault, work)
 
@@ -316,6 +321,12 @@ def test_a_role_off_the_cast_line_is_refused_by_name(env: dict[str, str], vault:
     assert code == 2 and "BOSUN" in str(body["message"])
     assert cast_json(work)["RAMON"]["by"] == "design"  # the role that could be designed still was
     assert [r["role"] for r in body["refused"]] == ["BOSUN"]  # type: ignore[union-attr]
+    assert "add it to the CAST: line" in str(body["message"]) and "--role-traits" in str(body["message"])
+
+    # The next step it names works: the harness's role-traits give BOSUN a gender to design from.
+    again, code, _, _ = design(env, vault, work, "--role-traits", json.dumps({"BOSUN": {"gender": "m", "pitch": "high"}}))
+    assert code == 0, again
+    assert cast_json(work)["BOSUN"]["by"] == "design"
 
 
 def test_design_flags_without_design_are_refused(env: dict[str, str], vault: Path, work: Path) -> None:

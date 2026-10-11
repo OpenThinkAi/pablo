@@ -248,7 +248,15 @@ describe("argv to the Python side", () => {
     const result = await verbsOver(deps)["describe_voice"]!.run({ describe: "seventies, smells of the sea", gender: "m", role: "RAMON" }, ctxIn(vault));
     expect(result.exitCode).toBe(0);
     expect(lastPython(calls)).toEqual(["describe", "--describe=seventies, smells of the sea", "--gender=m", "--role=RAMON", `--vault=${vault}`, "--json"]);
-    const text = castingText("describe_voice", { ok: true, message: "not in the vocabulary: smells of the sea", traits: { gender: "m", age: "70s" }, instruct: "A man in his seventies." });
+    const text = castingText("describe_voice", {
+      ok: true,
+      message: "not in the vocabulary: smells of the sea",
+      traits: { gender: "m", age: "70s" },
+      freeText: ["smells of the sea"],
+      instruct: "A man in his seventies.",
+    });
+    expect(text).toContain("pablo: not in the vocabulary: smells of the sea");
+    expect(text).toContain("not normalised: smells of the sea (choose traits for these and pass --role-traits");
     expect(text).toContain("traits: gender=m age=70s");
     expect(text).toContain("instruct: A man in his seventies.");
   });

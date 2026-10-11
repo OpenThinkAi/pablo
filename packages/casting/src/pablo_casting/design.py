@@ -359,7 +359,8 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
     """Designs, trials and admits one voice for `role`, retrying once; raises `DesignRefusal` on a second miss."""
     if role.gender is None and "gender" not in role.traits:
         raise DesignRefusal(
-            f"no voice could be cast for {role.role}: it speaks but is not on the CAST: line, so there is no gender or description to design from",
+            f"no voice could be cast for {role.role}: it speaks but is not on the CAST: line, so there is no gender or description to design from; "
+            f'add it to the CAST: line (e.g. {role.role}=f "forties, warm"), or pass role-traits (--role-traits \'{{"{role.role}": {{"gender": "f"}}}}\')',
             role=role.role,
         )
     slug = design_slug(library, role.role)
@@ -461,12 +462,34 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
         }
 
     tried = sum(len(r["candidates"]) for r in rounds)  # type: ignore[arg-type]
+    failed = failure_tally(rounds)
+    tally = ", ".join(f"{name} {count}" for name, count in failed.items()) or "no gate recorded"
     raise DesignRefusal(
-        f"no voice could be cast for {role.role}: {tried} candidates over {len(rounds)} rounds (the second re-phrased), none passed every gate",
+        f"no voice could be cast for {role.role}: {tried} candidates over {len(rounds)} rounds (the second re-phrased), "
+        f"none passed every gate (failures: {tally}). Listen to {library.auditions(slug)}, then cast one by hand "
+        f"(pablo cast --role {role.role} --slug {slug} --candidate N), or run again with more candidates (-n 12) "
+        f"or different role-traits",
         role=role.role,
         slug=slug,
+        failures=failed,
         rounds=rounds,
     )
+
+
+def failure_tally(rounds: Sequence[Mapping[str, object]]) -> dict[str, int]:
+    """How many candidates each gate turned away, over every round: screen gates by name, trial gates as `trial:<gate>`."""
+    counts: dict[str, int] = {}
+    for summary in rounds:
+        for candidate in summary.get("candidates", []):  # type: ignore[union-attr]
+            screened = candidate.get("screen", {})
+            names = [str(n) for n in screened.get("failing", [])]
+            trial_result = candidate.get("trial")
+            if isinstance(trial_result, dict) and not trial_result.get("pass"):
+                lines = trial_result.get("lines") or [{}]
+                names += [f"trial:{n}" for n in lines[-1].get("failing", [])] or ["trial"]
+            for name in names:
+                counts[name] = counts.get(name, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
 def design_needed(
