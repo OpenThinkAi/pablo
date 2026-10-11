@@ -268,6 +268,19 @@ def test_role_traits_that_contradict_the_cast_line_are_refused(env: dict[str, st
     assert code == 2 and "NOBODY" in str(body["message"])
 
 
+@pytest.mark.parametrize(
+    ("raw", "says"),
+    [("{not json", "not valid JSON"), (json.dumps(["RAMON"]), "must map role names"), (json.dumps({"RAMON": "m"}), "must map role names")],
+)
+def test_malformed_role_traits_are_refused_before_any_design(env: dict[str, str], vault: Path, work: Path, raw: str, says: str) -> None:
+    body, code, designer, engines = design(env, vault, work, "--role-traits", raw)
+    assert code == 2 and body["ok"] is False and says in str(body["message"])
+    assert designer.calls == [] and engines.made == []
+    # Refused at argument parsing: no card, and no cast.json written at all.
+    assert not (voice(vault, "ramon") / "card.json").exists()
+    assert not (work / "outputs" / "radio" / "casting" / "cast.json").exists()
+
+
 # ---- AC2: no passing voice -> one retry with a re-phrased instruct, then a refusal naming the role; nothing admitted
 
 

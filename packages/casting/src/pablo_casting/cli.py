@@ -430,6 +430,10 @@ def cmd_auto_cast(
     if design_only and not args.design:
         return refused(f"{', '.join(design_only)} only apply with cast --auto --design")
     try:
+        overrides = _role_traits(args.role_traits)
+    except TraitsError as bad:
+        return refused(str(bad))
+    try:
         episode = None if args.episode is None else int(args.episode)
     except ValueError:
         return error(f"--episode must be an integer, got {args.episode!r}")
@@ -457,7 +461,6 @@ def cmd_auto_cast(
         return refused(f"-n must be between 1 and {MAX_CANDIDATES} (got {n})")
     if args.seed is not None and args.seed < 0:
         return refused(f"--seed must be a non-negative integer (got {args.seed})")
-    overrides = _role_traits(args.role_traits)
     settings = DesignSettings(
         designer=designer,
         engine=engine,
