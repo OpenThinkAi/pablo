@@ -142,7 +142,7 @@ export async function runConformance(def: unknown, opts: ConformanceOptions): Pr
   const first = plan[0] as (typeof plan)[number];
   const ready = type.preconditions(opts.workDir, first.unit);
   if (!ready.ready) fail("preconditions", `unit ${first.unit} is not ready on a fresh work: ${ready.missing.join("; ")}`);
-  const pack = type.pack(opts.vaultRoot, opts.workDir, first.unit, { marker: opts.marker });
+  const pack = type.pack(opts.vaultRoot, opts.workDir, first.unit, { marker: opts.marker, output: type.id });
   if (!pack.ok) fail("pack", pack.message);
   type.report(opts.workDir, readCoreState(opts.workDir));
   if (snapshot(opts.workDir) !== before) fail("plan", "plan, preconditions, pack or report wrote to the work directory");
@@ -152,7 +152,7 @@ export async function runConformance(def: unknown, opts: ConformanceOptions): Pr
   for (const row of plan) {
     const pre = type.preconditions(opts.workDir, row.unit);
     if (!pre.ready) fail("preconditions", `unit ${row.unit} is not ready after the units before it: ${pre.missing.join("; ")}`);
-    const packed = type.pack(opts.vaultRoot, opts.workDir, row.unit, { marker: opts.marker });
+    const packed = type.pack(opts.vaultRoot, opts.workDir, row.unit, { marker: opts.marker, output: type.id });
     if (!packed.ok) fail("pack", packed.message);
     if (!packed.ok) continue;
     if (packed.pack.prompt.trim() === "") fail("pack", `unit ${row.unit}'s prompt is empty`);
@@ -172,6 +172,8 @@ export async function runConformance(def: unknown, opts: ConformanceOptions): Pr
       words: 0,
       model: "conformance-fake",
       receiptLine: "conformance",
+      output: type.id,
+      unitNoun: type.noun,
       env: opts.env,
       ...(opts.now ? { now: opts.now } : {}),
     });

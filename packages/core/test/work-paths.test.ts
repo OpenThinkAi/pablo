@@ -28,3 +28,12 @@ test("a migrated work resolves to outline/beats.md and outputs/novel/continuity.
   expect(continuityFile(work)).toBe("outputs/novel/continuity.md");
   rmSync(work, { recursive: true, force: true });
 });
+
+test("another output's ledger is outputs/<type>/continuity.md, never the novel's shim (AGT-1671)", () => {
+  const work = mkdtempSync(join(tmpdir(), "pablo-work-paths-"));
+  writeFileSync(join(work, "continuity.md"), "x");
+  expect(continuityFile(work, "radio")).toBe("outputs/radio/continuity.md");
+  expect(continuityFile(work, "novel")).toBe("continuity.md");
+  expect(() => continuityFile(work, "../novel")).toThrow();
+  rmSync(work, { recursive: true, force: true });
+});

@@ -71,6 +71,7 @@ const P0_VERBS = [
   "write",
   "save",
   "check",
+  "promote",
   "migrate",
   "merge",
   "publish",
@@ -138,6 +139,14 @@ function helpText(): string {
     "                                            core is at beats), remove one (archived under",
     "                                            outputs/_removed/), or rewrite its plan.md",
     "  check, publish and share take --output <type> the same way",
+    "  pablo check --project <slug> --output <type>",
+    "                                            tells and provenance, plus the core check:",
+    "                                            story-time and names the core does not know",
+    "  pablo check --project <slug> --across     contradictions between the outputs' ledgers,",
+    "                                            each with a promote action",
+    "  pablo promote --project <slug> --finding <id> --keep <type>",
+    "                                            a finding's fact to facts.md on a plan/ branch,",
+    "                                            commenting the contradicting units' lines",
     "  pablo migrate lines --project <slug> [--dry-run]",
     `                                            one-time split of ${OUTPUTS.novel.artifactDir}/*.md to one`,
     "                                            sentence per line, committed on its own",
@@ -478,6 +487,51 @@ export function outputVerbText(raw: unknown): string {
   const paths = (body["paths"] as string[]).map((p) => `  ${p}`);
   const what = body["action"] === "remove" ? (body["archived"] !== undefined ? `removed, archived to ${String(body["archived"])}` : "removed") : "added";
   return [`pablo: output ${String(body["type"])}: ${what}${body["committed"] === true ? " (committed)" : ""}`, ...paths, ...(body["notice"] ? [String(body["notice"])] : [])].join("\n");
+}
+
+/** Plain-text output for `check --across` (AGT-1671): each finding with both sources and its promote commands. */
+export function acrossText(raw: unknown): string {
+  const body = raw as Record<string, unknown>;
+  if (body["ok"] !== true) return String(body["message"]);
+  const findings = (body["findings"] ?? []) as { id: string; claim: string; sources: { output: string; ledger: string; line: number; fact: string; tag?: string }[]; actions: { command: string }[] }[];
+  if (findings.length === 0) return `no contradictions between outputs${typeof body["note"] === "string" ? ` (${body["note"]})` : ""}`;
+  return findings
+    .map((f) =>
+      [
+        `${f.id}  ${f.claim}`,
+        ...f.sources.map((s) => `  ${s.output}${s.tag ? ` ${s.tag}` : ""}: ${s.fact}  (${s.ledger}:${s.line})`),
+        ...f.actions.map((a) => `  promote: ${a.command}`),
+      ].join("\n"),
+    )
+    .join("\n");
+}
+
+/** Plain-text output for `promote` (AGT-1671). */
+export function promoteText(raw: unknown): string {
+  const body = raw as Record<string, unknown>;
+  if (body["ok"] !== true) return String(body["message"]);
+  const comments = (body["comments"] ?? []) as { path: string; line?: number }[];
+  return [
+    `pablo: promote ${String(body["finding"])}: ${String(body["line"])} -> ${String(body["path"])} on ${String(body["branch"])}`,
+    ...comments.map((c) => `  comment on ${c.path}${c.line !== undefined ? `:${c.line}` : ""}`),
+    ...((body["notices"] ?? []) as string[]),
+    "  review the branch in the screen (pablo), then merge it",
+  ].join("\n");
+}
+
+/** Runs one verb off its `VERBS` entry with the CLI's flags, printing `text(body)` (or the JSON body). */
+async function runVerbEntry(name: string, args: ParsedArgs, cwd: string, text: (body: unknown) => string): Promise<number> {
+  const verb = VERBS.find((v) => v.name === name) as (typeof VERBS)[number];
+  const built = verbArgsFromCli(verb, args.values, args.rest);
+  if (!built.ok) {
+    emit({ ok: false, code: EXIT_REFUSED, message: built.message }, args.json);
+    return EXIT_REFUSED;
+  }
+  const result = await verb.run(built.args as never, { cwd, env: process.env, stderr: process.stderr });
+  if (args.json) console.log(JSON.stringify(result.body));
+  else if ((result.body as { ok?: boolean }).ok === true) console.log(text(result.body));
+  else console.error(text(result.body));
+  return result.exitCode;
 }
 
 /** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
@@ -1200,6 +1254,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
+    // `check --across` (AGT-1671) runs off the check verb's `VERBS` entry, as `pablo mcp` does: it asks the critic.
+    if (args.values["across"] === true) return await runVerbEntry("check", args, cwd, acrossText);
     const vaultResult = findVault(cwd);
     if (!vaultResult.ok) {
       emit(refusalResult(vaultResult), args.json);
@@ -1338,6 +1394,15 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       console.error(String(body["message"]));
     }
     return outcome.exitCode;
+  }
+
+  // `promote` (AGT-1671), a `check --across` finding's action, runs off its one `VERBS` entry.
+  if (args.verb === "promote") {
+    if (projectPath === undefined) {
+      emit({ ok: false, code: EXIT_REFUSED, message: "pablo: promote requires --project <slug>" }, args.json);
+      return EXIT_REFUSED;
+    }
+    return await runVerbEntry("promote", args, cwd, promoteText);
   }
 
   // `output list|add|remove|plan` (AGT-1669) runs off its one `VERBS` entry, as `pablo mcp` does.

@@ -63,6 +63,13 @@ export interface BuildChapterPackOptions {
   readonly marker: Marker;
   /** A steer for this chapter beyond the beat row (AGT-1562): its own `direction` slice in the pack. */
   readonly direction?: string | undefined;
+  /**
+   * The output the unit belongs to (AGT-1671), default `novel`: the pack
+   * carries that output's own continuity ledger plus `facts.md`, never another
+   * output's ledger, and a slice sourced under another output's directory is
+   * a refusal, like a `neverSend` one.
+   */
+  readonly output?: string | undefined;
 }
 
 /**
@@ -83,8 +90,10 @@ export function buildChapterPack(
   // The output's plan maps the unit onto its beats (a row may name several);
   // no plan, or no row for the unit, is one unit per beat. Its RULES.md, when
   // it has one, is its own slice after the work's rules (AGT-1670).
-  const beats = planBeatsFor(workDir, NOVEL_ID, chapter);
-  const rulesPath = join(workDir, outputRulesFile(NOVEL_ID));
+  // `output` (AGT-1671) is the unit's own output: its plan, rules and ledger, never another's.
+  const output = options.output ?? NOVEL_ID;
+  const beats = planBeatsFor(workDir, output, chapter);
+  const rulesPath = join(workDir, outputRulesFile(output));
   const inputs = readDraftingInputs({
     vaultRoot,
     workRoot: workDir,
@@ -94,9 +103,10 @@ export function buildChapterPack(
     wordTarget,
     minScenes,
     castEndsAt: CAST_ENDS_AT,
+    output,
   });
 
-  return packFromInputs(vaultRoot, workDir, inputs, options);
+  return packFromInputs(vaultRoot, workDir, inputs, { ...options, output });
 }
 
 /**
@@ -108,8 +118,9 @@ export function packFromInputs(
   vaultRoot: string,
   workDir: string,
   inputs: DraftingInputs,
-  options: Pick<BuildChapterPackOptions, "marker" | "direction">,
+  options: Pick<BuildChapterPackOptions, "marker" | "direction" | "output">,
 ): ChapterPackOutcome {
+  const output = options.output ?? NOVEL_ID;
   const filtered: DraftingInputs = {
     ...inputs,
     style: filterVoice(inputs.style),
@@ -126,6 +137,17 @@ export function packFromInputs(
       message:
         `pablo: refusing to draft — slice "${violation.slice}" (${violation.source}) ` +
         `is under neverSend prefix "${violation.prefix}"`,
+    };
+  }
+
+  const leak = findOtherOutputSlice(pack, vaultRoot, workDir, output);
+  if (leak !== undefined) {
+    return {
+      ok: false,
+      code: 2,
+      message:
+        `pablo: refusing to draft — slice "${leak.slice}" (${leak.source}) belongs to output ` +
+        `"${leak.prefix}", not this unit's; another telling's continuity never enters a pack (promote it to facts.md)`,
     };
   }
 
@@ -194,6 +216,26 @@ function findNeverSendViolation(
     }
   }
 
+  return undefined;
+}
+
+/**
+ * The first slice sourced under `outputs/<type>/` for a type other than
+ * `output` (AGT-1671): output-specific facts do not leak sideways. The
+ * `prefix` it reports is the other type's id. The novel's unmigrated ledger
+ * (`continuity.md` at the work root) is not under `outputs/`, so a non-novel
+ * unit is kept from it by the reader (`continuityFile(work, output)`) rather
+ * than here.
+ */
+function findOtherOutputSlice(pack: Pack, vaultRoot: string, workDir: string, output: string): NeverSendViolation | undefined {
+  for (const slice of pack.slices) {
+    if (slice.source === undefined) continue;
+    for (const sourcePath of slice.source.split(", ")) {
+      const rel = toWorkRelative(vaultRoot, workDir, sourcePath);
+      const owner = rel === undefined ? undefined : /^outputs\/([^/]+)\//.exec(rel)?.[1];
+      if (owner !== undefined && owner !== output) return { slice: slice.name, source: sourcePath, prefix: owner };
+    }
+  }
   return undefined;
 }
 

@@ -42,27 +42,31 @@ export function proposeTool(session: PlanSession, workPath: string): McpToolSpec
 const RecordFactArgs = z.object({
   fact: z.string(),
   // Path-shaped but model-controlled: recordFact resolves it to `continuity` or a bible .md file; this keeps traversal out at the schema too.
-  where: z.string().regex(/^[a-z0-9][a-z0-9/_.-]*$/i).refine((w) => !w.includes(".."), "where must stay inside the work"),
+  where: z.string().regex(/^[a-z0-9][a-z0-9/_.-]*$/i).refine((w) => !w.includes(".."), "where must stay inside the work").optional(),
   kind: z.string(),
   source: z.string().optional(),
   heading: z.string().optional(),
   chapter: z.string().optional(),
+  promote: z.boolean().optional(),
+  established_by: z.string().regex(/^[a-z][a-z0-9-]*\/[a-z]{2}\d+$/).optional(),
 });
 
 export function recordFactTool(session: PlanSession, workPath: string): McpToolSpec {
   const tool: McpToolSpec<typeof RecordFactArgs.shape> = {
     name: "record_fact",
     description:
-      "Record a fact on this session's plan branch: where is `continuity` or a bible file (`places`, `bible/places.md`); kind is researched (needs a source citation), invented or author. Staged on this session's plan branch, not applied to the book until the author accepts it in review mode.",
+      "Record a fact on this session's plan branch: where is `continuity` or a bible file (`places`, `bible/places.md`); kind is researched (needs a source citation), invented or author. With promote true the fact goes to facts.md instead (the story core's facts every output honours; where is ignored) and needs established_by, the output and unit that established it (`novel/ch03`, `radio/ep05`). Staged on this session's plan branch, not applied to the book until the author accepts it in review mode.",
     args: RecordFactArgs,
     async run(args): Promise<VerbResult> {
       const result = recordFact(session, workPath, {
         fact: args.fact,
-        where: args.where,
+        where: args.where ?? "",
         kind: args.kind,
         ...(args.source !== undefined ? { source: args.source } : {}),
         ...(args.heading !== undefined ? { heading: args.heading } : {}),
         ...(args.chapter !== undefined ? { chapter: args.chapter } : {}),
+        ...(args.promote === true ? { promote: true } : {}),
+        ...(args.established_by !== undefined ? { establishedBy: args.established_by } : {}),
       });
       return result.ok
         ? { body: result, exitCode: 0 }

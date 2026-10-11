@@ -15,7 +15,10 @@
  *     <work>/outline/beats.md                 | # | story date | title | beat | POV | status |
  *                                             (outline/chapters.md on an unmigrated work)
  *     <work>/outputs/novel/continuity.md      what the text has established
- *                                             (continuity.md on an unmigrated work)
+ *                                             (continuity.md on an unmigrated work;
+ *                                             outputs/<type>/continuity.md for another
+ *                                             output: only the unit's own output's ledger)
+ *     <work>/facts.md                         promoted facts every output honours
  *     <work>/chapters/NN-slug.md              the manuscript
  *
  * A missing file is not an error: a work with no continuity ledger yet gets a
@@ -25,7 +28,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { joinParagraphs } from "../sentences";
-import { beatsFile, continuityFile } from "../work-paths";
+import { FACTS_FILE, beatsFile, continuityFile } from "../work-paths";
 import type { BeatRow, DraftingInputs, TextSource, TimelineGate, WorkIdentity } from "./types";
 
 /** Words of the previous chapter carried into a drafting pack, as `draft-chapter` sends. */
@@ -75,6 +78,12 @@ export interface ReadDraftingOptions {
   readonly placesStartsAt?: string | undefined;
   /** Overrides the title parsed from the work's `QWEN.md`. */
   readonly work?: Partial<WorkIdentity> | undefined;
+  /**
+   * The output the unit belongs to (AGT-1671), default `novel`: its own ledger
+   * (`continuityFile(work, output)`) is the continuity slice, and no other
+   * output's ledger is ever read.
+   */
+  readonly output?: string | undefined;
 }
 
 /**
@@ -128,7 +137,8 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
       section(text, { from: options.placesStartsAt }),
     ),
     timeline: gateTimeline(read(timelinePath) ?? "", beat.storyDate, label(vaultRoot, timelinePath)),
-    continuity: sourceOfFile(vaultRoot, join(workRoot, continuityFile(workRoot))),
+    continuity: sourceOfFile(vaultRoot, join(workRoot, continuityFile(workRoot, options.output ?? "novel"))),
+    facts: sourceOfFile(vaultRoot, join(workRoot, FACTS_FILE)),
     previousTail: readPreviousTail(vaultRoot, workRoot, chapter, options.tailWords ?? DEFAULT_TAIL_WORDS),
     wordTarget: options.wordTarget,
     minScenes: options.minScenes,

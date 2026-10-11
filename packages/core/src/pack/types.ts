@@ -153,8 +153,10 @@ export interface DraftingInputs {
   /** `bible/places.md`. */
   readonly places?: TextSource | undefined;
   readonly timeline: TimelineGate;
-  /** `continuity.md`: what the text has already established. */
+  /** The unit's own output's continuity ledger: what this telling has already established. */
   readonly continuity?: TextSource | undefined;
+  /** `facts.md` (AGT-1671): promoted facts every output must honour, whichever established them. */
+  readonly facts?: TextSource | undefined;
   /** The tail of the previous chapter, to continue from. */
   readonly previousTail?: TextSource | undefined;
   readonly wordTarget: number;

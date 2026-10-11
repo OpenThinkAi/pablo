@@ -343,6 +343,7 @@ export async function runWrite(
     scenes,
     marker: markerResult.marker,
     direction,
+    output: output.id,
   });
   if (!packResult.ok) {
     emitError(packResult.message, undefined, packResult.code, args.json);

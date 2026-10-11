@@ -8,6 +8,8 @@
  *                outline/chapters.md              (unmigrated: the old name, shimmed)
  *     continuity outputs/novel/continuity.md      (migrated: the novel output's ledger)
  *                continuity.md                    (unmigrated)
+ *                outputs/<type>/continuity.md     (every other output's own ledger, AGT-1671)
+ *     facts      facts.md                         (the core's promoted facts, AGT-1671)
  *
  * The new name wins whenever it exists; otherwise the old name is returned
  * whether or not it exists, so a message about a missing file names the file
@@ -25,6 +27,12 @@ export const LEGACY_BEATS_FILE = "outline/chapters.md";
 export const NOVEL_CONTINUITY_FILE = "outputs/novel/continuity.md";
 /** The continuity ledger's old place at the work root. */
 export const LEGACY_CONTINUITY_FILE = "continuity.md";
+/**
+ * The story core's promoted facts (pm project `pablo-story-core`, "Per-output
+ * continuity"): facts one output established that every output must honour,
+ * each naming its source (`established-by: novel/ch03`). Work-relative.
+ */
+export const FACTS_FILE = "facts.md";
 
 /** The work-relative (forward-slash) path of the work's beats file. */
 export function beatsFile(workRoot: string): string {
@@ -32,11 +40,19 @@ export function beatsFile(workRoot: string): string {
 }
 
 /**
- * The work-relative (forward-slash) path of the **novel** output's continuity
- * ledger. Novel-only on purpose: per-output ledgers for other types
- * (`outputs/<type>/continuity.md`) come with pablo-story-core S7, which gives
- * this an output parameter; until then no other output has a ledger to find.
+ * The work-relative (forward-slash) path of an output's own continuity ledger
+ * (AGT-1671): what that telling established, read only by that output's packs
+ * and critic. The novel's resolves through the migration shim
+ * (`outputs/novel/continuity.md`, else the unmigrated `continuity.md`); every
+ * other type's is `outputs/<type>/continuity.md`, whether or not it exists yet.
  */
-export function continuityFile(workRoot: string): string {
+export function continuityFile(workRoot: string, output = "novel"): string {
+  if (output !== "novel") return outputContinuityFile(output);
   return existsSync(join(workRoot, NOVEL_CONTINUITY_FILE)) ? NOVEL_CONTINUITY_FILE : LEGACY_CONTINUITY_FILE;
+}
+
+/** `outputs/<type>/continuity.md`: the ledger's place for an output type, with no shim. Throws on an id that is not one. */
+export function outputContinuityFile(output: string): string {
+  if (!/^[a-z][a-z0-9-]*$/.test(output)) throw new RangeError(`pablo: "${output}" is not an output type id`);
+  return `outputs/${output}/continuity.md`;
 }

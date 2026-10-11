@@ -1,5 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { formatFactLine, formatProvenance, parseFactLine, scanFacts, withProvenance } from "../src/index";
+import { establishedByOf, formatFactLine, formatProvenance, parseFactLine, scanFacts, unitTag, withProvenance } from "../src/index";
+
+test("unit tags and established-by are tags, not part of the fact (AGT-1671)", () => {
+  expect(unitTag("chapter", 3)).toBe("ch03");
+  expect(unitTag("episode", 12)).toBe("ep12");
+  const ep = parseFactLine("- Ines keeps bees. [ep05] [invented]");
+  expect(ep).toMatchObject({ text: "Ines keeps bees.", tags: ["ep05"], provenance: { kind: "invented" } });
+  const promoted = parseFactLine("- Ines keeps bees. [established-by: novel/ch03] [author]");
+  expect(promoted?.text).toBe("Ines keeps bees.");
+  expect(establishedByOf(promoted!)).toBe("novel/ch03");
+  expect(establishedByOf(ep!)).toBeUndefined();
+  expect(formatFactLine(promoted!)).toBe("- Ines keeps bees. [established-by: novel/ch03] [author]");
+});
 
 // Invented fixtures only: no manuscript text belongs in this public repo.
 

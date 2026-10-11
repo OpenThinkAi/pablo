@@ -26,7 +26,7 @@ export type Provenance =
 export interface FactLine {
   /** The fact itself, without bullet, chapter tags or provenance tag. */
   readonly text: string;
-  /** Chapter-style bracket groups (`ch03`, `ch03, anchor not found`), inner text only, in line order. */
+  /** Unit-style bracket groups (`ch03`, `ep05, anchor not found`, `established-by: novel/ch03`), inner text only, in line order. */
   readonly tags: readonly string[];
   /** Undefined when the line is untagged, or carries conflicting provenance tags (see `conflicting`). */
   readonly provenance: Provenance | undefined;
@@ -50,8 +50,35 @@ export interface FactScan {
 
 const BULLET = /^\s*[-*]\s+(.*)$/;
 const TRAILING_GROUP = /\s*\[([^\[\]]*)\]\s*$/;
-const CHAPTER_TAG = /^ch\d+(?:,\s*[^\[\]]+)?$/;
+/**
+ * A unit tag: `ch03` (a chapter), `ep05` (an episode), any output's unit as
+ * `unitTag` spells it (AGT-1671), optionally `, anchor not found`.
+ */
+const CHAPTER_TAG = /^[a-z]{2}\d+(?:,\s*[^\[\]]+)?$/;
+/** A promoted fact's source in `facts.md` (AGT-1671): `established-by: novel/ch03`. */
+const ESTABLISHED_BY = /^established-by:\s*([a-z][a-z0-9-]*\/[a-z]{2}\d+)$/;
 const RESEARCHED = /^researched:\s*(\S[^\[\]]*)$/;
+
+/**
+ * The tag a ledger puts on a fact for unit `n` of an output whose unit is a
+ * `noun` (AGT-1671): the noun's first two letters and the number, two digits
+ * at least. `chapter` 3 is `ch03` (what the novel's ledger always said),
+ * `episode` 5 is `ep05`.
+ */
+export function unitTag(noun: string, n: number): string {
+  const prefix = noun.toLowerCase().replace(/[^a-z]/g, "").slice(0, 2);
+  if (prefix.length < 2) throw new RangeError(`pablo: "${noun}" cannot name a unit tag`);
+  return `${prefix}${String(n).padStart(2, "0")}`;
+}
+
+/** The `established-by` source a fact line carries (`novel/ch03`), or undefined. */
+export function establishedByOf(fact: FactLine): string | undefined {
+  for (const tag of fact.tags) {
+    const match = ESTABLISHED_BY.exec(tag);
+    if (match?.[1] !== undefined) return match[1];
+  }
+  return undefined;
+}
 
 function provenanceOf(inner: string): Provenance | undefined {
   const text = inner.trim();
@@ -87,7 +114,7 @@ export function parseFactLine(line: string): FactLine | undefined {
     if (group?.[1] === undefined) break;
     const provenance = provenanceOf(group[1]);
     if (provenance !== undefined) found.unshift(provenance);
-    else if (CHAPTER_TAG.test(group[1].trim())) tags.unshift(group[1].trim());
+    else if (CHAPTER_TAG.test(group[1].trim()) || ESTABLISHED_BY.test(group[1].trim())) tags.unshift(group[1].trim());
     else break;
     rest = rest.slice(0, group.index);
   }
