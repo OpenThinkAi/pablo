@@ -3,7 +3,21 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { castingLayout, castingState, ensureProvisioned, runAudition, runDoctor, runTakes, takeShowText, takesGcText, UV_INSTALL, venvPython } from "../src/casting";
+import {
+  castingLayout,
+  castingState,
+  doctorText,
+  ensureProvisioned,
+  gateText,
+  runAudition,
+  runDoctor,
+  runGate,
+  runTakes,
+  takeShowText,
+  takesGcText,
+  UV_INSTALL,
+  venvPython,
+} from "../src/casting";
 import type { CastingDeps, CastingLayout, CastingRun } from "../src/casting";
 import { BUNDLED, bundleCasting } from "../src/casting-bundle";
 
@@ -306,6 +320,128 @@ describe("audition --dry-run provisioning (AC2)", () => {
   test("no casting sources is an error", () => {
     const root = temp("pablo-casting-");
     expect(runAudition({ dryRun: true }, ctx(root).ctx, fakeDeps(undefined), undefined).exitCode).toBe(1);
+  });
+});
+
+describe("gate (AGT-1682)", () => {
+  const passing = { ok: true, pass: true, failing: [], flags: [], card: "cora", scores: { wer: 0, sim_card: 0.74, heard: "x" } };
+  const answer = (body: unknown, code = 0): CastingRun => ({ code, stdout: JSON.stringify(body), stderr: "" });
+
+  test("scoring a take provisions with the scorers extra and passes absolute paths to the Python side", () => {
+    const { layout, root } = fakeLayout();
+    const work = join(root, "work");
+    mkdirSync(work);
+    const deps = fakeDeps(layout, { answers: { gate: answer(passing) } });
+    const result = runGate(
+      ["takes/t1.wav", "--line", "Not just for the breweries.", "--card", "cora", "--centroid", "c.json", "--emotion", "sad", "--json"],
+      ctx(root).ctx,
+      deps,
+      root,
+      work,
+    );
+    expect(result).toEqual({ body: passing, exitCode: 0 });
+    expect(deps.calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]);
+    expect(deps.calls.at(-1)).toEqual([
+      venvPython(layout), "-m", "pablo_casting", "gate", join(root, "takes/t1.wav"),
+      "--line", "Not just for the breweries.", "--centroid", join(root, "c.json"), "--emotion", "sad",
+      "--work", work, "--card", "cora", "--json",
+    ]);
+    expect(castingState(layout, ["scorers"])).toBe("provisioned");
+  });
+
+  test("a venv provisioned without the extra is topped up once, keeping what it had", () => {
+    const { layout, root } = fakeLayout();
+    const deps = fakeDeps(layout, { answers: { gate: answer(passing) } });
+    runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    expect(castingState(layout)).toBe("provisioned");
+    expect(castingState(layout, ["scorers"])).toBe("stale");
+    runGate(["t.wav", "--line", "x", "--card", "cora"], ctx(root).ctx, deps, root, undefined);
+    runGate(["t.wav", "--line", "x", "--card", "cora"], ctx(root).ctx, deps, root, undefined);
+    const syncs = deps.calls.filter((call) => call[1] === "sync");
+    expect(syncs).toEqual([["/fake/bin/uv", "sync", "--frozen"], ["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]]);
+    // A later audition does not drop the extra.
+    runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    expect(deps.calls.filter((call) => call[1] === "sync")).toHaveLength(2);
+  });
+
+  test("a changed lock re-provisions with the extras the venv had", () => {
+    const { layout, root } = fakeLayout();
+    const deps = fakeDeps(layout, { answers: { gate: answer(passing) } });
+    runGate(["t.wav", "--line", "x", "--card", "cora"], ctx(root).ctx, deps, root, undefined);
+    writeFileSync(join(layout.source, "uv.lock"), "version = 3\n", "utf8");
+    runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    expect(deps.calls.filter((call) => call[1] === "sync").at(-1)).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]);
+    expect(castingState(layout, ["scorers"])).toBe("provisioned");
+  });
+
+  test("calibrate and --scores need no extra and never pass --work", () => {
+    const { layout, root } = fakeLayout();
+    const deps = fakeDeps(layout, { answers: { gate: answer({ ok: true, proposed: { gates: { sim_min: 0.66 } }, approved: 30, others: 30, warnings: [] }) } });
+    const result = runGate(["calibrate", "--approved", "ok", "--others", "/abs/others", "--card", "./voices/cora", "--apply"], ctx(root).ctx, deps, root, join(root, "w"));
+    expect(result.exitCode).toBe(0);
+    expect(deps.calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen"]);
+    expect(deps.calls.at(-1)?.slice(3)).toEqual(["gate", "calibrate", "--approved", join(root, "ok"), "--others", "/abs/others", "--apply", "--card", join(root, "voices/cora"), "--json"]);
+
+    runGate(["--scores", "rec.json", "--card", "cora"], ctx(root).ctx, deps, root, undefined);
+    expect(deps.calls.at(-1)?.slice(3)).toEqual(["gate", "--scores", join(root, "rec.json"), "--card", "cora", "--json"]);
+    expect(deps.calls.filter((call) => call[1] === "sync")).toHaveLength(1);
+  });
+
+  test("usage mistakes are errors (exit 1) and provision nothing", () => {
+    const { layout, root } = fakeLayout();
+    const deps = fakeDeps(layout);
+    for (const argv of [[], ["t.wav", "--card", "cora"], ["a.wav", "b.wav", "--line", "x"], ["t.wav", "--scores", "r.json"], ["t.wav", "--bogus"], ["calibrate"], ["calibrate", "x", "--approved", "d"]]) {
+      const result = runGate(argv, ctx(root).ctx, deps, root, undefined);
+      expect(result.exitCode).toBe(1);
+      expect((result.body as { ok: boolean }).ok).toBe(false);
+    }
+    expect(deps.calls).toEqual([]);
+  });
+
+  test("a Python refusal passes through with its code", () => {
+    const { layout, root } = fakeLayout();
+    const refusal = { ok: false, code: 2, message: 'no card "nobody"' };
+    const deps = fakeDeps(layout, { answers: { gate: answer(refusal, 2) } });
+    expect(runGate(["t.wav", "--line", "x", "--card", "nobody"], ctx(root).ctx, deps, root, undefined)).toEqual({ body: refusal, exitCode: 2 });
+  });
+
+  test("a missing uv refuses before anything runs", () => {
+    const { layout, root } = fakeLayout();
+    const deps = fakeDeps(layout, { uv: false });
+    expect(runGate(["t.wav", "--line", "x", "--card", "cora"], ctx(root).ctx, deps, root, undefined).exitCode).toBe(2);
+    expect(deps.calls).toEqual([]);
+  });
+
+  test("plain text names the failing gates and the proposed block", () => {
+    expect(gateText({ ...passing, pass: false, failing: ["identity", "pace"], flags: ["emotion"] })).toStartWith("fail: identity, pace (card cora)\nflags: emotion\n  wer: 0");
+    expect(gateText(passing)).not.toContain("heard");
+    expect(gateText({ ok: true, proposed: { gates: { sim_min: 0.66 } }, approved: 30, others: 2, warnings: ["sim_min: few"], message: "nothing written" })).toContain('"sim_min": 0.66');
+  });
+
+  test("doctor lists each scorer's weights, license and version", () => {
+    const text = doctorText({
+      version: "9.9.9",
+      casting: {
+        state: "provisioned",
+        venv: "/v",
+        uv: { found: true, path: "/uv" },
+        config: "/c",
+        python: {
+          ok: true,
+          python: "3.12.13",
+          version: "0.1.0",
+          scorers: [
+            { name: "ecapa", weights: "speechbrain/spkrec-ecapa-voxceleb", license: { code: "Apache-2.0", weights: "Apache-2.0" }, package: "speechbrain", version: "1.1.1", installed: true, runs: "CPU (PyTorch)", extra: "scorers", cached: true },
+            { name: "utmos", weights: "tarepan/SpeechMOS utmos22_strong", revision: "v1.2.0", license: { code: "MIT", weights: "MIT" }, package: "torch", version: null, installed: false, runs: "CPU (PyTorch)", extra: "scorers", cached: null },
+          ],
+        },
+      },
+    });
+    expect(text).toContain("gate scorers:");
+    expect(text).toContain("ecapa     speechbrain/spkrec-ecapa-voxceleb");
+    expect(text).toContain("license Apache-2.0 / weights Apache-2.0; speechbrain 1.1.1; CPU (PyTorch), cached");
+    expect(text).toContain("tarepan/SpeechMOS utmos22_strong @ v1.2.0");
+    expect(text).toContain("not installed (extra: scorers)");
   });
 });
 

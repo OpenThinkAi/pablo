@@ -28,6 +28,10 @@ Commands today:
 - `check --work W [--episode N]`  unknown directions (with line numbers) and unbound roles.
 - `status --work W --episode N`   ready, or exit 2 with the unbound roles in `missing`.
 - `bind --work W --role R --voice SLUG [--vault V | --library DIR]`  pin a role to a library voice.
+- `gate`     score a take with the scorer stack and judge it against a card's
+             thresholds; `gate calibrate` fits thresholds from approved takes
+             (see `gate_command.py`). Writes nothing but a receipt unless
+             `gate calibrate --apply`.
 """
 
 from __future__ import annotations
@@ -44,9 +48,11 @@ from pathlib import Path
 from pablo_casting import __version__
 from pablo_casting.binding import BindingRefusal, bind, episode_files, library_dir, read_cast, read_episode
 from pablo_casting.config import ConfigRefusal, load_config
+from pablo_casting.gate_command import cmd_calibrate, cmd_gate
 from pablo_casting.hfcache import hub_cache, is_cached
 from pablo_casting.manifest import ManifestError, referenced_takes, write_version
 from pablo_casting.receipts import append_receipt
+from pablo_casting.scorers import ScorerFactory, describe, real_scorers
 from pablo_casting.takes import (
     KEY_RE,
     AmbiguousKey,
@@ -69,7 +75,7 @@ Body = dict[str, object]
 Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "takes", "manifest", "script", "check", "status", "bind")
+COMMANDS = ("version", "doctor", "pull", "audition", "takes", "manifest", "script", "check", "status", "bind", "gate")
 
 
 def refused(message: str, **extra: object) -> Result:
@@ -108,6 +114,15 @@ def _parser() -> _Parser:
     parser.add_argument("--voice")
     parser.add_argument("--vault", help="the vault root; the voice library is <vault>/casting/voices")
     parser.add_argument("--library", help="the voice library directory (overrides the config and --vault)")
+    # gate / gate calibrate
+    parser.add_argument("--line")
+    parser.add_argument("--card")
+    parser.add_argument("--centroid")
+    parser.add_argument("--emotion")
+    parser.add_argument("--scores")
+    parser.add_argument("--approved")
+    parser.add_argument("--others")
+    parser.add_argument("--apply", action="store_true")
     return parser
 
 
@@ -136,7 +151,18 @@ def cmd_doctor(env: Mapping[str, str]) -> Result:
         "config": config.as_body(),
         "hfCache": str(hub_cache(env)),
         "weights": [{"id": model_id, "cached": is_cached(model_id, env)} for model_id in config.weights],
+        "scorers": _scorers_body(env),
     }, EXIT_OK
+
+
+def _scorers_body(env: Mapping[str, str]) -> list[dict[str, object]]:
+    """The gate's scorer stack: weights, licenses, installed versions, and whether Hub weights are cached."""
+    out = describe()
+    for scorer in out:
+        weights = str(scorer["weights"])
+        # Hub ids look like `org/name`; UTMOS (torch.hub) and DNSMOS (an ONNX file) live in their own caches.
+        scorer["cached"] = is_cached(weights, env) if weights.count("/") == 1 and " " not in weights else None
+    return out
 
 
 def cmd_pull(env: Mapping[str, str], work: Path | None, downloader: Downloader) -> Result:
@@ -345,7 +371,12 @@ def cmd_bind(env: Mapping[str, str], work: Path, args: argparse.Namespace) -> Re
         return refused(str(refusal))
 
 
-def run(argv: Sequence[str], env: Mapping[str, str] | None = None, downloader: Downloader | None = None) -> tuple[Result, bool]:
+def run(
+    argv: Sequence[str],
+    env: Mapping[str, str] | None = None,
+    downloader: Downloader | None = None,
+    scorers: ScorerFactory | None = None,
+) -> tuple[Result, bool]:
     """Parse and run one command. Returns `(result, json)`; never raises for a bad argv."""
     env = os.environ if env is None else env
     wants_json = "--json" in argv
@@ -358,7 +389,7 @@ def run(argv: Sequence[str], env: Mapping[str, str] | None = None, downloader: D
         return error(f"a command is required: one of {', '.join(COMMANDS)}"), args.json
     if args.command not in COMMANDS:
         return error(f'unknown command "{args.command}": one of {", ".join(COMMANDS)}'), args.json
-    if args.rest and args.command not in ("takes", "manifest"):
+    if args.rest and args.command not in ("takes", "manifest", "gate"):
         return error(f"usage: unexpected argument(s) for {args.command}: {' '.join(args.rest)}"), args.json
 
     work: Path | None = None
@@ -385,6 +416,22 @@ def run(argv: Sequence[str], env: Mapping[str, str] | None = None, downloader: D
             return cmd_manifest_write(work, args.episode, args.from_file, args.flag, args.audio), args.json
         subs = "show, gc" if args.command == "takes" else "write"
         return error(f'unknown {args.command} subcommand "{sub}": one of {subs}'), args.json
+    if args.command == "gate":
+        if args.rest[:1] == ["calibrate"]:
+            if len(args.rest) > 1:
+                return error(f"gate calibrate takes no positional arguments, got: {' '.join(args.rest[1:])}"), args.json
+            return cmd_calibrate(approved_dir=args.approved, others_dir=args.others, card_ref=args.card, apply=args.apply, env=env), args.json
+        return cmd_gate(
+            args.rest,
+            line=args.line,
+            card_ref=args.card,
+            centroid_path=args.centroid,
+            emotion=args.emotion,
+            scores_path=args.scores,
+            env=env,
+            work=work,
+            scorer_factory=scorers or real_scorers,
+        ), args.json
     if args.command == "audition":
         return cmd_audition(env, args.dry_run), args.json
     missing_work = _need_work(work, args.command)
@@ -404,8 +451,13 @@ def run(argv: Sequence[str], env: Mapping[str, str] | None = None, downloader: D
     return cmd_status(work, episode), args.json
 
 
-def main(argv: Sequence[str], env: Mapping[str, str] | None = None, downloader: Downloader | None = None) -> int:
-    (body, code), wants_json = run(argv, env, downloader)
+def main(
+    argv: Sequence[str],
+    env: Mapping[str, str] | None = None,
+    downloader: Downloader | None = None,
+    scorers: ScorerFactory | None = None,
+) -> int:
+    (body, code), wants_json = run(argv, env, downloader, scorers)
     if wants_json:
         print(json.dumps(body))
     elif body.get("ok"):

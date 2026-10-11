@@ -158,7 +158,13 @@ def test_a_take_already_in_place_wins_a_race_and_the_loser_leaves_nothing(work: 
 def test_no_code_path_deletes_or_rewrites_a_take() -> None:
     """Static guard: the only deleting/replacing calls in the package are the staging discard and the link swap."""
     deleting = {"unlink", "rmtree", "remove", "rmdir", "removedirs", "truncate"}
-    allowed = {("takes.py", "_discard_staging", "rmtree"), ("manifest.py", "write_version", "replace")}
+    allowed = {
+        ("takes.py", "_discard_staging", "rmtree"),
+        ("manifest.py", "write_version", "replace"),
+        # `gate calibrate --apply` (AGT-1682) swaps a card.json atomically and removes only its own temp file; never a take.
+        ("gate_command.py", "_write_json_atomically", "replace"),
+        ("gate_command.py", "_write_json_atomically", "unlink"),
+    }
     found: set[tuple[str, str, str]] = set()
     for path in SRC.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))

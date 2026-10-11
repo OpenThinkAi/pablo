@@ -125,18 +125,31 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `CAST:` line), `status --for "episode N"` and `bind` ask the
                 Python side through it; scripts are read from
                 `outputs/radio/episodes/`, else `chapters/`.
+                `pablo gate` (AGT-1682) scoring audio provisions with
+                `--extra scorers` (recorded in the venv's stamp, never
+                dropped by a later sync); `gate calibrate` and
+                `gate --scores` need no extra. `gate` is CLI-only, not in
+                `verbs.ts`, until the casting verbs land there together.
                 Tests inject `CastingDeps`; `bun test` never needs uv or a
                 model. `prepack` copies the casting sources into
                 `packages/cli/casting/` (gitignored) for the npm `files`.
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`
-                (`version`, `doctor`, `pull`, `audition --dry-run`, `script`,
-                `check`, `status`, `bind`), never a user-facing binary; same
-                body and exit codes as pablo. The script reader
+                (`version`, `doctor`, `pull`, `audition --dry-run`, `takes`,
+                `manifest`, `script`, `check`, `status`, `bind`, `gate`,
+                `gate calibrate`), never a user-facing binary; same body and
+                exit codes as pablo. The script reader
                 (`script.py`), the direction grammar (`directions.py`), the
                 `CAST:` traits mapper (`traits.py`) and the `cast.json`
-                binding (`binding.py`) are pure Python, model-free.
+                binding (`binding.py`) are pure Python, model-free. The gate's scorers sit behind
+                `scorers.py`'s `Scorer` interface with their heavy imports
+                inside each backend, so `doctor` lists weights, licenses and
+                versions from metadata alone; the backends need the optional
+                `scorers` extra (`emotion` for emotion2vec). Thresholds and
+                the pass/fail table are `gates.py`, the calibration rule
+                `calibrate.py`, the Whisper words/tail check (ported from the
+                radio prototype) `words.py`.
                 Config: `$XDG_CONFIG_HOME/pablo/casting.json` (engines,
                 weights, library, pace; no weights by default). Receipts:
                 `<work>/.pablo/casting/receipts.jsonl`. Its tests are pytest;

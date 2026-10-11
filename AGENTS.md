@@ -122,4 +122,7 @@ cd packages/casting && uv run --frozen pytest -q    # casting-test (model-free)
 `casting-test` needs `uv` on the merging machine (`brew install uv`). It runs
 from the committed `uv.lock` (`--frozen`), so a dependency change means
 re-running `uv lock` and committing the lock. Tests that load real weights are
-marked `models` and run by hand only: `uv run pytest -m models`.
+marked `models` and run by hand only: `uv run pytest -m models`. The gate's
+real scorers live in the optional `scorers` and `emotion` extras, which the
+default sync (and `casting-test`) never installs: run them with
+`uv sync --extra scorers --extra emotion && uv run pytest -m models -s`.
