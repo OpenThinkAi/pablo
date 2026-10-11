@@ -93,6 +93,24 @@ export function outputForWork(workDir: string): OutputDefinition {
   return workOutput(marker.ok ? marker.marker.outputs : {});
 }
 
+/**
+ * The output a draft branch belongs to on a work (AGT-1690): the declared
+ * type whose `unitOfBranch` reads it, so `draft/story` merges as the story's
+ * on a work that also has a novel. A work that declares none is read as the
+ * novel, as `outputForWork` reads it. Undefined for a branch no declared type
+ * drafts.
+ */
+export function outputForBranch(workDir: string, branch: string): { readonly output: OutputDefinition; readonly unit: number } | undefined {
+  const marker = readMarker(workDir);
+  const declared = marker.ok ? Object.keys(marker.marker.outputs) : [];
+  const defs = declared.length === 0 ? [OUTPUTS.novel] : declared.map(outputDefinition).filter((d): d is OutputDefinition => d !== undefined);
+  for (const output of defs) {
+    const unit = output.unitOfBranch(branch);
+    if (unit !== undefined) return { output, unit };
+  }
+  return undefined;
+}
+
 /** `resolveOutput`'s refusal: exit 2, naming what is missing. */
 export interface OutputRefusal {
   readonly ok: false;

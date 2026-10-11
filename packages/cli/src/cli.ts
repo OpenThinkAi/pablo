@@ -31,6 +31,7 @@ import { outputsLabel, readMarker } from "./marker";
 import type { Composer } from "@openthink/pablo-tui";
 import { loadConfig } from "@openthink/pablo-core";
 import { runAgent } from "./harness/agent";
+import { lineReader, stdinAskAuthor } from "./harness/ask-author";
 import { harnessAuth } from "./harness/auth";
 import { createComposer } from "./harness/compose";
 import { loadPromptWork } from "./harness/prompt";
@@ -78,6 +79,7 @@ const P0_VERBS = [
   "share",
   "notes",
   "output",
+  "story",
   "mcp",
   "voice",
   "prose",
@@ -138,6 +140,12 @@ function helpText(): string {
     "                                            the work's outputs: list them, add one (once the",
     "                                            core is at beats), remove one (archived under",
     "                                            outputs/_removed/), or rewrite its plan.md",
+    "  pablo story \"<prompt>\" [--output <type>]... [--review] [--title T] [--words N]",
+    "                                            create a work and write it end to end: the core",
+    "                                            through the harness, then each output (default:",
+    "                                            a story or novel by the prompt's length cue);",
+    "                                            --review stops on every branch, and",
+    "                                            pablo story --project <slug> continues the run",
     "  check, publish and share take --output <type> the same way",
     "  pablo check --project <slug> --output <type>",
     "                                            tells and provenance, plus the core check:",
@@ -1006,6 +1014,74 @@ export function composeSpec(dir: string, cwd: string, env: Record<string, string
 
 const screenComposer = (dir: string, cwd: string): Composer => createComposer(() => composeSpec(dir, cwd));
 
+/**
+ * Every value of a repeatable string flag, in argument order (`--output novel --output story`,
+ * `--output=radio`). `parseArgs` keeps only the last value of a flag another verb declares as a
+ * single string (`write --output`), so `story` reads its own repeats off the raw argv.
+ */
+export function repeatedFlag(argv: readonly string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i] as string;
+    if (token === "--") break;
+    if (token === `--${flag}`) {
+      const next = argv[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        values.push(next);
+        i += 1;
+      }
+    } else if (token.startsWith(`--${flag}=`)) {
+      values.push(token.slice(flag.length + 3));
+    }
+  }
+  return values;
+}
+
+/** One line per thing a story run did, or the branch it waits on. */
+function storyText(body: Record<string, unknown>): string {
+  const waiting = body["waiting"] as { branch: string } | undefined;
+  if (waiting !== undefined) return `pablo: story ${String(body["project"])} is waiting on ${waiting.branch}\n  next: ${String(body["next"])}`;
+  const published = (body["published"] ?? {}) as Record<string, { where: string; words: number }>;
+  const assumptions = (body["assumptions"] ?? []) as { question: string }[];
+  return [
+    `pablo: wrote ${String(body["project"])} (${String(body["path"])})`,
+    ...Object.entries(published).map(([id, p]) => `  ${id}: ${p.words} words, published to ${p.where}`),
+    ...assumptions.map((a) => `  assumed: ${a.question}`),
+  ].join("\n");
+}
+
+/** `pablo story` (AGT-1690): a review run asks the author on the terminal; an on-demand run asks nobody. */
+async function runStoryCli(args: ParsedArgs, argv: readonly string[], cwd: string): Promise<number> {
+  const { runStory } = await import("./story");
+  const review = args.values["review"] === true;
+  const words = args.words === undefined ? undefined : Number(args.words);
+  if (words !== undefined && (!Number.isInteger(words) || words <= 0)) {
+    emit({ ok: false, code: EXIT_REFUSED, message: `pablo story: --words must be a positive integer (got "${args.words}")` }, args.json);
+    return EXIT_REFUSED;
+  }
+  const interactive = review && process.stdin.isTTY === true;
+  const result = await runStory(
+    {
+      prompt: args.rest.length === 0 ? undefined : args.rest.join(" "),
+      output: repeatedFlag(argv, "output"),
+      review,
+      title: args.title,
+      words,
+      project: args.project,
+    },
+    { cwd, env: process.env, stderr: process.stderr },
+    interactive ? { ask: stdinAskAuthor(lineReader(process.stdin), process.stderr) } : {},
+  );
+  const body = result.body as Record<string, unknown>;
+  if (args.json) console.log(JSON.stringify(body));
+  else if (body["ok"] === true) console.log(storyText(body));
+  else {
+    console.error(String(body["message"]));
+    for (const item of (body["missing"] ?? []) as string[]) console.error(`  ${item}`);
+  }
+  return result.exitCode;
+}
+
 /** Runs the CLI for `argv` (already stripped of `bun`/script name) and returns the process exit code. */
 export async function main(argv: readonly string[], cwd: string = process.cwd()): Promise<number> {
   const args = parseCliArgs(argv);
@@ -1108,6 +1184,11 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       { project: args.project, message: args.rest.length === 0 ? undefined : args.rest.join(" "), json: args.json, tagFacts: args.tagFacts, new: args.new },
       { cwd, env: process.env, stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
     );
+  }
+
+  // `story` (AGT-1690) creates its work, or resumes one with --project: it resolves both itself.
+  if (args.verb === "story") {
+    return await runStoryCli(args, argv, cwd);
   }
 
   // The reader's `read` (AGT-1583) lists/fetches reading rounds from GitHub: no vault, no project.

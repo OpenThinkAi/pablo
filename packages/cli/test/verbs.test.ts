@@ -36,7 +36,7 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the twenty-six verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the twenty-seven verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "audition",
     "bind",
@@ -60,6 +60,7 @@ test("VERBS exposes exactly the twenty-six verbs, each project-required verb req
     "search",
     "share",
     "status",
+    "story",
     "timeline",
     "voice",
     "voices",
@@ -68,7 +69,8 @@ test("VERBS exposes exactly the twenty-six verbs, each project-required verb req
   for (const v of VERBS) {
     if (v.name === "voice" || v.name === "prose") continue; // neither resolves via a --project slug (AGT-1240, AGT-1241)
     // The voice library is shared across works (AGT-1679): project is optional, for receipts only.
-    if (v.name === "audition" || v.name === "cast" || v.name === "voices") {
+    // `story` (AGT-1690) creates its work from a prompt; project only resumes a run.
+    if (v.name === "audition" || v.name === "cast" || v.name === "voices" || v.name === "story") {
       expect(v.args.shape).toHaveProperty("project");
       continue;
     }
@@ -148,6 +150,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     "auto-admitted": { type: "boolean", default: false }, // AGT-1679: voices list --auto-admitted
     reason: { type: "string" }, // AGT-1679: voices retire --reason
     auto: { type: "boolean", default: false }, // AGT-1698: cast --auto
+    review: { type: "boolean", default: false }, // AGT-1690: story --review
     episode: { type: "string" }, // AGT-1698: cast --auto --episode
     all: { type: "boolean", default: false }, // AGT-1698: cast --auto --all
     output: { type: "string" }, // AGT-1669: write/check/publish/share --output

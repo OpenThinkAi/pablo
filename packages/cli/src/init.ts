@@ -117,7 +117,7 @@ function addReadmeRow(vault: string, title: string, kind: string, dirName: strin
 }
 
 /** Appends `entry` to `<vault>/.gitignore` if not already present (as its own line). Returns whether it changed the file. */
-function ensureGitignoreEntry(vault: string, entry: string): boolean {
+export function ensureGitignoreEntry(vault: string, entry: string): boolean {
   const gitignorePath = join(vault, ".gitignore");
 
   if (!existsSync(gitignorePath)) {

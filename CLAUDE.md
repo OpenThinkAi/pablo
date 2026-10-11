@@ -128,6 +128,21 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 names (a chosen act), in `outputs/story/story.md` on
                 `draft/story`; the outline is one pack slice and the length
                 is `--words`, else 600 words a beat.
+                `pablo story "<prompt>"` (AGT-1690, `src/story.ts`, one
+                `VERBS` entry with no MCP tool) creates a work under
+                `stories/` (`novels/` when a novel is asked for), runs each
+                core stage as one harness message on its own `plan/` branch,
+                then `output add`, `write`, merge and publish per requested
+                output (default `story` or `novel` by the prompt's length
+                cue). On demand it accepts every branch and answers
+                `ask_author` with "assume and say so"; `--review` stops on
+                each branch and `--project <slug>` resumes from
+                `.pablo/story.json`. A requested type whose `ensure()` fails
+                (or that is not registered) is refused before anything is
+                written; an unrequested type's `ensure()` is never called.
+                Merges find a draft branch's output by `outputForBranch`, so
+                `draft/story` merges on a work that also has a novel. Tests
+                use a fake `HarnessQuery` that calls pablo's own tools.
                 Addressing (AGT-1669): `write`, `status --for "<type> N"`,
                 `check`, `publish` and `share` take `--output <type>`
                 (`--chapter N` is `--output novel --unit N`) and resolve it

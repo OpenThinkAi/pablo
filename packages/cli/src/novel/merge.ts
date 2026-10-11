@@ -17,7 +17,7 @@ import { createProviders, loadConfig } from "@openthink/pablo-core";
 import type { Adapter, Intent } from "@openthink/pablo-core";
 import { deleteBranch, mergeBranch, repoRoot } from "../branch";
 import { readMarker } from "../marker";
-import { OUTPUTS, outputForWork } from "../outputs/registry";
+import { OUTPUTS, outputForBranch, outputForWork } from "../outputs/registry";
 import type { OutputDefinition } from "../outputs/types";
 import type { Ritual, RitualOptions } from "./rituals";
 
@@ -33,12 +33,16 @@ export type MergeDraftResult =
 /** The options `runAfterMerge` takes, minus what the merged chapter's own frontmatter supplies. */
 export type MergeDraftOptions = Omit<RitualOptions, "words" | "model" | "receiptLine">;
 
-/** The unit's `NN-*.md` file in the output's artifact directory on the merged tree, or undefined. */
+/**
+ * The unit's file in the output's artifact directory on the merged tree, or undefined: the file the type's own
+ * `unitOfPath` reads as `chapter` (the novel's `NN-*.md`, the story's `story.md`).
+ */
 function findChapterFile(output: OutputDefinition, projectPath: string, chapter: number): string | undefined {
   const dir = join(projectPath, output.artifactDir);
   if (!existsSync(dir)) return undefined;
-  const prefix = `${String(chapter).padStart(2, "0")}-`;
-  const name = readdirSync(dir).find((f) => f.startsWith(prefix) && f.endsWith(".md"));
+  const name = readdirSync(dir)
+    .sort()
+    .find((f) => f.endsWith(".md") && output.unitOfPath(`${output.artifactDir}/${f}`) === chapter);
   return name === undefined ? undefined : join(dir, name);
 }
 
@@ -57,9 +61,10 @@ export async function mergeDraft(
   branch: string,
   opts: MergeDraftOptions,
 ): Promise<MergeDraftResult> {
-  const output = outputForWork(projectPath);
-  const chapter = output.unitOfBranch(branch);
-  if (chapter === undefined) return { ok: false, notice: `pablo: merge: "${branch}" is not a draft branch (draft/chNN)` };
+  // The output whose draft branch this is (AGT-1690): `draft/story` on a work with a novel and a story is the story's.
+  const drafted = outputForBranch(projectPath, branch);
+  if (drafted === undefined) return { ok: false, notice: `pablo: merge: "${branch}" is not a draft branch (draft/chNN)` };
+  const { output, unit: chapter } = drafted;
   const repo = repoRoot(projectPath);
   if (repo === undefined) return { ok: false, notice: `pablo: merge: ${projectPath} is not in a git repository` };
 
@@ -80,7 +85,7 @@ export async function mergeDraft(
 async function ritualsFor(output: OutputDefinition, projectPath: string, chapter: number, branch: string, opts: MergeDraftOptions, notices: string[]): Promise<Ritual[]> {
   const chapterPath = findChapterFile(output, projectPath, chapter);
   if (chapterPath === undefined) {
-    notices.push(`pablo: merge: no ${output.artifactDir}/${String(chapter).padStart(2, "0")}-*.md on main after merging ${branch}`);
+    notices.push(`pablo: merge: no ${output.noun} ${chapter} file in ${output.artifactDir}/ on main after merging ${branch}`);
     return [];
   }
   const text = readFileSync(chapterPath, "utf8");
@@ -119,8 +124,7 @@ export async function mergeChanges(projectPath: string, branch: string, opts: Me
   const repo = repoRoot(projectPath);
   if (repo === undefined) return { ok: false, notice: `pablo: merge: ${projectPath} is not in a git repository` };
   const output = outputForWork(projectPath);
-  const draft = output.unitOfBranch(branch);
-  if (draft !== undefined) {
+  if (outputForBranch(projectPath, branch) !== undefined) {
     const merged = await mergeDraft(projectPath, branch, opts);
     return merged.ok ? { ok: true, sha: merged.sha, chapters: [merged.chapter], rituals: merged.rituals, notices: merged.notices } : merged;
   }
@@ -155,7 +159,7 @@ export async function mergeDraftInProject(
   /** Overrides the routed extraction adapter; tests inject a fake so no model is called. */
   extractorOverride?: Adapter,
 ): Promise<{ readonly exitCode: number; readonly body: Record<string, unknown> }> {
-  if (outputForWork(projectPath).unitOfBranch(branch) === undefined) {
+  if (outputForBranch(projectPath, branch) === undefined) {
     return { exitCode: 2, body: { ok: false, code: 2, message: `pablo: merge: "${branch}" is not a draft branch (draft/chNN)` } };
   }
   const marker = readMarker(projectPath);
