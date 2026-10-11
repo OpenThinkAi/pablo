@@ -11,7 +11,8 @@ export type ScreenWriteResult =
   | { readonly ok: true; readonly branch: string; readonly lines: readonly string[] }
   | { readonly ok: false; readonly message: string; readonly missing: readonly string[] };
 
-export type ScreenWriter = (chapter: number, progress: (line: string) => void) => Promise<ScreenWriteResult>;
+/** `unit` of `output` (the screen's `a w` on `radio › 3`); with no `output` it is the novel's chapter, as before outputs. */
+export type ScreenWriter = (unit: number, progress: (line: string) => void, output?: string) => Promise<ScreenWriteResult>;
 
 interface Body {
   ok?: boolean;
@@ -39,9 +40,11 @@ function receiptLines(body: Body): string[] {
 }
 
 export function screenWriter(vaultRoot: string, projectPath: string, deps: Pick<RunWriteDeps, "adapter" | "env" | "now"> = {}): ScreenWriter {
-  return async (chapter, progress) => {
+  return async (unit, progress, output) => {
     const stderr = { write: (text: string) => { for (const line of text.split("\n")) if (line.trim() !== "") progress(line); } };
-    const args = { chapter: String(chapter), words: undefined, scenes: undefined, dryRun: false, json: true, force: false };
+    // `write --output <type> --unit N` (AGT-1669); the novel keeps its `--chapter N` spelling.
+    const which = output === undefined || output === "novel" ? { chapter: String(unit) } : { chapter: undefined, output, unit: String(unit) };
+    const args = { ...which, words: undefined, scenes: undefined, dryRun: false, json: true, force: false };
     let exitCode: number;
     let text: string;
     try {

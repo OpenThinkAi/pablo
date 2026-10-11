@@ -16,7 +16,14 @@ export interface BookStage {
   readonly missing: readonly string[];
   /** A `waiting` stage: the change branch holding its draft (no file on `main` yet); Enter on its row opens that branch in review. */
   readonly branch?: string;
+  /** The output this row belongs to (`novel`, `radio`): its group row and each of its units. Absent on a core stage. */
+  readonly output?: string;
+  /** A unit row's number within its output (`radio › 3` is `output: "radio", unit: 3`). */
+  readonly unit?: number;
 }
+
+/** The output unit `a w` writes: what `write --output <output> --unit <unit>` takes. */
+export interface WriteTarget { readonly output: string; readonly unit: number }
 
 export const MARKS: Readonly<Record<StageStatus, string>> = { ready: "✓", missing: "✗", drafted: "●", waiting: "◆" };
 
@@ -29,13 +36,25 @@ export interface BookRail {
   readonly waiting: Readonly<Record<string, string>>;
   /** Groups that start folded: the chapters, until → opens them. */
   readonly folded: readonly string[];
+  /** The output a row belongs to (its group row or one of its units), by row id; core stages have none. */
+  readonly outputOf: Readonly<Record<string, string>>;
+  /** The unit each unit row writes, by row id. A `chapter:N` row with no output named is the novel's chapter N. */
+  readonly targets: Readonly<Record<string, WriteTarget>>;
+  /** Units drafted of the total, per output: the status line's progress while the cursor is in that output. */
+  readonly counts: Readonly<Record<string, { readonly drafted: number; readonly total: number }>>;
 }
 
 export function bookRail(stages: readonly BookStage[]): BookRail {
   const labels: Record<string, string> = {};
   const missing: Record<string, readonly string[]> = {};
   const waiting: Record<string, string> = {};
+  const outputOf: Record<string, string> = {};
+  const targets: Record<string, WriteTarget> = {};
   for (const s of stages) {
+    const legacy = /^chapter:(\d+)$/.exec(s.id)?.[1];
+    if (s.output !== undefined) outputOf[s.id] = s.output;
+    if (s.unit !== undefined && s.output !== undefined) targets[s.id] = { output: s.output, unit: s.unit };
+    else if (legacy !== undefined) targets[s.id] = { output: s.output ?? "novel", unit: Number(legacy) };
     labels[s.id] = `${MARKS[s.status]} ${s.name}${s.status === "waiting" ? " · draft waiting for review" : ""}`;
     if (s.status === "waiting" && s.branch !== undefined) waiting[s.id] = s.branch;
     if (s.status === "missing" && s.missing.length > 0) missing[s.id] = s.missing;
@@ -46,14 +65,23 @@ export function bookRail(stages: readonly BookStage[]): BookRail {
     missing,
     waiting,
     folded: stages.filter((s) => s.group).map((s) => s.id),
+    outputOf,
+    targets,
+    counts: Object.fromEntries([...new Set(Object.values(outputOf))].map((o) => [o, bookCounts(stages, o)])),
   };
 }
 
-/** The status area's progress: chapters drafted of the book's total (every row under the chapters group). */
-export const bookCounts = (stages: readonly BookStage[]): { drafted: number; total: number } => ({
-  drafted: stages.filter((s) => s.status === "drafted").length,
-  total: stages.filter((s) => s.depth > 0).length,
-});
+/** What `a w` on row `rowId` writes, or undefined when the row is a core stage or an output's group row. Pure. */
+export const writeRequest = (book: BookRail, rowId: string | undefined): WriteTarget | undefined => (rowId === undefined ? undefined : book.targets[rowId]);
+
+/** The `pablo write` arguments that request means: `write --output radio --unit 3`. */
+export const writeArgv = (t: WriteTarget): string[] => ["write", "--output", t.output, "--unit", String(t.unit)];
+
+/** The status area's progress: units drafted of the total (every unit row), of one output when `output` is given. */
+export const bookCounts = (stages: readonly BookStage[], output?: string): { drafted: number; total: number } => {
+  const units = stages.filter((s) => s.depth > 0 && (output === undefined || s.output === output));
+  return { drafted: units.filter((s) => s.status === "drafted").length, total: units.length };
+};
 
 /** What the content area shows for a stage that is not ready. */
 export const missingContent = (name: string, reasons: readonly string[]) =>

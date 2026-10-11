@@ -20,7 +20,8 @@ const LEAVE_ALT = "\x1b[?1049l";
 export type WriteResult =
   | { readonly ok: true; readonly branch: string; readonly lines: readonly string[] }
   | { readonly ok: false; readonly message: string; readonly missing: readonly string[] };
-export type Writer = (chapter: number, progress: (line: string) => void) => Promise<WriteResult>;
+/** `unit` of `output` (`write --output radio --unit 3`); a writer that only knows the novel ignores `output`. */
+export type Writer = (unit: number, progress: (line: string) => void, output?: string) => Promise<WriteResult>;
 
 /** What `a v` came to: lines saying where the sentences were written, or why they were not. */
 export type VoiceResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };

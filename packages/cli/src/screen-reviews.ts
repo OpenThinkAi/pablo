@@ -9,9 +9,8 @@
 
 import { basename } from "node:path";
 import type { BookSnapshot, PullResult, Round, RoundsResult } from "@openthink/pablo-tui";
-import { bookStages } from "./book";
+import { workBookStages } from "./book";
 import { repoRoot, waitingBranches } from "./branch";
-import { readNovelState } from "./novel/machine";
 
 /** What a child pablo came to. */
 export interface ExecResult { readonly code: number; readonly stdout: string; readonly stderr: string }
@@ -38,7 +37,7 @@ export function screenRefresh(dir: string): () => BookSnapshot | undefined {
     const waiting = repo === undefined ? { ok: true as const, branches: [] } : waitingBranches(repo);
     // A git that fails this once keeps what the screen has; the next tick tries again.
     if (!waiting.ok) return undefined;
-    return { stages: bookStages(readNovelState(dir), waiting.branches), branches: waiting.branches };
+    return { stages: workBookStages(dir, waiting.branches), branches: waiting.branches };
   };
 }
 

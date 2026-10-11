@@ -16,7 +16,7 @@
 import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { bookStages } from "./book";
+import { workBookStages } from "./book";
 import { doctorText, gateText, realCastingDeps, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
 import { parseForEpisode, radioBind, radioStatus } from "./radio";
 import { branchDiff, fileAt, repoRoot, waitingBranches } from "./branch";
@@ -36,7 +36,6 @@ import { createComposer } from "./harness/compose";
 import { loadPromptWork } from "./harness/prompt";
 import type { HarnessSpec } from "./harness/session";
 import { runMcp } from "./mcp";
-import { readNovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
@@ -980,7 +979,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       const slug = marked.ok ? marked.marker.slug : undefined;
       return await runScreen({
         ...screen,
-        stages: bookStages(readNovelState(screen.dir), waiting?.ok ? waiting.branches : []),
+        stages: workBookStages(screen.dir, waiting?.ok ? waiting.branches : []),
         // A chapter opened there is scanned with `check`'s rules from the vault, each hit a box under its line (AGT-1528).
         ...(vault.ok ? { checks: screenChecks(vault.path) } : {}),
         // `a w` writes the selected chapter through the same `runWrite` the verb uses (AGT-1542).

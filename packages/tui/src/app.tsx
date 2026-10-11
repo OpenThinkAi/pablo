@@ -14,7 +14,7 @@ import { configPath } from "@openthink/pablo-core";
 import { tooSmall, useTerminalSize, MIN_COLS, MIN_ROWS } from "./resize";
 import type { Size } from "./resize";
 import { resolve, tokenOf } from "./chord";
-import { bookCounts, bookRail, missingContent, waitingDoc, type BookRail } from "./book";
+import { bookCounts, bookRail, missingContent, waitingDoc, writeRequest, type BookRail } from "./book";
 import { KeyPanel } from "./key-panel";
 import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, voiceChoiceOf, voiceChoicesFor, VOICE_CHOICES, VOICE_TARGETS, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
@@ -283,12 +283,12 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   // `a w` on a chapter row: the writer runs in the background, its progress lines and its end arrive as actions.
   function startWrite() {
     const id = railRow(viewOf(state).rail)?.id ?? "";
-    const chapter = /^chapter:(\d+)$/.exec(id)?.[1];
-    if (state.writing !== null) return void dispatch({ type: "write.progress", line: `chapter ${state.writing} is still being written` });
-    if (chapter === undefined) return void dispatch({ type: "write.failed", message: "Select a chapter to write.", missing: [] });
+    const target = book === undefined ? undefined : writeRequest(book, id);
+    if (state.writing !== null) return void dispatch({ type: "write.progress", line: `${state.writingOutput ?? "chapter"} ${state.writing} is still being written` });
+    if (target === undefined) return void dispatch({ type: "write.failed", message: "Select a chapter to write.", missing: [] });
     if (!writer) return void dispatch({ type: "write.failed", message: "Writing is not available here.", missing: [] });
-    dispatch({ type: "write.start", chapter: Number(chapter) });
-    writer(Number(chapter), (line) => dispatch({ type: "write.progress", line })).then(
+    dispatch({ type: "write.start", chapter: target.unit, ...(target.output === "novel" ? {} : { output: target.output }) });
+    writer(target.unit, (line) => dispatch({ type: "write.progress", line }), target.output).then(
       (r) => dispatch(r.ok ? { type: "write.done", branch: r.branch, lines: r.lines } : { type: "write.failed", message: r.message, missing: r.missing }),
       (e: unknown) => dispatch({ type: "write.failed", message: e instanceof Error ? e.message : String(e), missing: [] }),
     );
@@ -497,7 +497,9 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   const where = state.mode.kind === "compose" ? `compose · Esc back to the book${working}` : `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}${state.mode.back ? " · Esc back to compose" : ""}` : "book"} · ${state.focus}${working}${roundsNote}`;
   const pending = pendingText(state.pending);
   const shownComments = hits.length ? { ...comments, check: hits.length } : comments;
-  const fields = fitFields(statusFields({ format, drafted, total, branch: reviewBranch ?? branch, comments: review ? { ...shownComments, ...review.counts } : shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}), reviews: reviewsIn(state.rounds) }), size.cols - 4);
+  // The status line names the output the cursor is in (its group row or one of its units); on a core stage it names the work's format.
+  const inOutput = review || stageId === undefined ? undefined : book?.outputOf[stageId];
+  const fields = fitFields(statusFields({ format: inOutput ?? format, ...(inOutput !== undefined && book?.counts[inOutput] ? book.counts[inOutput] : { drafted, total }), branch: reviewBranch ?? branch, comments: review ? { ...shownComments, ...review.counts } : shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}), reviews: reviewsIn(state.rounds) }), size.cols - 4);
   return (
     <Box flexDirection="column" width={size.cols} height={size.rows}>
       <Box flexDirection="column" borderStyle="single" paddingX={1} height={4}>
