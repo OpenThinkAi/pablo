@@ -34,7 +34,10 @@
  *   directory as the lines pass, the episode file mixed from the same
  *   timeline, then published there at once (`radio-stream.ts`); `--all`
  *   performs every unrendered episode in order through `progressive.ts`'s
- *   engine queue, each published as it finishes.
+ *   engine queue, each published as it finishes. `--output radio --all` (AGT-1700) is
+ *   the radio output's whole chain (`radio-chain.ts`): episodes with no script are
+ *   written from the core and accepted, then cast (`--auto --design`), performed
+ *   with `--stream` and published, writing overlapping performing.
  * - `mix --project W --episode N [--version k]` (AGT-1684) turns a performed
  *   episode into `renders/epNN/epNN.v<k>.m4a`: the takes paced by the manifest,
  *   the script's cues from the content-addressed cue library, normalised and
@@ -162,7 +165,9 @@ const PERFORM_ARGS = z.object({
     .boolean()
     .optional()
     .default(false)
-    .describe("Perform every episode that has a script and no render yet, in order, one at a time (not with `episode`)."),
+    .describe(
+      "Perform every episode that has a script and no render yet, in order, one at a time (not with `episode`). With output: radio, the radio output's whole chain instead: every episode not yet made is written from the story core (and accepted), cast from the library (a voice designed on demand when none fits), performed with stream and published to the listening directory, the next episode written while one performs.",
+    ),
   stream: z
     .boolean()
     .optional()
@@ -466,11 +471,14 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       "Perform a radio episode: every spoken line is rendered through the decided engine (Chatterbox-Turbo; `dia` for A/B only) in its bound voice, scored by the quality gates, and retaken up to 4 times with derived seeds (first passing take kept, else the best kept and flagged automatically); the pace policy stretches each take to its role's pace (slow/quick directions scale it) within 0.75-1.05, retaking lines that would need more. Writes immutable takes and the episode's v1 manifest (with rtf_total) and a receipt per engine pass; each line's take is reported as it lands. Refuses an unbound role, a changed card pin, or an episode that already has a manifest (use fix). With `stream`, a listener can start the episode in the review player before its last line is performed, and the episode is mixed and published to the listening directory as soon as it finishes; with `all`, every episode not yet performed, in order. Loads models and uses the GPU.",
     args: PERFORM_ARGS,
     run: async (args, ctx) => {
+      // `--output radio --all` (AGT-1700) is the radio output's whole chain, not the engine queue alone.
+      const outputAll = args.all && args.output !== undefined && args.episode === undefined && args.unit === undefined;
       const addressedAny = args.episode !== undefined || args.unit !== undefined || args.output !== undefined;
-      if (args.all && addressedAny) return refuse("pablo perform takes --episode N (or --output radio --unit N) or --all, not both");
+      if (args.all && addressedAny && !outputAll) return refuse("pablo perform takes --episode N (or --output radio --unit N) or --all, not both");
       const where = locate(ctx, args.project);
       if ("exitCode" in where) return where;
       const work = where.work as string;
+      if (outputAll) return performOutput(args.output as string, where.vault as string, work, ctx, ctx.casting ?? deps(ctx.env));
       let single: number | undefined;
       if (!args.all) {
         const episode = addressedEpisode(args, work, "perform");
@@ -640,6 +648,62 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
   };
 
   return [audition, cast, voices, perform, mix, fix, describeVoice] as readonly Verb[];
+}
+
+/**
+ * `pablo perform --output radio --all` (AGT-1700): the radio output's chain over every episode not yet made,
+ * on a work whose radio output was added later (`pablo output add radio` once the core is at beats). Each
+ * episode with no script is written from the core and accepted (the writer queue), then cast with `cast
+ * --auto --design`, performed with `--stream` and published to the listening directory (the engine queue),
+ * episode N+1 written while episode N performs (`radio-chain.ts`, loaded only here). The work's other
+ * outputs are never touched. A refusal stops both queues and leaves what is published.
+ */
+async function performOutput(output: string, vault: string, work: string, ctx: VerbContext, machine: CastingDeps): Promise<VerbResult> {
+  if (output !== RADIO_ID) return refuseWith(`pablo perform: only the radio output is performed; got --output ${output}`, [`--output ${RADIO_ID}`]);
+  const marker = readMarker(work);
+  if (!marker.ok) return { body: { ok: false, code: marker.code, message: marker.message, tried: marker.tried }, exitCode: marker.code };
+  const resolved = resolveOutput(marker.marker.outputs, RADIO_ID, "perform");
+  if (!resolved.ok) return refuseWith(resolved.message, resolved.missing);
+  const mod = await import("./radio-chain");
+  const chain = {
+    vault,
+    work,
+    slug: marker.marker.slug,
+    ctx,
+    casting: machine,
+    progress: (line: string) => ctx.stderr.write(`pablo perform: ${line}\n`),
+    now: () => machine.now(),
+  };
+  const units = mod.radioUnits(work).filter((unit) => episodeState(work, unit).stage !== "publish");
+  if (units.length === 0) return refuse(`pablo perform --output radio --all: every episode of ${work} is already made (change one with pablo fix)`);
+  const written: number[] = [];
+  const made = await mod.runRadioChain(chain, units, {
+    write: async (unit) => {
+      chain.progress(`radio: writing episode ${unit}`);
+      const result = await mod.writeAndAcceptEpisode(chain, unit, { writer: ctx.writer });
+      if (result.ok) written.push(unit);
+      return result;
+    },
+  });
+  const { report } = made;
+  const episodes = report.units.filter((u) => u.performed !== undefined).map((u) => ({ episode: u.unit, exitCode: u.performed?.outcome.exitCode, ...(u.performed?.outcome.body as object) }));
+  const done = episodes.filter((e) => e.exitCode === 0).length;
+  const stoppedBody = (report.stopped?.outcome.body ?? {}) as Record<string, unknown>;
+  return {
+    body: {
+      ...(report.ok ? {} : stoppedBody),
+      ok: report.ok,
+      ...(report.ok ? {} : { code: report.exitCode, stopped: { unit: report.stopped?.unit, queue: report.stopped?.queue } }),
+      output: RADIO_ID,
+      written,
+      episodes,
+      published: made.where === undefined ? null : { where: made.where, chapters: made.published },
+      message: report.ok
+        ? `made ${done} radio episode(s) (${units.join(", ")}): ${written.length} written, each cast, performed and published to the listening directory as it finished`
+        : `stopped at episode ${String(report.stopped?.unit)} after ${done} made: ${String(stoppedBody["message"] ?? "failed")}`,
+    },
+    exitCode: report.exitCode,
+  };
 }
 
 /** A `perform` progress line (`{"event": ...}`), as opposed to the final body. */

@@ -1184,13 +1184,19 @@ export function repeatedFlag(argv: readonly string[], flag: string): string[] {
 
 /** One line per thing a story run did, or the branch it waits on. */
 function storyText(body: Record<string, unknown>): string {
-  const waiting = body["waiting"] as { branch: string } | undefined;
-  if (waiting !== undefined) return `pablo: story ${String(body["project"])} is waiting on ${waiting.branch}\n  next: ${String(body["next"])}`;
-  const published = (body["published"] ?? {}) as Record<string, { where: string; words: number }>;
+  const waiting = body["waiting"] as { step: string; branch?: string; review?: string; unit?: number } | undefined;
+  if (waiting !== undefined) {
+    // A radio approval (AGT-1700) waits on the episode's bindings or render, not a branch.
+    const on = waiting.branch ?? `radio episode ${String(waiting.unit)}'s ${waiting.review === "binding" ? "voices" : "render"}`;
+    return `pablo: story ${String(body["project"])} is waiting on ${on}\n  next: ${String(body["next"])}`;
+  }
+  const published = (body["published"] ?? {}) as Record<string, { where: string; words: number; episodes?: readonly unknown[] }>;
   const assumptions = (body["assumptions"] ?? []) as { question: string }[];
   return [
     `pablo: wrote ${String(body["project"])} (${String(body["path"])})`,
-    ...Object.entries(published).map(([id, p]) => `  ${id}: ${p.words} words, published to ${p.where}`),
+    ...Object.entries(published).map(([id, p]) =>
+      p.episodes !== undefined ? `  ${id}: ${p.episodes.length} episode(s), published to ${p.where}` : `  ${id}: ${p.words} words, published to ${p.where}`,
+    ),
     ...assumptions.map((a) => `  assumed: ${a.question}`),
   ].join("\n");
 }

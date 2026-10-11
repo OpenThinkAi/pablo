@@ -32,6 +32,18 @@
  * Every model call keeps its receipt in `<work>/.pablo/receipts.jsonl`
  * naming its `output` and `unit` (drafts and continuity extraction); the
  * harness's planning calls are Claude's and are not pablo receipts.
+ *
+ * The radio output (AGT-1700) runs its own machine after the script:
+ * `radio-chain.ts`, imported only when a run asks for radio, so a written
+ * run never loads the casting side. On demand, episode N+1 is written while
+ * episode N is cast (`cast --auto --design`), performed with `--stream`
+ * (mixed from the same timeline) and published to the listening directory;
+ * a refusal anywhere stops both queues and leaves what is published. Under
+ * `--review` each episode stops three times: on its draft branch, on its
+ * bindings (`cast:radio:N`) and on its render (`render:radio:N`, played in
+ * `pablo review`; a render with open flags, auto-flags included, keeps
+ * waiting until they are fixed or cleared), and is published only once the
+ * render is approved by resuming.
  */
 
 import { execFileSync } from "node:child_process";
@@ -42,10 +54,14 @@ import type { Adapter, Intent, KeyLookup, LoadConfigOptions } from "@openthink/p
 import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
 import { coreStages, readCoreState } from "./core/machine";
 import { ensureGitignoreEntry, gitCommit, SLUG_PATTERN } from "./init";
+import type { CastingDeps } from "./radio";
 import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, readMarker, writeMarker } from "./marker";
 import { FACTS_TEXT } from "./migrate-outputs";
 import { mergeDraft } from "./novel/merge";
 import { addOutput } from "./output-verbs";
+import { radioMachine } from "./outputs/radio/casting-side";
+import { episodeState } from "./outputs/radio/state";
+import { RADIO_ID } from "./outputs/radio/units";
 import { slugify } from "./outputs/novel/units";
 import { outputDefinition, outputIds } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
@@ -163,6 +179,11 @@ export interface StoryDeps {
   /** `--review`'s `ask_author`: the front end's question card. Absent, review runs answer by assumption too. */
   readonly ask?: AskAuthor;
   readonly now?: () => Date;
+  /**
+   * The casting side's machine the radio output runs on (AGT-1700); absent, the context's, else the radio
+   * type's own seam (`radioMachine`). Never touched by a run with no radio output.
+   */
+  readonly casting?: CastingDeps;
 }
 
 /** A question the harness put to an absent author, answered by assumption. */
@@ -192,13 +213,24 @@ interface StoryState {
   titled?: boolean;
   /** Steps finished: `core:<stage>`, `output:<type>`, `draft:<type>:<unit>`, `publish:<type>`. */
   done: string[];
-  /** The branch a review run waits on. */
-  pending?: { readonly step: string; readonly branch: string; readonly sha: string };
+  /**
+   * What a review run waits on: a branch to accept (`branch`, `sha`), or a radio episode's bindings or
+   * render to approve (`approve`, `unit`), approved by resuming.
+   */
+  pending?: { readonly step: string; readonly branch?: string; readonly sha?: string; readonly approve?: "binding" | "render"; readonly unit?: number };
   plan: { readonly stage: string; readonly branch: string; readonly merged?: string }[];
   drafts: Record<string, DraftRecord[]>;
-  published: Record<string, { readonly target: string; readonly where: string; readonly words: number }>;
+  published: Record<string, PublishedRecord>;
   assumptions: StoryAssumption[];
   finished?: boolean;
+}
+
+/** What an output's publish left: the radio output lists its published episodes (AGT-1700). */
+interface PublishedRecord {
+  readonly target: string;
+  readonly where: string;
+  readonly words: number;
+  readonly episodes?: readonly { readonly episode: number; readonly version: number; readonly audio: string }[];
 }
 
 const STATE_FILE = join(".pablo", "story.json");
@@ -501,6 +533,172 @@ function extractorFor(run: Run): Adapter | undefined {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The radio output (AGT-1700): its chain after the script, through radio-chain.ts
+// ---------------------------------------------------------------------------
+
+type RadioChainModule = typeof import("./radio-chain");
+
+/** The chain for this run: imported on first use, on the casting machine the run was given (or the radio type's seam). */
+async function radioChainFor(run: Run): Promise<{ mod: RadioChainModule; chain: import("./radio-chain").RadioChain }> {
+  const mod = await import("./radio-chain");
+  const casting = run.deps.casting ?? run.ctx.casting ?? radioMachine.deps(run.ctx.env);
+  return {
+    mod,
+    chain: {
+      vault: run.vault,
+      work: run.work,
+      slug: run.slug,
+      ctx: run.ctx,
+      casting,
+      progress: (line) => progress(run, line),
+      ...(run.deps.now ? { now: run.deps.now } : {}),
+    },
+  };
+}
+
+/** Records the radio output's published episodes (the listening directory's index) in the run. */
+function recordRadioPublished(run: Run, where: string | undefined, chapters: readonly { episode: number; version: number; audio: string }[]): void {
+  if (where === undefined) return;
+  run.state.published[RADIO_ID] = { target: "stream", where, words: 0, episodes: chapters.map((c) => ({ episode: c.episode, version: c.version, audio: c.audio })) };
+  saveState(run.work, run.state);
+}
+
+/** A refusal or failure in the radio chain: its own body, where the run stopped, and what is already published (left in place). */
+function radioStopped(run: Run, unit: number, result: { body: unknown; exitCode: number }, queue?: "writer" | "engine"): VerbResult {
+  const exitCode = result.exitCode === 0 ? 1 : result.exitCode;
+  const body = (typeof result.body === "object" && result.body !== null ? result.body : { message: String(result.body) }) as Record<string, unknown>;
+  return {
+    body: {
+      ...body,
+      ok: false,
+      code: typeof body["code"] === "number" ? body["code"] : exitCode,
+      output: RADIO_ID,
+      unit,
+      ...(queue !== undefined ? { queue } : {}),
+      project: run.slug,
+      path: run.work,
+      published: run.state.published,
+      next: `fix what is named, then \`pablo story --project ${run.slug}\` continues from episode ${unit}`,
+    },
+    exitCode,
+  };
+}
+
+/** What a review run shows for a radio approval: the episode's bindings, or its render and open flags. */
+function radioApprovalDetail(run: Run, kind: "binding" | "render", unit: number, bindings?: readonly unknown[]): Record<string, unknown> {
+  const state = episodeState(run.work, unit);
+  if (kind === "binding") return { bindings: bindings ?? [] };
+  return {
+    render: {
+      version: state.version ?? null,
+      audio: state.audio ?? null,
+      openFlags: state.openFlags,
+      player: `pablo review --project ${run.slug} --episode ${unit}`,
+    },
+  };
+}
+
+/**
+ * A review run stopped on a radio stage: the bindings to approve after `cast` (rebind with `pablo bind`), or the
+ * render to play in the review player after `perform` and `mix` (open flags keep it waiting: `pablo fix`, or
+ * clear them in the player). Resuming approves it.
+ */
+function radioApproval(run: Run, step: string, kind: "binding" | "render", unit: number, extra: Record<string, unknown> = {}): VerbResult {
+  const detail = radioApprovalDetail(run, kind, unit, extra["bindings"] as readonly unknown[] | undefined);
+  const flags = episodeState(run.work, unit).openFlags;
+  const next =
+    kind === "binding"
+      ? `approve episode ${unit}'s voices (listen with \`pablo voices show <voice>\`, rebind with \`pablo bind --project ${run.slug} --role R --voice V\`), then run \`pablo story --project ${run.slug}\``
+      : `play episode ${unit} in the review player (\`pablo review --project ${run.slug} --episode ${unit}\`)${flags > 0 ? `; it has ${flags} open flag(s): \`pablo fix --output radio --unit ${unit}\`, or clear them in the player` : ""}, then run \`pablo story --project ${run.slug}\` to publish it`;
+  return {
+    body: {
+      ok: true,
+      project: run.slug,
+      path: run.work,
+      waiting: { step, review: kind, output: RADIO_ID, unit, ...detail, ...("cast" in extra ? { cast: extra["cast"] } : {}) },
+      ...(kind === "render" && flags > 0 ? { missing: [`episode ${unit} has ${flags} open flag(s) (pablo fix --output radio --unit ${unit})`] } : {}),
+      next,
+      done: run.state.done,
+      assumptions: run.state.assumptions,
+    },
+    exitCode: 0,
+  };
+}
+
+/**
+ * The radio output after it is added: on demand, the whole chain over every episode not yet made (writer and
+ * engine queues overlapping); under `--review`, one stage at a time. Undefined when every episode is made and
+ * published; otherwise the result to return (a wait, a refusal or a failure).
+ */
+async function advanceRadio(run: Run): Promise<VerbResult | undefined> {
+  const { state } = run;
+  const { mod, chain } = await radioChainFor(run);
+  const all = mod.radioUnits(run.work);
+  const total = all.length;
+  const writeDeps = { writer: run.deps.writer, extractor: run.deps.extractor, now: run.deps.now };
+
+  if (!state.review) {
+    const units = all.filter((u) => !state.done.includes(`episode:${RADIO_ID}:${u}`));
+    const made = await mod.runRadioChain(chain, units, {
+      write: async (unit) => {
+        progress(run, `radio: writing episode ${unit} of ${total}`);
+        const written = await mod.writeAndAcceptEpisode(chain, unit, writeDeps);
+        if (written.ok) {
+          (state.drafts[RADIO_ID] ??= []).push({ unit, branch: written.branch as string, path: written.path as string, merged: written.merged as string });
+          markDone(run, `draft:${RADIO_ID}:${unit}`);
+        }
+        return written;
+      },
+      onMade: (unit) => markDone(run, `episode:${RADIO_ID}:${unit}`),
+    });
+    recordRadioPublished(run, made.where, made.published);
+    const stopped = made.report.stopped;
+    if (stopped !== undefined) return radioStopped(run, stopped.unit, stopped.outcome, stopped.queue);
+    markDone(run, `publish:${RADIO_ID}`);
+    return undefined;
+  }
+
+  for (const unit of all) {
+    if (state.done.includes(`episode:${RADIO_ID}:${unit}`)) continue;
+    const ep = episodeState(run.work, unit);
+    if (!ep.script) {
+      progress(run, `radio: writing episode ${unit} of ${total}`);
+      const drafted = await mod.writeUnit(run.vault, run.work, RADIO_ID, unit, { env: run.ctx.env, writer: run.deps.writer, now: run.deps.now });
+      if (!drafted.ok) return drafted.result;
+      const step = `draft:${RADIO_ID}:${unit}`;
+      state.pending = { step, branch: drafted.branch, sha: git(run.repo, ["rev-parse", drafted.branch]) };
+      (state.drafts[RADIO_ID] ??= []).push({ unit, branch: drafted.branch, path: drafted.path });
+      saveState(run.work, state);
+      return waiting(run, step, drafted.branch);
+    }
+    const castStep = `cast:${RADIO_ID}:${unit}`;
+    if (!state.done.includes(castStep)) {
+      const cast = await mod.castEpisode(chain, unit);
+      if (cast.exitCode !== 0) return radioStopped(run, unit, cast);
+      state.pending = { step: castStep, approve: "binding", unit };
+      saveState(run.work, state);
+      return radioApproval(run, castStep, "binding", unit, { bindings: mod.episodeBindings(run.work, unit), cast: cast.body });
+    }
+    const renderStep = `render:${RADIO_ID}:${unit}`;
+    if (!state.done.includes(renderStep)) {
+      // Performed and mixed, not published: the review player gates the publish.
+      const rendered = await mod.renderEpisode(chain, unit, false);
+      if (rendered.exitCode !== 0) return radioStopped(run, unit, rendered);
+      state.pending = { step: renderStep, approve: "render", unit };
+      saveState(run.work, state);
+      return radioApproval(run, renderStep, "render", unit);
+    }
+    const published = mod.publishEpisode(chain, unit);
+    if (published.exitCode !== 0) return radioStopped(run, unit, published);
+    markDone(run, `episode:${RADIO_ID}:${unit}`);
+  }
+  const index = mod.publishEpisodeIndex(chain);
+  recordRadioPublished(run, index.where, index.published);
+  markDone(run, `publish:${RADIO_ID}`);
+  return undefined;
+}
+
 /** Runs every step not yet done, stopping on a branch in review mode. */
 async function advance(run: Run): Promise<VerbResult> {
   const { state } = run;
@@ -554,6 +752,12 @@ async function advance(run: Run): Promise<VerbResult> {
         if (!added.ok) return { body: added, exitCode: added.code };
       }
       markDone(run, addStep);
+    }
+
+    if (id === RADIO_ID) {
+      const stopped = await advanceRadio(run);
+      if (stopped !== undefined) return stopped;
+      continue;
     }
 
     const units = def
@@ -619,10 +823,23 @@ async function advance(run: Run): Promise<VerbResult> {
   };
 }
 
-/** A review run's pending branch: merged moves on, still open waits, dropped runs the step again. */
+/** A review run's pending branch: merged moves on, still open waits, dropped runs the step again. A radio approval is given by resuming. */
 function settlePending(run: Run): VerbResult | undefined {
   const pending = run.state.pending;
   if (pending === undefined) return undefined;
+  if (pending.approve !== undefined) {
+    const unit = pending.unit as number;
+    // A render with open flags (the author's, or perform's automatic ones) is not approved: fix or clear them first.
+    if (pending.approve === "render" && episodeState(run.work, unit).openFlags > 0) return radioApproval(run, pending.step, "render", unit);
+    delete run.state.pending;
+    markDone(run, pending.step);
+    return undefined;
+  }
+  if (pending.branch === undefined || pending.sha === undefined) {
+    delete run.state.pending;
+    saveState(run.work, run.state);
+    return undefined;
+  }
   if (isMerged(run.repo, pending.sha)) {
     delete run.state.pending;
     if (pending.step.startsWith("core:")) {
