@@ -171,10 +171,15 @@ def write_version(
     episode: int,
     proposal: Mapping[str, object],
     *,
-    flags_applied: Sequence[str] = (),
+    flags_applied: Sequence[str | Mapping[str, object]] = (),
     audio: Path | None = None,
 ) -> Written:
-    """Writes `v<k+1>` of `episode`, or raises `ManifestError` having written nothing."""
+    """Writes `v<k+1>` of `episode`, or raises `ManifestError` having written nothing.
+
+    `flags_applied` is flag ids, or (as `pablo fix` writes them, AGT-1685) objects
+    carrying the flag's `id`, `line`, `reason` and `by`; either way the ids are what
+    the invariant is checked against.
+    """
     if isinstance(episode, bool) or not isinstance(episode, int) or episode < 1:
         raise ManifestError(f"episode must be a positive integer, got {episode!r}")
     if audio is not None and not audio.is_file():
@@ -190,7 +195,7 @@ def write_version(
     else:
         parent = takes_by_line(_lines(read_version(work, episode, parent_version)))
         changed = changed_lines(parent, child)
-        flagged = resolve_flags(work, episode, flags_applied)
+        flagged = resolve_flags(work, episode, [flag if isinstance(flag, str) else str(flag.get("id")) for flag in flags_applied])
         offending = [i for i in changed if i not in flagged]
         if offending:
             raise ManifestError(
@@ -212,7 +217,7 @@ def write_version(
         "parent": parent_version,
         **{name: proposal[name] for name in PROPOSED_FIELDS if name in proposal},
         "changed_lines": changed,
-        "flags_applied": list(flags_applied),
+        "flags_applied": [flag if isinstance(flag, str) else dict(flag) for flag in flags_applied],
         "lines": lines,  # validated by `_validate_lines` above
         "audio": audio_name if audio is not None else None,
         "created": now(),

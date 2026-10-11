@@ -54,6 +54,13 @@ Commands:
              normalise, encode `renders/epNN/epNN.v<k>.m4a`, move the `epNN.m4a`
              link and write each line's `start`/`end` into the manifest
              (AGT-1684, `mix.py`); mixing an already-mixed version is a new version.
+- `fix --work W --episode N [--cues DIR] [--json-lines] [--vault V | --library DIR]`
+             re-record only the episode's flagged lines (`flags.json`: the player's
+             and perform's automatic ones, a flag's reason may bump the engine:
+             `wrong voice`/`flat` temperature, `rushed` pace), write `v<k+1>`
+             through the "only flagged lines change" invariant, remix it, and move
+             the flags to `flags-done.json` with the version they landed in; no open
+             flags is exit 2 (AGT-1685, `fix.py`).
 - `gate`     score a take with the scorer stack and judge it against a card's
              thresholds; `gate calibrate` fits thresholds from approved takes
              (see `gate_command.py`). Writes nothing but a receipt unless
@@ -110,7 +117,7 @@ Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "cast", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix")
 VOICES_SUBCOMMANDS = ("list", "show", "retire")
 DEFAULT_CANDIDATES = 6
 
@@ -664,6 +671,24 @@ def run(
             args.json_lines,
             engines or real_engine,
             scorers or real_scorers,
+        ), args.json
+    if args.command == "fix":
+        from pablo_casting.cues import real_generators
+        from pablo_casting.fix import cmd_fix
+        from pablo_casting.mix import Seams, cmd_mix
+
+        try:
+            configured = load_config(env).library
+        except ConfigRefusal as refusal:
+            return refused(str(refusal)), args.json
+        fix_seams = mixer or Seams(generators=real_generators(), log=lambda message: print(message, file=sys.stderr, flush=True))
+        fix_work = work
+
+        def remix(version: int) -> Result:
+            return cmd_mix(fix_work, args.episode, version, args.cues, args.library or configured, args.vault, fix_seams)
+
+        return cmd_fix(
+            env, work, args.episode, args.vault, args.library, configured, args.json_lines, engines or real_engine, scorers or real_scorers, remix
         ), args.json
     if args.command == "mix":
         from pablo_casting.cues import real_generators

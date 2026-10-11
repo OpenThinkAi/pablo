@@ -99,6 +99,7 @@ const P0_VERBS = [
   "perform",
   "mix",
   "review",
+  "fix",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -282,6 +283,12 @@ function helpText(): string {
     "                                            a version switcher and a chapter list that fills",
     "                                            in as chapters are published. Flags go to",
     "                                            outputs/radio/casting/flags.json for `pablo fix`",
+    "  pablo fix --project <slug> --episode N [--json-lines]",
+    "                                            re-record only the episode's flagged lines",
+    "                                            (flags.json; a reason can bump the engine),",
+    "                                            write the next manifest version, remix it and",
+    "                                            move the flags to flags-done.json; no open",
+    "                                            flags is a refusal. Uses the GPU",
     "  pablo takes show <key> --project <slug>  one radio take: inputs, scores, timings and",
     "                                            receipt id (a unique key prefix is enough)",
     "  pablo takes gc --project <slug> [--yes]  list the takes no manifest references, then",
@@ -575,7 +582,7 @@ async function runVerbEntry(name: string, args: ParsedArgs, cwd: string, text: (
 }
 
 /** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
-const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix"]);
+const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix", "fix"]);
 
 /** Plain-text output for a casting verb's body. */
 export function castingText(verb: string, body: Record<string, unknown>): string {
@@ -633,6 +640,13 @@ export function castingText(verb: string, body: Record<string, unknown>): string
     lines.push(`  manifest: ${String(body["manifest"])}`);
     lines.push(`  ${String(body["duration"])} s, ${String(body["cuesGenerated"])} cue(s) generated, ${String(body["cuesReused"])} reused (${String(body["cueLibrary"])})`);
     if (body["linkMoved"] === false) lines.push("  epNN.m4a was left on the newer version that already has audio");
+  }
+  if (verb === "fix" && typeof body["manifest"] === "string") {
+    lines.push(`  manifest: ${body["manifest"]}`);
+    lines.push(`  changed lines: ${((body["changedLines"] as readonly number[] | undefined) ?? []).join(", ")}`);
+    if (typeof body["audio"] === "string") lines.push(`  audio: ${body["audio"]}`);
+    const again = (body["flags"] as readonly string[] | undefined) ?? [];
+    if (again.length > 0) lines.push(`  ${again.length} line(s) flagged again automatically`);
   }
   if (verb === "voices" && body["card"] !== undefined) {
     lines.push(`${String(body["slug"])}  ${String(body["hash"])}${body["retired"] ? "  (retired)" : ""}${body["reference_intact"] ? "" : "  REFERENCE CHANGED"}`);

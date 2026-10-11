@@ -174,6 +174,8 @@ def test_no_code_path_deletes_or_rewrites_a_take() -> None:
         ("manifest.py", "move_link", "replace"),
         ("manifest.py", "attach_mix", "replace"),
         ("cues.py", "ensure", "unlink"),
+        # AGT-1685: fix moves applied flags between flags.json and flags-done.json by atomic swaps; never a take.
+        ("fix.py", "_write_atomic", "replace"),
     }
     found: set[tuple[str, str, str]] = set()
     for path in SRC.glob("*.py"):

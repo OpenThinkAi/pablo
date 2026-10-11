@@ -252,8 +252,51 @@ DIRECTION_PARAMS: dict[str, Callable[[str | None, int | None], dict[str, object]
 }
 
 
-def adapt(spec: EngineSpec, take_pass: Pass, voices: Mapping[str, VoiceRef], emotion: str | None, intensity: int | None) -> dict[str, object]:
-    """The params that change a pass's audio (the take key's `params`)."""
+# What a flag's reason does to a retake (`pablo fix`, AGT-1685). Neither engine has an
+# emotion or intensity control, so the only levers are the sampling temperature and the
+# line's pace (a stretch, applied by the mix):
+#
+# - `wrong voice`: the clone drifted from the card, so sample colder (more faithful).
+# - `flat`: the read had no life, so sample hotter (more varied).
+# - `rushed`: the line's pace goes one step slower (quick -> normal -> slow).
+# - `clipped`, `other`, and an automatic flag's free-text reason: no bump; the retake is
+#   fresh attempts (new numbers, so new derived seeds) at the same settings.
+#
+# When `wrong voice` and `flat` are both raised for one line, the voice wins. A bump is
+# part of the take key (`temperature`, plus a `retake` param naming the reasons), so a
+# retake is a new take, never the old one.
+RETAKE_REASONS = ("clipped", "wrong voice", "flat", "rushed", "other")
+RETAKE_TEMPERATURE: dict[str, dict[str, float]] = {
+    TURBO.name: {"wrong voice": 0.65, "flat": 0.95},
+    DIA.name: {"wrong voice": 0.95, "flat": 1.25},
+}
+SLOWER = {None: "slow", "quick": None, "slow": "slow"}
+
+
+def normalise_reasons(reasons: Sequence[object]) -> tuple[str, ...]:
+    """The reasons that are in the player's vocabulary, lower-cased, de-duplicated, sorted."""
+    found = {" ".join(str(reason).lower().split()) for reason in reasons if isinstance(reason, str)}
+    return tuple(sorted(found & set(RETAKE_REASONS)))
+
+
+def retake_pace(pace: str | None, reasons: Sequence[str]) -> str | None:
+    """The pace a retake asks for: one step slower for `rushed`, else unchanged."""
+    return SLOWER[pace] if "rushed" in reasons else pace
+
+
+def adapt(
+    spec: EngineSpec,
+    take_pass: Pass,
+    voices: Mapping[str, VoiceRef],
+    emotion: str | None,
+    intensity: int | None,
+    reasons: Sequence[str] = (),
+) -> dict[str, object]:
+    """The params that change a pass's audio (the take key's `params`).
+
+    `reasons` are a flag's normalised reasons (`normalise_reasons`); with none the
+    params are exactly what `perform` has always sent, so existing takes keep their keys.
+    """
     params: dict[str, object] = {"adapter": f"{spec.name}/{ADAPTER_VERSION}"}
     if spec.name == TURBO.name:
         params["temperature"] = TURBO_TEMPERATURE
@@ -265,6 +308,12 @@ def adapt(spec: EngineSpec, take_pass: Pass, voices: Mapping[str, VoiceRef], emo
     else:
         raise KeyError(spec.name)
     params.update(DIRECTION_PARAMS[spec.name](emotion, intensity))
+    for reason in ("wrong voice", "flat"):  # the voice wins when both are raised
+        if reason in reasons:
+            params["temperature"] = RETAKE_TEMPERATURE[spec.name][reason]
+            break
+    if reasons:
+        params["retake"] = "+".join(reasons)
     return params
 
 

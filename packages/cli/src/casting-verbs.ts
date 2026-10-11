@@ -27,6 +27,11 @@
  *   the script's cues from the content-addressed cue library, normalised and
  *   encoded, the `epNN.m4a` link moved and each line's start/end written into
  *   the manifest. It provisions the `mix` extra (Stable Audio Open).
+ * - `fix --project W --episode N [--json-lines]` (AGT-1685) re-records only the
+ *   episode's flagged lines (`flags.json`, with their reasons), writes the next
+ *   manifest version through the "only flagged lines change" invariant, remixes
+ *   it and moves the flags to `flags-done.json`. No open flags is a refusal. It
+ *   provisions both the `scorers` and `mix` extras.
  *
  * Each `run` resolves what it can from `ctx` (the vault, for the library's
  * default `<vault>/casting`; the work, when `project` is given, for receipts)
@@ -129,6 +134,16 @@ const MIX_ARGS = z.object({
     .positive()
     .optional()
     .describe("The manifest version to mix (default: the newest). An unmixed version is completed in place; a version that already has audio is remixed into a new version (the newest only)."),
+});
+
+const FIX_ARGS = z.object({
+  project: z.string().describe("The work whose performed radio episode to fix."),
+  episode: z.number().int().positive().describe("The episode number; it must have been performed and have open flags (flags.json)."),
+  "json-lines": z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Also write each re-recorded line's progress event to stdout as a JSON line as it lands; they always go to stderr."),
 });
 
 const VOICES_ARGS = z.object({
@@ -338,7 +353,43 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     },
   };
 
-  return [audition, cast, voices, perform, mix] as readonly Verb[];
+  const fix: Verb<typeof FIX_ARGS.shape> = {
+    name: "fix",
+    description:
+      "Fix a performed radio episode from its flags: re-records only the flagged lines (flags.json: the player's, with a reason of clipped, wrong voice, flat, rushed or other, and perform's automatic ones for takes that never passed the gates), with new attempt numbers and, by reason, an adjusted engine temperature (wrong voice: colder, flat: hotter) or a slower pace (rushed); writes the next manifest version through the invariant that no unflagged line's take changes (a violation writes nothing), remixes it into epNN.v<k+1>.m4a with the epNN.m4a link moved, and moves the flags to flags-done.json with the version they landed in. The flags and their reasons are recorded in the manifest's flags_applied. Refuses an episode with no open flags (naming it), an unperformed episode, a script whose unflagged lines changed, or a role bound to a different voice since the version. Loads models and uses the GPU.",
+    args: FIX_ARGS,
+    run: async (args, ctx) => {
+      const where = locate(ctx, args.project);
+      if ("exitCode" in where) return where;
+      const work = where.work as string;
+      const machine = deps(ctx.env);
+      const casting = { env: ctx.env, stderr: ctx.stderr };
+      // The engine and the gates' scorers, then the remix's cue generators.
+      const ready = ensureProvisioned(casting, machine, work, [SCORERS_EXTRA, MIX_EXTRA]);
+      if (!ready.ok) return ready.result;
+      const relay = args["json-lines"] ? ctx.stdout : undefined;
+      const pythonArgs = [
+        "fix",
+        ...flag("--episode", args.episode),
+        ...(relay !== undefined ? ["--json-lines"] : []),
+        ...flag("--vault", where.vault),
+        "--work",
+        work,
+      ];
+      const result =
+        relay === undefined
+          ? runPython(ready.layout, machine, casting, pythonArgs)
+          : await runPythonStreaming(ready.layout, machine, casting, pythonArgs, (line) => {
+              if (isProgressEvent(line)) relay.write(`${line}\n`);
+            });
+      return {
+        body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) },
+        exitCode: result.exitCode,
+      };
+    },
+  };
+
+  return [audition, cast, voices, perform, mix, fix] as readonly Verb[];
 }
 
 /** A `perform` progress line (`{"event": ...}`), as opposed to the final body. */
