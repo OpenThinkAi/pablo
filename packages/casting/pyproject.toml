@@ -10,6 +10,33 @@ dependencies = [
     "huggingface-hub>=0.34",
 ]
 
+# The gate's scorer stack (AGT-1682), installed by pablo on the first `pablo gate`
+# that scores audio, never by the default `uv sync` (the tests use fakes). The
+# MLX scorers (Whisper, the forced aligner) exist only on Apple Silicon.
+# emotion2vec (funasr) is its own extra: its gate is soft and its weights'
+# license is unverified (design, "Research: quality gates on Apple Silicon").
+[project.optional-dependencies]
+scorers = [
+    "numpy>=2.0",
+    "soundfile>=0.13",
+    "mlx-whisper>=0.4.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-audio>=0.5.8; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "torch>=2.6",
+    "torchaudio>=2.6",
+    "speechbrain>=1.1.1",
+    "audiobox-aesthetics>=0.0.4",
+    "speechmos>=0.0.1.1",
+    "onnxruntime>=1.20",
+    "librosa>=0.10",
+]
+# funasr pulls modelscope and the Alibaba Cloud SDKs (oss2, aliyun-python-sdk-*)
+# transitively; they can reach Alibaba hosts. The scorer loads from the Hugging
+# Face hub (`hub="hf"`, `disable_update=True`), the extra is never installed by
+# default, and its gate is soft; re-check those three before depending on it.
+emotion = [
+    "funasr>=1.2",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

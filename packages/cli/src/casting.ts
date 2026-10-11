@@ -29,13 +29,22 @@
  * dispatched by `cli.ts` only; registering them in `verbs.ts` (MCP, the
  * harness) comes with the real `cast`/`audition` verbs, so an agent cannot
  * trigger a multi-gigabyte download through a tool before those land.
+ *
+ * `pablo gate` (AGT-1682) is the first verb that needs an optional extra:
+ * scoring audio provisions with `--extra scorers` (torch, speechbrain, the
+ * MLX scorers), which the stamp records, so a venv provisioned for
+ * `audition --dry-run` alone is topped up once and never downgraded.
+ * `gate calibrate` and `gate --scores` read score records only and need no
+ * extra. `gate` stays CLI-only for the same reason as above: its first run
+ * downloads the scorers' weights.
  */
 
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import { stateDir } from "./paths";
 import type { ProgressSink, VerbResult } from "./verbs";
 
@@ -130,6 +139,8 @@ export function realCastingDeps(env: Env): CastingDeps {
 interface ProvisionStamp {
   readonly lock: string;
   readonly at: string;
+  /** The optional extras (`pyproject.toml` `[project.optional-dependencies]`) this venv was synced with. */
+  readonly extras?: readonly string[];
 }
 
 const STAMP = ".pablo-provisioned.json";
@@ -144,16 +155,34 @@ function lockHash(layout: CastingLayout): string {
 
 export type CastingState = "not provisioned" | "stale" | "provisioned";
 
-/** Reads the venv's stamp against the current `uv.lock`. Never runs anything. */
-export function castingState(layout: CastingLayout): CastingState {
+function readStamp(layout: CastingLayout): Partial<ProvisionStamp> | undefined {
   const stampPath = join(layout.venv, STAMP);
-  if (!existsSync(stampPath) || !existsSync(venvPython(layout))) return "not provisioned";
+  if (!existsSync(stampPath) || !existsSync(venvPython(layout))) return undefined;
   try {
-    const stamp = JSON.parse(readFileSync(stampPath, "utf8")) as Partial<ProvisionStamp>;
-    return stamp.lock === lockHash(layout) ? "provisioned" : "stale";
+    return JSON.parse(readFileSync(stampPath, "utf8")) as Partial<ProvisionStamp>;
   } catch {
-    return "not provisioned";
+    return undefined;
   }
+}
+
+/** The extras the venv was last synced with (kept across a lock change, so a re-provision does not drop them). */
+function stampedExtras(layout: CastingLayout): readonly string[] {
+  const stamp = readStamp(layout);
+  if (stamp === undefined || !Array.isArray(stamp.extras)) return [];
+  // Only bare extra names reach `uv sync --extra`: a hand-edited stamp cannot smuggle in a flag.
+  return stamp.extras.filter((extra): extra is string => typeof extra === "string" && /^[a-z][a-z0-9-]*$/.test(extra));
+}
+
+/**
+ * Reads the venv's stamp against the current `uv.lock`. Never runs anything.
+ * With `extras`, a lock-matching venv synced without one of them is `stale`.
+ */
+export function castingState(layout: CastingLayout, extras: readonly string[] = []): CastingState {
+  const stamp = readStamp(layout);
+  if (stamp === undefined) return "not provisioned";
+  if (stamp.lock !== lockHash(layout)) return "stale";
+  const have = new Set(Array.isArray(stamp.extras) ? stamp.extras : []);
+  return extras.every((extra) => have.has(extra)) ? "provisioned" : "stale";
 }
 
 /** `<work>/.pablo/casting/receipts.jsonl`, or the state directory's when there is no work. */
@@ -209,10 +238,14 @@ export function ensureProvisioned(
   ctx: CastingContext,
   deps: CastingDeps,
   work: string | undefined,
+  extras: readonly string[] = [],
 ): { readonly ok: true; readonly layout: CastingLayout; readonly outcome: ProvisionOutcome } | { readonly ok: false; readonly result: VerbResult } {
   const layout = deps.layout;
   if (layout === undefined) return { ok: false, result: noSources() };
-  if (castingState(layout) === "provisioned") return { ok: true, layout, outcome: { provisioned: false } };
+  if (castingState(layout, extras) === "provisioned") return { ok: true, layout, outcome: { provisioned: false } };
+  // Keep what an earlier provision installed: `uv sync` removes the extras it is not asked for.
+  const wanted = [...new Set([...stampedExtras(layout), ...extras])].sort();
+  const extraArgs = wanted.flatMap((extra) => ["--extra", extra]);
 
   const uv = deps.which("uv", ctx.env);
   if (uv === undefined) {
@@ -223,10 +256,11 @@ export function ensureProvisioned(
   }
 
   const started = deps.now();
-  ctx.stderr.write(`pablo: provisioning the casting side (uv sync --frozen into ${layout.venv})\n`);
+  const syncing = ["sync", "--frozen", ...(layout.install === "npm" ? ["--no-dev"] : []), ...extraArgs];
+  ctx.stderr.write(`pablo: provisioning the casting side (uv ${syncing.join(" ")} into ${layout.venv})\n`);
   const env: Env = { ...ctx.env, UV_PROJECT_ENVIRONMENT: layout.venv };
   // An npm install has no use for the test dependencies; a checkout keeps them for `casting-test`.
-  const sync = deps.run([uv, "sync", "--frozen", ...(layout.install === "npm" ? ["--no-dev"] : [])], { cwd: layout.source, env });
+  const sync = deps.run([uv, ...syncing], { cwd: layout.source, env });
   if (sync.code !== 0) {
     return { ok: false, result: failure(`pablo: uv sync --frozen failed (exit ${sync.code})${sync.stderr ? `: ${sync.stderr.trim()}` : ""}`) };
   }
@@ -241,7 +275,7 @@ export function ensureProvisioned(
 
   const lock = lockHash(layout);
   const finished = deps.now();
-  writeFileSync(join(layout.venv, STAMP), `${JSON.stringify({ lock, at: finished.toISOString() } satisfies ProvisionStamp)}\n`, "utf8");
+  writeFileSync(join(layout.venv, STAMP), `${JSON.stringify({ lock, at: finished.toISOString(), extras: wanted } satisfies ProvisionStamp)}\n`, "utf8");
   const receipt = castingReceiptsPath(ctx.env, work);
   appendReceipt(receipt, {
     at: finished.toISOString(),
@@ -249,6 +283,7 @@ export function ensureProvisioned(
     install: layout.install,
     venv: layout.venv,
     lock,
+    extras: wanted,
     weights: (pull.body as { weights?: unknown }).weights ?? [],
     wall: (finished.getTime() - started.getTime()) / 1000,
   });
@@ -295,9 +330,32 @@ export function doctorText(body: unknown): string {
   if (casting["venv"] !== undefined) lines.push(`  venv:   ${String(casting["venv"])}`);
   lines.push(`  uv:     ${uv.found ? uv.path : `not found (${uv.install})`}`);
   lines.push(`  config: ${String(casting["config"])}`);
-  const python = casting["python"] as { ok?: boolean; python?: string; version?: string; message?: string } | undefined;
+  const python = casting["python"] as { ok?: boolean; python?: string; version?: string; message?: string; scorers?: readonly ScorerRow[] } | undefined;
   if (python !== undefined) lines.push(python.ok ? `  python: ${python.python} (pablo_casting ${python.version})` : `  python: ${python.message}`);
+  if (python?.scorers !== undefined && python.scorers.length > 0) {
+    lines.push("  gate scorers:");
+    for (const s of python.scorers) {
+      const version = s.installed ? `${s.package} ${s.version ?? "?"}` : `not installed (extra: ${s.extra})`;
+      const cached = s.cached === true ? ", cached" : s.cached === false ? ", not cached" : "";
+      lines.push(`    ${s.name.padEnd(9)} ${s.weights}${s.revision ? ` @ ${s.revision}` : ""}`);
+      lines.push(`              license ${s.license.code} / weights ${s.license.weights}; ${version}; ${s.runs}${cached}`);
+    }
+  }
   return lines.join("\n");
+}
+
+/** One row of the Python doctor's `scorers` list (AGT-1682). */
+interface ScorerRow {
+  readonly name: string;
+  readonly weights: string;
+  readonly revision?: string;
+  readonly license: { readonly code: string; readonly weights: string };
+  readonly package: string;
+  readonly version: string | null;
+  readonly installed: boolean;
+  readonly runs: string;
+  readonly extra: string;
+  readonly cached: boolean | null;
 }
 
 /**
@@ -414,4 +472,106 @@ export function takesGcText(body: unknown): string {
   const listing = [`${unreferenced.length} take(s) no manifest references:`, ...unreferenced.map((entry) => `  ${entry.key}  ${entry.bytes ?? "?"} bytes  ${entry.created ?? ""}`)];
   if (gc.declined) listing.push("nothing archived");
   return listing.join("\n");
+}
+
+/** The extra `pablo gate` needs to score audio (`packages/casting/pyproject.toml`). */
+export const SCORERS_EXTRA = "scorers";
+
+/** Makes a path the author typed absolute against their cwd: the Python side runs in the casting sources. */
+function absolute(cwd: string, path: string): string {
+  return isAbsolute(path) ? path : resolve(cwd, path);
+}
+
+function parseGateArgs(argv: readonly string[]) {
+  return parseArgs({
+    args: [...argv],
+    allowPositionals: true,
+    strict: true,
+    options: {
+      line: { type: "string" },
+      card: { type: "string" },
+      centroid: { type: "string" },
+      emotion: { type: "string" },
+      scores: { type: "string" },
+      approved: { type: "string" },
+      others: { type: "string" },
+      apply: { type: "boolean" },
+      // Resolved by cli.ts before `runGate` is called; accepted here so strict parsing allows them.
+      project: { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+}
+
+/**
+ * `pablo gate` (AGT-1682), parsed strictly here and passed to
+ * `python -m pablo_casting gate`:
+ *
+ *     pablo gate <take.wav> --line "<line>" --card <slug|dir> [--centroid <file>] [--emotion <class>]
+ *     pablo gate --scores <record.json> --card <slug|dir> [--line "<line>"]
+ *     pablo gate calibrate --approved <dir> [--others <dir>] [--card <slug|dir>] [--apply]
+ *
+ * `argv` is everything after the verb. Paths are made absolute against `cwd`;
+ * a card given as a path (it holds a `/` or starts with `.`) is too, a bare
+ * word is a library slug. Scoring audio provisions with the `scorers` extra;
+ * calibrate and `--scores` need none. A failing take is exit 0 with
+ * `pass: false`; `calibrate` writes nothing without `--apply`.
+ */
+export function runGate(argv: readonly string[], ctx: CastingContext, deps: CastingDeps, cwd: string, work: string | undefined): VerbResult {
+  let parsed: ReturnType<typeof parseGateArgs>;
+  try {
+    parsed = parseGateArgs(argv);
+  } catch (error) {
+    return failure(`pablo: gate: ${(error as Error).message}`);
+  }
+  const { values, positionals } = parsed;
+  const calibrating = positionals[0] === "calibrate";
+  const args: string[] = ["gate"];
+  if (calibrating) {
+    if (positionals.length > 1) return failure(`pablo: gate calibrate takes no positional arguments, got: ${positionals.slice(1).join(" ")}`);
+    if (values.approved === undefined) return failure("pablo: gate calibrate needs --approved <dir> (score records of approved takes)");
+    args.push("calibrate", "--approved", absolute(cwd, values.approved));
+    if (values.others !== undefined) args.push("--others", absolute(cwd, values.others));
+    if (values.apply === true) args.push("--apply");
+  } else {
+    const take = positionals[0];
+    if (positionals.length > 1) return failure(`pablo: gate takes one take, got ${positionals.length}: ${positionals.join(" ")}`);
+    if (take === undefined && values.scores === undefined) return failure('pablo: gate needs a take (`pablo gate <take.wav> --line "..." --card <slug>`) or --scores <record.json>');
+    if (take !== undefined && values.scores !== undefined) return failure("pablo: give gate either a take or --scores, not both");
+    if (take !== undefined && values.line === undefined) return failure('pablo: gate <take.wav> needs --line "<the script line>"');
+    if (take !== undefined) args.push(absolute(cwd, take));
+    if (values.scores !== undefined) args.push("--scores", absolute(cwd, values.scores));
+    if (values.line !== undefined) args.push("--line", values.line);
+    if (values.centroid !== undefined) args.push("--centroid", absolute(cwd, values.centroid));
+    if (values.emotion !== undefined) args.push("--emotion", values.emotion);
+    if (work !== undefined) args.push("--work", work);
+  }
+  if (values.card !== undefined) {
+    const card = values.card;
+    args.push("--card", card.includes("/") || card.startsWith(".") ? absolute(cwd, card) : card);
+  }
+
+  const scoresAudio = !calibrating && values.scores === undefined;
+  const ready = ensureProvisioned(ctx, deps, work, scoresAudio ? [SCORERS_EXTRA] : []);
+  if (!ready.ok) return ready.result;
+  return runPython(ready.layout, deps, ctx, args);
+}
+
+/** Plain-text `pablo gate` / `pablo gate calibrate`. */
+export function gateText(body: unknown): string {
+  const b = body as Record<string, unknown>;
+  if (b["ok"] !== true) return String(b["message"] ?? "pablo: gate failed");
+  if ("proposed" in b) {
+    const lines = [`proposed gates (${String(b["approved"])} approved, ${String(b["others"])} others):`, JSON.stringify(b["proposed"], null, 2)];
+    for (const warning of (b["warnings"] as readonly string[] | undefined) ?? []) lines.push(`warning: ${warning}`);
+    if (typeof b["message"] === "string") lines.push(b["message"]);
+    return lines.join("\n");
+  }
+  const failing = (b["failing"] as readonly string[] | undefined) ?? [];
+  const flags = (b["flags"] as readonly string[] | undefined) ?? [];
+  const head = b["pass"] === true ? `pass (card ${String(b["card"])})` : `fail: ${failing.join(", ")} (card ${String(b["card"])})`;
+  const scores = Object.entries((b["scores"] as Record<string, unknown> | undefined) ?? {})
+    .filter(([key]) => key !== "heard")
+    .map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`);
+  return [head, ...(flags.length > 0 ? [`flags: ${flags.join(", ")}`] : []), ...scores].join("\n");
 }

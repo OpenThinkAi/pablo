@@ -17,7 +17,7 @@ import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
-import { doctorText, realCastingDeps, runAudition, runDoctor, runTakes, takeShowText, takesGcText } from "./casting";
+import { doctorText, gateText, realCastingDeps, runAudition, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
 import { parseForEpisode, radioBind, radioStatus } from "./radio";
 import { branchDiff, fileAt, repoRoot, waitingBranches, waitingForReview } from "./branch";
 import { runCheck, screenChecks } from "./check";
@@ -89,6 +89,7 @@ const P0_VERBS = [
   "audition",
   "takes",
   "bind",
+  "gate",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -213,6 +214,19 @@ function helpText(): string {
     "  pablo takes gc --project <slug> [--yes]  list the takes no manifest references, then",
     "                                            ask before archiving them (moved, never",
     "                                            deleted); without a terminal, needs --yes",
+    '  pablo gate <take.wav> --line "<line>" --card <slug|dir> [--centroid <file>]',
+    "             [--emotion <class>] [--project <slug>] [--json]",
+    "                                            score a take (Whisper WER + tail, aligner",
+    "                                            pace, ECAPA, UTMOS, Audiobox, DNSMOS,",
+    "                                            emotion2vec) against the card's gates; exit 0",
+    "                                            with pass and the failing gates. The first",
+    "                                            run installs the scorers and their weights",
+    "  pablo gate --scores <record.json> --card <slug|dir>",
+    "                                            re-judge stored scores; loads no model",
+    "  pablo gate calibrate --approved <dir> [--others <dir>] [--card <slug|dir>] [--apply]",
+    "                                            fit each threshold (5th percentile of approved",
+    "                                            vs midpoint to others, stricter wins) and print",
+    "                                            a gates block; writes the card only with --apply",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -1028,6 +1042,17 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     if (args.json) console.log(JSON.stringify(result.body));
     else if (body.ok) console.log(`pablo: bound ${body.role} to ${body.slug}`);
     else console.error(body.message ?? "pablo: bind failed");
+    return result.exitCode;
+  }
+
+  // `gate` (AGT-1682) scores a take against a cast card, or calibrates a card's
+  // thresholds. Its flags are its own (`runGate` parses everything after the
+  // verb strictly); `--project` is optional and only places the receipt.
+  if (args.verb === "gate") {
+    const result = runGate(argv.slice(argv.indexOf("gate") + 1), { env: process.env, stderr: process.stderr }, realCastingDeps(process.env), cwd, projectPath);
+    if (args.json) console.log(JSON.stringify(result.body));
+    else if ((result.body as { ok?: boolean }).ok) console.log(gateText(result.body));
+    else console.error(gateText(result.body));
     return result.exitCode;
   }
 
