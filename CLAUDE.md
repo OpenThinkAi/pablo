@@ -6,7 +6,7 @@
 screen in `packages/tui`; the CLI verbs and `pablo mcp` stay, so whatever agent
 Matt already likes (Claude Code, Codex, pi) can still drive pablo over the shell
 or MCP. pablo is the *manager* of the writing project: it knows the vault, the framework a
-format follows, the author's voice, version control, and publishing, and hands
+work's story core and outputs follow, the author's voice, version control, and publishing, and hands
 any agent a structured way in and out.
 
 Two invariants:
@@ -16,10 +16,16 @@ Two invariants:
    never sends prose through its own context. pablo assembles the prompt,
    sends it to the configured writer (Gemma 4 for Matt, by default), writes
    the file, and returns a receipt.
-2. **pablo enforces the framework.** A format is a stage machine (a chapter
-   needs a beat, a beat needs acts, acts need a bible). A verb whose
-   precondition is unmet is refused, naming exactly what is missing, so the
-   agent can steer the author there instead of guessing.
+2. **pablo enforces the framework, in two layers** (decided 2026-10-10, pm
+   project `pablo-story-core`; it supersedes "a format is a stage machine").
+   A work has one shared **story core** with its own stage machine (premise,
+   research, bible, acts, beats, facts decided), and any number of
+   **outputs** derived from it (novel, radio, later blog, essay, story), each
+   an output type in the output registry with its own stage machine after the
+   core (a chapter needs a beat and the previous chapter, a beat needs acts,
+   acts need a bible). A verb whose precondition is unmet is refused, naming
+   exactly what is missing and which layer is short, so the agent can steer
+   the author there instead of guessing.
 
 **The canonical design doc is the pm project `ai-terminal`'s design doc:
 `pm project show ai-terminal`** (named docs: `--doc prose`, `--doc screen`;
@@ -29,6 +35,13 @@ verb table, the stage machines, the voice model, and the binding-decisions
 table. Read it before any non-trivial change; this file deliberately does not
 restate it. A change that contradicts a binding decision there amends the doc
 in the same task or does not land.
+
+The two-layer design (core machine, output registry, `pablo.json` `outputs`
+in place of `format`, per-output continuity) is the pm project
+`pablo-story-core`'s design doc (`pm project show pablo-story-core`). Core
+material (`research/`, `bible/`, `outline/`, `facts.md`, `notes/`) is shared;
+the novel output keeps `chapters/`, every other output lives under
+`outputs/<type>/`.
 
 Documents are the plain markdown files already in the `~/writing` vault. pablo
 is a manager over that vault, never a replacement for it, and never a second
