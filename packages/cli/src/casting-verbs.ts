@@ -169,6 +169,10 @@ interface Where {
  * `voices`, `cast --auto` and `audition --dry-run` need none.
  */
 function run(args: readonly string[], where: Where, ctx: VerbContext, deps: (env: Env) => CastingDeps, extras: readonly string[] = []): VerbResult {
+  // The library and vault are the author's to aim: a model (or text it read) must not redirect where `cast` writes cards.
+  if (ctx.caller === "mcp" && (where.library !== undefined || where.vault !== undefined)) {
+    return refuse("pablo: --library and --vault are CLI options; through MCP the library is the vault's <vault>/casting or the casting config's `library`");
+  }
   const located = locate(ctx, where.project);
   if ("exitCode" in located) return located;
   const vault = where.vault === undefined ? located.vault : resolve(ctx.cwd, where.vault);

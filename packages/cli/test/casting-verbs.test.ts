@@ -193,6 +193,21 @@ describe("argv to the Python side", () => {
     expect(lastPython(calls)).toEqual(["audition", "--role=CORA", "--describe=a voice", "--library=/abs/lib", "--json"]);
   });
 
+  test("over MCP --library and --vault are refused: a model cannot redirect where cards are written", async () => {
+    const { deps, calls, root } = fakeMachine();
+    const mcp: VerbContext = { ...ctxIn(join(root, "casting")), caller: "mcp" };
+    for (const [name, args] of [
+      ["cast", { role: "CORA", candidate: 1, recast: false, library: "/elsewhere" }],
+      ["audition", { role: "CORA", describe: "a voice", "dry-run": false, vault: "/elsewhere" }],
+      ["voices", { sub: "list", "auto-admitted": false, library: "/elsewhere" }],
+    ] as const) {
+      const result = await verbsOver(deps)[name]!.run(args as never, mcp);
+      expect(result.exitCode).toBe(2);
+      expect((result.body as { message: string }).message).toContain("CLI options");
+    }
+    expect(calls).toEqual([]);
+  });
+
   test("the CLI flags --library and --vault parse into the verbs' args", () => {
     for (const name of ["audition", "cast", "voices"]) {
       const verb = VERBS.find((v) => v.name === name)!;
