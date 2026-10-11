@@ -112,6 +112,27 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 use a fake `mount`, never a window.
                 Any new dependency the CLI needs
                 goes here; core stays dependency-free.
+                `src/casting.ts` (AGT-1678) is the runner for the Python
+                side: `pablo doctor` reports it, and the first casting verb
+                (`pablo audition --dry-run` today) provisions it lazily with
+                `uv sync --frozen` (venv in `packages/casting/.venv`, or
+                `$XDG_DATA_HOME/pablo/casting/venv` for an npm install),
+                pulls the configured weights and leaves a receipt. A missing
+                `uv` is a refusal naming `brew install uv`; only `cli.ts`
+                imports the runner, so a writing verb never touches it.
+                Tests inject `CastingDeps`; `bun test` never needs uv or a
+                model. `prepack` copies the casting sources into
+                `packages/cli/casting/` (gitignored) for the npm `files`.
+packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
+                `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
+                Run only as `python -m pablo_casting <command> --json`
+                (`version`, `doctor`, `pull`, `audition --dry-run`), never a
+                user-facing binary; same body and exit codes as pablo.
+                Config: `$XDG_CONFIG_HOME/pablo/casting.json` (engines,
+                weights, library, pace; no weights by default). Receipts:
+                `<work>/.pablo/casting/receipts.jsonl`. Its tests are pytest;
+                the default run is model-free, `-m models` marks the
+                hand-run ones.
 ```
 
 `packages/core/test/tty-free.test.ts` enforces the split — it walks
@@ -157,12 +178,15 @@ does and returns; `pablo --help` lists the P0 set.
 bun install            # workspace install; commit the resulting bun.lock
 bun run typecheck      # tsc --noEmit across packages/core and packages/cli
 bun test               # all tests, both packages
+(cd packages/casting && uv run --frozen pytest -q)   # the Python side's tests
 bun run pablo          # run the CLI from source (bun run packages/cli/src/cli.ts)
 ```
 
-Both `bun run typecheck` and `bun test` are `required_checks` in
+`bun run typecheck`, `bun test` and `casting-test` (`cd packages/casting && uv
+run --frozen pytest -q`) are the three `required_checks` in
 `.stamp/config.yml`: `stamp merge` runs them against the merged tree and rolls
-the merge back on a non-zero exit. There is no `build` step yet — the package
+the merge back on a non-zero exit. A `uv.lock` change is a dependency change:
+the security reviewer reads it. There is no `build` step yet — the package
 ships TypeScript that Bun runs directly. Add a `build` check to
 `.stamp/config.yml` the moment that stops being true.
 

@@ -16,6 +16,7 @@
 import { basename, dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
+import { doctorText, realCastingDeps, runAudition, runDoctor } from "./casting";
 import { branchDiff, fileAt, repoRoot, waitingBranches, waitingForReview } from "./branch";
 import { runCheck, screenChecks } from "./check";
 import { reviewCommentsOf } from "./critique";
@@ -81,6 +82,8 @@ const P0_VERBS = [
   "read",
   "search",
   "tray",
+  "doctor",
+  "audition",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -183,6 +186,14 @@ function helpText(): string {
     "                                            tag every untagged bible and continuity fact",
     "                                            (researched/invented/author) on a plan/ branch;",
     "                                            chapters are never touched",
+    "  pablo doctor [--json]                    the casting side's state (not provisioned,",
+    "                                            stale, provisioned), uv, and its config;",
+    "                                            never provisions or downloads",
+    "  pablo audition --dry-run [--project <slug>]",
+    "                                            provision the casting side (uv sync --frozen,",
+    "                                            configured weights) on first use, then check",
+    "                                            it runs; no model is loaded. Needs uv",
+    "                                            (brew install uv); writing verbs never do",
     "",
     "Every verb but init refuses (exit 2) when the resolved project has no",
     "pablo.json marker.",
@@ -893,6 +904,14 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     return await runTray(args.rest[0], realTrayDeps());
   }
 
+  // `doctor` (AGT-1678) reports the machine, not a work: no vault, no project.
+  // It reads the casting side's state and never provisions or downloads.
+  if (args.verb === "doctor") {
+    const result = runDoctor({ env: process.env, stderr: process.stderr }, realCastingDeps(process.env), VERSION);
+    console.log(args.json ? JSON.stringify(result.body) : doctorText(result.body));
+    return result.exitCode;
+  }
+
   let projectPath: string | undefined;
   if (args.project !== undefined) {
     const resolved = resolveProjectFromCwd(cwd, args.project);
@@ -907,6 +926,17 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return markerRefusal.code;
     }
     projectPath = resolved.path;
+  }
+
+  // `audition` (AGT-1678) is the first casting verb: it provisions the Python
+  // side lazily. `--project` is optional; with one, receipts go under the work.
+  if (args.verb === "audition") {
+    const result = runAudition({ dryRun: args.dryRun }, { env: process.env, stderr: process.stderr }, realCastingDeps(process.env), projectPath);
+    const body = result.body as { ok?: boolean; message?: string };
+    if (args.json) console.log(JSON.stringify(result.body));
+    else if (body.ok) console.log(`pablo: ${body.message ?? "audition ok"}`);
+    else console.error(body.message ?? "pablo: audition failed");
+    return result.exitCode;
   }
 
   if (args.verb === "status") {

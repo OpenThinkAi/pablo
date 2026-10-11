@@ -26,11 +26,18 @@
   "bin": {
     "pablo": "./src/cli.ts"
   },
+  "scripts": {
+    "prepack": "bun run src/casting-bundle.ts",
+    "postpack": "bun run src/casting-bundle.ts --clean"
+  },
   "files": [
     "src",
     "views",
     "tray",
-    "policies"
+    "policies",
+    "casting",
+    "!casting/.venv",
+    "!casting/**/__pycache__"
   ],
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.287",

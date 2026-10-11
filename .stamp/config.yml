@@ -10,6 +10,10 @@ branches:
     #               references packages/core and packages/tui)
     #   test      — `bun test` across all workspaces, including the guard in
     #               packages/core that asserts core imports no terminal library
+    #   casting-test — `pytest` for the Python side (packages/casting,
+    #               AGT-1678), from its frozen uv.lock. The default run is
+    #               model-free: tests that load weights are marked `models`
+    #               and excluded by pyproject's addopts.
     # There is deliberately no `build` check yet: nothing is bundled, and both
     # packages ship TypeScript sources consumed by Bun. Add one here the moment
     # a build script exists.
@@ -18,6 +22,8 @@ branches:
         run: bun run typecheck
       - name: test
         run: bun test
+      - name: casting-test
+        run: cd packages/casting && uv run --frozen pytest -q
 reviewers:
   security:
     prompt: .stamp/reviewers/security.md
