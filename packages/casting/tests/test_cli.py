@@ -87,12 +87,14 @@ def test_a_missing_work_directory_is_a_refusal(env: dict[str, str], tmp_path: Pa
     assert body["missing"] == [str(tmp_path / "absent")]
 
 
-def test_audition_dry_run_loads_no_model_and_a_real_audition_is_not_implemented(env: dict[str, str]) -> None:
+def test_audition_dry_run_loads_no_model_and_a_real_audition_needs_a_role(env: dict[str, str]) -> None:
     (body, code), _ = run(["audition", "--dry-run", "--json"], env)
     assert code == 0
     assert body["dryRun"] is True
+    # AGT-1679: a real audition exists; without --role/--describe it is a refusal naming both.
     (body, code), _ = run(["audition", "--json"], env)
-    assert code == 1
+    assert code == 2
+    assert body["missing"] == ["--role", "--describe"]
 
 
 def test_pull_with_no_weights_configured_downloads_nothing(env: dict[str, str], tmp_path: Path) -> None:

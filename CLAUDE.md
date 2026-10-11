@@ -114,12 +114,14 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 goes here; core stays dependency-free.
                 `src/casting.ts` (AGT-1678) is the runner for the Python
                 side: `pablo doctor` reports it, and the first casting verb
-                (`pablo audition --dry-run` today) provisions it lazily with
+                (`audition`, `cast`, `voices`: `src/casting-verbs.ts`,
+                AGT-1679, one `VERBS` entry each) provisions it lazily with
                 `uv sync --frozen` (venv in `packages/casting/.venv`, or
                 `$XDG_DATA_HOME/pablo/casting/venv` for an npm install),
                 pulls the configured weights and leaves a receipt. A missing
                 `uv` is a refusal naming `brew install uv`; only `cli.ts`
-                and `radio.ts` import the runner, so a writing verb on a
+                `radio.ts` and `casting-verbs.ts` import the runner, and it
+                runs only inside a casting verb, so a writing verb on a
                 writing work never touches it. `src/radio.ts` (AGT-1680) is
                 the radio door: `check` (on a work whose scripts carry a
                 `CAST:` line), `status --for "episode N"` and `bind` ask the
@@ -136,13 +138,16 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`
-                (`version`, `doctor`, `pull`, `audition --dry-run`, `takes`,
-                `manifest`, `script`, `check`, `status`, `bind`, `gate`,
-                `gate calibrate`), never a user-facing binary; same body and
-                exit codes as pablo. The script reader
-                (`script.py`), the direction grammar (`directions.py`), the
-                `CAST:` traits mapper (`traits.py`) and the `cast.json`
-                binding (`binding.py`) are pure Python, model-free. The gate's scorers sit behind
+                (`version`, `doctor`, `pull`, `audition`, `cast`, `voices`,
+                `takes`, `manifest`, `script`, `check`, `status`, `bind`,
+                `gate`, `gate calibrate`),
+                never a user-facing binary; same body and exit codes as
+                pablo. The script reader (`script.py`), the direction
+                grammar (`directions.py`), the `CAST:` traits mapper and the
+                traits vocabulary cards validate against (`traits.py`) and
+                the `cast.json` binding (`binding.py`, which takes the card
+                hash and the library root from `library.py`) are pure
+                Python, model-free. The gate's scorers sit behind
                 `scorers.py`'s `Scorer` interface with their heavy imports
                 inside each backend, so `doctor` lists weights, licenses and
                 versions from metadata alone; the backends need the optional
@@ -166,6 +171,18 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 nothing written) a version whose changed takes are not a
                 subset of the applied flags' lines. `fake_engine.py` is the
                 model-free engine (silence of the right shape) until C11.
+                The voice library (AGT-1679) is the config's `library`, else
+                `<vault>/casting`: `voices/<slug>/` holds the tracked card
+                (`card.json`, `reference.flac`, `reference.txt`,
+                `embedding.ecapa.npy`) and the untracked `auditions/` and
+                `recast/`; `library.py` owns the layout and the card hash
+                (sha256 of the card's canonical JSON, `retired` excluded).
+                Every model sits behind `toolkit.py`'s protocols (designer,
+                embedder, MOS, aligner): tests use `fakes.py`, the real
+                adapters in `real.py` import their stacks lazily and those
+                stacks are not dependencies yet. Synthetic only: a card's
+                reference comes from a designer's audition, checked by
+                sha256; there is no `--from-wav`.
 ```
 
 `packages/core/test/tty-free.test.ts` enforces the split — it walks

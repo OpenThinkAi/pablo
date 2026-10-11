@@ -164,6 +164,9 @@ def test_no_code_path_deletes_or_rewrites_a_take() -> None:
         # `gate calibrate --apply` (AGT-1682) swaps a card.json atomically and removes only its own temp file; never a take.
         ("gate_command.py", "_write_json_atomically", "replace"),
         ("gate_command.py", "_write_json_atomically", "unlink"),
+        # AGT-1679: a cast card's staging discard and its file moves (into place, or the old card into recast/).
+        ("cards.py", "_discard_staging", "rmtree"),
+        ("cards.py", "_move", "replace"),
     }
     found: set[tuple[str, str, str]] = set()
     for path in SRC.glob("*.py"):

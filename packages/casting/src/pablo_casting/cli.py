@@ -6,7 +6,7 @@ prints, success or not, and the exit code is pablo's contract (0 ok, 2 refused,
 the same shape with code 1. Nothing here is a user-facing binary: the pablo CLI
 runs it and returns its body as its own.
 
-Commands today:
+Commands:
 
 - `version`  the package and Python versions.
 - `doctor`   the config, the Python side and which configured weights are in the
@@ -14,7 +14,17 @@ Commands today:
 - `pull`     download the configured weights into the HF cache (progress on
              stderr), with a receipt when `--work` is given.
 - `audition --dry-run`  a no-model command: proves the side is provisioned and
-             runnable. A real audition lands with the cast-card ticket.
+             runnable.
+- `audition --role R --describe "..." [--designer qwen3|voxcpm2] [-n 6]
+             [--seed S] [--traits JSON] [--slug S]`  render N candidates of the
+             shared audition passage into the library's `auditions/` (AGT-1679).
+- `cast --role R --candidate N [--recast] [--traits JSON] [--notes T] [--by B]`
+             freeze a candidate into the voice's card; prints the card hash.
+             There is no `--from-wav`: a card's reference only comes from a
+             designer.
+- `voices list [--auto-admitted]`, `voices show <slug>`, `voices retire <slug>
+             [--reason T]`  read the library; retire marks a voice unmatchable
+             without changing its card hash.
 - `takes show <key> --work W`  one take's inputs, scores, timings and receipt id
              (a unique key prefix of 4+ hex characters is enough).
 - `takes gc --work W [--yes [--key K ...]]`  lists the takes no manifest
@@ -32,6 +42,9 @@ Commands today:
              thresholds; `gate calibrate` fits thresholds from approved takes
              (see `gate_command.py`). Writes nothing but a receipt unless
              `gate calibrate --apply`.
+
+The library root is `--library`, else the config's `library`, else
+`<vault>/casting` (`--vault`); its voices are under `voices/`.
 """
 
 from __future__ import annotations
@@ -47,11 +60,12 @@ from pathlib import Path
 
 from pablo_casting import __version__
 from pablo_casting.binding import BindingRefusal, bind, episode_files, library_dir, read_cast, read_episode
-from pablo_casting.config import ConfigRefusal, load_config
+from pablo_casting.config import CastingConfig, ConfigRefusal, load_config
 from pablo_casting.gate_command import cmd_calibrate, cmd_gate
 from pablo_casting.hfcache import hub_cache, is_cached
+from pablo_casting.library import Library, LibraryRefusal, card_hash, check_slug, resolve_root, slugify
 from pablo_casting.manifest import ManifestError, referenced_takes, write_version
-from pablo_casting.receipts import append_receipt
+from pablo_casting.receipts import append_receipt, now
 from pablo_casting.scorers import ScorerFactory, describe, real_scorers
 from pablo_casting.takes import (
     KEY_RE,
@@ -66,6 +80,8 @@ from pablo_casting.takes import (
     takes_dir,
 )
 from pablo_casting.script import Script
+from pablo_casting.toolkit import DEFAULT_DESIGNER, DESIGNER_NAMES, Toolkit, ToolkitUnavailable, select_toolkit
+from pablo_casting.traits import TraitsError, parse_traits
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -74,8 +90,11 @@ EXIT_REFUSED = 2
 Body = dict[str, object]
 Result = tuple[Body, int]
 Downloader = Callable[[str], str]
+ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "takes", "manifest", "script", "check", "status", "bind", "gate")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate")
+VOICES_SUBCOMMANDS = ("list", "show", "retire")
+DEFAULT_CANDIDATES = 6
 
 
 def refused(message: str, **extra: object) -> Result:
@@ -110,10 +129,24 @@ def _parser() -> _Parser:
     parser.add_argument("--audio")
     parser.add_argument("--work", help="the work directory receipts go under (<work>/.pablo/casting/)")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")
+    parser.add_argument("--vault", help="the vault; the library defaults to <vault>/casting")
+    parser.add_argument("--library", help="the voice library root (overrides the config and --vault)")
     parser.add_argument("--role")
     parser.add_argument("--voice")
-    parser.add_argument("--vault", help="the vault root; the voice library is <vault>/casting/voices")
-    parser.add_argument("--library", help="the voice library directory (overrides the config and --vault)")
+    parser.add_argument("--slug")
+    parser.add_argument("--describe")
+    parser.add_argument("--designer")
+    parser.add_argument("-n", "--n", type=int, dest="n")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--traits")
+    parser.add_argument("--candidate", type=int)
+    parser.add_argument("--recast", action="store_true")
+    parser.add_argument("--notes")
+    parser.add_argument("--by")
+    parser.add_argument("--reason")
+    parser.add_argument("--auto-admitted", action="store_true", dest="auto_admitted")
+    # Parsed only to refuse it by name: a card's reference comes from a designer, never a file.
+    parser.add_argument("--from-wav", dest="from_wav")
     # gate / gate calibrate
     parser.add_argument("--line")
     parser.add_argument("--card")
@@ -132,6 +165,10 @@ def _default_downloader(model_id: str) -> str:
     from huggingface_hub import snapshot_download
 
     return snapshot_download(repo_id=model_id)
+
+
+def _default_toolkit(env: Mapping[str, str], config: CastingConfig) -> Toolkit:
+    return select_toolkit(env, config.engines)
 
 
 def cmd_version(env: Mapping[str, str]) -> Result:
@@ -188,14 +225,112 @@ def cmd_pull(env: Mapping[str, str], work: Path | None, downloader: Downloader) 
     return {"ok": True, "weights": pulled}, EXIT_OK
 
 
-def cmd_audition(env: Mapping[str, str], dry_run: bool) -> Result:
-    if not dry_run:
-        return error("audition is not implemented yet; `audition --dry-run` checks the casting side without a model")
+def _library(config: CastingConfig, args: argparse.Namespace) -> Library:
+    """The library root: `--library`, else the config's `library`, else `<vault>/casting` (the rule `bind` shares)."""
+    return Library(Path(args.library) if args.library else resolve_root(config.library, args.vault))
+
+
+def _slug_for(args: argparse.Namespace) -> str:
+    if args.slug:
+        return check_slug(args.slug)
+    slug = slugify(args.role or "")
+    if not slug:
+        raise LibraryRefusal(f'--role "{args.role}" has no letters or digits to name a voice; pass --slug')
+    return check_slug(slug)
+
+
+def _author(env: Mapping[str, str], given: str | None) -> str:
+    return given or env.get("PABLO_AUTHOR") or env.get("USER") or "author"
+
+
+def cmd_audition(env: Mapping[str, str], args: argparse.Namespace, work: Path | None, toolkits: ToolkitFactory) -> Result:
+    if args.dry_run:
+        return {
+            "ok": True,
+            "dryRun": True,
+            "version": __version__,
+            "message": "the casting side is provisioned and runnable; no model was loaded",
+        }, EXIT_OK
+    from pablo_casting.audition import MAX_CANDIDATES, AuditionRequest, audition
+
+    if not args.role or not args.describe or not args.describe.strip():
+        missing = [flag for flag, value in (("--role", args.role), ("--describe", (args.describe or "").strip())) if not value]
+        return refused(f"audition needs {' and '.join(missing)} (or --dry-run to check the casting side)", missing=missing)
+    designer = args.designer or DEFAULT_DESIGNER
+    if designer not in DESIGNER_NAMES:
+        return refused(f'unknown designer "{designer}": one of {", ".join(DESIGNER_NAMES)}')
+    n = DEFAULT_CANDIDATES if args.n is None else args.n
+    if not 1 <= n <= MAX_CANDIDATES:
+        return refused(f"-n must be between 1 and {MAX_CANDIDATES} (got {n})")
+    if args.seed is not None and args.seed < 0:
+        return refused(f"--seed must be a non-negative integer (got {args.seed})")
+    config = load_config(env)
+    library = _library(config, args)
+    request = AuditionRequest(
+        slug=_slug_for(args),
+        role=args.role,
+        description=args.describe.strip(),
+        designer=designer,
+        n=n,
+        seed=args.seed if args.seed is not None else int.from_bytes(os.urandom(3), "big"),
+        traits=parse_traits(args.traits),
+    )
+    return audition(library, request, toolkits(env, config), now, work), EXIT_OK
+
+
+def cmd_cast(env: Mapping[str, str], args: argparse.Namespace, work: Path | None, toolkits: ToolkitFactory) -> Result:
+    from pablo_casting.cards import CastRequest, cast
+
+    if args.from_wav is not None:
+        return refused(
+            "pablo cast has no --from-wav: voices are synthetic only, and a card's reference comes from "
+            "a designer (`pablo audition`), never from a recording"
+        )
+    if not args.role and not args.slug:
+        return refused("cast needs --role (or --slug)", missing=["--role"])
+    if args.candidate is None:
+        return refused("cast needs --candidate <n>, a number `pablo audition` printed", missing=["--candidate"])
+    config = load_config(env)
+    library = _library(config, args)
+    request = CastRequest(
+        slug=_slug_for(args),
+        candidate=args.candidate,
+        recast=args.recast,
+        by=_author(env, args.by),
+        traits=parse_traits(args.traits) if args.traits is not None else None,
+        notes=args.notes,
+    )
+    return cast(library, request, toolkits(env, config), config.engines, now, work), EXIT_OK
+
+
+def cmd_voices(env: Mapping[str, str], args: argparse.Namespace) -> Result:
+    sub = args.rest[0] if args.rest else "list"
+    if sub not in VOICES_SUBCOMMANDS:
+        return error(f'voices: unknown subcommand "{sub}": one of {", ".join(VOICES_SUBCOMMANDS)}')
+    library = _library(load_config(env), args)
+    if sub == "list":
+        rows = [library.summary(slug) for slug in library.slugs()]
+        if args.auto_admitted:
+            rows = [row for row in rows if row.get("admitted_by") == "auto"]
+        return {"ok": True, "library": str(library.root), "voices": rows}, EXIT_OK
+    if len(args.rest) < 2:
+        return refused(f"voices {sub} needs a voice slug", missing=["slug"])
+    slug = check_slug(args.rest[1])
+    if sub == "show":
+        return {"ok": True, **library.show(slug)}, EXIT_OK
+    card, changed = library.retire(slug, now(), _author(env, args.by), args.reason)
+    digest = card_hash(card)
     return {
         "ok": True,
-        "dryRun": True,
-        "version": __version__,
-        "message": "the casting side is provisioned and runnable; no model was loaded",
+        "slug": slug,
+        "retired": card["retired"],
+        "changed": changed,
+        "hash": digest,
+        "message": (
+            f"{slug} is retired: never matched again; stories that pin {digest[:12]} still perform"
+            if changed
+            else f"{slug} was already retired"
+        ),
     }, EXIT_OK
 
 
@@ -376,6 +511,7 @@ def run(
     env: Mapping[str, str] | None = None,
     downloader: Downloader | None = None,
     scorers: ScorerFactory | None = None,
+    toolkits: ToolkitFactory | None = None,
 ) -> tuple[Result, bool]:
     """Parse and run one command. Returns `(result, json)`; never raises for a bad argv."""
     env = os.environ if env is None else env
@@ -389,7 +525,7 @@ def run(
         return error(f"a command is required: one of {', '.join(COMMANDS)}"), args.json
     if args.command not in COMMANDS:
         return error(f'unknown command "{args.command}": one of {", ".join(COMMANDS)}'), args.json
-    if args.rest and args.command not in ("takes", "manifest", "gate"):
+    if args.rest and args.command not in ("takes", "manifest", "gate", "voices"):
         return error(f"usage: unexpected argument(s) for {args.command}: {' '.join(args.rest)}"), args.json
 
     work: Path | None = None
@@ -432,8 +568,18 @@ def run(
             work=work,
             scorer_factory=scorers or real_scorers,
         ), args.json
-    if args.command == "audition":
-        return cmd_audition(env, args.dry_run), args.json
+    toolkit_factory = toolkits or _default_toolkit
+    try:
+        if args.command == "audition":
+            return cmd_audition(env, args, work, toolkit_factory), args.json
+        if args.command == "cast":
+            return cmd_cast(env, args, work, toolkit_factory), args.json
+        if args.command == "voices":
+            return cmd_voices(env, args), args.json
+    except LibraryRefusal as refusal:
+        return refused(str(refusal), **({"missing": refusal.missing} if refusal.missing else {})), args.json
+    except (ConfigRefusal, TraitsError, ToolkitUnavailable) as refusal:
+        return refused(str(refusal)), args.json
     missing_work = _need_work(work, args.command)
     if missing_work is not None:
         return missing_work, args.json
@@ -456,8 +602,9 @@ def main(
     env: Mapping[str, str] | None = None,
     downloader: Downloader | None = None,
     scorers: ScorerFactory | None = None,
+    toolkits: ToolkitFactory | None = None,
 ) -> int:
-    (body, code), wants_json = run(argv, env, downloader, scorers)
+    (body, code), wants_json = run(argv, env, downloader, scorers, toolkits)
     if wants_json:
         print(json.dumps(body))
     elif body.get("ok"):

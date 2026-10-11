@@ -9,7 +9,7 @@ import {
   doctorText,
   ensureProvisioned,
   gateText,
-  runAudition,
+  runCasting,
   runDoctor,
   runGate,
   runTakes,
@@ -235,7 +235,7 @@ describe("audition --dry-run provisioning (AC2)", () => {
     const deps = fakeDeps(layout);
     const { ctx: c, err } = ctx(root);
 
-    const first = runAudition({ dryRun: true }, c, deps, work);
+    const first = runCasting(["audition", "--dry-run"], c, deps, work);
     expect(first.exitCode).toBe(0);
     expect((first.body as { provisioned: boolean }).provisioned).toBe(true);
     expect(deps.calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen"]);
@@ -251,7 +251,7 @@ describe("audition --dry-run provisioning (AC2)", () => {
     expect(castingState(layout)).toBe("provisioned");
 
     const syncs = () => deps.calls.filter((call) => call[1] === "sync").length;
-    const second = runAudition({ dryRun: true }, c, deps, work);
+    const second = runCasting(["audition", "--dry-run"], c, deps, work);
     expect(second.exitCode).toBe(0);
     expect((second.body as { provisioned: boolean }).provisioned).toBe(false);
     expect(syncs()).toBe(1);
@@ -260,7 +260,7 @@ describe("audition --dry-run provisioning (AC2)", () => {
 
   test("with no work, the receipt goes to the state directory", () => {
     const { layout, root } = fakeLayout();
-    const result = runAudition({ dryRun: true }, ctx(root).ctx, fakeDeps(layout), undefined);
+    const result = runCasting(["audition", "--dry-run"], ctx(root).ctx, fakeDeps(layout), undefined);
     expect(result.exitCode).toBe(0);
     expect(existsSync(join(root, "state", "pablo", "casting", "receipts.jsonl"))).toBe(true);
   });
@@ -268,10 +268,10 @@ describe("audition --dry-run provisioning (AC2)", () => {
   test("a changed uv.lock makes the venv stale and re-provisions", () => {
     const { layout, root } = fakeLayout();
     const deps = fakeDeps(layout);
-    runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    runCasting(["audition", "--dry-run"], ctx(root).ctx, deps, undefined);
     writeFileSync(join(layout.source, "uv.lock"), "version = 2\n", "utf8");
     expect(castingState(layout)).toBe("stale");
-    runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    runCasting(["audition", "--dry-run"], ctx(root).ctx, deps, undefined);
     expect(deps.calls.filter((call) => call[1] === "sync")).toHaveLength(2);
   });
 
@@ -279,14 +279,14 @@ describe("audition --dry-run provisioning (AC2)", () => {
     const { layout, root } = fakeLayout();
     const npm: CastingLayout = { ...layout, venv: join(root, "data", "venv"), install: "npm" };
     const deps = fakeDeps(npm);
-    expect(runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined).exitCode).toBe(0);
+    expect(runCasting(["audition", "--dry-run"], ctx(root).ctx, deps, undefined).exitCode).toBe(0);
     expect(deps.calls[0]).toEqual(["/fake/bin/uv", "sync", "--frozen", "--no-dev"]);
   });
 
   test("a missing uv is a refusal naming `brew install uv`, and nothing runs", () => {
     const { layout, root } = fakeLayout();
     const deps = fakeDeps(layout, { uv: false });
-    const result = runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    const result = runCasting(["audition", "--dry-run"], ctx(root).ctx, deps, undefined);
     expect(result.exitCode).toBe(2);
     const body = result.body as { ok: boolean; code: number; message: string; missing: string[] };
     expect(body).toMatchObject({ ok: false, code: 2, missing: ["uv"] });
@@ -296,7 +296,7 @@ describe("audition --dry-run provisioning (AC2)", () => {
 
   test("a failed uv sync is an error and leaves no stamp", () => {
     const { layout, root } = fakeLayout();
-    const result = runAudition({ dryRun: true }, ctx(root).ctx, fakeDeps(layout, { sync: 1 }), undefined);
+    const result = runCasting(["audition", "--dry-run"], ctx(root).ctx, fakeDeps(layout, { sync: 1 }), undefined);
     expect(result.exitCode).toBe(1);
     expect(castingState(layout)).toBe("not provisioned");
   });
@@ -305,21 +305,24 @@ describe("audition --dry-run provisioning (AC2)", () => {
     const { layout, root } = fakeLayout();
     const refusal = { ok: false, code: 2, message: "casting.json is not valid JSON" };
     const deps = fakeDeps(layout, { answers: { pull: { code: 2, stdout: JSON.stringify(refusal), stderr: "" } } });
-    const result = runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    const result = runCasting(["audition", "--dry-run"], ctx(root).ctx, deps, undefined);
     expect(result).toEqual({ body: refusal, exitCode: 2 });
     expect(castingState(layout)).toBe("not provisioned");
   });
 
-  test("plain audition is not implemented yet and provisions nothing", () => {
+  test("a casting command runs after provisioning, with the work for its receipts (AGT-1679)", () => {
     const { layout, root } = fakeLayout();
+    const work = join(root, "work");
+    mkdirSync(work);
     const deps = fakeDeps(layout);
-    expect(runAudition({ dryRun: false }, ctx(root).ctx, deps, undefined).exitCode).toBe(1);
-    expect(deps.calls).toEqual([]);
+    const result = runCasting(["voices", "list"], ctx(root).ctx, deps, work);
+    expect(result.exitCode).toBe(1); // the fake answers "unknown" for voices; the point is the argv
+    expect(deps.calls.at(-1)).toEqual([venvPython(layout), "-m", "pablo_casting", "voices", "list", "--work", work, "--json"]);
   });
 
   test("no casting sources is an error", () => {
     const root = temp("pablo-casting-");
-    expect(runAudition({ dryRun: true }, ctx(root).ctx, fakeDeps(undefined), undefined).exitCode).toBe(1);
+    expect(runCasting(["audition", "--dry-run"], ctx(root).ctx, fakeDeps(undefined), undefined).exitCode).toBe(1);
   });
 });
 
@@ -352,7 +355,7 @@ describe("gate (AGT-1682)", () => {
   test("a venv provisioned without the extra is topped up once, keeping what it had", () => {
     const { layout, root } = fakeLayout();
     const deps = fakeDeps(layout, { answers: { gate: answer(passing) } });
-    runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    runCasting(["audition", "--dry-run"], ctx(root).ctx, deps, undefined);
     expect(castingState(layout)).toBe("provisioned");
     expect(castingState(layout, ["scorers"])).toBe("stale");
     runGate(["t.wav", "--line", "x", "--card", "cora"], ctx(root).ctx, deps, root, undefined);
@@ -360,7 +363,7 @@ describe("gate (AGT-1682)", () => {
     const syncs = deps.calls.filter((call) => call[1] === "sync");
     expect(syncs).toEqual([["/fake/bin/uv", "sync", "--frozen"], ["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]]);
     // A later audition does not drop the extra.
-    runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    runCasting(["audition", "--dry-run"], ctx(root).ctx, deps, undefined);
     expect(deps.calls.filter((call) => call[1] === "sync")).toHaveLength(2);
   });
 
@@ -369,7 +372,7 @@ describe("gate (AGT-1682)", () => {
     const deps = fakeDeps(layout, { answers: { gate: answer(passing) } });
     runGate(["t.wav", "--line", "x", "--card", "cora"], ctx(root).ctx, deps, root, undefined);
     writeFileSync(join(layout.source, "uv.lock"), "version = 3\n", "utf8");
-    runAudition({ dryRun: true }, ctx(root).ctx, deps, undefined);
+    runCasting(["audition", "--dry-run"], ctx(root).ctx, deps, undefined);
     expect(deps.calls.filter((call) => call[1] === "sync").at(-1)).toEqual(["/fake/bin/uv", "sync", "--frozen", "--extra", "scorers"]);
     expect(castingState(layout, ["scorers"])).toBe("provisioned");
   });
@@ -492,7 +495,9 @@ describe("packaging", () => {
 // side through it, and only for a work whose scripts carry a `CAST:` line; verbs.ts and check.ts import the
 // runner's types and defaults from radio.ts, never from casting.ts, so a writing verb on a writing work
 // still never touches packages/casting.
-test("only cli.ts and radio.ts reach the casting runner: a writing verb never touches packages/casting", () => {
+// AGT-1679: `casting-verbs.ts` holds the `audition`/`cast`/`voices` VERBS entries; the runner only runs
+// inside their `run`, never at import, so `verbs.ts` importing them provisions nothing.
+test("only cli.ts, radio.ts and the casting verbs reach the casting runner: a writing verb never touches packages/casting", () => {
   const src = fileURLToPath(new URL("../src", import.meta.url));
   const importers: string[] = [];
   const walk = (dir: string): void => {
@@ -503,5 +508,5 @@ test("only cli.ts and radio.ts reach the casting runner: a writing verb never to
     }
   };
   walk(src);
-  expect(importers.sort()).toEqual(["cli.ts", "radio.ts"]);
+  expect(importers.sort()).toEqual(["casting-verbs.ts", "cli.ts", "radio.ts"]);
 });
