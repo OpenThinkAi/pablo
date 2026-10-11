@@ -18,6 +18,7 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { bookStages } from "./book";
 import { doctorText, realCastingDeps, runAudition, runDoctor, runTakes, takeShowText, takesGcText } from "./casting";
+import { parseForEpisode, radioBind, radioStatus } from "./radio";
 import { branchDiff, fileAt, repoRoot, waitingBranches, waitingForReview } from "./branch";
 import { runCheck, screenChecks } from "./check";
 import { reviewCommentsOf } from "./critique";
@@ -86,6 +87,7 @@ const P0_VERBS = [
   "doctor",
   "audition",
   "takes",
+  "bind",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -191,6 +193,10 @@ function helpText(): string {
     "  pablo doctor [--json]                    the casting side's state (not provisioned,",
     "                                            stale, provisioned), uv, and its config;",
     "                                            never provisions or downloads",
+    "  pablo status --project <slug> --for \"episode N\"",
+    "                                            radio: exit 2 while a role is unbound",
+    "  pablo bind --project <slug> --role <NAME> --voice <slug>",
+    "                                            pin a script role to a voice in the library",
     "  pablo audition --dry-run [--project <slug>]",
     "                                            provision the casting side (uv sync --frozen,",
     "                                            configured weights) on first use, then check",
@@ -223,6 +229,8 @@ interface ParsedArgs {
   readonly tagFacts: boolean;
   /** `status --for "chapter N"` (also accepts `chapter-N`, `ch N`, or bare `N`). */
   readonly for: string | undefined;
+  /** `bind --role <NAME>` (AGT-1680): a role from a script's `CAST:` line; the voice is `--voice <slug>`. */
+  readonly role: string | undefined;
   /** `save --stage acts|beats|premise|bible/<file>`. */
   readonly stage: string | undefined;
   /** `save --file <path>` — stdin is read when omitted. */
@@ -327,6 +335,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     list: values["list"] === true,
     noOpen: values["no-open"] === true,
     for: typeof values["for"] === "string" ? values["for"] : undefined,
+    role: typeof values["role"] === "string" ? values["role"] : undefined,
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
     file: typeof values["file"] === "string" ? values["file"] : undefined,
     chapter: typeof values["chapter"] === "string" ? values["chapter"] : undefined,
@@ -514,9 +523,22 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
   const state = readNovelState(projectPath);
 
   if (args.for !== undefined) {
+    // `--for "episode N"` (AGT-1680): a radio episode is ready when every role in its script is bound to a voice.
+    const episode = parseForEpisode(args.for);
+    if (episode !== undefined) {
+      const result = radioStatus({ env: process.env, stderr: process.stderr }, realCastingDeps(process.env), projectPath, episode);
+      const body = result.body as { ready?: boolean; missing?: string[]; message?: string };
+      if (args.json) console.log(JSON.stringify(result.body));
+      else if (body.ready !== undefined) {
+        console.log(`episode ${episode}: ${body.ready ? "ready" : "not ready"}`);
+        for (const item of body.missing ?? []) console.log(`  ${item}`);
+      } else console.error(body.message ?? "pablo: status failed");
+      return result.exitCode;
+    }
+
     const chapter = parseForChapter(args.for);
     if (chapter === undefined) {
-      const message = 'pablo: --for expects "chapter N"';
+      const message = 'pablo: --for expects "chapter N" or "episode N"';
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
@@ -978,6 +1000,28 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       if (body.unreferenced !== undefined) console.log(takesGcText(result.body));
       console.error(body.message ?? "pablo: takes failed");
     }
+    return result.exitCode;
+  }
+
+  if (args.verb === "bind") {
+    if (projectPath === undefined || args.role === undefined || args.voice === undefined) {
+      const message = "pablo: bind requires --project <slug>, --role <NAME> and --voice <slug>";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const vaultResult = findVault(cwd);
+    if (!vaultResult.ok) {
+      emit(refusalResult(vaultResult), args.json);
+      return vaultResult.code;
+    }
+    const result = radioBind({ env: process.env, stderr: process.stderr }, realCastingDeps(process.env), vaultResult.path, projectPath, {
+      role: args.role,
+      voice: args.voice,
+    });
+    const body = result.body as { ok?: boolean; message?: string; role?: string; slug?: string; cardHash?: string };
+    if (args.json) console.log(JSON.stringify(result.body));
+    else if (body.ok) console.log(`pablo: bound ${body.role} to ${body.slug}`);
+    else console.error(body.message ?? "pablo: bind failed");
     return result.exitCode;
   }
 
