@@ -1,26 +1,22 @@
 /**
  * The radio output's rules template (AGT-1694, pm project `pablo-casting`).
  *
- * The real `radio` registry entry is AGT-1686; here a stub `radio` output that
- * uses the template stands in for it (`registerOutput`), to show the template
- * is what `pablo output add radio` scaffolds and what `write --dry-run` shows
- * as the rules slice. The check half (`pablo check --output radio`) is the
+ * The real `radio` registry entry (AGT-1686) carries it as its `rulesTemplate`:
+ * the template is what `pablo output add radio` scaffolds and what `write
+ * --dry-run` shows as the rules slice. The check half (`pablo check --output radio`) is the
  * Python side's report rendered by `radioCheckLines`; its parser is tested in
  * `packages/casting/tests/test_radio_rules.py`. Scripts here are invented;
  * everything runs on a temp copy of the synthetic fixture vault, no model.
  */
 
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assemblePack, DEFAULT_MIN_SCENES, outputRulesFile, planBeatsFor, readDraftingInputs } from "@openthink/pablo-core";
 import { addOutput } from "../src/output-verbs";
-import { NOVEL } from "../src/outputs/novel";
 import { RADIO_EMOTIONS, RADIO_NONVERBALS, RADIO_RULES_TEMPLATE } from "../src/outputs/radio/rules";
-import { registerOutput } from "../src/outputs/registry";
-import type { OutputDefinition } from "../src/outputs/types";
+import { OUTPUTS } from "../src/outputs/registry";
 import { radioCheckLines } from "../src/radio";
 import { runWrite } from "../src/write";
 
@@ -28,39 +24,7 @@ const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url)
 const DIRECTIONS_PY = fileURLToPath(new URL("../../casting/src/pablo_casting/directions.py", import.meta.url));
 const STATE_HOME = mkdtempSync(join(tmpdir(), "pablo-radio-rules-state-"));
 
-/** Stands in for AGT-1686's registry entry: the novel's machinery under radio's id, directory and the real template. */
-const RADIO: OutputDefinition = {
-  ...NOVEL,
-  id: "radio",
-  noun: "episode",
-  plural: "episodes",
-  artifactDir: "outputs/radio/episodes",
-  rulesTemplate: RADIO_RULES_TEMPLATE,
-  branch: (n) => `draft/radio-ep${String(n).padStart(2, "0")}`,
-  preconditions: () => ({ ready: true, missing: [] }),
-  // The novel's pack reads `outputs/novel/RULES.md`; AGT-1686's pack reads the radio output's own.
-  pack: (vaultRoot, workDir, unit) => {
-    const beats = planBeatsFor(workDir, "radio", unit);
-    const inputs = readDraftingInputs({
-      vaultRoot,
-      workRoot: workDir,
-      chapter: unit,
-      ...(beats !== undefined ? { beats } : {}),
-      outputRulesPath: join(workDir, outputRulesFile("radio")),
-      wordTarget: 1800,
-      minScenes: DEFAULT_MIN_SCENES,
-      castEndsAt: "## Decisions for Matt",
-    });
-    return { ok: true, pack: assemblePack("drafting", inputs), inputs };
-  },
-};
-
-let off: () => void;
-beforeAll(() => {
-  off = registerOutput(RADIO);
-});
 afterAll(() => {
-  off();
   rmSync(STATE_HOME, { recursive: true, force: true });
 });
 
@@ -116,6 +80,10 @@ test("the template carries the script shape, the cues, the length, the direction
   expect(text).toMatch(/CAST: MAE=f "fifties, dry, unhurried"/);
   expect(text).toMatch(/Describe every role/);
   expect(text).toContain("character\nsheet in the core");
+});
+
+test("AGT-1686: the radio registry row's rules template is this template", () => {
+  expect(OUTPUTS.radio.rulesTemplate).toBe(RADIO_RULES_TEMPLATE);
 });
 
 test("the template names no work: no manuscript, no chapters directory", () => {

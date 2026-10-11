@@ -41,6 +41,7 @@ import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
 import { OUTPUTS, outputDefinition } from "./outputs/registry";
+import { radioStageCheck } from "./outputs/radio/state";
 import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
 import { readTool, searchTool } from "./harness-tools";
@@ -136,7 +137,9 @@ function helpText(): string {
     "  pablo status --project <slug>            the story core's stages, then each output's",
     "  pablo status --project <slug> --for \"<output> N\"",
     "                                            {ready, missing[]} for one unit (\"chapter N\" is",
-    "                                            the novel's); exit 0 if ready, 2 if not",
+    "                                            the novel's); exit 0 if ready, 2 if not. \"radio N\"",
+    "                                            lists what the episode still needs (roles to",
+    "                                            cast, render, mix, flags, the casting side)",
     "  pablo write --project <slug> [--output <type>] --unit N [--dry-run]",
     "                                            draft unit N of an output on the local model;",
     "                                            --chapter N is --output novel --unit N; a work",
@@ -172,10 +175,12 @@ function helpText(): string {
     "                                            merge a reviewed draft branch to main, then run",
     "                                            the after-write steps (outline, note, README,",
     "                                            continuity, commit, think sync)",
-    "  pablo publish --project <slug> --target draft",
+    "  pablo publish --project <slug> [--output <type>] --target draft|bundle",
     "                                            compile every chapter into one markdown file",
     "                                            under <work>/.pablo/out/ (frontmatter stripped,",
-    "                                            sentences joined, quotes curled)",
+    "                                            sentences joined, quotes curled); the radio",
+    "                                            output's bundle copies every script and each",
+    "                                            mixed episode's m4a and manifest into one dir",
     "  pablo share --project <slug> --reader <name> --chapters N|N-M",
     "                                            open a reading round: push those chapters (all",
     "                                            on main) to the book's private reading repo as a",
@@ -262,13 +267,14 @@ function helpText(): string {
     "  pablo voices list [--auto-admitted] | show <slug> | retire <slug> [--reason \"...\"]",
     "                                            the shared voice library; retire keeps the",
     "                                            card hash, so pinned stories still perform",
-    "  pablo perform --project <slug> --episode N [--engine chatterbox-turbo|dia] [--json-lines]",
+    "  pablo perform --project <slug> --output radio --unit N (or --episode N) [--engine chatterbox-turbo|dia] [--json-lines]",
+    "                                            refused, naming it, while a role is not cast;",
     "                                            render the episode's lines in their bound voices",
     "                                            (gates, up to 4 takes a line, pace stretch within",
     "                                            0.75-1.05) into takes and renders/epNN/v1.json;",
     "                                            one JSON line per line on stderr as it lands",
     "                                            (and stdout with --json-lines). Uses the GPU",
-    "  pablo mix --project <slug> --episode N [--version k]",
+    "  pablo mix --project <slug> --output radio --unit N (or --episode N) [--version k]",
     "                                            mix a performed episode: its takes (paced by the",
     "                                            manifest) and the script's cues from the cue",
     "                                            library (<library>/cues; the same description is",
@@ -283,7 +289,7 @@ function helpText(): string {
     "                                            a version switcher and a chapter list that fills",
     "                                            in as chapters are published. Flags go to",
     "                                            outputs/radio/casting/flags.json for `pablo fix`",
-    "  pablo fix --project <slug> --episode N [--json-lines]",
+    "  pablo fix --project <slug> --output radio --unit N (or --episode N) [--json-lines]",
     "                                            re-record only the episode's flagged lines",
     "                                            (flags.json; a reason can bump the engine),",
     "                                            write the next manifest version, remix it and",
@@ -790,6 +796,8 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
     } else if (body.ready !== undefined) {
       console.log(`${result.label ?? args.for.trim()}: ${body.ready ? "ready" : "not ready"}`);
       for (const item of body.missing ?? []) console.log(`  ${item}`);
+      // A radio episode (AGT-1686) also says its stage, render, open flags and the casting side.
+      for (const line of result.lines ?? []) console.log(`  ${line}`);
     } else {
       console.error(body.message ?? "pablo: status failed");
       for (const item of body.missing ?? []) console.error(`  ${item}`);
@@ -885,6 +893,16 @@ export async function runReviewView(args: ParsedArgs, projectPath: string | unde
     const message = projectPath === undefined ? "pablo: review requires --project <slug>" : "pablo: review: --episode expects a whole number of 1 or more";
     emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
     return EXIT_REFUSED;
+  }
+  // The radio output's stage machine (AGT-1686): the player plays mixed versions, so an episode with none is refused by name.
+  if (episode !== undefined) {
+    const check = radioStageCheck(projectPath, "review", episode);
+    if (!check.ready) {
+      const message = `pablo: review: radio episode ${episode} is not ready to review (${check.missing.join("; ")}); nothing was opened`;
+      if (args.json) console.log(JSON.stringify({ ok: false, code: EXIT_REFUSED, message, missing: check.missing }));
+      else console.error(message);
+      return EXIT_REFUSED;
+    }
   }
   const marker = readMarker(projectPath);
   const opened = await open(projectPath, marker.ok ? marker.marker.title : args.project ?? "radio", episode);
@@ -1511,12 +1529,24 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     }
     // `--output <type>` (AGT-1669): the addressed output's own publish targets.
     const result = publishOutput(projectPath, args.target, args.output);
-    const body = result.body as { ok: boolean; message?: string; missing?: string[]; output?: string; target?: string; where?: string; chapters?: number; words?: number };
+    const body = result.body as {
+      ok: boolean;
+      message?: string;
+      missing?: string[];
+      output?: string;
+      target?: string;
+      where?: string;
+      chapters?: number;
+      words?: number;
+      notes?: string[];
+    };
     if (args.json) {
       console.log(JSON.stringify(body));
     } else if (body.ok) {
       const def = outputDefinition(body.output ?? "") ?? OUTPUTS.novel;
-      console.log(`pablo: published ${body.target}: ${body.where} (${body.chapters} ${def.plural}, ${body.words} words)`);
+      console.log(`pablo: published ${body.target}: ${body.where} (${body.chapters} ${body.chapters === 1 ? def.noun : def.plural}, ${body.words} words)`);
+      // The radio bundle (AGT-1686) names the episodes it holds no audio for yet.
+      for (const note of body.notes ?? []) console.log(`  ${note}`);
     } else {
       console.error(body.message);
       for (const item of body.missing ?? []) console.error(`  ${item}`);

@@ -5,9 +5,9 @@
  * `output` and `unit`, `draft_unit` reaching the same code as `write`, and
  * `pablo output list|add|remove|plan`.
  *
- * `radio` (pablo-casting) and `blog` (a later type) are not rows of `OUTPUTS` yet, so
- * these tests register fixture types built from the novel's machinery
- * (`registerOutput`) and remove them after. Everything runs on a temp copy of
+ * `radio` is the real registry row (AGT-1686); `blog` (a later type) is not a
+ * row of `OUTPUTS` yet, so these tests register a fixture type built from the
+ * novel's machinery (`registerOutput`) and remove it after. Everything runs on a temp copy of
  * the synthetic fixture vault with a fake writer: no model, never `~/writing`.
  */
 
@@ -31,8 +31,8 @@ const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url)
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
 const STATE_HOME = mkdtempSync(join(tmpdir(), "pablo-output-addressing-state-"));
 
-/** A second type on the novel's machinery, with its own directory and branches: stands in for pablo-casting's radio. */
-const RADIO: OutputDefinition = {
+/** A fixture type on the novel's machinery with radio's directory and branches: only the base `BLOG` is built from (the real `radio` is a row of `OUTPUTS`, AGT-1686). */
+const RADIO_LIKE: OutputDefinition = {
   ...NOVEL,
   id: "radio",
   noun: "episode",
@@ -69,11 +69,11 @@ const RADIO: OutputDefinition = {
 };
 
 /** Stands in for a later type's blog type: one directory under outputs/, its own rules. */
-const BLOG: OutputDefinition = { ...RADIO, id: "blog", noun: "blog", plural: "posts", artifactDir: "outputs/blog", rulesTemplate: "# Blog rules\n\nOne piece, all the beats.\n" };
+const BLOG: OutputDefinition = { ...RADIO_LIKE, id: "blog", noun: "blog", plural: "posts", artifactDir: "outputs/blog", rulesTemplate: "# Blog rules\n\nOne piece, all the beats.\n" };
 
 const unregister: (() => void)[] = [];
 beforeAll(() => {
-  unregister.push(registerOutput(RADIO), registerOutput(BLOG));
+  unregister.push(registerOutput(BLOG));
 });
 afterAll(() => {
   for (const off of unregister.splice(0)) off();

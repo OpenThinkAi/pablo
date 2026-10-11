@@ -1,0 +1,27 @@
+[
+  {
+    "name": "declared roles in CAST: order, announcer and narrator included",
+    "script": "CAST: ANNOUNCER=m \"forties, warm, brisk\", NARRATOR=f \"sixties, low, even\", MAE=f \"fifties, dry, unhurried\", TOBY=m \"twenties, quick\"\n[MUSIC: a thin organ line]\nANNOUNCER: Good evening.\nNARRATOR: The pond froze early that year.\nMAE: (dry) Sit down, Toby.\nTOBY: I would rather stand.\n",
+    "roles": ["ANNOUNCER", "NARRATOR", "MAE", "TOBY"]
+  },
+  {
+    "name": "an undeclared speaker comes after the declared roles, in order of first line",
+    "script": "CAST: MAE=f \"fifties, dry\", TOBY=m\nNED: Morning.\nMAE: Morning, Ned.\nCLERK: Next.\nNED: Again.\n",
+    "roles": ["MAE", "TOBY", "NED", "CLERK"]
+  },
+  {
+    "name": "frontmatter, cues, continuations and a non-verbal-only line add no role",
+    "script": "---\nepisode: 2\ntitle: Invented\n---\n\nCAST: CORA=f \"thirties, “dry”, exact\", EDWIN=m \"forties, loud\"\n[SFX: a door, then rain]\n[BED: off]\nCORA: (tender) Sit.\nThe chair is warm, sit.\nPIP: (laughs)\nEDWIN: (sighs) Fine. (laughs)\n",
+    "roles": ["CORA", "EDWIN"]
+  },
+  {
+    "name": "a comma inside a quoted description does not split a role; bold markers are ignored",
+    "script": "**CAST:** HALE=m \"fifties, slow, gruff, a cough\", IDA=f \"teens, bright\"\n**HALE:** Well.\nIDA: Well what.\n",
+    "roles": ["HALE", "IDA"]
+  },
+  {
+    "name": "a role declared twice keeps its first place",
+    "script": "CAST: A=f \"x\", B=m \"y\", A=f \"z\"\nB: One.\n",
+    "roles": ["A", "B"]
+  }
+]

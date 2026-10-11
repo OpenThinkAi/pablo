@@ -25,6 +25,13 @@ export interface OutputUnit {
   readonly status: string;
   /** The unit file, work-relative, when it is drafted. */
   readonly file?: string;
+  /**
+   * For an output that is performed after it is written (the radio output,
+   * AGT-1686): `none`, `performed vK` or `mixed vK`. Absent for written-only types.
+   */
+  readonly render?: string;
+  /** Open flags on the unit's render (the radio output's `flags.json`). Absent for written-only types. */
+  readonly openFlags?: number;
 }
 
 /** One output's state as reported: its units and the next one to draft. */
@@ -99,6 +106,10 @@ export type PublishOutcome =
       /** Units compiled. */
       readonly chapters: number;
       readonly words: number;
+      /** For a target that writes a directory (the radio bundle): the files written, relative to `where`. */
+      readonly files?: readonly string[];
+      /** What the target left out and why (an episode with no mixed audio yet). */
+      readonly notes?: readonly string[];
     }
   | { readonly ok: false; readonly code: 2; readonly message: string; readonly tried: readonly string[] };
 
@@ -107,6 +118,20 @@ export interface OutputPublish {
   readonly targets: readonly string[];
   /** Publishes the work's units to `target`; an unknown or unbuilt target is a refusal. */
   readonly run: (workDir: string, slug: string, title: string, target: string | undefined) => PublishOutcome;
+}
+
+/**
+ * `status --for "<type> N"` for a type whose units go through stages after
+ * they are written (the radio output, AGT-1686): the next stage's
+ * `{ready, missing}` plus whatever the type reports about the unit.
+ */
+export interface UnitStatusReport {
+  readonly ready: boolean;
+  readonly missing: readonly string[];
+  /** Fields the type adds to the body (stage, stages, render, open flags, the casting side). */
+  readonly detail?: Readonly<Record<string, unknown>>;
+  /** Extra prose lines for the CLI, after the ready line and the missing items. */
+  readonly lines?: readonly string[];
 }
 
 /** `ensure()`'s answer (AGT-1690): the type can run on this machine, or what it is missing. */
@@ -155,4 +180,17 @@ export interface OutputDefinition {
    * needs nothing beyond pablo.
    */
   readonly ensure?: () => EnsureOutcome | Promise<EnsureOutcome>;
+  /**
+   * How `write` stores a unit's text: `sentences` (the default: one sentence
+   * per line, AGT-1531) or `lines` (as the writer laid it out, line for line:
+   * a radio script, where a line is a speaker, a cue or the `CAST:` line and
+   * joining or splitting them would change the script).
+   */
+  readonly manuscript?: "sentences" | "lines";
+  /**
+   * `status --for "<type> N"` for a type whose units have stages after the
+   * write (the radio output): where the unit stands. Absent: the unit's
+   * `preconditions` are its status. Pure over the work directory.
+   */
+  readonly unitStatus?: (workDir: string, unit: number) => UnitStatusReport;
 }

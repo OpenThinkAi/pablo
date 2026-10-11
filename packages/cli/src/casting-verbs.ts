@@ -48,6 +48,10 @@ import { z } from "zod";
 import { ensureProvisioned, MIX_EXTRA, realCastingDeps, runCasting, runPython, runPythonStreaming, SCORERS_EXTRA } from "./casting";
 import type { CastingDeps } from "./casting";
 import { readMarker } from "./marker";
+import { episodeState, lastReceipt, radioStageCheck } from "./outputs/radio/state";
+import type { RadioVerbStage } from "./outputs/radio/state";
+import { RADIO_ID } from "./outputs/radio/units";
+import { resolveOutput } from "./outputs/registry";
 import { findVault, resolveProject } from "./project";
 import type { Verb, VerbContext, VerbResult } from "./verbs";
 
@@ -70,6 +74,10 @@ const traitsField = z
   .describe(
     'The traits block as JSON: gender (f|m|x, required for a card), age (child|teen|20s|30s|40s|50s|60s|70s), pitch (low|low-medium|medium|medium-high|high), energy (subdued|measured|lively|intense), warmth (warm|cool), register (dry|formal|folksy|theatrical|plain|gruff), era (period|modern), roles (["lead", ...]).',
   );
+
+/** `--output radio --unit N` (AGT-1686): the radio output's addressing, the same as `write`'s; `--episode N` is its short spelling. */
+const outputArg = z.string().optional().describe('The output whose unit this is: "radio" (the only performed output). With `unit`, the same as `episode`.');
+const unitArg = z.number().int().positive().optional().describe("The radio output's unit (episode) number, with output: radio; the same as `episode`.");
 
 const AUDITION_ARGS = z.object({
   project: projectField,
@@ -99,6 +107,8 @@ const CAST_ARGS = z.object({
       "Auto-cast the work's scripts instead (needs `project`): every unbound described role in `CAST:` is matched to the best distinct, non-retired library voice and pinned with by: match, its score and the runner-up; a middle-band match is marked review; roles with no fit or no distinct candidate come back as needsDesign.",
     ),
   episode: z.number().int().positive().optional().describe("auto: only the roles of episode N (default: every episode)."),
+  output: outputArg,
+  unit: unitArg,
   all: z.boolean().optional().default(false).describe("auto: every episode's roles (the default; not with `episode`)."),
   recast: z.boolean().optional().default(false).describe("Replace an existing card; the old one is archived under recast/<timestamp>/."),
   traits: traitsField,
@@ -113,7 +123,10 @@ const PERFORM_ARGS = z.object({
     .number()
     .int()
     .positive()
-    .describe("The episode number: its script is outputs/radio/episodes/NN-*.md, else the novel's chapter file NN-*.md carrying a CAST: line."),
+    .optional()
+    .describe("The episode number (or output: radio with unit): its script is outputs/radio/episodes/NN-*.md, else the novel's chapter file NN-*.md carrying a CAST: line."),
+  output: outputArg,
+  unit: unitArg,
   engine: z
     .enum(["chatterbox-turbo", "dia"])
     .optional()
@@ -127,7 +140,9 @@ const PERFORM_ARGS = z.object({
 
 const MIX_ARGS = z.object({
   project: z.string().describe("The work whose performed radio episode to mix."),
-  episode: z.number().int().positive().describe("The episode number; it must have been performed (`pablo perform`)."),
+  episode: z.number().int().positive().optional().describe("The episode number (or output: radio with unit); it must have been performed (`pablo perform`)."),
+  output: outputArg,
+  unit: unitArg,
   version: z
     .number()
     .int()
@@ -138,7 +153,9 @@ const MIX_ARGS = z.object({
 
 const FIX_ARGS = z.object({
   project: z.string().describe("The work whose performed radio episode to fix."),
-  episode: z.number().int().positive().describe("The episode number; it must have been performed and have open flags (flags.json)."),
+  episode: z.number().int().positive().optional().describe("The episode number (or output: radio with unit); it must have been performed and have open flags (flags.json)."),
+  output: outputArg,
+  unit: unitArg,
   "json-lines": z
     .boolean()
     .optional()
@@ -187,6 +204,82 @@ function autoRefusal(args: z.infer<typeof CAST_ARGS>): VerbResult | undefined {
   return undefined;
 }
 
+function refuseWith(message: string, missing: readonly string[]): VerbResult {
+  return { body: { ok: false, code: 2, message, missing }, exitCode: 2 };
+}
+
+interface Addressed {
+  readonly episode?: number | undefined;
+  readonly output?: string | undefined;
+  readonly unit?: number | undefined;
+}
+
+/**
+ * The episode a casting verb addresses (AGT-1686): `--episode N`, or the
+ * radio output's own spelling `--output radio --unit N` (which needs the
+ * work to have a radio output). Anything else is a refusal naming the fix.
+ */
+function addressedEpisode(args: Addressed, work: string, verb: string): number | VerbResult {
+  if (args.output !== undefined) {
+    if (args.output !== RADIO_ID) return refuseWith(`pablo ${verb}: only the radio output is performed; got --output ${args.output}`, [`--output ${RADIO_ID}`]);
+    const marker = readMarker(work);
+    const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, RADIO_ID, verb);
+    if (!resolved.ok) return refuseWith(resolved.message, resolved.missing);
+  } else if (args.unit !== undefined) {
+    return refuseWith(`pablo ${verb}: --unit is an output's unit; say --output ${RADIO_ID} --unit ${args.unit}, or --episode ${args.unit}`, [`--output ${RADIO_ID}`]);
+  }
+  if (args.episode !== undefined && args.unit !== undefined && args.episode !== args.unit) {
+    return refuse(`pablo ${verb}: --episode ${args.episode} and --unit ${args.unit} name different episodes`);
+  }
+  const episode = args.episode ?? args.unit;
+  if (episode === undefined) return refuseWith(`pablo ${verb} needs --episode N (or --output ${RADIO_ID} --unit N)`, ["--episode N"]);
+  return episode;
+}
+
+/**
+ * The radio output's stage machine for a casting verb (AGT-1686,
+ * `outputs/radio/state.ts`): a refusal naming exactly what is missing
+ * (`role NED is not cast`), returned before anything is provisioned or run.
+ */
+function stageRefusal(work: string, stage: RadioVerbStage, episode: number, verb: string): VerbResult | undefined {
+  const check = radioStageCheck(work, stage, episode);
+  if (check.ready) return undefined;
+  return {
+    body: {
+      ok: false,
+      code: 2,
+      message: `pablo ${verb}: radio episode ${episode} is not ready to ${stage} (${check.missing.join("; ")}); nothing was run`,
+      output: RADIO_ID,
+      unit: episode,
+      stage,
+      missing: check.missing,
+    },
+    exitCode: 2,
+  };
+}
+
+/** The fields of a perform or fix receipt worth reporting back: the summary, not the engine's whole load record. */
+const RECEIPT_FIELDS = ["at", "intent", "episode", "engine", "version", "lines", "pass", "best_of_failed", "rtf_total", "rtf_engine", "audio_seconds", "wall"] as const;
+
+/**
+ * What a performed episode adds to the body (AGT-1686): its output and unit,
+ * the newest mixed audio (null until `pablo mix`, with the command as
+ * `next`), and the summary of the receipt the run left. The Python body's own
+ * fields (`version`, `manifest`, ...) win over these.
+ */
+function performedBody(work: string, episode: number, intent: "perform" | "fix"): Record<string, unknown> {
+  const state = episodeState(work, episode);
+  const receipt = lastReceipt(work, episode, [intent]);
+  const summary = receipt === undefined ? null : Object.fromEntries(RECEIPT_FIELDS.filter((key) => receipt[key] !== undefined).map((key) => [key, receipt[key]]));
+  return {
+    output: RADIO_ID,
+    unit: episode,
+    audio: state.audio ?? null,
+    receiptSummary: summary,
+    ...(state.audio === undefined ? { next: `pablo mix --output ${RADIO_ID} --unit ${episode}` } : {}),
+  };
+}
+
 /** The options every casting verb shares: the work (receipts) and where the library is (`--library`, `--vault`). */
 interface Where {
   readonly project?: string | undefined;
@@ -209,7 +302,7 @@ function run(args: readonly string[], where: Where, ctx: VerbContext, deps: (env
   if ("exitCode" in located) return located;
   const vault = where.vault === undefined ? located.vault : resolve(ctx.cwd, where.vault);
   const library = where.library === undefined ? undefined : resolve(ctx.cwd, where.library);
-  return runCasting([...args, ...flag("--vault", vault), ...flag("--library", library)], { env: ctx.env, stderr: ctx.stderr }, deps(ctx.env), located.work, extras);
+  return runCasting([...args, ...flag("--vault", vault), ...flag("--library", library)], { env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? deps(ctx.env), located.work, extras);
 }
 
 /** The casting verbs (audition, cast, voices, perform), over `deps` (the real machine by default). */
@@ -249,8 +342,21 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       if (args.auto) {
         const refusal = autoRefusal(args);
         if (refusal !== undefined) return refusal;
-        return run(["cast", "--auto", ...flag("--episode", args.episode), ...(args.all ? ["--all"] : [])], args, ctx, deps);
+        let episode: number | undefined;
+        if (args.episode !== undefined || args.unit !== undefined || args.output !== undefined) {
+          // One episode's roles: the radio output's cast stage needs its script (AGT-1686).
+          const where = locate(ctx, args.project);
+          if ("exitCode" in where) return where;
+          const addressed = addressedEpisode(args, where.work as string, "cast");
+          if (typeof addressed !== "number") return addressed;
+          if (args.all) return refuse("pablo cast --auto takes --episode N or --all, not both");
+          const notReady = stageRefusal(where.work as string, "cast", addressed, "cast");
+          if (notReady !== undefined) return notReady;
+          episode = addressed;
+        }
+        return run(["cast", "--auto", ...flag("--episode", episode), ...(args.all ? ["--all"] : [])], args, ctx, deps);
       }
+      if (args.output !== undefined || args.unit !== undefined) return refuse("pablo cast: --output and --unit address a work's episode; they go with --auto");
       if (args.role === undefined || args.candidate === undefined) {
         return refuse("pablo cast needs --role R and --candidate n (or --auto --project <slug> to match the work's roles from the library)");
       }
@@ -297,7 +403,12 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const where = locate(ctx, args.project);
       if ("exitCode" in where) return where;
       const work = where.work as string;
-      const machine = deps(ctx.env);
+      const episode = addressedEpisode(args, work, "perform");
+      if (typeof episode !== "number") return episode;
+      // The radio output's stage machine first (AGT-1686): an unbound role is refused by name, and nothing is provisioned or run.
+      const notReady = stageRefusal(work, "perform", episode, "perform");
+      if (notReady !== undefined) return notReady;
+      const machine = ctx.casting ?? deps(ctx.env);
       const casting = { env: ctx.env, stderr: ctx.stderr };
       // A real engine and the gates' scorers: the `scorers` extra (mlx-audio included).
       const ready = ensureProvisioned(casting, machine, work, [SCORERS_EXTRA]);
@@ -305,7 +416,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const relay = args["json-lines"] ? ctx.stdout : undefined;
       const pythonArgs = [
         "perform",
-        ...flag("--episode", args.episode),
+        ...flag("--episode", episode),
         ...flag("--engine", args.engine),
         ...(relay !== undefined ? ["--json-lines"] : []),
         ...flag("--vault", where.vault),
@@ -319,7 +430,12 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
               if (isProgressEvent(line)) relay.write(`${line}\n`);
             });
       return {
-        body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) },
+        body: {
+          ...(result.exitCode === 0 ? performedBody(work, episode, "perform") : {}),
+          ...(result.body as object),
+          provisioned: ready.outcome.provisioned,
+          ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}),
+        },
         exitCode: result.exitCode,
       };
     },
@@ -334,20 +450,29 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const where = locate(ctx, args.project);
       if ("exitCode" in where) return where;
       const work = where.work as string;
-      const machine = deps(ctx.env);
+      const episode = addressedEpisode(args, work, "mix");
+      if (typeof episode !== "number") return episode;
+      const notReady = stageRefusal(work, "mix", episode, "mix");
+      if (notReady !== undefined) return notReady;
+      const machine = ctx.casting ?? deps(ctx.env);
       const casting = { env: ctx.env, stderr: ctx.stderr };
       const ready = ensureProvisioned(casting, machine, work, [MIX_EXTRA]);
       if (!ready.ok) return ready.result;
       const result = runPython(ready.layout, machine, casting, [
         "mix",
-        ...flag("--episode", args.episode),
+        ...flag("--episode", episode),
         ...flag("--version", args.version),
         ...flag("--vault", where.vault),
         "--work",
         work,
       ]);
       return {
-        body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) },
+        body: {
+          ...(result.exitCode === 0 ? { output: RADIO_ID, unit: episode } : {}),
+          ...(result.body as object),
+          provisioned: ready.outcome.provisioned,
+          ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}),
+        },
         exitCode: result.exitCode,
       };
     },
@@ -362,7 +487,11 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const where = locate(ctx, args.project);
       if ("exitCode" in where) return where;
       const work = where.work as string;
-      const machine = deps(ctx.env);
+      const episode = addressedEpisode(args, work, "fix");
+      if (typeof episode !== "number") return episode;
+      const notReady = stageRefusal(work, "fix", episode, "fix");
+      if (notReady !== undefined) return notReady;
+      const machine = ctx.casting ?? deps(ctx.env);
       const casting = { env: ctx.env, stderr: ctx.stderr };
       // The engine and the gates' scorers, then the remix's cue generators.
       const ready = ensureProvisioned(casting, machine, work, [SCORERS_EXTRA, MIX_EXTRA]);
@@ -370,7 +499,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const relay = args["json-lines"] ? ctx.stdout : undefined;
       const pythonArgs = [
         "fix",
-        ...flag("--episode", args.episode),
+        ...flag("--episode", episode),
         ...(relay !== undefined ? ["--json-lines"] : []),
         ...flag("--vault", where.vault),
         "--work",
@@ -383,7 +512,12 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
               if (isProgressEvent(line)) relay.write(`${line}\n`);
             });
       return {
-        body: { ...(result.body as object), provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) },
+        body: {
+          ...(result.exitCode === 0 ? performedBody(work, episode, "fix") : {}),
+          ...(result.body as object),
+          provisioned: ready.outcome.provisioned,
+          ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}),
+        },
         exitCode: result.exitCode,
       };
     },

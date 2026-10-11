@@ -64,9 +64,23 @@ export function coreLines(core: CoreReport): string[] {
   return ["core:", ...core.stages.map((stage) => `  ${stage.id}: ${stage.summary}`)];
 }
 
+/**
+ * For a performed output (radio, AGT-1686): `; 2 mixed, 1 performed, 3 open flags`, or `; none rendered`.
+ * Empty for a written-only output, whose units carry no `render`.
+ */
+function renderSummary(output: OutputReport): string {
+  const drafted = output.units.filter((u) => u.file !== undefined);
+  if (!output.units.some((u) => u.render !== undefined) || drafted.length === 0) return "";
+  const mixed = drafted.filter((u) => u.render?.startsWith("mixed")).length;
+  const performed = drafted.filter((u) => u.render?.startsWith("performed")).length;
+  const flags = drafted.reduce((n, u) => n + (u.openFlags ?? 0), 0);
+  const parts = [...(mixed > 0 ? [`${mixed} mixed`] : []), ...(performed > 0 ? [`${performed} performed`] : [])];
+  return `; ${parts.length === 0 ? "none rendered" : parts.join(", ")}${flags > 0 ? `, ${flags} open flag${flags === 1 ? "" : "s"}` : ""}`;
+}
+
 /** One output's line: `novel: 2 of 24 chapters drafted`, with the drafted units' statuses when `detail` is set. */
 export function outputLine(type: string, output: OutputReport, detail = false): string {
-  const line = `${type}: ${output.drafted} of ${output.total} ${output.total === 1 ? output.noun : output.plural} drafted`;
+  const line = `${type}: ${output.drafted} of ${output.total} ${output.total === 1 ? output.noun : output.plural} drafted${renderSummary(output)}`;
   if (!detail) return line;
   const counts = new Map<string, number>();
   for (const unit of output.units) {

@@ -276,7 +276,7 @@ export const FOR_USAGE = 'pablo: --for expects "chapter N" (the novel), "<output
  * when ready and 2 when not; a work with several outputs and no type named,
  * or a type it does not have, is a refusal naming them.
  */
-export function unitStatus(projectPath: string, raw: string): VerbResult & { readonly label?: string } {
+export function unitStatus(projectPath: string, raw: string): VerbResult & { readonly label?: string; readonly lines?: readonly string[] } {
   const parsed = parseForUnit(raw);
   if (parsed === undefined) return { body: { ok: false, code: 2, message: FOR_USAGE }, exitCode: 2 };
   if (parsed.output !== undefined && !isOutputId(parsed.output)) {
@@ -286,8 +286,18 @@ export function unitStatus(projectPath: string, raw: string): VerbResult & { rea
   const marker = readMarker(projectPath);
   const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, parsed.output, "status");
   if (!resolved.ok) return { body: { ok: false, code: resolved.code, message: resolved.message, missing: resolved.missing }, exitCode: resolved.code };
-  const preconditions = resolved.output.preconditions(projectPath, parsed.unit);
   const label = `${resolved.output.noun} ${parsed.unit}`;
+  // A type with stages after the write (the radio output, AGT-1686) reports where the unit stands in them.
+  if (resolved.output.unitStatus !== undefined) {
+    const report = resolved.output.unitStatus(projectPath, parsed.unit);
+    return {
+      body: { ready: report.ready, missing: report.missing, ...(report.detail ?? {}) },
+      exitCode: report.ready ? 0 : 2,
+      label,
+      ...(report.lines !== undefined ? { lines: report.lines } : {}),
+    };
+  }
+  const preconditions = resolved.output.preconditions(projectPath, parsed.unit);
   return { body: { ready: preconditions.ready, missing: preconditions.missing }, exitCode: preconditions.ready ? 0 : 2, label };
 }
 
@@ -780,7 +790,11 @@ async function runMergeVerb(args: z.infer<typeof MERGE_ARGS>, ctx: VerbContext):
 
 const PUBLISH_ARGS = z.object({
   project: projectField,
-  target: z.string().describe("draft|review|final — the publish target: one compiled markdown file under .pablo/out/. The novel builds only draft; the story builds draft, review (a review copy) and final."),
+  target: z
+    .string()
+    .describe(
+      "The publish target, by output: novel and story draft|review|final (one compiled markdown file under .pablo/out/; the novel builds only draft); radio bundle|player|stream (bundle: every episode's script plus its newest mixed audio and manifest in one directory, .pablo/out/<slug>-radio-bundle/; player is `pablo review`; stream is not built yet).",
+    ),
   output: outputField.optional(),
 });
 
@@ -798,7 +812,16 @@ export function publishOutput(projectPath: string, target: string | undefined, o
   const outcome = resolved.output.publish.run(projectPath, marker.marker.slug, marker.marker.title, target);
   if (!outcome.ok) return { body: refusalBody(outcome), exitCode: outcome.code };
   return {
-    body: { ok: true, output: resolved.output.id, target: outcome.target, where: outcome.where, chapters: outcome.chapters, words: outcome.words },
+    body: {
+      ok: true,
+      output: resolved.output.id,
+      target: outcome.target,
+      where: outcome.where,
+      chapters: outcome.chapters,
+      words: outcome.words,
+      ...(outcome.files !== undefined ? { files: outcome.files } : {}),
+      ...(outcome.notes !== undefined ? { notes: outcome.notes } : {}),
+    },
     exitCode: 0,
   };
 }
@@ -1677,7 +1700,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "publish",
     description:
-      "Compile the work's chapters into one publishable markdown file (frontmatter stripped, sentence lines joined into paragraphs, quotes curled) under .pablo/out/. Only the draft target exists today.",
+      "Publish one of the work's outputs to a target. The novel and the story compile into one markdown file (frontmatter stripped, sentence lines joined into paragraphs, quotes curled) under .pablo/out/; the radio output's bundle copies every episode's script and, for each mixed episode, its audio and manifest into one directory (episodes not yet mixed are listed in notes).",
     args: PUBLISH_ARGS,
     run: runPublishVerb,
   },
