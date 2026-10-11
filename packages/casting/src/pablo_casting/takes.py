@@ -144,17 +144,21 @@ class TakeInputs:
         unknown = sorted(set(body) - known)
         if unknown:
             raise TakeInputError(f"unknown take input field(s): {', '.join(unknown)}")
+        engine = body.get("engine")
+        lines = body.get("lines")
+        direction = body.get("direction") or {}
+        params = body.get("params") or {}
+        take_version = body.get("take_version", TAKE_VERSION)
+        seed = body.get("seed")
+        if not isinstance(engine, Mapping) or not isinstance(lines, Sequence) or isinstance(lines, str):
+            raise TakeInputError("malformed take inputs: `engine` must be an object and `lines` a list")
+        if not isinstance(direction, Mapping) or not isinstance(params, Mapping):
+            raise TakeInputError("malformed take inputs: `direction` and `params` must be objects")
+        if isinstance(take_version, bool) or not isinstance(take_version, int):
+            raise TakeInputError("malformed take inputs: `take_version` must be an integer")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise TakeInputError("malformed take inputs: `seed` must be an integer")
         try:
-            engine = body["engine"]
-            lines = body["lines"]
-            direction = body.get("direction") or {}
-            assert isinstance(engine, Mapping) and isinstance(lines, Sequence) and isinstance(direction, Mapping)
-            params = body.get("params") or {}
-            assert isinstance(params, Mapping)
-            take_version = body.get("take_version", TAKE_VERSION)
-            assert isinstance(take_version, int)
-            seed = body["seed"]
-            assert isinstance(seed, int) and not isinstance(seed, bool)
             return cls(
                 engine=EngineId(
                     id=str(engine["id"]),
@@ -173,7 +177,7 @@ class TakeInputs:
                 params=dict(params),  # type: ignore[arg-type]
                 take_version=take_version,
             )
-        except (KeyError, TypeError, AssertionError) as failure:
+        except (KeyError, TypeError) as failure:
             raise TakeInputError(f"malformed take inputs: {failure!r}") from failure
 
 
@@ -415,6 +419,7 @@ __all__ = [
     "Direction",
     "Engine",
     "EngineId",
+    "KEY_RE",
     "Line",
     "Synthesis",
     "Take",

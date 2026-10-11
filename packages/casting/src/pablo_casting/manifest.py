@@ -37,7 +37,7 @@ VERSION_RE = re.compile(r"^v(\d+)\.json$")
 
 # Fields a caller proposes; the writer computes episode, version, parent,
 # changed_lines, flags_applied, audio, created and by itself.
-PROPOSED_FIELDS = ("script_sha256", "cast_hash", "engine", "pace_policy", "lines", "cues", "duration")
+PROPOSED_FIELDS = ("script_sha256", "cast_hash", "engine", "pace_policy", "cues", "duration")
 
 
 class ManifestError(Exception):
@@ -213,11 +213,11 @@ def write_version(
         **{name: proposal[name] for name in PROPOSED_FIELDS if name in proposal},
         "changed_lines": changed,
         "flags_applied": list(flags_applied),
+        "lines": lines,  # validated by `_validate_lines` above
         "audio": audio_name if audio is not None else None,
         "created": now(),
         "by": f"casting {__version__}",
     }
-    manifest["lines"] = lines
 
     root.mkdir(parents=True, exist_ok=True)
     ensure_gitignore(work)
