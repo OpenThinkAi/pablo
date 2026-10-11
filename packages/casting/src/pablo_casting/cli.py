@@ -24,6 +24,10 @@ Commands today:
              writes `renders/epNN/v<k+1>.json` through the "only flagged lines
              change" invariant; a violation is exit 1 naming the offending
              line ids, and nothing is written. `pablo fix` (C13) is its caller.
+- `script --work W --episode N`  the parsed script: lines, cues, roles with traits, issues.
+- `check --work W [--episode N]`  unknown directions (with line numbers) and unbound roles.
+- `status --work W --episode N`   ready, or exit 2 with the unbound roles in `missing`.
+- `bind --work W --role R --voice SLUG [--vault V | --library DIR]`  pin a role to a library voice.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from pablo_casting import __version__
+from pablo_casting.binding import BindingRefusal, bind, episode_files, library_dir, read_cast, read_episode
 from pablo_casting.config import ConfigRefusal, load_config
 from pablo_casting.hfcache import hub_cache, is_cached
 from pablo_casting.manifest import ManifestError, referenced_takes, write_version
@@ -54,6 +59,7 @@ from pablo_casting.takes import (
     take_path,
     takes_dir,
 )
+from pablo_casting.script import Script
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -63,7 +69,7 @@ Body = dict[str, object]
 Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "takes", "manifest")
+COMMANDS = ("version", "doctor", "pull", "audition", "takes", "manifest", "script", "check", "status", "bind")
 
 
 def refused(message: str, **extra: object) -> Result:
@@ -98,6 +104,10 @@ def _parser() -> _Parser:
     parser.add_argument("--audio")
     parser.add_argument("--work", help="the work directory receipts go under (<work>/.pablo/casting/)")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")
+    parser.add_argument("--role")
+    parser.add_argument("--voice")
+    parser.add_argument("--vault", help="the vault root; the voice library is <vault>/casting/voices")
+    parser.add_argument("--library", help="the voice library directory (overrides the config and --vault)")
     return parser
 
 
@@ -246,6 +256,95 @@ def cmd_manifest_write(work: Path, episode: str | None, from_file: str | None, f
     }, EXIT_OK
 
 
+def _episode_number(raw: str | None) -> int | None:
+    return None if raw is None else int(raw)
+
+
+def _need_work(work: Path | None, command: str) -> Result | None:
+    if work is None:
+        return refused(f"{command} needs --work <dir>")
+    return None
+
+
+def cmd_script(work: Path, episode: int | None) -> Result:
+    if episode is None:
+        return refused("script needs --episode N")
+    found = read_episode(work, episode)
+    if found is None:
+        return refused(f"no script for episode {episode} in {work}", missing=[f"episode {episode}"])
+    path, script = found
+    return {"ok": True, "file": path.name, "episode": episode, **script.as_body()}, EXIT_OK
+
+
+def _episode_report(work: Path, number: int, path: Path, script: Script, bound: dict[str, dict[str, object]]) -> dict[str, object]:
+    roles = script.role_names()
+    return {
+        "episode": number,
+        "file": str(path.relative_to(work)),
+        "lines": len(script.lines),
+        "cues": len(script.cues),
+        "roles": roles,
+        "undeclaredSpeakers": script.undeclared,
+        "unboundRoles": [r for r in roles if r not in bound],
+        "unknownDirections": [i.as_body() for i in script.issues],
+    }
+
+
+def cmd_check(work: Path, episode: int | None) -> Result:
+    try:
+        bound = read_cast(work)
+    except BindingRefusal as refusal:
+        return refused(str(refusal))
+    reports: list[dict[str, object]] = []
+    for number, path in episode_files(work):
+        if episode is not None and number != episode:
+            continue
+        found = read_episode(work, number)
+        assert found is not None
+        reports.append(_episode_report(work, number, found[0], found[1], bound))
+    if episode is not None and not reports:
+        return refused(f"no script for episode {episode} in {work}", missing=[f"episode {episode}"])
+    return {
+        "ok": True,
+        "episodes": reports,
+        "unknownDirections": [
+            {"file": r["file"], **issue} for r in reports for issue in r["unknownDirections"]  # type: ignore[union-attr]
+        ],
+        "unboundRoles": [{"file": r["file"], "episode": r["episode"], "role": role} for r in reports for role in r["unboundRoles"]],  # type: ignore[union-attr]
+    }, EXIT_OK
+
+
+def cmd_status(work: Path, episode: int | None) -> Result:
+    if episode is None:
+        return refused("status needs --episode N")
+    try:
+        bound = read_cast(work)
+    except BindingRefusal as refusal:
+        return refused(str(refusal))
+    found = read_episode(work, episode)
+    if found is None:
+        return {"ready": False, "missing": [f"episode {episode} has no script"]}, EXIT_REFUSED
+    roles = found[1].role_names()
+    missing = [f"role {role} is not bound to a voice (pablo bind --role {role} --voice <slug>)" for role in roles if role not in bound]
+    return {"ready": not missing, "missing": missing, "episode": episode, "roles": roles}, EXIT_REFUSED if missing else EXIT_OK
+
+
+def cmd_bind(env: Mapping[str, str], work: Path, args: argparse.Namespace) -> Result:
+    if not args.role or not args.voice:
+        return refused("bind needs --role R and --voice SLUG")
+    try:
+        configured = load_config(env).library
+    except ConfigRefusal as refusal:
+        return refused(str(refusal))
+    library = library_dir(Path(args.vault) if args.vault else None, configured, Path(args.library) if args.library else None)
+    if library is None:
+        return refused("no voice library: pass --vault or --library, or set `library` in the casting config")
+    try:
+        return bind(work, library, args.role, args.voice), EXIT_OK
+    except BindingRefusal as refusal:
+        return refused(str(refusal))
+
+
 def run(argv: Sequence[str], env: Mapping[str, str] | None = None, downloader: Downloader | None = None) -> tuple[Result, bool]:
     """Parse and run one command. Returns `(result, json)`; never raises for a bad argv."""
     env = os.environ if env is None else env
@@ -286,7 +385,23 @@ def run(argv: Sequence[str], env: Mapping[str, str] | None = None, downloader: D
             return cmd_manifest_write(work, args.episode, args.from_file, args.flag, args.audio), args.json
         subs = "show, gc" if args.command == "takes" else "write"
         return error(f'unknown {args.command} subcommand "{sub}": one of {subs}'), args.json
-    return cmd_audition(env, args.dry_run), args.json
+    if args.command == "audition":
+        return cmd_audition(env, args.dry_run), args.json
+    missing_work = _need_work(work, args.command)
+    if missing_work is not None:
+        return missing_work, args.json
+    assert work is not None
+    if args.command == "bind":
+        return cmd_bind(env, work, args), args.json
+    try:
+        episode = _episode_number(args.episode)
+    except ValueError:
+        return error(f"--episode must be an integer, got {args.episode!r}"), args.json
+    if args.command == "script":
+        return cmd_script(work, episode), args.json
+    if args.command == "check":
+        return cmd_check(work, episode), args.json
+    return cmd_status(work, episode), args.json
 
 
 def main(argv: Sequence[str], env: Mapping[str, str] | None = None, downloader: Downloader | None = None) -> int:

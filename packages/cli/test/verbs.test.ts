@@ -36,8 +36,9 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the nineteen verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the twenty verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
+    "bind",
     "check",
     "critique",
     "draft_chapter",
@@ -123,6 +124,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     branch: { type: "string" }, // AGT-1564: critique --branch
     reader: { type: "string" }, // AGT-1582: share --reader
     chapters: { type: "string" }, // AGT-1582: share --chapters
+    role: { type: "string" }, // AGT-1680: bind --role (bind reuses `voice`, already pinned above)
   });
 });
 

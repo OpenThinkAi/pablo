@@ -73,6 +73,8 @@ import { readTool, searchTool } from "./harness-tools";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
+import { parseForEpisode, radioBind, radioCheck, radioStatus, realCastingDeps } from "./radio";
+import type { CastingDeps } from "./radio";
 import { publishWork } from "./publish";
 import { realRunner, shareRound } from "./share";
 import { listRoundStatus, notesPull } from "./notes";
@@ -106,6 +108,13 @@ export interface VerbContext {
    * server)"); no other verb's behavior depends on who called it.
    */
   readonly caller?: "cli" | "mcp";
+  /**
+   * AGT-1680: the machine the casting verbs (`check` on a radio work, `status
+   * --for "episode N"`, `bind`) reach the Python side through. Tests inject a
+   * fake; left `undefined`, the real one (`uv`, the venv) is used, and only
+   * once a radio work actually needs it.
+   */
+  readonly casting?: CastingDeps;
 }
 
 /** `run`'s return: `body` is the exact `--json` object; `exitCode` is the CLI's exit-code contract (0 ok, 2 refused, 1 error). */
@@ -247,7 +256,7 @@ const STATUS_ARGS = z.object({
     .string()
     .optional()
     .describe(
-      'A chapter target, e.g. "chapter 3" (also accepts "chapter-3", "ch 3", or a bare "3"). Omit for the whole-project stage summary.',
+      'A chapter target, e.g. "chapter 3" (also accepts "chapter-3", "ch 3", or a bare "3"), or a radio episode, e.g. "episode 3": ready only when every role in its script is bound to a voice. Omit for the whole-project stage summary.',
     ),
 });
 
@@ -260,9 +269,14 @@ async function runStatusVerb(args: z.infer<typeof STATUS_ARGS>, ctx: VerbContext
     return { body: { ...state, waiting: waitingForReview(resolved.projectPath) }, exitCode: 0 };
   }
 
+  const episode = parseForEpisode(args.for);
+  if (episode !== undefined) {
+    return radioStatus({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath, episode);
+  }
+
   const chapter = parseForChapter(args.for);
   if (chapter === undefined) {
-    return { body: { ok: false, code: 2, message: 'pablo: --for expects "chapter N"' }, exitCode: 2 };
+    return { body: { ok: false, code: 2, message: 'pablo: --for expects "chapter N" or "episode N"' }, exitCode: 2 };
   }
 
   const preconditions = chapterPreconditions(state, chapter);
@@ -542,7 +556,35 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
   if (!outcome.ok) {
     return { body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried }, exitCode: outcome.code };
   }
-  return { body: { ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced }, exitCode: 0 };
+  const body: Record<string, unknown> = { ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced };
+  // A radio work also gets its scripts read: unknown directions and unbound roles (AGT-1680).
+  const radio = args.file === undefined ? radioCheck({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath) : undefined;
+  if (radio !== undefined) {
+    if (radio.exitCode !== 0) return radio;
+    const { ok: _ok, ...rest } = radio.body as Record<string, unknown>;
+    body["radio"] = rest;
+  }
+  return { body, exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// bind
+// ---------------------------------------------------------------------------
+
+const BIND_ARGS = z.object({
+  project: projectField,
+  role: z.string().describe('A role from a script\'s `CAST:` line, e.g. "CORA".'),
+  voice: z.string().describe("A voice slug in the shared library (<vault>/casting/voices/<slug>/card.json). Refused when absent or retired."),
+});
+
+/**
+ * AGT-1680: bind a role to a library voice. `cast.json` pins the card's hash and records `by: "manual"`, so a
+ * voice recast later is noticed instead of silently changing under the story.
+ */
+async function runBindVerb(args: z.infer<typeof BIND_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  return radioBind({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.vaultRoot, resolved.projectPath, args);
 }
 
 // ---------------------------------------------------------------------------
@@ -1340,9 +1382,17 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "check",
-    description: "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps.",
+    description:
+      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`.",
     args: CHECK_ARGS,
     run: runCheckVerb,
+  },
+  {
+    name: "bind",
+    description:
+      "Bind a radio script's role to a voice in the shared library: writes the role, the voice's slug and its card hash into the work's cast.json (by: manual). Refuses a voice that is not in the library or is retired.",
+    args: BIND_ARGS,
+    run: runBindVerb,
   },
   {
     name: "migrate",

@@ -352,7 +352,11 @@ describe("packaging", () => {
   });
 });
 
-test("only cli.ts reaches the casting runner: a writing verb never touches packages/casting", () => {
+// AGT-1680: `radio.ts` is the one other door. `check`, `status --for "episode N"` and `bind` reach the Python
+// side through it, and only for a work whose scripts carry a `CAST:` line; verbs.ts and check.ts import the
+// runner's types and defaults from radio.ts, never from casting.ts, so a writing verb on a writing work
+// still never touches packages/casting.
+test("only cli.ts and radio.ts reach the casting runner: a writing verb never touches packages/casting", () => {
   const src = fileURLToPath(new URL("../src", import.meta.url));
   const importers: string[] = [];
   const walk = (dir: string): void => {
@@ -363,5 +367,5 @@ test("only cli.ts reaches the casting runner: a writing verb never touches packa
     }
   };
   walk(src);
-  expect(importers).toEqual(["cli.ts"]);
+  expect(importers.sort()).toEqual(["cli.ts", "radio.ts"]);
 });

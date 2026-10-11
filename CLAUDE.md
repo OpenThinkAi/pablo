@@ -119,15 +119,24 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `$XDG_DATA_HOME/pablo/casting/venv` for an npm install),
                 pulls the configured weights and leaves a receipt. A missing
                 `uv` is a refusal naming `brew install uv`; only `cli.ts`
-                imports the runner, so a writing verb never touches it.
+                and `radio.ts` import the runner, so a writing verb on a
+                writing work never touches it. `src/radio.ts` (AGT-1680) is
+                the radio door: `check` (on a work whose scripts carry a
+                `CAST:` line), `status --for "episode N"` and `bind` ask the
+                Python side through it; scripts are read from
+                `outputs/radio/episodes/`, else `chapters/`.
                 Tests inject `CastingDeps`; `bun test` never needs uv or a
                 model. `prepack` copies the casting sources into
                 `packages/cli/casting/` (gitignored) for the npm `files`.
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`
-                (`version`, `doctor`, `pull`, `audition --dry-run`), never a
-                user-facing binary; same body and exit codes as pablo.
+                (`version`, `doctor`, `pull`, `audition --dry-run`, `script`,
+                `check`, `status`, `bind`), never a user-facing binary; same
+                body and exit codes as pablo. The script reader
+                (`script.py`), the direction grammar (`directions.py`), the
+                `CAST:` traits mapper (`traits.py`) and the `cast.json`
+                binding (`binding.py`) are pure Python, model-free.
                 Config: `$XDG_CONFIG_HOME/pablo/casting.json` (engines,
                 weights, library, pace; no weights by default). Receipts:
                 `<work>/.pablo/casting/receipts.jsonl`. Its tests are pytest;

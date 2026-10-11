@@ -24,6 +24,8 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { TextSource } from "@openthink/pablo-core";
 import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
+import { radioCheck, radioCheckLines, realCastingDeps } from "./radio";
+import type { CastingDeps } from "./radio";
 
 /** One mechanical-tell or flagged-line match. `detail` disambiguates which stock name matched when `rule` is `"stock-name"`. */
 export interface Hit {
@@ -432,10 +434,16 @@ export interface CheckArgs {
  * `pablo check --project <slug> [--file F]`. Prose output is one line per
  * hit (`path:line rule — excerpt`, with `(<detail>)` appended when set) then
  * one `unprovenanced: <path>` line per unprovenanced file, or `no hits` when
- * both are empty. JSON is `{ok: true, hits[], unprovenanced[]}`. Exit 0
- * always, except a resolution refusal before any scanning (exit 2).
+ * both are empty. JSON is `{ok: true, hits[], unprovenanced[], radio?}`. Exit
+ * 0 always, except a resolution refusal before any scanning (exit 2).
+ *
+ * A work with radio scripts (a `CAST:` line, AGT-1680) also gets them read by
+ * the Python side: `radio` holds each episode's counts, the directions outside
+ * the vocabulary (with line numbers) and the roles with no voice; prose adds
+ * one `file:line unknown direction` / `unbound role` line each. A `--file`
+ * scan skips it. `casting` is injectable so tests never reach `uv`.
  */
-export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string): number {
+export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, casting?: CastingDeps): number {
   const outcome = checkWork(vaultRoot, workDir, args.file);
 
   if (!outcome.ok) {
@@ -447,9 +455,21 @@ export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string): n
     return outcome.code;
   }
 
+  const radio =
+    args.file === undefined ? radioCheck({ env: process.env, stderr: process.stderr }, casting ?? realCastingDeps(process.env), workDir) : undefined;
+  if (radio !== undefined && radio.exitCode !== 0) {
+    const failure = radio.body as { message?: string };
+    if (args.json) console.log(JSON.stringify(radio.body));
+    else console.error(failure.message ?? "pablo: reading the radio scripts failed");
+    return radio.exitCode;
+  }
+  const { ok: _ok, ...radioBody } = (radio?.body ?? {}) as Record<string, unknown>;
+  const hasRadio = radio !== undefined;
+  const radioLines = hasRadio ? radioCheckLines(radioBody) : [];
+
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced }));
-  } else if (outcome.hits.length === 0 && outcome.unprovenanced.length === 0) {
+    console.log(JSON.stringify({ ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced, ...(hasRadio ? { radio: radioBody } : {}) }));
+  } else if (outcome.hits.length === 0 && outcome.unprovenanced.length === 0 && radioLines.length === 0) {
     console.log("no hits");
   } else {
     for (const hit of outcome.hits) {
@@ -459,6 +479,7 @@ export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string): n
     for (const path of outcome.unprovenanced) {
       console.log(`unprovenanced: ${path}`);
     }
+    for (const line of radioLines) console.log(line);
   }
 
   return outcome.code;
