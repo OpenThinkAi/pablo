@@ -164,6 +164,7 @@ def test_retiring_a_bound_voice_keeps_its_pin_and_refuses_new_binds(env: dict[st
     assert code == 0 and body["hash"] == pinned
     retired = json.loads((vault / "casting/voices/cora/card.json").read_text())
     assert card_hash(retired) == pinned
+    # binding.load_card reads `retired` off the card and bind() refuses it (AGT-1680's check, unchanged here).
     refused, code = bind(env, vault, work, "CORA", "cora")
     assert code == 2 and "retired" in str(refused["message"])
 

@@ -360,6 +360,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       yes: { type: "boolean", default: false },
       // `audition -n 6` (AGT-1679): the derived `n` option, with its short form.
       n: { type: "string", short: "n" },
+      // Declared only so `cast --from-wav` is refused by name (synthetic voices only);
+      // no verb's schema has it, so it never reaches a verb's args.
+      "from-wav": { type: "string" },
     },
   });
 
@@ -450,7 +453,7 @@ export function castingText(verb: string, body: Record<string, unknown>): string
       const near = (c["near_duplicates"] as number[] | undefined) ?? [];
       lines.push(
         `  ${String(c["candidate"])}: seed ${String(c["seed"])}, ${String(c["seconds"])} s${c["reference_ok"] ? "" : " (too short or long for a reference)"}, ` +
-          `utmos ${String(scores["utmos"])}, ${String(scores["pitch_hz"])} Hz, ${String(scores["wps"])} w/s` +
+          `naturalness ${String(scores["utmos"])}/5, ${String(scores["pitch_hz"])} Hz, ${String(scores["wps"])} w/s` +
           (near.length > 0 ? `, sounds like ${near.join(", ")}` : "") +
           `  ${String(c["file"])}`,
       );

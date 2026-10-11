@@ -227,7 +227,7 @@ describe("the CLI", () => {
         { candidate: 2, seed: 8, seconds: 31.2, reference_ok: false, scores: { utmos: 3.9, pitch_hz: 181, wps: 2.5 }, near_duplicates: [1], file: "/x/2.wav" },
       ],
     });
-    expect(audition).toContain("1: seed 7, 26.1 s, utmos 4.1, 180 Hz, 2.9 w/s, sounds like 2");
+    expect(audition).toContain("1: seed 7, 26.1 s, naturalness 4.1/5, 180 Hz, 2.9 w/s, sounds like 2");
     expect(audition).toContain("too short or long for a reference");
     const voices = castingText("voices", {
       ok: true,
