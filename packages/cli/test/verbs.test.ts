@@ -159,13 +159,13 @@ test("resume.run on ice-house returns the resume summary shape, exit 0", async (
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("status.run with no for returns the novel machine's state, exit 0", async () => {
+test("status.run with no for returns the core then each output, exit 0", async () => {
   const vault = tempVault();
 
   const outcome = await verb("status").run({ project: "ice-house" }, ctxFor(vault));
 
   expect(outcome.exitCode).toBe(0);
-  expect(outcome.body).toMatchObject({ premise: true });
+  expect(outcome.body).toMatchObject({ core: { premise: true }, outputs: { novel: { drafted: 1, total: 4 } } });
 
   rmSync(vault, { recursive: true, force: true });
 });

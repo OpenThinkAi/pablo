@@ -98,7 +98,7 @@ test("pablo's MCP tools are attached in-process and callable", async () => {
     expect(listed).toEqual(mcpTools().map((tool) => tool.name));
     const called = await client.callTool({ name: "status", arguments: { project: "ice-house" } });
     const text = (called.content as { type: string; text: string }[])[0]!.text;
-    expect(JSON.parse(text)).toMatchObject({ premise: true });
+    expect(JSON.parse(text)).toMatchObject({ core: { premise: true } });
   } finally {
     await client.close();
   }
@@ -220,7 +220,7 @@ test("pablo agent runs one session and prints the transcript", async () => {
   expect(lines[1]).toBe("session: claude-test-1, credential none");
   expect(io.out()).toContain("pablo: Checking where the book stands.");
   expect(io.out()).toContain('  → status {"project":"ice-house"}');
-  expect(io.out()).toContain('  ← {"premise":true');
+  expect(io.out()).toContain('  ← {"core":{"premise":true');
   expect(io.out()).toContain("pablo: The bible is in; acts come next.");
   expect(io.out()).toContain("— done: 2 turn(s), 1.5s");
 });

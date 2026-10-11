@@ -15,8 +15,9 @@ import { join, relative } from "node:path";
 import { beatsFile } from "@openthink/pablo-core";
 import { outputsLabel, readMarker } from "./marker";
 import { waitingForReview } from "./branch";
-import { readNovelState } from "./novel/machine";
-import type { NovelState } from "./novel/machine";
+import type { CoreState } from "./core/machine";
+import { coreLines, outputLines, readWorkReport } from "./work-state";
+import type { CoreReport, OutputReport } from "./work-state";
 
 /** The newest dated file in `notes/`, summarized by its first `# ` heading. */
 export interface NoteSummary {
@@ -39,9 +40,13 @@ export interface OpenItem {
 }
 
 export interface ResumeResult {
+  /** The work's outputs as one label (`"novel"`, `"novel, radio"`, `"core"` with none). */
   readonly format: string;
   readonly title: string;
-  readonly stages: NovelState;
+  /** The story core's state and stages (AGT-1667). */
+  readonly core: CoreReport;
+  /** Each output the marker names, with its units. `{}` for a core with nothing derived yet. */
+  readonly outputs: Readonly<Record<string, OutputReport>>;
   /** Branches with changes `main` does not have yet: the ones waiting for review. */
   readonly waiting: readonly string[];
   readonly last: {
@@ -49,6 +54,7 @@ export interface ResumeResult {
     readonly commit?: CommitSummary;
   };
   readonly open: readonly OpenItem[];
+  /** The next action, naming the layer that is short: `core: ...`, `add an output`, or `<type>: ...`. */
   readonly next: string;
   /** The `think brief` output, trimmed, when it landed inside the timeout. */
   readonly brief?: string;
@@ -105,8 +111,8 @@ function readLastCommit(workDir: string): CommitSummary | undefined {
   }
 }
 
-/** Every `[pick]` row the novel state already found, as `"<name> ([pick] in <file>)"`. */
-function picksToOpen(state: NovelState): OpenItem[] {
+/** Every `[pick]` row the core state already found, as `"<name> ([pick] in <file>)"`. */
+function picksToOpen(state: CoreState): OpenItem[] {
   return state.bible.picks.map((pick) => ({
     source: pick.file,
     text: `${pick.name} ([pick] in ${pick.file})`,
@@ -162,27 +168,6 @@ function bibleAndOutlineOpen(workDir: string): OpenItem[] {
     items.push(...headingBullets(readFileSync(path, "utf8"), relative(workDir, path)));
   }
   return items;
-}
-
-/**
- * The first unmet stage, or the next unwritten chapter: premise missing ->
- * write the bible overview; no acts table -> save it; no beats -> save them;
- * else the lowest-numbered beat with no chapter file; else all beats drafted.
- */
-function computeNext(state: NovelState): string {
-  if (!state.premise) return "write bible/overview.md";
-  if (state.acts.length === 0) return "save the acts table (pablo save --stage acts)";
-  if (state.beats.length === 0) return "save chapter beats (pablo save --stage beats)";
-
-  const written = new Set(state.chapters.map((chapter) => chapter.number));
-  const beatsByChapter = [...state.beats].sort((a, b) => a.chapter - b.chapter);
-  for (const beat of beatsByChapter) {
-    if (!written.has(beat.chapter)) {
-      return `write chapter ${beat.chapter} (pablo write --chapter ${beat.chapter})`;
-    }
-  }
-
-  return "all beats drafted";
 }
 
 interface BriefOutcome {
@@ -250,7 +235,7 @@ export async function buildResume(
   const format = markerResult.ok ? outputsLabel(markerResult.marker) : "";
   const title = markerResult.ok ? markerResult.marker.title : "";
 
-  const state = readNovelState(workDir);
+  const report = readWorkReport(workDir, markerResult.ok ? markerResult.marker.outputs : {});
 
   const last: { note?: NoteSummary; commit?: CommitSummary } = {};
   const note = readLastNote(workDir);
@@ -258,25 +243,23 @@ export async function buildResume(
   const commit = readLastCommit(workDir);
   if (commit !== undefined) last.commit = commit;
 
-  const open = [...picksToOpen(state), ...bibleAndOutlineOpen(workDir)];
-  const next = computeNext(state);
+  const open = [...picksToOpen(report.core), ...bibleAndOutlineOpen(workDir)];
 
   const briefOutcome = await briefPromise;
 
-  const result: ResumeResult = { format, title, stages: state, waiting: waitingForReview(workDir), last, open, next };
+  const result: ResumeResult = {
+    format,
+    title,
+    core: report.core,
+    outputs: report.outputs,
+    waiting: waitingForReview(workDir),
+    last,
+    open,
+    next: report.next,
+  };
   if (briefOutcome.brief !== undefined) return { ...result, brief: briefOutcome.brief };
   if (briefOutcome.notice !== undefined) return { ...result, notices: [briefOutcome.notice] };
   return result;
-}
-
-/** One line per stage, in the state's own order — the resume prose form's second block. */
-function stageLines(state: NovelState): string[] {
-  return [
-    `premise: ${state.premise ? "ok" : "missing"}`,
-    `acts: ${state.acts.length}`,
-    `beats: ${state.beats.length}`,
-    `chapters: ${state.chapters.length} written`,
-  ];
 }
 
 const MAX_PROSE_LINES = 30;
@@ -284,13 +267,14 @@ const MAX_OPEN_BULLETS = 8;
 const MAX_BRIEF_LINES = 8;
 
 /**
- * The prose form: title, one line per stage, `last`, `open` (max 8 bullets,
+ * The prose form: title, the core's stages, one line per output
+ * (`novel: 2 of 24 chapters drafted`), `last`, `open` (max 8 bullets,
  * then `+N more`), `brief` if present (indented, max ~8 lines), then
  * `next: …` as the FINAL line. Under 30 lines total — truncated from the
  * body above, the `next:` line is never cut.
  */
 export function formatResumeProse(result: ResumeResult): string {
-  const body: string[] = [result.title, ...stageLines(result.stages)];
+  const body: string[] = [result.title, ...coreLines(result.core), ...outputLines(result.outputs)];
   if (result.waiting.length > 0) body.push(`waiting for review: ${result.waiting.join(", ")}`);
 
   if (result.last.note !== undefined) {
