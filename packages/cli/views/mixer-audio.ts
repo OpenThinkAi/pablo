@@ -8,8 +8,9 @@
  * re-render. The context runs at the mix rate, so a clip's edges fall on the same samples as the export's.
  *
  * The master: `master.gain` dB, then (as `mix.py`'s `master` does with `peak_db`) the one gain that puts the
- * mix's peak at `peak_db` dBFS. The peak is measured once, after the buffers are decoded, by rendering the
- * document's own mix offline through the same graph; live volume/mute/solo changes do not re-measure it.
+ * mix's peak at `peak_db` dBFS. The peak is measured after the buffers are decoded, and again after edits settle
+ * (AGT-1769: the export normalises the edited mix, so the preview does too), by rendering the document's own mix
+ * offline through the same graph.
  */
 
 import { dbToGain } from "./mixmath";
@@ -95,6 +96,7 @@ export class MixEngine {
   private mixer: Mixer;
   private onEnd: (() => void) | null = null;
   private endTimer: ReturnType<typeof setTimeout> | undefined;
+  private measuring = 0;
 
   constructor(
     private input: EngineInput,
@@ -118,6 +120,8 @@ export class MixEngine {
    * master to `mix.py`'s: `peak_db` dBFS at the peak, or just `master.gain` when `peak_db` is null.
    */
   async measure(documentMixer: Mixer): Promise<{ peak: number; gain: number }> {
+    this.measuring += 1;
+    const ticket = this.measuring;
     const base = dbToGain(this.input.doc.master.gain);
     const peakDb = this.input.doc.master.peak_db;
     const frames = Math.ceil(this.input.span * SR);
@@ -125,6 +129,7 @@ export class MixEngine {
     const offline = new OfflineAudioContext(1, frames, SR);
     build(offline, this.input.placed, this.buffers, this.input.automation, documentMixer, 1, 0, 0, this.input.span);
     const rendered = await offline.startRendering();
+    if (ticket !== this.measuring) return { peak: NaN, gain: this.masterGain }; // a newer edit is being measured
     const data = rendered.getChannelData(0);
     let peak = 0;
     for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i] as number));
@@ -167,6 +172,17 @@ export class MixEngine {
     const was = this.playing;
     this.paused = Math.max(0, Math.min(t, this.input.span));
     if (was) await this.play(this.paused, this.onEnd ?? undefined);
+  }
+
+  /**
+   * An edited mix (AGT-1769): the clips, automation and length to play from now on. While playing, everything is
+   * rescheduled from the current playhead, so an edit is heard at once with no re-render; the decoded buffers
+   * stay (an edit never adds a source: a split is two clips over one).
+   */
+  update(input: EngineInput): void {
+    this.input = input;
+    this.paused = Math.min(this.paused, input.span);
+    if (this.graph !== null) void this.play(this.time(), this.onEnd ?? undefined);
   }
 
   /** Live volume/mute/solo: ramps each track's gain, no rescheduling. */
