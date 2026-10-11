@@ -15,7 +15,7 @@ import pytest
 from pablo_casting.binding import bind, cast_path, casting_dir
 from pablo_casting.cli import run
 from pablo_casting.engines import DIA, TURBO, EngineSpec, RecordingEngine, VoiceRef
-from pablo_casting.manifest import flags_path, read_version
+from pablo_casting.manifest import episode_dir, flags_path, read_version
 from pablo_casting.perform import PACE_RANGE, PerformRequest, perform
 from pablo_casting.receipts import receipts_path
 from pablo_casting.scorers import ALIGNER, AUDIOBOX, DNSMOS, ECAPA, EMOTION, UTMOS, WHISPER, ScorerInfo, ScorerUnavailable, Take
@@ -189,7 +189,7 @@ def test_tender_slow_reaches_the_engine_mapped_and_ends_in_its_pace_band(setup: 
     assert line["pace"]["band"] == [round(2.4 * 0.85, 3), round(3.4 * 0.85, 3)]
     low, high = line["pace"]["band"]
     assert low <= line["pace"]["paced_wps"] <= high
-    assert line["stretch"] == pytest.approx(2.38 / 3.0, abs=0.002)
+    assert line["stretch"] == pytest.approx(2.89 / 3.0, abs=0.002)  # out of the slowed band: to its edge, not the target
 
 
 def test_caps_reach_the_engine_capitalised_and_the_script_text_is_unchanged(setup: tuple[Path, Path]) -> None:
@@ -209,10 +209,41 @@ def test_caps_reach_the_engine_capitalised_and_the_script_text_is_unchanged(setu
 # AC3 -------------------------------------------------------------------------
 
 
+def test_an_in_band_line_is_not_stretched(setup: tuple[Path, Path]) -> None:
+    work, library = setup
+    assert go(work, library, Factory(wps=(3.0,)))[1] == 0  # inside the 2.4-3.4 band
+    lines = read_version(work, 1, 1)["lines"]
+    assert [line["stretch"] for line in lines if line["i"] != 1] == [1.0, 1.0, 1.0]  # line 1 is `slow`: band 2.04-2.89
+
+
+def test_an_out_of_band_line_goes_to_the_band_edge_not_the_target(setup: tuple[Path, Path]) -> None:
+    work, library = setup
+    assert go(work, library, Factory(wps=(3.6,)))[1] == 0  # over the band
+    stretches = {line["i"]: line["stretch"] for line in read_version(work, 1, 1)["lines"]}
+    assert stretches[0] == pytest.approx(3.4 / 3.6, abs=0.002) and stretches[1] == pytest.approx(2.89 / 3.6, abs=0.002)
+
+
+def test_reused_takes_are_re_measured_under_the_current_pace_policy(setup: tuple[Path, Path]) -> None:
+    work, library = setup
+    assert go(work, library, Factory(wps=(3.0,)))[1] == 0
+    for path in (work / "outputs/radio/casting/takes").glob("*/take.json"):
+        record = json.loads(path.read_text())
+        record["scores"]["stretch"] = 0.8  # what the exact-target policy would have written
+        path.chmod(0o644)
+        path.write_text(json.dumps(record))
+    # Re-performing means setting the old render aside; the takes stay in the store.
+    episode_dir(work, 1).rename(work / "ep01-old")
+    factory = Factory(wps=(3.0,))
+    body, code, _, _ = go(work, library, factory)
+    assert code == 0, body
+    assert factory.engine is None or not factory.engine.calls  # nothing re-rendered
+    stretches = {line["i"]: line["stretch"] for line in read_version(work, 1, 1)["lines"]}
+    assert stretches[0] == 1.0
+
 def test_a_take_needing_a_stretch_outside_the_range_is_retaken(setup: tuple[Path, Path]) -> None:
     work, library = setup
-    # Every first attempt is rushed (2.8 / 4.5 = 0.62 stretch), every second at a sane pace.
-    factory = Factory(wps=(4.5, 3.0))
+    # Every first attempt is rushed (3.4 / 5.0 = 0.68 stretch), every second at a sane pace.
+    factory = Factory(wps=(5.0, 3.0))
     body, code, _, _ = go(work, library, factory)
     assert code == 0, body
     manifest = read_version(work, 1, 1)
@@ -235,7 +266,7 @@ def test_no_attempt_in_range_keeps_the_best_clamped_and_flags_the_line(setup: tu
     assert body["bestOfFailed"] == 4 and len(factory.engine.calls) == 16  # type: ignore[union-attr]
     line = read_version(work, 1, 1)["lines"][0]
     assert line["status"] == "best_of_failed" and line["attempts"] == 4
-    assert line["stretch"] == PACE_RANGE[0] and line["stretch_needed"] == round(2.8 / 5.0, 3)
+    assert line["stretch"] == PACE_RANGE[0] and line["stretch_needed"] == round(3.4 / 5.0, 3)
     assert "pace" in line["failing"] and "needed stretch" in line["flag"]
     assert read_take(work, line["take"]).record["status"] == "best_of_failed"  # type: ignore[union-attr]
     flags = json.loads(flags_path(work).read_text())["flags"]
@@ -248,7 +279,7 @@ def test_no_attempt_in_range_keeps_the_best_clamped_and_flags_the_line(setup: tu
 
 def test_receipts_have_one_entry_per_engine_pass_and_the_manifest_has_rtf_total(setup: tuple[Path, Path]) -> None:
     work, library = setup
-    factory = Factory(wps=(4.5, 3.0))
+    factory = Factory(wps=(5.0, 3.0))
     body, code, _, _ = go(work, library, factory)
     assert code == 0
     takes = receipts(work, "take")

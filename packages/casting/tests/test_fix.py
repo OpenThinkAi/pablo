@@ -118,6 +118,8 @@ def test_two_flagged_lines_of_sixty_change_and_nothing_else_does(episode: tuple[
     assert (root / "ep01.m4a").resolve() == (root / "ep01.v2.m4a").resolve()
     assert (root / "ep01.v1.m4a").read_bytes() == v1_audio
     assert all("start" in line for line in v2["lines"])
+    # The pace policy is perform's: a retake read inside the role's band is not stretched.
+    assert [v2["lines"][i]["stretch"] for i in (7, 41)] == [1.0, 1.0]
 
 
 # AC2 -------------------------------------------------------------------------

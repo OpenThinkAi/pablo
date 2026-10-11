@@ -25,7 +25,7 @@ module is what the default tests exercise.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -182,13 +182,28 @@ def target_wps(thresholds: Mapping[str, object], card: Card | None) -> float:
     return (float(low) + float(high)) / 2
 
 
-def derive(scores: Mapping[str, object], line: str | None, seconds: float | None, target: float) -> dict[str, object]:
+def pace_stretch(wps: float, target: float, band: Sequence[float] | None = None) -> float:
+    """The tempo factor for a line read at `wps`: 1.0 inside the band, else to the nearest band edge.
+
+    Without a band the factor brings `wps` to `target` exactly (the gate
+    command's reading). Below 1 slows the take down.
+    """
+    if band is None:
+        return round(target / wps, 3)
+    low, high = float(band[0]), float(band[1])
+    if low <= wps <= high:
+        return 1.0
+    return round((low if wps < low else high) / wps, 3)
+
+
+def derive(scores: Mapping[str, object], line: str | None, seconds: float | None, target: float, band: Sequence[float] | None = None) -> dict[str, object]:
     """Pace and duration from the aligner's timings (or Whisper's cut), the line and the audio length.
 
     `wps` is script words over the spoken span (first aligned word's start to
     the last one's end; without timings, Whisper's cut, else the whole take).
     `stretch` is the tempo factor that brings `wps` to the role's target (below
-    1 slows the take down). `duration_ratio` is audio seconds over the seconds
+    1 slows the take down); given the line's pace `band`, a `wps` inside it is
+    left alone (1.0) and one outside goes to the nearest band edge. `duration_ratio` is audio seconds over the seconds
     the line should take at the target pace. A stored record's own values are
     kept when there is nothing to recompute them from.
     """
@@ -205,7 +220,7 @@ def derive(scores: Mapping[str, object], line: str | None, seconds: float | None
     if words and spoken is not None:
         wps = words / max(0.5, spoken)
         out["wps"] = round(wps, 3)
-        out["stretch"] = round(target / wps, 3)
+        out["stretch"] = pace_stretch(wps, target, band)
     if words and seconds is not None:
         expected = words / target
         out["seconds"] = round(seconds, 3)
