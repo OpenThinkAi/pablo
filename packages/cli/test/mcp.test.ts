@@ -72,6 +72,7 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "cast",
     "check",
     "critique",
+    "describe_voice", // AGT-1699: the CAST: mapper and the traits vocabulary, for the harness
     "draft_chapter",
     "draft_unit",
     "fix", // AGT-1685: fixes a performed radio episode from its flags; project required

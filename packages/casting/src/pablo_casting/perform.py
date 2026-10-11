@@ -341,6 +341,8 @@ class Performer:
     out: TextIO | None
     scratch: Path
     totals: Totals = field(default_factory=Totals)
+    receipt_tags: dict[str, object] = field(default_factory=dict)
+    """Merged into every `take` and `gate` receipt (design on demand tags its trial passes, AGT-1699)."""
 
     def thresholds(self, card: Card) -> dict[str, object]:
         # The pace policy holds the stretch the gate allows to [0.75, 1.05], whatever a card calibrated.
@@ -378,7 +380,7 @@ class Performer:
         scores.update(derive(scores, text, synthesis.audio.duration, target, band))
         append_receipt(
             self.work,
-            {"intent": "gate", "episode": self.episode, "attempt": attempt_no, "card": card.slug, "scorers": ran, "wall": wall, "audio_seconds": round(synthesis.audio.duration, 6)},
+            {"intent": "gate", "episode": self.episode, "attempt": attempt_no, "card": card.slug, "scorers": ran, "wall": wall, "audio_seconds": round(synthesis.audio.duration, 6), **self.receipt_tags},
         )
         return scores, wall
 
@@ -435,6 +437,7 @@ class Performer:
                 "rtf": round(wall / seconds, 6) if seconds else None,
                 "peak_memory_gb": synthesis.peak_memory_gb,
                 "ttfa": synthesis.ttfa,
+                **self.receipt_tags,
             },
         )
         scores, score_wall = self._score(attempt_no, inputs, synthesis, card, target, band)

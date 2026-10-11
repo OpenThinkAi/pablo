@@ -268,6 +268,15 @@ function helpText(): string {
     "                                            active library voice (by: match, score,",
     "                                            runner-up; review in the middle band); roles",
     "                                            with no fit are listed as needing design",
+    "  pablo cast --auto --design --project <slug> [--role-traits '{\"R\":{...}}']",
+    "                                            design a voice for each role that needs one:",
+    "                                            6 candidates, screened, a 3-line trial through",
+    "                                            the engine and every gate; the best is admitted",
+    "                                            (admitted.by: auto) and bound by: design. One",
+    "                                            re-phrased retry, then a refusal naming the role",
+    '  pablo describe_voice --describe "..." [--gender f|m|x]',
+    "                                            a CAST: description in the traits vocabulary,",
+    "                                            and the phrases the mapper could not normalise",
     "  pablo voices list [--auto-admitted] | show <slug> | retire <slug> [--reason \"...\"]",
     "                                            the shared voice library; retire keeps the",
     "                                            card hash, so pinned stories still perform",
@@ -598,7 +607,7 @@ async function runVerbEntry(name: string, args: ParsedArgs, cwd: string, text: (
 }
 
 /** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
-const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix", "fix"]);
+const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix", "fix", "describe_voice"]);
 
 /** Plain-text output for a casting verb's body. */
 export function castingText(verb: string, body: Record<string, unknown>): string {
@@ -641,9 +650,26 @@ export function castingText(verb: string, body: Record<string, unknown>): string
           `)${b["review"] ? "  REVIEW" : ""}${b["pin"] !== undefined && b["pin"] !== "ok" ? `  PIN ${String(b["pin"]).toUpperCase()}` : ""}`,
       );
     }
+    const refused = new Set(((body["refused"] as Array<Record<string, unknown>> | undefined) ?? []).map((r) => String(r["role"])));
     for (const n of (body["needsDesign"] as Array<Record<string, unknown>> | undefined) ?? []) {
+      if (refused.has(String(n["role"]))) continue;
       lines.push(`  ${String(n["role"])}: needs a designed voice (${String(n["reason"])})`);
     }
+    for (const r of (body["refused"] as Array<Record<string, unknown>> | undefined) ?? []) {
+      lines.push(`  ${String(r["role"])}: REFUSED (${String(r["message"])})`);
+    }
+    for (const d of (body["designed"] as Array<Record<string, unknown>> | undefined) ?? []) {
+      lines.push(`  ${String(d["role"])}: designed ${String(d["slug"])} (round ${String(d["round"])}, candidate ${String(d["candidate"])}), card ${String(d["hash"]).slice(0, 12)}`);
+    }
+  }
+  if (verb === "describe_voice" && typeof body["traits"] === "object" && body["traits"] !== null) {
+    const traits = Object.entries(body["traits"] as Record<string, unknown>)
+      .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join("/") : String(v)}`)
+      .join(" ");
+    lines.push(`  traits: ${traits || "(none)"}`);
+    const free = (body["freeText"] as readonly string[] | undefined) ?? [];
+    if (free.length > 0) lines.push(`  not normalised: ${free.join("; ")} (choose traits for these and pass --role-traits to cast --auto --design)`);
+    lines.push(`  instruct: ${String(body["instruct"])}`);
   }
   if (verb === "perform" && typeof body["manifest"] === "string") {
     lines.push(`  manifest: ${body["manifest"]}`);
@@ -694,6 +720,10 @@ async function runCastingVerb(args: ParsedArgs, cwd: string): Promise<number> {
   if (args.json) console.log(JSON.stringify(body));
   else if (body["ok"] === true) console.log(castingText(verb.name, body));
   else console.error(typeof body["message"] === "string" ? (body["message"].startsWith("pablo") ? body["message"] : `pablo: ${body["message"]}`) : "pablo: failed");
+  // A partly failed design (AGT-1699): one line per refused role, and the roles that were designed and bound.
+  if (!args.json && body["ok"] !== true && Array.isArray(body["refused"])) {
+    console.error(castingText(verb.name, { ...body, message: undefined }));
+  }
   return result.exitCode;
 }
 

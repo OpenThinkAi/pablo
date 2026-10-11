@@ -25,11 +25,11 @@ from pathlib import Path
 import numpy as np
 
 from pablo_casting.audio import REFERENCE_RATE, file_sha256, read_audio, resample, write_flac
-from pablo_casting.audition import trim_for
+from pablo_casting.audition import Trim, trim_for
 from pablo_casting.library import CARD_FILES, Library, LibraryRefusal, card_hash
 from pablo_casting.passage import PASSAGE, PASSAGE_SHA256
 from pablo_casting.receipts import append_receipt
-from pablo_casting.toolkit import Toolkit
+from pablo_casting.toolkit import Aligner, Embedder, Toolkit
 from pablo_casting.traits import parse_traits, require_gender
 
 PACE_BAND = (2.4, 3.4)
@@ -48,6 +48,8 @@ class CastRequest:
     by: str
     traits: Mapping[str, object] | None
     notes: str | None
+    admission: Mapping[str, object] | None = None
+    """Extra fields for the card's `admitted` block: design on demand's trial evidence (AGT-1699)."""
 
 
 def _stamp(at: str) -> str:
@@ -102,6 +104,28 @@ def _performance(engines: Mapping[str, Mapping[str, object]]) -> dict[str, objec
     return {"engine": None, "defaults": {}}
 
 
+@dataclass(frozen=True)
+class Frozen:
+    """A candidate as a card would hold it: the aligner's trim, the 24 kHz reference and its embedding."""
+
+    trim: Trim
+    reference: np.ndarray
+    embedding: np.ndarray
+    aligner: Aligner
+    embedder: Embedder
+
+
+def freeze_reference(wav: Path, toolkit: Toolkit) -> Frozen:
+    """The reference `cast` freezes from a candidate's audio; design on demand's trial clones the same one."""
+    audio, rate = read_audio(wav)
+    aligner = toolkit.aligner()
+    trim = trim_for(aligner, audio, rate, PASSAGE)
+    reference = resample(audio[int(trim.start * rate) : int(trim.end * rate)], rate, REFERENCE_RATE)
+    embedder = toolkit.embedder()
+    embedding = np.asarray(embedder.embed(reference, REFERENCE_RATE), dtype=np.float32)
+    return Frozen(trim=trim, reference=reference, embedding=embedding, aligner=aligner, embedder=embedder)
+
+
 def cast(
     library: Library,
     request: CastRequest,
@@ -125,14 +149,10 @@ def cast(
     traits = parse_traits(request.traits) if request.traits is not None else parse_traits(record.get("traits") or {})  # type: ignore[arg-type]
     require_gender(traits)
 
-    audio, rate = read_audio(wav)
-    aligner = toolkit.aligner()
-    trim = trim_for(aligner, audio, rate, PASSAGE)
-    if trim.problem is not None:
-        raise LibraryRefusal(f"candidate {request.candidate} cannot be a reference: {trim.problem}")
-    reference = resample(audio[int(trim.start * rate) : int(trim.end * rate)], rate, REFERENCE_RATE)
-    embedder = toolkit.embedder()
-    embedding = np.asarray(embedder.embed(reference, REFERENCE_RATE), dtype=np.float32)
+    frozen = freeze_reference(wav, toolkit)
+    if frozen.trim.problem is not None:
+        raise LibraryRefusal(f"candidate {request.candidate} cannot be a reference: {frozen.trim.problem}")
+    trim, reference, embedding, aligner, embedder = frozen.trim, frozen.reference, frozen.embedding, frozen.aligner, frozen.embedder
 
     library.ensure_gitignore()
     at = now()
@@ -173,6 +193,7 @@ def cast(
             "at": at,
             "gates": "pass" if isinstance(utmos, (int, float)) and utmos >= gates["utmos_min"] else "fail",
             "approved_takes": 0,
+            **dict(request.admission or {}),
         },
         "performance": _performance(engines),
         "gates": gates,

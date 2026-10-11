@@ -272,7 +272,19 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 cards are never candidates; bindings carry `by: match`,
                 the score, the runner-up and `review`, and the rest come
                 back as `needsDesign`. Thresholds are the config's
-                `matching` block over the design's 0.8 / 0.6 / 0.75. The gate's scorers sit behind
+                `matching` block over the design's 0.8 / 0.6 / 0.75.
+                Design on demand (`design.py`, AGT-1699, `cast --auto
+                --design`): each `needsDesign` role is auditioned
+                unattended (instruct from `traits.describe_traits`),
+                screened (UTMOS, pitch band, a usable reference, ECAPA
+                distinctness against every card), trialled on three lines
+                through `perform.py`'s `Performer` and the full gate stack
+                (takes receipted, never stored), and the best pass is cast
+                with `admitted.by: auto` plus its trial evidence and bound
+                `by: design`; one re-phrased retry, then exit 2 naming the
+                role. `describe` (the harness's `describe_voice`) returns
+                the mapper's traits, the free text it left and the
+                vocabulary; the harness answers with `--role-traits`. The gate's scorers sit behind
                 `scorers.py`'s `Scorer` interface with their heavy imports
                 inside each backend, so `doctor` lists weights, licenses and
                 versions from metadata alone; the backends need the optional

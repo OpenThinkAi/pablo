@@ -100,7 +100,9 @@ def audition(
     toolkit: Toolkit,
     now: Callable[[], str],
     work: Path | None = None,
+    tags: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    """`tags` are merged into each candidate's receipt (design on demand names its role and round, AGT-1699)."""
     library.ensure_gitignore()
     folder = library.auditions(request.slug)
     folder.mkdir(parents=True, exist_ok=True)
@@ -146,6 +148,7 @@ def audition(
                     "audio_seconds": audio_seconds,
                     "rtf": round(wall / audio_seconds, 4) if audio_seconds else None,
                     "peak_rss_mb": _peak_rss_mb(),
+                    **(tags or {}),
                 },
             )
 

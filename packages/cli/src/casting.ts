@@ -427,8 +427,9 @@ interface ScorerRow {
  * runs `python -m pablo_casting <args> [--work <work>] --json` and returns its
  * body as pablo's own, with whether this call provisioned. Every casting verb
  * (`casting-verbs.ts`) comes through here. `extras` are the optional extras the
- * command needs (a real `audition` and `cast` render and score audio, so they
- * ask for `scorers`, AGT-1709); the stamp records them, so a venv is never
+ * command needs (a real `audition` and `cast`, and `cast --auto --design`,
+ * render and score audio, so they ask for `scorers`, AGT-1709/AGT-1699); the
+ * stamp records them, so a venv is never
  * downgraded by a command that needs fewer.
  */
 export function runCasting(

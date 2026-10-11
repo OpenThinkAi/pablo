@@ -14,7 +14,15 @@
  * - `cast --auto --project W [--episode N | --all]` (AGT-1698) auto-casts
  *   the work's described `CAST:` roles from the library (`matching.py`):
  *   `cast.json` gets `by: match`, the score, the runner-up and `review`;
- *   roles with no fit come back as `needsDesign`.
+ *   roles with no fit come back as `needsDesign`. With `--design` (AGT-1699,
+ *   `design.py`) those roles get a voice designed on demand: auditioned
+ *   unattended, screened, trialled through the engine and the gates, admitted
+ *   with `admitted.by: auto` and bound `by: design`, or refused (exit 2) by
+ *   name after one re-phrased retry. It provisions the `scorers` extra.
+ * - `describe_voice --describe "..." [--gender f|m|x]` (AGT-1699) is the
+ *   harness's tool for a description the `CAST:` mapper cannot normalise: the
+ *   mapper's traits, the phrases left over and the traits vocabulary, so the
+ *   harness can hand `cast --auto --design` its own `role-traits`.
  * - `voices list|show|retire` reads the library; `retire` marks a voice
  *   unmatchable without changing its card hash.
  * - `perform --project W --episode N [--engine chatterbox-turbo|dia]
@@ -114,6 +122,19 @@ const CAST_ARGS = z.object({
     .describe(
       "Auto-cast the work's scripts instead (needs `project`): every unbound described role in `CAST:` is matched to the best distinct, non-retired library voice and pinned with by: match, its score and the runner-up; a middle-band match is marked review; roles with no fit or no distinct candidate come back as needsDesign.",
     ),
+  design: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "auto: design a voice for every role that needs one (6 candidates auditioned unattended, screened for naturalness, pitch and distinctness from the library, a 3-line trial through the engine scored by every gate); the best passing voice is admitted to the library (admitted.by: auto) and bound by: design. One retry with a re-phrased description; a second miss refuses naming the role. Loads models and uses the GPU.",
+    ),
+  "role-traits": z
+    .string()
+    .optional()
+    .describe(
+      'design: traits for roles whose CAST: description the mapper could not normalise (see describe_voice), as JSON mapping role to a traits block, e.g. {"RAMON": {"gender": "m", "age": "70s", "pitch": "high"}}.',
+    ),
   episode: z.number().int().positive().optional().describe("auto: only the roles of episode N (default: every episode)."),
   output: outputArg,
   unit: unitArg,
@@ -185,6 +206,12 @@ const FIX_ARGS = z.object({
     .describe("Also write each re-recorded line's progress event to stdout as a JSON line as it lands; they always go to stderr."),
 });
 
+const DESCRIBE_ARGS = z.object({
+  describe: z.string().describe("The role's description as the script's CAST: line gives it, e.g. \"seventies, reedy, smells of the sea\"."),
+  gender: z.enum(["f", "m", "x"]).optional().describe("The role's gender from its CAST: entry."),
+  role: roleField.optional(),
+});
+
 const VOICES_ARGS = z.object({
   sub: z.enum(["list", "show", "retire"]).describe("`list` the library, `show` one card, `retire` a voice so it is never matched again."),
   name: z.string().optional().describe("The voice slug, for show and retire."),
@@ -223,6 +250,7 @@ function autoRefusal(args: z.infer<typeof CAST_ARGS>): VerbResult | undefined {
   if (args.recast) manual.push("recast");
   if (manual.length > 0) return refuse(`pablo cast --auto matches from the library; it takes no ${manual.map((key) => `--${key}`).join(", ")}`);
   if (args.episode !== undefined && args.all) return refuse("pablo cast --auto takes --episode N or --all, not both");
+  if (args["role-traits"] !== undefined && !args.design) return refuse("pablo cast --role-traits only applies with --auto --design");
   return undefined;
 }
 
@@ -376,7 +404,23 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
           if (notReady !== undefined) return notReady;
           episode = addressed;
         }
-        return run(["cast", "--auto", ...flag("--episode", episode), ...(args.all ? ["--all"] : [])], args, ctx, deps);
+        return run(
+          [
+            "cast",
+            "--auto",
+            ...flag("--episode", episode),
+            ...(args.all ? ["--all"] : []),
+            ...(args.design ? ["--design"] : []),
+            ...flag("--role-traits", args["role-traits"]),
+          ],
+          args,
+          ctx,
+          deps,
+          args.design ? [SCORERS_EXTRA] : [],
+        );
+      }
+      if (args.design || args["role-traits"] !== undefined) {
+        return refuse("pablo cast --design designs voices for an auto-cast: pass it with --auto --project <slug>");
       }
       if (args.output !== undefined || args.unit !== undefined) return refuse("pablo cast: --output and --unit address a work's episode; they go with --auto");
       if (args.role === undefined || args.candidate === undefined) {
@@ -586,7 +630,16 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     },
   };
 
-  return [audition, cast, voices, perform, mix, fix] as readonly Verb[];
+  const describeVoice: Verb<typeof DESCRIBE_ARGS.shape> = {
+    name: "describe_voice",
+    description:
+      "Normalise a role's CAST: description into the voice traits vocabulary (gender, age, pitch, energy, warmth, register, era, roles) with pablo's deterministic mapper: returns the traits it found, the phrases it could not normalise (freeText), the whole vocabulary, and the designer instruct the traits become. When freeText is not empty, choose traits for it from the vocabulary and pass them to `cast` with auto, design and role-traits. Loads no model and writes nothing.",
+    args: DESCRIBE_ARGS,
+    run: async (args, ctx) =>
+      run(["describe", ...flag("--describe", args.describe), ...flag("--gender", args.gender), ...flag("--role", args.role)], {}, ctx, deps),
+  };
+
+  return [audition, cast, voices, perform, mix, fix, describeVoice] as readonly Verb[];
 }
 
 /** A `perform` progress line (`{"event": ...}`), as opposed to the final body. */
