@@ -308,11 +308,11 @@ def trial(
                 # `SpokenLine.line` is a script file line number (1-based), used only in reports.
                 take_pass = Pass((PassLine(k, speaker, text),))
                 thresholds = performer.thresholds(card)  # type: ignore[arg-type]
-                target, _ = pace_for(card, thresholds, None)  # type: ignore[arg-type]
+                target, band = pace_for(card, thresholds, None)  # type: ignore[arg-type]
                 base = performer.base_inputs(take_pass, spoken)
                 attempts = []
                 for attempt_no in range(MAX_ATTEMPTS):
-                    attempt = performer.attempt(attempt_no, base, take_pass, card, target, thresholds)  # type: ignore[arg-type]
+                    attempt = performer.attempt(attempt_no, base, take_pass, card, target, band, thresholds)  # type: ignore[arg-type]
                     attempts.append(attempt)
                     if attempt.passed:
                         break
