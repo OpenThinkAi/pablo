@@ -119,6 +119,45 @@ class Script:
                 seen.append(spoken.speaker)
         return seen
 
+    @property
+    def undescribed(self) -> list[str]:
+        """Every role with no description on the `CAST:` line: declared bare, or speaking without being declared."""
+        bare = [name for name, role in self.roles.items() if not role.description]
+        return [*bare, *self.undeclared]
+
+    def off_vocabulary(self) -> list[dict[str, object]]:
+        """Leading directions that parse but are not vocabulary words (a synonym, a sound note): the template wants the word itself."""
+        found: list[dict[str, object]] = []
+        for spoken in self.lines:
+            direction = spoken.direction
+            if direction is None or direction.status not in ("mapped", "ignored"):
+                continue
+            found.append(
+                {
+                    "line": spoken.line,
+                    "speaker": spoken.speaker,
+                    "text": f"({direction.raw})",
+                    "mapped": dict(direction.mapped),
+                    "ignored": list(direction.ignored),
+                }
+            )
+        return found
+
+    def multiple_directions(self) -> list[dict[str, object]]:
+        """Speaker lines carrying more than one direction: the leading one plus any stray parenthetical in the words or a continuation."""
+        strays: dict[int, list[str]] = {}
+        for issue in self.issues:
+            if issue.kind == "inline":
+                strays.setdefault(issue.line, []).append(issue.text)
+        found: list[dict[str, object]] = []
+        for spoken in self.lines:
+            texts = [f"({spoken.direction.raw})"] if spoken.direction is not None else []
+            for number in (spoken.line, *spoken.continued):
+                texts.extend(strays.get(number, []))
+            if len(texts) > 1:
+                found.append({"line": spoken.line, "speaker": spoken.speaker, "directions": texts})
+        return found
+
     def role_names(self) -> list[str]:
         """Every role that needs a voice: the `CAST:` roles, then any undeclared speaker."""
         return [*self.roles, *self.undeclared]
