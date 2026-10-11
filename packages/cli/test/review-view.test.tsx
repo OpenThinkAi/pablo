@@ -39,7 +39,21 @@ test("an empty work says it is waiting and that the list fills in by itself", ()
   expect(html).toContain("Chapters (0)");
 });
 
-test("the view bundles the way the ui-leaf binary bundles it (React is the binary's) and calls only the five mutations", async () => {
+test("a chapter still being performed is listed live, with how far its performance has got", () => {
+  const live: ReviewData = {
+    ...DATA,
+    chapters: [
+      ...DATA.chapters,
+      { episode: 3, title: "The Third Night", versions: [], latest: null, flags: { human: 0, auto: 0 }, stream: { state: "streaming", seconds: 36, segments: 6, linesDone: 9, linesTotal: 20 } },
+    ],
+  };
+  const html = renderToStaticMarkup(<Review data={live} mutate={noMutate} />);
+  expect(html).toContain("The Third Night");
+  expect(html).toContain("live 9/20");
+  expect(html).toContain("Chapters (3)");
+});
+
+test("the view bundles the way the ui-leaf binary bundles it (React is the binary's) and calls only the six mutations", async () => {
   const result = await Bun.build({
     entrypoints: [new URL("../views/review.tsx", import.meta.url).pathname],
     external: ["react", "react/jsx-runtime", "react-dom", "react-dom/client"],
@@ -49,5 +63,5 @@ test("the view bundles the way the ui-leaf binary bundles it (React is the binar
   expect(result.success).toBe(true);
   const text = (await result.outputs[0]?.text()) ?? "";
   const called = new Set([...text.matchAll(/mutate\(\s*"([A-Za-z]+)"/g)].map((m) => m[1]));
-  expect([...called].sort()).toEqual(["flag", "listChapters", "loadTrack", "setVersion", "unflag"]);
+  expect([...called].sort()).toEqual(["flag", "listChapters", "loadSegments", "loadTrack", "setVersion", "unflag"]);
 });

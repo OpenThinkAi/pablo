@@ -21,7 +21,12 @@
  *   [--json-lines]` (AGT-1683) renders the episode through the decided engine
  *   with the gates, retakes and pace policy into takes and `v1.json`; it
  *   provisions the `scorers` extra, and with `--json-lines` relays each line's
- *   progress event to stdout as it lands (always on stderr).
+ *   progress event to stdout as it lands (always on stderr). With `--stream`
+ *   (AGT-1697) it is the progressive render: segments into the listening
+ *   directory as the lines pass, the episode file mixed from the same
+ *   timeline, then published there at once (`radio-stream.ts`); `--all`
+ *   performs every unrendered episode in order through `progressive.ts`'s
+ *   engine queue, each published as it finishes.
  * - `mix --project W --episode N [--version k]` (AGT-1684) turns a performed
  *   episode into `renders/epNN/epNN.v<k>.m4a`: the takes paced by the manifest,
  *   the script's cues from the content-addressed cue library, normalised and
@@ -52,7 +57,10 @@ import { episodeState, lastReceipt, radioStageCheck } from "./outputs/radio/stat
 import type { RadioVerbStage } from "./outputs/radio/state";
 import { RADIO_ID } from "./outputs/radio/units";
 import { resolveOutput } from "./outputs/registry";
+import { runProgressive } from "./progressive";
 import { findVault, resolveProject } from "./project";
+import { radioEpisodes } from "./radio";
+import { isPerformed, publishStream } from "./radio-stream";
 import type { Verb, VerbContext, VerbResult } from "./verbs";
 
 type Env = Record<string, string | undefined>;
@@ -124,9 +132,23 @@ const PERFORM_ARGS = z.object({
     .int()
     .positive()
     .optional()
-    .describe("The episode number (or output: radio with unit): its script is outputs/radio/episodes/NN-*.md, else the novel's chapter file NN-*.md carrying a CAST: line."),
+    .describe(
+      "The episode number (or output: radio with unit): its script is outputs/radio/episodes/NN-*.md, else the novel's chapter file NN-*.md carrying a CAST: line. Required unless `all`.",
+    ),
   output: outputArg,
   unit: unitArg,
+  all: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Perform every episode that has a script and no render yet, in order, one at a time (not with `episode`)."),
+  stream: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Progressive render: mix as the lines pass and cut 6-second segments into the listening directory (<work>/.pablo/out/stream/), so the review player can start an episode once its first 30 seconds have passed the gates; then mix the episode file from the same timeline and publish it there the moment it exists. Time to first audio is recorded in the manifest and the receipts.",
+    ),
   engine: z
     .enum(["chatterbox-turbo", "dia"])
     .optional()
@@ -397,46 +419,87 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
   const perform: Verb<typeof PERFORM_ARGS.shape> = {
     name: "perform",
     description:
-      "Perform a radio episode: every spoken line is rendered through the decided engine (Chatterbox-Turbo; `dia` for A/B only) in its bound voice, scored by the quality gates, and retaken up to 4 times with derived seeds (first passing take kept, else the best kept and flagged automatically); the pace policy stretches each take to its role's pace (slow/quick directions scale it) within 0.75-1.05, retaking lines that would need more. Writes immutable takes and the episode's v1 manifest (with rtf_total) and a receipt per engine pass; each line's take is reported as it lands. Refuses an unbound role, a changed card pin, or an episode that already has a manifest (use fix). Loads models and uses the GPU.",
+      "Perform a radio episode: every spoken line is rendered through the decided engine (Chatterbox-Turbo; `dia` for A/B only) in its bound voice, scored by the quality gates, and retaken up to 4 times with derived seeds (first passing take kept, else the best kept and flagged automatically); the pace policy stretches each take to its role's pace (slow/quick directions scale it) within 0.75-1.05, retaking lines that would need more. Writes immutable takes and the episode's v1 manifest (with rtf_total) and a receipt per engine pass; each line's take is reported as it lands. Refuses an unbound role, a changed card pin, or an episode that already has a manifest (use fix). With `stream`, a listener can start the episode in the review player before its last line is performed, and the episode is mixed and published to the listening directory as soon as it finishes; with `all`, every episode not yet performed, in order. Loads models and uses the GPU.",
     args: PERFORM_ARGS,
     run: async (args, ctx) => {
+      const addressedAny = args.episode !== undefined || args.unit !== undefined || args.output !== undefined;
+      if (args.all && addressedAny) return refuse("pablo perform takes --episode N (or --output radio --unit N) or --all, not both");
       const where = locate(ctx, args.project);
       if ("exitCode" in where) return where;
       const work = where.work as string;
-      const episode = addressedEpisode(args, work, "perform");
-      if (typeof episode !== "number") return episode;
-      // The radio output's stage machine first (AGT-1686): an unbound role is refused by name, and nothing is provisioned or run.
-      const notReady = stageRefusal(work, "perform", episode, "perform");
-      if (notReady !== undefined) return notReady;
+      let single: number | undefined;
+      if (!args.all) {
+        const episode = addressedEpisode(args, work, "perform");
+        if (typeof episode !== "number") return episode;
+        // The radio output's stage machine first (AGT-1686): an unbound role is refused by name, and nothing is provisioned or run.
+        const notReady = stageRefusal(work, "perform", episode, "perform");
+        if (notReady !== undefined) return notReady;
+        single = episode;
+      }
       const machine = ctx.casting ?? deps(ctx.env);
       const casting = { env: ctx.env, stderr: ctx.stderr };
-      // A real engine and the gates' scorers: the `scorers` extra (mlx-audio included).
-      const ready = ensureProvisioned(casting, machine, work, [SCORERS_EXTRA]);
+      // A real engine and the gates' scorers: the `scorers` extra (mlx-audio included); streaming mixes as it goes: `mix`.
+      const ready = ensureProvisioned(casting, machine, work, args.stream ? [SCORERS_EXTRA, MIX_EXTRA] : [SCORERS_EXTRA]);
       if (!ready.ok) return ready.result;
       const relay = args["json-lines"] ? ctx.stdout : undefined;
-      const pythonArgs = [
-        "perform",
-        ...flag("--episode", episode),
-        ...flag("--engine", args.engine),
-        ...(relay !== undefined ? ["--json-lines"] : []),
-        ...flag("--vault", where.vault),
-        "--work",
-        work,
-      ];
-      const result =
-        relay === undefined
-          ? runPython(ready.layout, machine, casting, pythonArgs)
-          : await runPythonStreaming(ready.layout, machine, casting, pythonArgs, (line) => {
-              if (isProgressEvent(line)) relay.write(`${line}\n`);
-            });
+      const provisioned = { provisioned: ready.outcome.provisioned, ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}) };
+
+      const performOne = async (episode: number): Promise<VerbResult> => {
+        const pythonArgs = [
+          "perform",
+          ...flag("--episode", episode),
+          ...flag("--engine", args.engine),
+          ...(args.stream ? ["--stream"] : []),
+          ...(relay !== undefined || args.stream ? ["--json-lines"] : []),
+          ...flag("--vault", where.vault),
+          "--work",
+          work,
+        ];
+        // Streaming runs the child asynchronously, so the writer's queue (progressive.ts) keeps moving meanwhile.
+        const result =
+          relay === undefined && !args.stream
+            ? runPython(ready.layout, machine, casting, pythonArgs)
+            : await runPythonStreaming(ready.layout, machine, casting, pythonArgs, (line) => {
+                if (relay !== undefined && isProgressEvent(line)) relay.write(`${line}\n`);
+              });
+        if (result.exitCode !== 0) return result;
+        const performed = { ...performedBody(work, episode, "perform"), ...(result.body as object) };
+        if (!args.stream) return { body: performed, exitCode: 0 };
+        // The episode file exists: publish it to the listening directory at once.
+        const published = publishStream(work, { episode, now: () => machine.now() });
+        if (relay !== undefined && published.ok) relay.write(`${JSON.stringify({ event: "published", episode, where: published.where, chapters: published.chapters.length })}\n`);
+        return {
+          body: { ...performed, published: published.ok ? { where: published.where, chapter: published.chapters.find((c) => c.episode === episode) } : published },
+          exitCode: published.ok ? 0 : published.code,
+        };
+      };
+
+      if (single !== undefined) {
+        const result = await performOne(single);
+        return { body: { ...(result.body as object), ...provisioned }, exitCode: result.exitCode };
+      }
+      const units = radioEpisodes(work).filter((episode) => !isPerformed(work, episode));
+      if (units.length === 0) return refuse(`pablo perform --all: every episode of ${work} with a script is already performed (or none has a CAST: line); change one with pablo fix`);
+      const report = await runProgressive({
+        units,
+        perform: async (episode) => {
+          const result = stageRefusal(work, "perform", episode, "perform") ?? (await performOne(episode));
+          return { ok: result.exitCode === 0, exitCode: result.exitCode, body: result.body };
+        },
+      });
+      const episodes = report.units.filter((u) => u.performed !== undefined).map((u) => ({ episode: u.unit, exitCode: u.performed?.outcome.exitCode, ...(u.performed?.outcome.body as object) }));
+      const done = episodes.filter((e) => e.exitCode === 0).length;
       return {
         body: {
-          ...(result.exitCode === 0 ? performedBody(work, episode, "perform") : {}),
-          ...(result.body as object),
-          provisioned: ready.outcome.provisioned,
-          ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}),
+          ok: report.ok,
+          ...(report.ok ? {} : { code: report.exitCode }),
+          episodes,
+          message: report.ok
+            ? `performed ${done} episode(s): ${units.join(", ")}${args.stream ? ", each published to the listening directory as it finished" : ""}`
+            : `stopped at episode ${String(report.stopped?.unit)} after ${done} performed: ${String((report.stopped?.outcome.body as { message?: unknown } | undefined)?.message ?? "failed")}`,
+          ...provisioned,
         },
-        exitCode: result.exitCode,
+        exitCode: report.exitCode,
       };
     },
   };

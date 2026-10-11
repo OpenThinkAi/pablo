@@ -47,6 +47,13 @@ over the delivered audio's seconds (the kept takes after their stretch).
 stdout, before the final body. A caller can start mixing a line as soon as its
 event arrives (C19).
 
+**Streaming** (`--stream`, AGT-1697, `stream.py`): each decided pass also goes
+onto the mix's timeline, every final 6 s segment is cut into the listening
+directory as it exists (`segment` events, one `playable` event once 30 s of the
+episode have passed), and when the last line has passed the same timeline is
+mixed into the episode file (`chapter` event). The manifest is written exactly
+as without it (same takes, same `changed_lines`), plus `ttfa`.
+
 Refusals (exit 2, nothing rendered): no script for the episode, a role with
 no voice in `cast.json`, a pin whose card has changed or gone, a card without
 its reference, an engine that cannot load, and an episode that already has a
@@ -91,8 +98,13 @@ from pablo_casting.engines import (
 from pablo_casting.gate_command import run_scorers
 from pablo_casting.gates import Card, GateRefusal, derive, evaluate, load_card, pace_stretch, target_wps, thresholds_for
 from pablo_casting.library import card_hash
+from pablo_casting.cues import CueLibrary, CueUnavailable
 from pablo_casting.manifest import ManifestError, episode_dir, flags_path, versions, write_version
+from pablo_casting.mix import SR, MixRefusal, MixRequest, Seams, Timeline, sox_pacer
+from pablo_casting.mix import mix as mix_episode
+from pablo_casting.organ import SoxUnavailable, require_sox
 from pablo_casting.receipts import append_receipt, now
+from pablo_casting.stream import EpisodeStream
 from pablo_casting.scorers import Scorer, ScorerUnavailable
 from pablo_casting.scorers import Take as ScoredTake
 from pablo_casting.script import Cue, Script, SpokenLine
@@ -573,6 +585,10 @@ class PerformRequest:
     engine: str
     voices_dir: Path
     json_lines: bool = False
+    stream: bool = False
+    """AGT-1697: mix as the lines pass, cut segments into the listening directory, and mix the episode file at the end."""
+    cues_dir: Path | None = None
+    """The cue library `--stream` mixes from (`mix.cues_dir_for`)."""
 
 
 def perform(
@@ -583,10 +599,13 @@ def perform(
     scorer_factory: Callable[[], Sequence[Scorer]],
     err: TextIO | None = None,
     out: TextIO | None = None,
+    mixer: Seams | None = None,
 ) -> Result:
     err = err if err is not None else sys.stderr
     stream_out = (out if out is not None else sys.stdout) if request.json_lines else None
     work, episode = request.work, request.episode
+    if request.stream and (mixer is None or request.cues_dir is None):
+        return _error("perform --stream needs the mix's seams and a cue library")
 
     spec = ENGINE_SPECS.get(request.engine)
     if spec is None:
@@ -610,8 +629,14 @@ def perform(
 
     runs, spoken = runs_between_cues(script)
     passes = group_dia(runs) if spec.grouping == "dia" else group_lines(runs)
+    if request.stream and mixer is not None and mixer.pacer is sox_pacer:
+        try:
+            require_sox()
+        except SoxUnavailable as missing:
+            return _refused(str(missing))
 
     started = time.monotonic()
+    started_at = now()
     engine = engine_factory(spec, {name: role.voice for name, role in roles.items()}, env)
     try:
         loaded = engine.load()
@@ -620,8 +645,12 @@ def perform(
     append_receipt(work, {"intent": "load", "engine": engine.identity.id, "revision": spec.revision, "weights_sha256": engine.identity.weights_sha256, **loaded})
     scorers = list(scorer_factory())
 
-    _emit({"event": "start", "episode": episode, "engine": spec.name, "lines": len(spoken), "passes": len(passes)}, err, stream_out)
+    _emit({"event": "start", "episode": episode, "engine": spec.name, "lines": len(spoken), "passes": len(passes), "stream": request.stream}, err, stream_out)
     lines: list[dict[str, object]] = [{} for _ in spoken]
+    live: EpisodeStream | None = None
+    if request.stream and mixer is not None and request.cues_dir is not None:
+        timeline = Timeline(work, cue_positions(script), CueLibrary(request.cues_dir, mixer.generators), mixer.pacer, log=mixer.log)
+        live = EpisodeStream(work, episode, timeline, lines_total=len(spoken), started=started, started_at=started_at)
     with tempfile.TemporaryDirectory(prefix="pablo-perform-") as scratch:
         performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch))
         try:
@@ -648,14 +677,26 @@ def perform(
                         err,
                         stream_out,
                     )
+                if live is not None:
+                    for event in live.add([lines[pass_line.i] for pass_line in take_pass.lines]):
+                        _emit(event, err, stream_out)
+            if live is not None:
+                for event in live.finish():
+                    _emit(event, err, stream_out)
         except ScorerUnavailable as missing:
+            _stream_failed(live)
             return _refused(
                 f"{missing}; pablo installs it with the perform verb, or run `uv sync --extra {missing.info.extra}` in packages/casting",
                 missing=[missing.info.package],
             )
-        except EngineUnavailable as missing:
+        except (EngineUnavailable, CueUnavailable, SoxUnavailable) as missing:
+            _stream_failed(live)
             return _refused(str(missing))
+        except MixRefusal as refusal:
+            _stream_failed(live)
+            return _refused(str(refusal), **refusal.extra)
         except Exception as failure:  # an engine or scorer crash: takes already decided stay in the store; a rerun resumes
+            _stream_failed(live)
             done = sum(1 for line in lines if line)
             return _error(f"performing episode {episode} failed after {done} of {len(spoken)} lines: {type(failure).__name__}: {failure}; run it again to resume")
 
@@ -700,10 +741,12 @@ def perform(
                 "duration": round(delivered, 3),
                 "rtf_total": rtf_total,
                 "render": render,
+                **({"ttfa": dict(live.ttfa)} if live is not None else {}),
                 "lines": lines,
             },
         )
     except (ManifestError, json.JSONDecodeError) as failure:
+        _stream_failed(live)
         return _error(f"writing episode {episode}'s manifest failed: {failure}")
 
     statuses = [str(line["status"]) for line in lines]
@@ -716,9 +759,16 @@ def perform(
         "pass": statuses.count("pass"),
         "best_of_failed": statuses.count("best_of_failed"),
         **render,
+        **({"stream": True, "ttfa": dict(live.ttfa)} if live is not None else {}),
     }
     append_receipt(work, {k: v for k, v in summary.items() if k != "load"})
     _emit({"event": "done", "episode": episode, "manifest": str(written.path), "rtf_total": rtf_total, "pass": summary["pass"], "best_of_failed": summary["best_of_failed"]}, err, stream_out)
+    streamed: dict[str, object] = {}
+    if live is not None and mixer is not None and request.cues_dir is not None:
+        streamed = _mix_streamed(live, written.manifest, request.cues_dir, mixer, err, stream_out)
+        if not streamed.get("ok"):
+            # The takes and v1 stand; `pablo mix` completes the episode file from them.
+            return {**streamed, "manifest": str(written.path), "version": written.manifest["version"]}, int(streamed.get("code", EXIT_ERROR))  # type: ignore[call-overload]
     return {
         "ok": True,
         "episode": episode,
@@ -736,11 +786,45 @@ def perform(
         "rtfEngine": render["rtf_engine"],
         "audioSeconds": render["audio_seconds"],
         "wall": wall,
+        **({"stream": streamed["stream"], "audio": streamed["audio"], "ttfa": streamed["ttfa"], "segments": streamed["segments"]} if streamed else {}),
         "message": (
             f"episode {episode} v{written.manifest['version']}: {len(lines)} lines, {summary['pass']} pass, "
             f"{summary['best_of_failed']} best-of (flagged), {totals.rendered} takes rendered, rtf_total {rtf_total}"
+            + (f"; streamed, first audio after {streamed['ttfa']['first_audio']} s, mixed to {Path(str(streamed['audio'])).name}" if streamed else "")  # type: ignore[index]
         ),
     }, EXIT_OK
+
+
+def _stream_failed(live: EpisodeStream | None) -> None:
+    if live is not None:
+        try:
+            live.failed()
+        except OSError:
+            pass  # the stream's index is a convenience; the refusal or error is what the caller needs
+
+
+def _mix_streamed(
+    live: EpisodeStream,
+    manifest: Mapping[str, object],
+    cues_dir: Path,
+    mixer: Seams,
+    err: TextIO,
+    out: TextIO | None,
+) -> Body:
+    """Completes the just-written version with the streamed timeline: normalised, encoded, the link moved (the mix's own path)."""
+    version = int(manifest["version"])  # type: ignore[call-overload]
+    extra = {"stream": {"segments": len(live.segments), "segment_seconds": live.segment_seconds, "gain": "segments are this mix before its normalising gain"}}
+    body, code = mix_episode(MixRequest(work=live.work, episode=live.episode, cues_dir=cues_dir, version=version), mixer, timeline=live.timeline, extra=extra)
+    if code != EXIT_OK:
+        _stream_failed(live)
+        return {**body, "message": f"episode {live.episode} v{version} performed and streamed, but its episode file was not made: {body.get('message')}; run `pablo mix` to make it"}
+    event = live.mixed(version, str(body.get("audio")))
+    _emit(event, err, out)
+    append_receipt(
+        live.work,
+        {"intent": "stream", "episode": live.episode, "version": version, "segments": len(live.segments), "seconds": round(live.emitted / SR, 3), "ttfa": dict(live.ttfa)},
+    )
+    return {"ok": True, "stream": str(live.dir), "audio": body.get("audio"), "ttfa": dict(live.ttfa), "segments": len(live.segments)}
 
 
 def cmd_perform(
@@ -754,6 +838,10 @@ def cmd_perform(
     json_lines: bool,
     engine_factory: EngineFactory,
     scorer_factory: Callable[[], Sequence[Scorer]],
+    *,
+    stream: bool = False,
+    cues: str | None = None,
+    mixer: Seams | None = None,
 ) -> Result:
     if work is None:
         return _refused("perform needs --work <dir> (the work whose script and cast to perform)", missing=["--work"])
@@ -769,12 +857,15 @@ def cmd_perform(
     if voices_dir is None:
         return _refused("no voice library: pass --vault or --library, or set `library` in the casting config", missing=["library"])
     from pablo_casting.engines import DEFAULT_ENGINE
+    from pablo_casting.mix import cues_dir_for
 
+    cues_dir = cues_dir_for(work, cues, library or configured_library, vault) if stream else None
     return perform(
-        PerformRequest(work=work, episode=number, engine=engine or DEFAULT_ENGINE, voices_dir=voices_dir, json_lines=json_lines),
+        PerformRequest(work=work, episode=number, engine=engine or DEFAULT_ENGINE, voices_dir=voices_dir, json_lines=json_lines, stream=stream, cues_dir=cues_dir),
         env=env,
         engine_factory=engine_factory,
         scorer_factory=scorer_factory,
+        mixer=mixer,
     )
 
 

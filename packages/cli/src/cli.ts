@@ -181,6 +181,10 @@ function helpText(): string {
     "                                            sentences joined, quotes curled); the radio",
     "                                            output's bundle copies every script and each",
     "                                            mixed episode's m4a and manifest into one dir",
+    "  pablo publish --project <slug> --output radio --target stream",
+    "                                            copy each mixed radio episode (newest version's",
+    "                                            audio and manifest, with its time to first audio)",
+    "                                            to the listening directory <work>/.pablo/out/stream/",
     "  pablo share --project <slug> --reader <name> --chapters N|N-M",
     "                                            open a reading round: push those chapters (all",
     "                                            on main) to the book's private reading repo as a",
@@ -274,6 +278,12 @@ function helpText(): string {
     "                                            0.75-1.05) into takes and renders/epNN/v1.json;",
     "                                            one JSON line per line on stderr as it lands",
     "                                            (and stdout with --json-lines). Uses the GPU",
+    "  pablo perform --project <slug> --episode N|--all --stream",
+    "                                            progressive render: mix as the lines pass, cut 6 s",
+    "                                            segments into <work>/.pablo/out/stream/ (playable in",
+    "                                            pablo review once 30 s have passed the gates), mix",
+    "                                            the episode file and publish it there at once;",
+    "                                            --all performs every unrendered episode in order",
     "  pablo mix --project <slug> --output radio --unit N (or --episode N) [--version k]",
     "                                            mix a performed episode: its takes (paced by the",
     "                                            manifest) and the script's cues from the cue",
@@ -640,6 +650,11 @@ export function castingText(verb: string, body: Record<string, unknown>): string
     lines.push(`  wall ${String(body["wall"])} s for ${String(body["audioSeconds"])} s of audio; rtf_total ${String(body["rtfTotal"])}, engine ${String(body["rtfEngine"])}`);
     const flags = (body["flags"] as readonly string[] | undefined) ?? [];
     if (flags.length > 0) lines.push(`  ${flags.length} line(s) auto-flagged for pablo fix`);
+    const ttfa = body["ttfa"] as { first_audio?: unknown; playable?: unknown; chapter?: unknown } | undefined;
+    if (ttfa !== undefined) {
+      lines.push(`  time to first audio ${String(ttfa.first_audio)} s, playable after ${String(ttfa.playable)} s, episode file after ${String(ttfa.chapter)} s`);
+    }
+    if (typeof body["audio"] === "string") lines.push(`  audio: ${body["audio"]}`);
   }
   if (verb === "mix" && typeof body["audio"] === "string") {
     lines.push(`  audio: ${body["audio"]}`);

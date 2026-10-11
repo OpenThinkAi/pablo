@@ -250,7 +250,6 @@ def render(
     lines = sorted((l for l in raw_lines if isinstance(l, Mapping)), key=lambda l: int(l["i"])) if isinstance(raw_lines, list) else []  # type: ignore[call-overload]
     raw_cues = manifest.get("cues")
     cues = [c for c in raw_cues if isinstance(c, Mapping)] if isinstance(raw_cues, list) else []
-    pending = sorted(range(len(cues)), key=lambda k: (int(cues[k].get("after", -1)), k))  # type: ignore[call-overload]
 
     takes: dict[str, _Take] = {}
     missing: list[str] = []
@@ -267,84 +266,197 @@ def render(
     if missing:
         raise MixRefusal(f"take(s) not in the store: {', '.join(sorted(set(missing)))}", missing_takes=sorted(set(missing)))
 
-    voice: list[tuple[int, np.ndarray]] = []
-    beds: list[tuple[int, int, np.ndarray]] = []
-    placed_cues: list[dict[str, object]] = [{} for _ in cues]
-    timings: dict[int, tuple[float, float]] = {}
-    state = {"t": 0, "generated": 0, "reused": 0}
-    bed: list[_Bed | None] = [None]
+    timeline = Timeline(work, cues, library, pacer, log=log, takes=takes)
+    for group in _group_lines(lines):
+        timeline.add(group)
+    return rendered_from(timeline)
 
-    def asset_for(cue: Mapping[str, object]) -> tuple[CueAsset, np.ndarray]:
-        asset = library.ensure(str(cue["kind"]), str(cue["desc"]))
-        state["generated" if asset.generated else "reused"] += 1
-        log(f"cue {asset.kind} {'generated' if asset.generated else 'reused'}: {asset.desc}")
-        return asset, library.load(asset)
 
-    def close_bed(at: int) -> None:
-        open_bed = bed[0]
-        if open_bed is not None:
-            beds.append((open_bed.start, at, open_bed.audio))
-            open_bed.placement["end"] = round(at / SR, 3)
-            bed[0] = None
+class Timeline:
+    """The episode's timeline, built one line group at a time (AGT-1697).
 
-    def place(k: int) -> None:
-        cue = cues[k]
-        kind, t = str(cue["kind"]), state["t"]
+    `render` adds every group and finishes; `perform --stream` (`stream.py`)
+    adds each group as its take passes the gates and cuts segments from the
+    audio that is already final. Both run this one placement code, so a
+    streamed episode's segments are the final mix's samples before its one
+    normalising gain, and the line timings the stream reports are the final
+    file's.
+
+    A sample is final once nothing still to come can write to it
+    (`frontier`): a voice take or MUSIC starts at `t`, an SFX up to
+    `SFX_OVERLAP_SECONDS` before it, and an open BED's fade-out ends where it
+    closes (no earlier than `t`) and lasts at most `BED_FADE_SECONDS`; while a
+    BED is shorter than four fades its fade-in is not settled either.
+    """
+
+    def __init__(
+        self,
+        work: Path,
+        cues: Sequence[Mapping[str, object]],
+        library: CueLibrary,
+        pacer: Pacer,
+        *,
+        log: Callable[[str], None] = lambda message: None,
+        takes: dict[str, _Take] | None = None,
+    ) -> None:
+        self.work = work
+        self.cues = [c for c in cues if isinstance(c, Mapping)]
+        self.library = library
+        self.pacer = pacer
+        self.log = log
+        self.takes: dict[str, _Take] = takes if takes is not None else {}
+        self.pending = sorted(range(len(self.cues)), key=lambda k: (int(self.cues[k].get("after", -1)), k))  # type: ignore[call-overload]
+        self.voice: list[tuple[int, np.ndarray]] = []
+        self.beds: list[tuple[int, int, np.ndarray]] = []
+        self.placed_cues: list[dict[str, object]] = [{} for _ in self.cues]
+        self.lines: list[dict[str, object]] = []
+        self.t = 0
+        self.generated = 0
+        self.reused = 0
+        self.bed: _Bed | None = None
+        self.total: int | None = None
+        self._faded: dict[int, np.ndarray] = {}
+
+    def _asset(self, cue: Mapping[str, object]) -> tuple[CueAsset, np.ndarray]:
+        asset = self.library.ensure(str(cue["kind"]), str(cue["desc"]))
+        if asset.generated:
+            self.generated += 1
+        else:
+            self.reused += 1
+        self.log(f"cue {asset.kind} {'generated' if asset.generated else 'reused'}: {asset.desc}")
+        return asset, self.library.load(asset)
+
+    def _close_bed(self, at: int) -> None:
+        if self.bed is not None:
+            self.beds.append((self.bed.start, at, self.bed.audio))
+            self.bed.placement["end"] = round(at / SR, 3)
+            self.bed = None
+
+    def _place(self, k: int) -> None:
+        cue = self.cues[k]
+        kind, t = str(cue["kind"]), self.t
         base: dict[str, object] = {"kind": kind, "desc": cue["desc"], "after": cue.get("after"), "line": cue.get("line")}
         if kind == "BED":
-            close_bed(t)
+            self._close_bed(t)
             if is_stop(str(cue["desc"])):
-                placed_cues[k] = {**base, "asset": None, "start": round(t / SR, 3), "end": round(t / SR, 3)}
+                self.placed_cues[k] = {**base, "asset": None, "start": round(t / SR, 3), "end": round(t / SR, 3)}
                 return
-            asset, audio = asset_for(cue)
-            placed_cues[k] = {**base, "asset": asset.ref, "key": asset.key, "start": round(t / SR, 3), "end": None}
-            bed[0] = _Bed(start=t, audio=audio * BED_GAIN, placement=placed_cues[k])
+            asset, audio = self._asset(cue)
+            self.placed_cues[k] = {**base, "asset": asset.ref, "key": asset.key, "start": round(t / SR, 3), "end": None}
+            self.bed = _Bed(start=t, audio=audio * BED_GAIN, placement=self.placed_cues[k])
             return
-        asset, audio = asset_for(cue)
+        asset, audio = self._asset(cue)
         overlap = int(SR * SFX_OVERLAP_SECONDS) if kind == "SFX" else 0
         start = max(0, t - overlap)
-        voice.append((start, audio * CUE_GAIN.get(kind, 0.75)))
+        self.voice.append((start, audio * CUE_GAIN.get(kind, 0.75)))
         end = start + len(audio)
-        placed_cues[k] = {**base, "asset": asset.ref, "key": asset.key, "start": round(start / SR, 3), "end": round(end / SR, 3)}
-        state["t"] = end + int(SR * CUE_TAIL_SECONDS)
+        self.placed_cues[k] = {**base, "asset": asset.ref, "key": asset.key, "start": round(start / SR, 3), "end": round(end / SR, 3)}
+        self.t = end + int(SR * CUE_TAIL_SECONDS)
 
-    for group in _group_lines(lines):
+    def _take(self, key: str) -> _Take:
+        take = self.takes.get(key)
+        if take is None:
+            stored = read_take(self.work, key)
+            if stored is None or not (stored.path / "take.wav").is_file():
+                raise MixRefusal(f"take(s) not in the store: {key}", missing_takes=[key])
+            audio, rate = read_audio(stored.path / "take.wav")
+            take = self.takes[key] = _Take(audio=audio, rate=rate, words=_words(stored.record))
+        return take
+
+    def add(self, group: Sequence[Mapping[str, object]]) -> None:
+        """Places the cues due before `group` (consecutive lines sharing one take, in line order), then its take."""
+        if self.total is not None:
+            raise ValueError("the timeline is finished")
         first = int(group[0]["i"])  # type: ignore[call-overload]
-        while pending and int(cues[pending[0]].get("after", -1)) < first:  # type: ignore[call-overload]
-            place(pending.pop(0))
-        take = takes[str(group[0]["take"])]
+        while self.pending and int(self.cues[self.pending[0]].get("after", -1)) < first:  # type: ignore[call-overload]
+            self._place(self.pending.pop(0))
+        take = self._take(str(group[0]["take"]))
         stretch = float(group[0].get("stretch") or 1.0)  # type: ignore[arg-type]
-        paced = pacer(take.audio, take.rate, stretch)
-        at = state["t"]
+        paced = self.pacer(take.audio, take.rate, stretch)
+        at = self.t
         clip = resample(paced, take.rate, SR)
-        voice.append((at, clip))
+        self.voice.append((at, clip))
         span = (0.0, len(take.audio) / take.rate)
         # The stored word times come from the aligner on the untrimmed attempt, so the last word can end after
         # the take (trimmed at the last word plus the tail air) does: nothing is audible past the take's end.
         bounds = [(min(begin, span[1]), min(end, span[1])) for begin, end in _split_words(take.words, group, span)]
         warped = warp_times(take.audio, paced, take.rate, [t for pair in bounds for t in pair])
         for k, line in enumerate(group):
-            timings[int(line["i"])] = (at / SR + warped[2 * k], at / SR + warped[2 * k + 1])  # type: ignore[call-overload]
-        state["t"] = at + len(clip) + int(SR * GAP_SECONDS)
-    while pending:
-        place(pending.pop(0))
-    close_bed(state["t"])
+            start, end = at / SR + warped[2 * k], at / SR + warped[2 * k + 1]
+            self.lines.append({**line, "start": round(start, 3), "end": round(end, 3)})
+        self.t = at + len(clip) + int(SR * GAP_SECONDS)
 
-    total = state["t"] + int(SR * END_PAD_SECONDS)
-    buffer = np.zeros(total, np.float32)
-    for start, clip in voice:
-        buffer[start : start + len(clip)] += clip[: total - start]
-    for start, end, loop in beds:
-        if end > start and len(loop):
-            buffer[start:end] += _fade_loop(loop, end - start)
-    peak = float(np.abs(buffer).max()) if total else 0.0
-    buffer /= max(1.0, peak / PEAK)
-    final_peak = float(np.abs(buffer).max())
-    if final_peak > 0:
-        buffer *= 10 ** (FINAL_PEAK_DB / 20) / final_peak
+    def finish(self) -> int:
+        """Places the cues after the last line and closes the bed; returns the episode's length in samples."""
+        if self.total is None:
+            while self.pending:
+                self._place(self.pending.pop(0))
+            self._close_bed(self.t)
+            self.total = self.t + int(SR * END_PAD_SECONDS)
+        return self.total
 
-    timed = [{**line, "start": round(timings[int(line["i"])][0], 3), "end": round(timings[int(line["i"])][1], 3)} for line in lines]  # type: ignore[call-overload]
-    return Rendered(audio=buffer, lines=timed, cues=placed_cues, cues_generated=state["generated"], cues_reused=state["reused"], peak_before=peak)
+    def frontier(self) -> int:
+        """The first sample that can still change (the episode's length once finished)."""
+        if self.total is not None:
+            return self.total
+        final = self.t - int(SR * SFX_OVERLAP_SECONDS)
+        if self.bed is not None:
+            if self.t - self.bed.start < 4 * int(SR * BED_FADE_SECONDS):
+                final = min(final, self.bed.start)
+            else:
+                final = min(final, self.t - int(SR * BED_FADE_SECONDS))
+        return max(0, final)
+
+    def mixdown(self, start: int, end: int) -> np.ndarray:
+        """The summed, unnormalised samples `[start, end)`: voice and cues first, then the beds, as the mix adds them."""
+        total = self.total if self.total is not None else end
+        end = min(end, total)
+        out = np.zeros(max(0, end - start), np.float32)
+        if end <= start:
+            return out
+        for at, clip in self.voice:
+            clip = clip[: max(0, total - at)]
+            lo, hi = max(start, at), min(end, at + len(clip))
+            if lo < hi:
+                out[lo - start : hi - start] += clip[lo - at : hi - at]
+        for k, (b_start, b_end, loop) in enumerate(self.beds):
+            if b_end <= b_start or not len(loop):
+                continue
+            lo, hi = max(start, b_start), min(end, b_end)
+            if lo < hi:
+                faded = self._faded.get(k)
+                if faded is None:
+                    faded = self._faded[k] = _fade_loop(loop, b_end - b_start)
+                out[lo - start : hi - start] += faded[lo - b_start : hi - b_start]
+        bed = self.bed
+        if bed is not None and len(bed.audio) and end > bed.start:
+            # Still open: only its settled part is ever asked for (`frontier`), the loop with its full fade-in.
+            lo = max(start, bed.start)
+            reps = np.tile(bed.audio, (end - bed.start) // len(bed.audio) + 1)[: end - bed.start].copy()
+            fade = int(SR * BED_FADE_SECONDS)
+            reps[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)[: len(reps)]
+            out[lo - start : end - start] += reps[lo - bed.start :]
+        return out
+
+
+def normalise(buffer: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """The prototype's two steps (under 0.95 peak, then to -1 dBFS) as the one gain they amount to.
+
+    Returns `(audio, peak_before, gain)`.
+    """
+    peak = float(np.abs(buffer).max()) if len(buffer) else 0.0
+    gain = 1.0 / max(1.0, peak / PEAK)
+    if peak * gain > 0:
+        gain *= 10 ** (FINAL_PEAK_DB / 20) / (peak * gain)
+    return (buffer * np.float32(gain)).astype(np.float32), peak, gain
+
+
+def rendered_from(timeline: Timeline) -> Rendered:
+    """The finished timeline as the mix's result: every line timed, the cues placed, normalised."""
+    total = timeline.finish()
+    audio, peak, _ = normalise(timeline.mixdown(0, total))
+    timed = sorted(timeline.lines, key=lambda line: int(line["i"]))  # type: ignore[call-overload]
+    return Rendered(audio=audio, lines=timed, cues=timeline.placed_cues, cues_generated=timeline.generated, cues_reused=timeline.reused, peak_before=peak)
 
 
 # --- the command --------------------------------------------------------------------------------
@@ -374,7 +486,14 @@ def _error(message: str) -> Result:
     return {"ok": False, "code": EXIT_ERROR, "message": message}, EXIT_ERROR
 
 
-def mix(request: MixRequest, seams: Seams) -> Result:
+def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, extra: Mapping[str, object] | None = None) -> Result:
+    """Mixes a version into its episode file.
+
+    `timeline` is a streamed episode's (AGT-1697): already built from this
+    version's takes as they passed, so it is finished and normalised rather
+    than built again; `extra` joins the manifest's `mix` block (the stream's
+    segments and time to first audio).
+    """
     work, episode = request.work, request.episode
     found = versions(work, episode)
     if not found:
@@ -395,7 +514,7 @@ def mix(request: MixRequest, seams: Seams) -> Result:
     started = time.monotonic()
     library = CueLibrary(request.cues_dir, seams.generators)
     try:
-        rendered = render(work, manifest, library, seams.pacer, log=seams.log)
+        rendered = render(work, manifest, library, seams.pacer, log=seams.log) if timeline is None else rendered_from(timeline)
         duration = round(len(rendered.audio) / SR, 3)
         with tempfile.TemporaryDirectory(prefix="pablo-mix-") as scratch:
             wav = Path(scratch) / f"ep{episode:02d}.wav"
@@ -411,13 +530,14 @@ def mix(request: MixRequest, seams: Seams) -> Result:
                 "cues_generated": rendered.cues_generated,
                 "cues_reused": rendered.cues_reused,
                 "wall": round(time.monotonic() - started, 3),
+                **(extra or {}),
             }
             completed: dict[str, object] = {**manifest, "lines": rendered.lines, "cues": rendered.cues, "duration": duration, "mix": info}
             if remix:
                 written = write_version(
                     work,
                     episode,
-                    {name: completed[name] for name in ("script_sha256", "cast_hash", "engine", "pace_policy", "cues", "duration", "rtf_total", "render", "mix", "lines") if name in completed},
+                    {name: completed[name] for name in ("script_sha256", "cast_hash", "engine", "pace_policy", "cues", "duration", "rtf_total", "render", "ttfa", "mix", "lines") if name in completed},
                     audio=encoded,
                 )
                 link_moved = True

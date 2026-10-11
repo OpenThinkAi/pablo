@@ -47,6 +47,11 @@ Commands:
              engine with the gates, retakes and pace policy, into takes and
              `renders/epNN/v1.json` (AGT-1683, `perform.py`); one JSON line per
              line on stderr as each lands (also on stdout with `--json-lines`).
+             `--stream [--cues DIR]` (AGT-1697, `stream.py`) also mixes as the
+             lines pass, cuts 6 s segments into `<work>/.pablo/out/stream/epNN/`
+             (`segment`, `playable` and `chapter` events), mixes the episode
+             file from the same timeline at the end, and records time to first
+             audio (`ttfa`) in the manifest and the receipts.
 - `mix --work W --episode N [--version k] [--cues DIR] [--vault V | --library DIR]`
              assemble the episode's voice track from a manifest version's takes
              (paced by the manifest), place its SFX/BED/MUSIC cues from the
@@ -189,6 +194,7 @@ def _parser() -> _Parser:
     # perform
     parser.add_argument("--engine")
     parser.add_argument("--json-lines", action="store_true", dest="json_lines")
+    parser.add_argument("--stream", action="store_true")
     return parser
 
 
@@ -660,6 +666,12 @@ def run(
             configured = load_config(env).library
         except ConfigRefusal as refusal:
             return refused(str(refusal)), args.json
+        stream_seams: Seams | None = None
+        if args.stream:
+            from pablo_casting.cues import real_generators
+            from pablo_casting.mix import Seams as StreamSeams  # `Seams` is local to run() (the fix/mix branches import it)
+
+            stream_seams = mixer or StreamSeams(generators=real_generators(), log=lambda message: print(message, file=sys.stderr, flush=True))
         return cmd_perform(
             env,
             work,
@@ -671,6 +683,9 @@ def run(
             args.json_lines,
             engines or real_engine,
             scorers or real_scorers,
+            stream=args.stream,
+            cues=args.cues,
+            mixer=stream_seams,
         ), args.json
     if args.command == "fix":
         from pablo_casting.cues import real_generators

@@ -25,7 +25,7 @@ export const RADIO_CASTING_DIR = "outputs/radio/casting";
  * The radio output's publish targets, in the order `--target` lists them.
  * `bundle` (the episodes' scripts, mixed audio and manifests in one
  * directory) is built; `player` is the review player (`pablo review`), and
- * `stream` is the progressive render (pablo-casting C19), not built yet.
+ * `stream` is the progressive render (AGT-1697): mixed episodes to the listening directory.
  */
 export const RADIO_PUBLISH_TARGETS = ["bundle", "player", "stream"] as const;
 

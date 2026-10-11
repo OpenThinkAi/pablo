@@ -1,7 +1,7 @@
 /**
  * The review player's host (AGT-1693, pm project `pablo-casting`, "The review surface"): `pablo review
  * [--episode N]` mounts the ui-leaf view `views/review.tsx` on a radio work's rendered episodes and answers
- * its five mutations. This file is the only thing that touches the casting directory; the view is dumb.
+ * its six mutations. This file is the only thing that touches the casting directory; the view is dumb.
  *
  * What it reads, all under `<work>/outputs/radio/casting/` (written by `pablo perform`, `pablo mix`, `pablo
  * fix`, none of which this file changes):
@@ -17,7 +17,11 @@
  *    episode's flags; the newest mixed version when `version` is omitted;
  *  - `setVersion({episode, version})` — `loadTrack` for a chosen version, refused when it is not mixed;
  *  - `flag({episode, line, reason?, time?, version?})` — writes the flag to `flags.json`;
- *  - `unflag({episode, line, id?})` — removes one flag by id, else every open flag on that line.
+ *  - `unflag({episode, line, id?})` — removes one flag by id, else every open flag on that line;
+ *  - `loadSegments({episode, from?})` (AGT-1697) — a chapter still being performed (`pablo perform --stream`):
+ *    its cut segments from `from` on, a few at a time, as base64 WAV, and its lines timed so far. Such a
+ *    chapter is in `listChapters` (with `stream`, no versions) once its stream is playable, read from the
+ *    listening directory `<work>/.pablo/out/stream/epNN/stream.json` (`radio-stream.ts`), until it is mixed.
  *
  * A failure is a thrown plain-words `Error`; ui-leaf hands it to the view, which toasts it. The window itself
  * is `deps.mount` (ui-leaf's `mount`), so tests drive the host against a temp work and a fake mount.
@@ -27,9 +31,11 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { join, resolve } from "node:path";
 import { mount } from "@openthink/ui-leaf";
 import type { MountOptions, MutationHandler, View } from "@openthink/ui-leaf";
-import { MUTATIONS, REASONS } from "../views/review-protocol";
-import type { ChapterRow, GateValue, ReviewData, ReviewFlag, ReviewLine, TrackPayload, VersionInfo } from "../views/review-protocol";
+import { MUTATIONS, REASONS, SEGMENTS_PER_CALL } from "../views/review-protocol";
+import type { ChapterRow, GateValue, ReviewData, ReviewFlag, ReviewLine, SegmentsPayload, TrackPayload, VersionInfo } from "../views/review-protocol";
 import { radioScriptDir } from "./radio";
+import { readLiveStream, readSegment, renderedEpisodes, streamedEpisodes } from "./radio-stream";
+import type { LiveStream } from "./radio-stream";
 import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./reader-host";
 
 type Env = Record<string, string | undefined>;
@@ -99,19 +105,6 @@ function readManifest(work: string, episode: number, version: number): Manifest 
   }
 }
 
-/** The numbers of the `epNN` directories under `renders/`, ascending. */
-function renderedEpisodes(work: string): number[] {
-  try {
-    return readdirSync(join(castingDir(work), "renders"))
-      .map((name) => /^ep(\d+)$/.exec(name)?.[1])
-      .filter((n): n is string => n !== undefined)
-      .map(Number)
-      .sort((a, b) => a - b);
-  } catch {
-    return [];
-  }
-}
-
 function versionNumbers(work: string, episode: number): number[] {
   try {
     return readdirSync(episodeDir(work, episode))
@@ -133,6 +126,21 @@ function mixedVersions(work: string, episode: number): Manifest[] {
     if (manifest?.audio != null && AUDIO_NAME.test(manifest.audio) && existsSync(join(dir, manifest.audio))) out.push(manifest);
   }
   return out;
+}
+
+/**
+ * The episode's streamed performance (`pablo perform --stream`) once a listener can start it: playable, with
+ * segments, still streaming or finished (and, for `loadSegments` only, already mixed). A failed stream is never one.
+ */
+function playableStream(work: string, episode: number, mixedToo = false): LiveStream | undefined {
+  const live = readLiveStream(work, episode);
+  if (live === undefined || !live.playable || live.segments.length === 0) return undefined;
+  if (live.state === "streaming" || live.state === "finished" || (mixedToo && live.state === "mixed")) return live;
+  return undefined;
+}
+
+function liveLines(live: LiveStream): ReviewLine[] {
+  return live.lines.map(reviewLine).filter((l): l is ReviewLine => l !== undefined);
 }
 
 const versionInfo = (m: Manifest): VersionInfo => ({ version: m.version, duration: m.duration, created: m.created, changedLines: m.changed });
@@ -245,6 +253,7 @@ export interface ReviewHost {
   setVersion(args: unknown): TrackPayload;
   flag(args: unknown): ReviewFlag[];
   unflag(args: unknown): ReviewFlag[];
+  loadSegments(args: unknown): SegmentsPayload;
 }
 
 function positiveInt(args: unknown, key: string, required: true): number;
@@ -275,21 +284,54 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
       }
     })();
     const rows: ChapterRow[] = [];
-    for (const episode of renderedEpisodes(work)) {
+    const counts = (flags: readonly ReviewFlag[]): ChapterRow["flags"] => ({
+      human: flags.filter((f) => f.source === "human").length,
+      auto: flags.filter((f) => f.source === "auto").length,
+    });
+    const episodes = [...new Set([...renderedEpisodes(work), ...streamedEpisodes(work)])].sort((a, b) => a - b);
+    for (const episode of episodes) {
       const mixed = mixedVersions(work, episode);
       const newest = mixed[mixed.length - 1];
-      if (newest === undefined) continue;
-      const flags = flagRows(file, episode, newest.lines);
+      if (newest !== undefined) {
+        rows.push({ episode, title: episodeTitle(work, episode), versions: mixed.map(versionInfo), latest: newest.version, flags: counts(flagRows(file, episode, newest.lines)) });
+        continue;
+      }
+      // Not mixed yet: listed once its streamed performance is playable (AGT-1697), with no version to switch.
+      const live = playableStream(work, episode);
+      if (live === undefined) continue;
       rows.push({
         episode,
         title: episodeTitle(work, episode),
-        versions: mixed.map(versionInfo),
-        latest: newest.version,
-        flags: { human: flags.filter((f) => f.source === "human").length, auto: flags.filter((f) => f.source === "auto").length },
+        versions: [],
+        latest: null,
+        flags: counts(flagRows(file, episode, liveLines(live))),
+        stream: { state: live.state === "streaming" ? "streaming" : "finished", seconds: live.seconds, segments: live.segments.length, linesDone: live.linesDone, linesTotal: live.linesTotal },
       });
     }
     return rows;
   };
+
+  function segments(episode: number, from: number): SegmentsPayload {
+    // A chapter that finished mixing while it played keeps its segments: the listener plays on to its end.
+    const live = playableStream(work, episode, true);
+    if (live === undefined) throw new Error(`episode ${episode} is not streaming (it has no playable performance in progress); choose it again from the chapter list, or start one with pablo perform --stream`);
+    return {
+      episode,
+      title: episodeTitle(work, episode),
+      from,
+      segments: live.segments.slice(from, from + SEGMENTS_PER_CALL).map((s) => ({
+        n: s.n,
+        start: s.start,
+        seconds: s.seconds,
+        mime: "audio/wav",
+        b64: readSegment(work, episode, s).toString("base64"),
+      })),
+      available: live.segments.length,
+      complete: live.state !== "streaming",
+      seconds: live.seconds,
+      lines: liveLines(live),
+    };
+  }
 
   function track(episode: number, version: number | undefined): TrackPayload {
     const mixed = mixedVersions(work, episode);
@@ -379,6 +421,12 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
       if (kept.length !== file.flags.length) writeFlagsFile(work, file, kept);
       return flagsFor(episode, undefined);
     },
+
+    loadSegments(args) {
+      const fromArg = isRecord(args) ? args["from"] : undefined;
+      if (fromArg !== undefined && (typeof fromArg !== "number" || !Number.isInteger(fromArg) || fromArg < 0)) throw new Error("from must be a whole number of 0 or more");
+      return segments(positiveInt(args, "episode", true), fromArg ?? 0);
+    },
   };
 }
 
@@ -390,6 +438,7 @@ export function reviewMutations(host: ReviewHost): Record<string, MutationHandle
     setVersion: async (args) => host.setVersion(args),
     flag: async (args) => host.flag(args),
     unflag: async (args) => host.unflag(args),
+    loadSegments: async (args) => host.loadSegments(args),
   };
   return handlers;
 }

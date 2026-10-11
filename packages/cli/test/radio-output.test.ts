@@ -611,11 +611,11 @@ test("publish --output radio --target bundle writes the episodes' m4as and manif
   expect(existsSync(join(work, "outputs", "radio", "casting", "renders", "ep01", "ep01.v2.m4a"))).toBe(true);
 });
 
-test("the player and stream targets are named and refused; an unknown target lists the radio targets", () => {
+test("the player target is named and refused, stream with nothing mixed is refused (AGT-1697); an unknown target lists the radio targets", () => {
   const { work } = radioVault();
   writeEpisode(work, 1);
   expect((publishOutput(work, "player", "radio").body as { message: string }).message).toContain("pablo review --project ice-house");
-  expect((publishOutput(work, "stream", "radio").body as { message: string }).message).toContain("not built yet");
+  expect((publishOutput(work, "stream", "radio").body as { message: string }).message).toContain("no radio episode has mixed audio yet");
   expect((publishOutput(work, "draft", "radio").body as { message: string }).message).toContain("bundle|player|stream");
 });
 

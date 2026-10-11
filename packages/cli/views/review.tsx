@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ViewProps } from "@openthink/ui-leaf/view";
 import { CHAPTER_POLL_MS, REASONS } from "./review-protocol";
-import type { ChapterRow, ReviewData, ReviewFlag, TrackPayload } from "./review-protocol";
+import type { ChapterRow, ReviewData, ReviewFlag, SegmentsPayload, TrackPayload } from "./review-protocol";
 import { arrivals, clock, flagTargetIndex, flagsOnLine, gateRows, lineIndexAt, seekAfterSwitch } from "./review-logic";
+import { SegmentStream } from "./review-stream";
 
 /**
  * The review player (AGT-1693, `pm project show pablo-casting`, "The review surface"): the prototype's
@@ -10,9 +11,14 @@ import { arrivals, clock, flagTargetIndex, flagsOnLine, gateRows, lineIndexAt, s
  * current line's gate scores, the performer's auto-flags in a second colour with the failing gate named, a
  * version switcher, and a chapter list that fills in as chapters are published.
  *
- * The view is dumb on purpose and never reads a file. It calls five host mutations, `listChapters`,
- * `loadTrack`, `setVersion`, `flag` and `unflag`, and draws what comes back (`review-protocol.ts`). It is
- * bundled by the ui-leaf binary, which supplies React; `bun run typecheck` checks this file.
+ * The view is dumb on purpose and never reads a file. It calls six host mutations, `listChapters`,
+ * `loadTrack`, `setVersion`, `flag`, `unflag` and `loadSegments`, and draws what comes back
+ * (`review-protocol.ts`). It is bundled by the ui-leaf binary, which supplies React; `bun run typecheck`
+ * checks this file.
+ *
+ * A chapter still being performed (AGT-1697, listed with `stream` and no version) plays live: its segments
+ * through `SegmentStream` (`review-stream.ts`) instead of the <audio> element, with no seeking and no flags
+ * until it is mixed (flags name a version).
  */
 
 type Track = Omit<TrackPayload, "b64">;
@@ -90,6 +96,11 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
   const [volume, setVolume] = useState(() => load("review.volume", 0.8));
   const [reason, setReason] = useState<string>(REASONS[0]);
   const [toast, setToast] = useState<string | null>(null);
+  // A chapter still being performed plays through `live` (its segments), not the <audio> element.
+  const live = useRef<SegmentStream | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const chaptersNow = useRef(chapters);
+  chaptersNow.current = chapters;
 
   const idx = Math.max(0, chapters.findIndex((c) => c.episode === episode));
   const chapter = chapters.find((c) => c.episode === episode);
@@ -135,12 +146,39 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
     [volume],
   );
 
-  // tune: fetch the episode (its newest mixed version) from the host and hand it to <audio>
+  // tune: fetch the episode (its newest mixed version) from the host and hand it to <audio>; a chapter that
+  // is still being performed is played from its segments instead
   useEffect(() => {
     if (episode === null) return;
     let cancelled = false;
     setLoading(true);
     setT(0);
+    live.current?.close();
+    live.current = null;
+    const row = chaptersNow.current.find((c) => c.episode === episode);
+    if (row !== undefined && row.latest === null && row.stream !== undefined) {
+      audio.current?.pause();
+      setStreaming(true);
+      const stream = new SegmentStream(
+        episode,
+        (ep, from) => mutate<SegmentsPayload>("loadSegments", { episode: ep, from }),
+        (p) => {
+          if (cancelled) return;
+          setTrack({ episode: p.episode, version: 0, versions: [], title: p.title, mime: "audio/wav", duration: p.seconds, lines: p.lines, flags: [] });
+          setLoading(false);
+        },
+        (e) => {
+          if (!cancelled) setToast(`Lost the stream for a moment: ${message(e)}`);
+        },
+        volume,
+      );
+      live.current = stream;
+      if (wantPlay.current) void stream.play();
+      return () => {
+        cancelled = true;
+      };
+    }
+    setStreaming(false);
     mutate<TrackPayload>("loadTrack", { episode })
       .then((p) => {
         if (!cancelled) applyTrack(p, 0);
@@ -157,8 +195,35 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episode]);
 
+  // The live chapter's clock: where the listener is, whether it plays, and on to the next chapter at its end.
+  useEffect(() => {
+    if (!streaming) return;
+    const h = setInterval(() => {
+      const stream = live.current;
+      if (stream === null) return;
+      setT(stream.time());
+      setPlaying(stream.playing);
+      if (stream.ended()) {
+        stream.close();
+        live.current = null;
+        setPlaying(false);
+        const list = chaptersNow.current;
+        const at = list.findIndex((c) => c.episode === episode);
+        const following = list[at + 1];
+        if (following !== undefined) {
+          wantPlay.current = true;
+          setEpisode(following.episode);
+        }
+      }
+    }, 250);
+    return () => clearInterval(h);
+  }, [streaming, episode]);
+
+  useEffect(() => () => live.current?.close(), []);
+
   useEffect(() => {
     if (audio.current) audio.current.volume = volume;
+    if (live.current) live.current.volume = volume;
     try {
       localStorage.setItem("review.volume", String(volume));
     } catch {
@@ -173,6 +238,14 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
   }, [toast]);
 
   const toggle = useCallback(() => {
+    const stream = live.current;
+    if (stream !== null) {
+      if (loading) return;
+      wantPlay.current = !stream.playing;
+      if (stream.playing) stream.pause();
+      else void stream.play().catch(() => setPlaying(false));
+      return;
+    }
     const a = audio.current;
     if (!a || loading) return;
     if (a.paused) {
@@ -186,6 +259,7 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
 
   const seek = useCallback(
     (by: number) => {
+      if (live.current !== null) return; // a live chapter plays straight through
       const a = audio.current;
       if (a) a.currentTime = Math.max(0, Math.min(a.duration || track?.duration || 0, a.currentTime + by));
     },
@@ -225,6 +299,10 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
 
   const flag = useCallback(async () => {
     if (track === null) return;
+    if (live.current !== null) {
+      setToast("This chapter is still being performed: flag its lines once it is mixed");
+      return;
+    }
     const target = track.lines[flagTargetIndex(track.lines, audio.current?.currentTime ?? t)];
     if (!target) return;
     try {
@@ -265,7 +343,7 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
     return () => window.removeEventListener("keydown", onKey);
   }, [toggle, seek, flag, tune]);
 
-  const duration = audio.current?.duration && isFinite(audio.current.duration) ? audio.current.duration : (track?.duration ?? 0);
+  const duration = !streaming && audio.current?.duration && isFinite(audio.current.duration) ? audio.current.duration : (track?.duration ?? 0);
   // needle sweeps the dial from the first chapter at the far left to the last at the far right
   const needle = -62 + (124 * idx) / Math.max(1, chapters.length - 1);
   const glowing = playing && !loading;
@@ -337,7 +415,7 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
           className="tape"
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
-            if (audio.current) audio.current.currentTime = ((e.clientX - r.left) / r.width) * duration;
+            if (audio.current && !streaming) audio.current.currentTime = ((e.clientX - r.left) / r.width) * duration;
           }}
         >
           <div className="tape-fill" style={{ width: `${(100 * t) / (duration || 1)}%` }} />
@@ -345,7 +423,9 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
             <div key={f.id} className={`tape-flag ${f.source}`} style={{ left: `${(100 * f.time) / (duration || 1)}%` }} />
           ))}
         </div>
-        <div className="time">{waiting ? "waiting for the first chapter…" : loading ? "warming up the tubes…" : `${clock(t)} / ${clock(duration)}`}</div>
+        <div className="time">
+          {waiting ? "waiting for the first chapter…" : loading ? "warming up the tubes…" : `${clock(t)} / ${clock(duration)}${streaming ? " · live, still being performed" : ""}`}
+        </div>
 
         <div className="controls">
           <Knob label="Volume" title="Volume: scroll or drag" angle={-135 + 270 * volume} onTurn={(d) => setVolume((v) => Math.max(0, Math.min(1, +(v + d * 0.05).toFixed(2))))} />
@@ -435,7 +515,7 @@ export default function Review({ data, mutate }: ViewProps<ReviewData>) {
               <span className="chapter-n">{c.episode}</span>
               <span className="chapter-title">{c.title}</span>
               <span className="chapter-meta">
-                v{c.latest}
+                {c.latest === null ? `live ${c.stream?.linesDone ?? 0}/${c.stream?.linesTotal ?? 0}` : `v${c.latest}`}
                 {c.flags.auto > 0 && <em className="auto"> {c.flags.auto} auto</em>}
                 {c.flags.human > 0 && <em className="human"> {c.flags.human} flagged</em>}
               </span>
