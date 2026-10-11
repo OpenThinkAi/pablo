@@ -55,7 +55,7 @@ from pablo_casting.cards import PACE_BAND, CastRequest, cast, freeze_reference
 from pablo_casting.engines import ENGINE_SPECS, EngineFactory, EngineUnavailable, Pass, PassLine, VoiceRef
 from pablo_casting.gates import DEFAULT_GATES, load_card
 from pablo_casting.library import Library, card_hash, slugify
-from pablo_casting.matching import cosine, load_voices
+from pablo_casting.matching import Voice, cosine, load_voices
 from pablo_casting.passage import PASSAGE
 from pablo_casting.perform import MAX_ATTEMPTS, Performer
 from pablo_casting.perform import Role as PerformRole
@@ -172,10 +172,10 @@ def role_for(row: Mapping[str, object], overrides: Mapping[str, Mapping[str, obj
     return DesignRole(role=name, gender=gender, description=description, traits=traits, free_text=tuple(free), traits_from=source)
 
 
-def _closest(embedding: np.ndarray, library: Library) -> tuple[str | None, float | None]:
+def _closest(embedding: np.ndarray, voices: Mapping[str, Voice]) -> tuple[str | None, float | None]:
     """The library card the candidate sounds most like (every card, retired or not) and the ECAPA cosine."""
     best: tuple[str | None, float | None] = (None, None)
-    for voice in load_voices(library).values():
+    for voice in voices.values():
         if voice.embedding is None:
             continue
         similarity = cosine(embedding, voice.embedding)
@@ -186,14 +186,16 @@ def _closest(embedding: np.ndarray, library: Library) -> tuple[str | None, float
     return best
 
 
-def screen(record: Mapping[str, object], embedding: np.ndarray, traits: Mapping[str, object], library: Library, distinct: float) -> dict[str, object]:
-    """The cheap gates, before any trial: naturalness, pitch vs the asked band, a usable reference, distinctness."""
+def screen(record: Mapping[str, object], embedding: np.ndarray, traits: Mapping[str, object], voices: Mapping[str, Voice], distinct: float) -> dict[str, object]:
+    """The cheap gates, before any trial: naturalness, pitch vs the asked band, a usable reference, distinctness.
+
+    `voices` is the library as `matching.load_voices` reads it, loaded once per round."""
     scores = record.get("scores") if isinstance(record.get("scores"), dict) else {}
     utmos = scores.get("utmos") if isinstance(scores, dict) else None
     pitch = scores.get("pitch_hz") if isinstance(scores, dict) else None
     trim = record.get("trim") if isinstance(record.get("trim"), dict) else {}
     band = pitch_band(traits)
-    closest, similarity = _closest(embedding, library)
+    closest, similarity = _closest(embedding, voices)
     utmos_min = float(DEFAULT_GATES["utmos_min"])  # type: ignore[arg-type]
     failing: list[str] = []
     if not isinstance(utmos, (int, float)) or utmos < utmos_min:
@@ -302,6 +304,8 @@ def trial(
             passed = True
             spoken = [SpokenLine(line=k + 1, speaker=speaker, text=text, direction=None, nonverbals=()) for k, text in enumerate(TRIAL_LINES)]
             for k, text in enumerate(TRIAL_LINES):
+                # `PassLine.i` indexes `spoken` (0-based, as perform numbers spoken lines);
+                # `SpokenLine.line` is a script file line number (1-based), used only in reports.
                 take_pass = Pass((PassLine(k, speaker, text),))
                 thresholds = performer.thresholds(card)  # type: ignore[arg-type]
                 target, _ = pace_for(card, thresholds, None)  # type: ignore[arg-type]
@@ -373,12 +377,13 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
             tags=tags,
         )
         folder = library.auditions(slug)
+        voices = load_voices(library)  # once per round: an earlier role's admission in this run counts
         candidates: list[Candidate] = []
         for row in rendered["candidates"]:  # type: ignore[union-attr]
             number = int(row["candidate"])  # type: ignore[index]
             record = json.loads((folder / f"{number}.json").read_text(encoding="utf-8"))
             embedding = np.load(folder / f"{number}.ecapa.npy", allow_pickle=False)
-            candidates.append(Candidate(number, folder / f"{number}.wav", record, screen(record, embedding, role.traits, library, settings.distinct)))
+            candidates.append(Candidate(number, folder / f"{number}.wav", record, screen(record, embedding, role.traits, voices, settings.distinct)))
         screened = [c for c in candidates if c.screen["pass"]]
         trials = trial(work, role.role, slug, round_no, screened, settings, machine)
         passing = sorted((c for c in screened if trials.get(c.number, {}).get("pass")), key=_rank, reverse=True)
@@ -525,7 +530,8 @@ def design_needed(
     still = [row for row in needs if row["role"] in {r["role"] for r in refused}]
     parts = [str(auto_body.get("message", ""))] if not needs else []
     if designed:
-        parts.append(f"designed and admitted {', '.join(f'{d['role']} -> {d['slug']}' for d in designed)}")
+        admitted = ", ".join(f"{d['role']} -> {d['slug']}" for d in designed)
+        parts.append(f"designed and admitted {admitted}")
     if refused:
         parts.append("; ".join(str(r["message"]) for r in refused))
     body: dict[str, object] = {

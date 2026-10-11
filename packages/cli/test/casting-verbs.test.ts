@@ -451,6 +451,14 @@ describe("the CLI", () => {
     });
     expect(designed).toContain("RAMON -> ramon (design)");
     expect(designed).toContain("RAMON: designed ramon (round 2, candidate 9), card fedcba987654");
+    const partial = castingText("cast", {
+      ok: false,
+      bindings: [],
+      needsDesign: [{ role: "BOSUN", reason: "not on the CAST: line" }],
+      refused: [{ role: "BOSUN", message: "no voice could be cast for BOSUN" }],
+    });
+    expect(partial).toContain("BOSUN: REFUSED (no voice could be cast for BOSUN)");
+    expect(partial).not.toContain("BOSUN: needs a designed voice");
   });
 });
 

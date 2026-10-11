@@ -655,6 +655,9 @@ export function castingText(verb: string, body: Record<string, unknown>): string
       if (refused.has(String(n["role"]))) continue;
       lines.push(`  ${String(n["role"])}: needs a designed voice (${String(n["reason"])})`);
     }
+    for (const r of (body["refused"] as Array<Record<string, unknown>> | undefined) ?? []) {
+      lines.push(`  ${String(r["role"])}: REFUSED (${String(r["message"])})`);
+    }
     for (const d of (body["designed"] as Array<Record<string, unknown>> | undefined) ?? []) {
       lines.push(`  ${String(d["role"])}: designed ${String(d["slug"])} (round ${String(d["round"])}, candidate ${String(d["candidate"])}), card ${String(d["hash"]).slice(0, 12)}`);
     }
@@ -715,6 +718,11 @@ async function runCastingVerb(args: ParsedArgs, cwd: string): Promise<number> {
   if (args.json) console.log(JSON.stringify(body));
   else if (body["ok"] === true) console.log(castingText(verb.name, body));
   else console.error(typeof body["message"] === "string" ? (body["message"].startsWith("pablo") ? body["message"] : `pablo: ${body["message"]}`) : "pablo: failed");
+  // A partly failed design (AGT-1699): one line per refused role, and the roles that were designed and bound.
+  if (!args.json && body["ok"] !== true && Array.isArray(body["refused"])) {
+    const detail = castingText(verb.name, { ...body, message: undefined });
+    if (detail.trim().startsWith("{") === false) console.error(detail);
+  }
   return result.exitCode;
 }
 

@@ -21,6 +21,7 @@ from pablo_casting.design import PITCH_HZ, TRIAL_LINES, pitch_band, screen
 from pablo_casting.engines import EngineSpec, RecordingEngine, VoiceRef
 from pablo_casting.fakes import FakeDesigner, fake_toolkit
 from pablo_casting.library import Library, card_hash
+from pablo_casting.matching import load_voices
 from pablo_casting.receipts import receipts_path
 from pablo_casting.scorers import ALIGNER, AUDIOBOX, DNSMOS, ECAPA, EMOTION, UTMOS, WHISPER, ScorerInfo, ScorerUnavailable, Take
 from pablo_casting.toolkit import Toolkit
@@ -194,7 +195,10 @@ def test_a_needs_design_role_is_bound_to_a_new_auto_admitted_card(env: dict[str,
         assert line["gates"]["sim_card"] == 0.8 and line["gates"]["utmos"] == 4.3
     assert admitted["screen"]["pass"] is True
     assert card["traits"] == normalise("RAMON", "m", "seventies, reedy, gruff, cool, period").traits
+    # `cards.cast` writes the designer's provenance as the card's top-level `designed` block (AGT-1679);
+    # its instruct is the one design on demand rendered the admitted candidate with.
     assert card["designed"]["instruct"] == admitted["instruct"] == describe_traits(card["traits"], (), 0)
+    assert card["designed"]["candidate"] == admitted["candidate"]
 
     roles = cast_json(work)
     assert roles["CORA"]["by"] == "match"
@@ -392,10 +396,10 @@ def test_pitch_bands() -> None:
 
 def test_a_candidate_that_sounds_like_a_library_voice_fails_distinctness(vault: Path) -> None:
     record = {"scores": {"utmos": 4.2, "pitch_hz": 170.0}, "trim": {"ok": True}}
-    library = Library(vault / "casting")
-    same = screen(record, EMBEDDINGS["edwin"], {"gender": "m", "pitch": "high"}, library, 0.75)
+    voices = load_voices(Library(vault / "casting"))
+    same = screen(record, EMBEDDINGS["edwin"], {"gender": "m", "pitch": "high"}, voices, 0.75)
     assert same["failing"] == ["distinctness"] and same["closest"] == {"slug": "edwin", "ecapa": 1.0}
-    apart = screen(record, -EMBEDDINGS["edwin"], {"gender": "m", "pitch": "high"}, library, 0.75)
+    apart = screen(record, -EMBEDDINGS["edwin"], {"gender": "m", "pitch": "high"}, voices, 0.75)
     assert apart["pass"] is True
 
 
