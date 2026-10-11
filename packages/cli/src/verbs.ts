@@ -773,7 +773,7 @@ async function runMergeVerb(args: z.infer<typeof MERGE_ARGS>, ctx: VerbContext):
 
 const PUBLISH_ARGS = z.object({
   project: projectField,
-  target: z.string().describe("draft|review|final — the publish target. Only draft is implemented: one compiled markdown file under .pablo/out/."),
+  target: z.string().describe("draft|review|final — the publish target: one compiled markdown file under .pablo/out/. The novel builds only draft; the story builds draft, review (a review copy) and final."),
   output: outputField.optional(),
 });
 

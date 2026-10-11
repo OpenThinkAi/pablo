@@ -28,13 +28,14 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { BEATS_FILE, parsePlanRows } from "@openthink/pablo-core";
+import { BEATS_FILE, LEGACY_CONTINUITY_FILE, NOVEL_CONTINUITY_FILE, parsePlanRows } from "@openthink/pablo-core";
 import type { PlanFileRow } from "@openthink/pablo-core";
 import { coreNext, coreStages, readCoreState } from "./core/machine";
 import { gitCommit } from "./init";
 import { markerPath, readMarker } from "./marker";
 import type { Marker } from "./marker";
 import { dirtyPaths } from "./migrate";
+import { LEDGER_TEMPLATE } from "./novel/continuity";
 import { renderNovelPlan } from "./outputs/novel/plan";
 import { OUTPUTS, outputDefinition, outputIds } from "./outputs/registry";
 import type { OutputDefinition, PlanRow } from "./outputs/types";
@@ -226,6 +227,11 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   const writes: { rel: string; content: string }[] = [];
   if (!existsSync(join(workDir, plan))) writes.push({ rel: plan, content: renderPlan(def.def, def.def.plan(workDir)) });
   if (!existsSync(join(workDir, rules))) writes.push({ rel: rules, content: def.def.rulesTemplate });
+  // The novel's ledger (AGT-1705): continuity extraction skips a work with none, so a novel added to a work gets one now.
+  // A work that already has its ledger, at either name, keeps it.
+  if (id === OUTPUTS.novel.id && !existsSync(join(workDir, NOVEL_CONTINUITY_FILE)) && !existsSync(join(workDir, LEGACY_CONTINUITY_FILE))) {
+    writes.push({ rel: NOVEL_CONTINUITY_FILE, content: LEDGER_TEMPLATE });
+  }
   const paths = ["pablo.json", ...writes.map((w) => w.rel)].sort();
   const dirty = dirtyRefusal("add", vaultRoot, workDir, ["pablo.json"]);
   if (dirty !== undefined) return dirty;
@@ -312,6 +318,7 @@ export function mergePlan(def: OutputDefinition, workDir: string, existing: read
     if (!drafted && row.beats.some((b) => !beats.has(b))) continue;
     kept.push({ unit: row.unit, title: row.title, beats: row.beats, status });
   }
+  if (def.soleUnit !== undefined) return soleUnitPlan(def.soleUnit, kept, defaults);
   const covered = new Set(kept.flatMap((r) => r.beats));
   let next = Math.max(0, ...kept.map((r) => r.unit)) + 1;
   for (const d of defaults) {
@@ -322,6 +329,28 @@ export function mergePlan(def: OutputDefinition, workDir: string, existing: read
     kept.push({ ...d, unit });
   }
   return kept.sort((a, b) => a.unit - b.unit);
+}
+
+/**
+ * An output with one unit (the story, AGT-1705) never has a second row: every
+ * kept row folds into the unit's. A beat added after the row was written
+ * extends the row when it comes after the row's last beat (the story told so
+ * far grows with the outline, "so far" meaning the row runs from the first
+ * beat without a gap); a row that starts later or skips a beat is a chosen act
+ * and is kept as the author wrote it. Rows an earlier plan appended for a
+ * second unit are folded back into the first.
+ */
+function soleUnitPlan(sole: number, kept: readonly PlanRow[], defaults: readonly PlanRow[]): PlanRow[] {
+  const base = kept.find((r) => r.unit === sole) ?? kept[0];
+  if (base === undefined) return defaults.slice(0, 1).map((d) => ({ ...d, unit: sole }));
+  const beats = new Set(kept.flatMap((r) => r.beats));
+  const all = defaults.flatMap((r) => r.beats).sort((a, b) => a - b);
+  const last = Math.max(0, ...beats);
+  // The story so far: the row runs from the outline's first beat without a gap. Only that row grows with the outline.
+  const sofar = all.filter((b) => b <= last).every((b) => beats.has(b)) && all[0] !== undefined && beats.has(all[0]);
+  if (sofar) for (const b of all) if (b > last) beats.add(b);
+  const status = kept.find((r) => r.status !== "beat")?.status ?? base.status;
+  return [{ unit: sole, title: base.title, beats: [...beats].sort((a, b) => a - b), status }];
 }
 
 /** `pablo output plan <type>`: rewrite `outputs/<type>/plan.md` from the type's default plan and commit it. */
