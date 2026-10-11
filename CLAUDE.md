@@ -204,7 +204,7 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 Run only as `python -m pablo_casting <command> --json`
                 (`version`, `doctor`, `pull`, `audition`, `cast`, `voices`,
                 `takes`, `manifest`, `script`, `check`, `status`, `bind`,
-                `gate`, `gate calibrate`),
+                `gate`, `gate calibrate`, `perform`),
                 never a user-facing binary; same body and exit codes as
                 pablo. The script reader (`script.py`), the direction
                 grammar (`directions.py`), the `CAST:` traits mapper and the
@@ -242,7 +242,28 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 only writer of `renders/epNN/v<k>.json`: it refuses (exit 1,
                 nothing written) a version whose changed takes are not a
                 subset of the applied flags' lines. `fake_engine.py` is the
-                model-free engine (silence of the right shape) until C11.
+                model-free engine (silence of the right shape) the take
+                store's tests use.
+                Perform (AGT-1683, `pablo perform --project W --episode N
+                [--engine chatterbox-turbo|dia] [--json-lines]`, a
+                `casting-verbs.ts` entry that provisions `--extra scorers`):
+                `engines.py` holds the decided engine's adapter
+                (Chatterbox-Turbo at its pinned revision: temperature 0.8,
+                no emotion mapping, `[laugh]`/`[cough]`/`[chuckle]`, short
+                references padded to 5.2 s), Dia with the prototype's pass
+                grouping for A/B only, and ALL-CAPS words capitalised in the
+                engine input (never in the script). `perform.py` runs the
+                retake loop (4 derived seeds, first pass kept, else best-of
+                with an auto flag in `flags.json`), the pace policy (role
+                `pace.wps` x 0.85/1.15 for slow/quick; stretch measured and
+                held to [0.75, 1.05], applied by the mix), writes takes and
+                `v1.json` (with `rtf_total` and a `render` block), a receipt
+                per engine pass, and one JSON progress line per line on
+                stderr (stdout too with `--json-lines`). It resolves cards
+                as `cast` writes them (`<library>/voices/<slug>/`), refuses
+                unbound roles, changed pins and already-rendered episodes,
+                and resumes a stopped run without re-rendering stored takes.
+                Tests use `engines.RecordingEngine` and fake scorers.
                 The voice library (AGT-1679) is the config's `library`, else
                 `<vault>/casting`: `voices/<slug>/` holds the tracked card
                 (`card.json`, `reference.flac`, `reference.txt`,

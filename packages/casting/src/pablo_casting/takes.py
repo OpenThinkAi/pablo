@@ -204,6 +204,9 @@ class Synthesis:
 
     audio: Audio
     words: tuple[WordTiming, ...] = ()
+    # What the engine pass cost, when the engine measures it (AGT-1683 receipts).
+    peak_memory_gb: float | None = None
+    ttfa: float | None = None
 
 
 class Engine(Protocol):

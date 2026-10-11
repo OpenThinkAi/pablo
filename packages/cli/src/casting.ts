@@ -37,6 +37,11 @@
  * `audition --dry-run` alone is topped up once and never downgraded.
  * `gate calibrate` and `gate --scores` read score records only and need no
  * extra. `gate` stays CLI-only: its first run downloads the scorers' weights.
+ *
+ * `perform` (AGT-1683, a `casting-verbs.ts` entry) renders through a real
+ * engine and judges every take with the gates, so it provisions with the
+ * `scorers` extra too (mlx-audio is in it), and relays its progress events
+ * live through `runPythonStreaming` when asked for JSON lines.
  */
 
 import { createHash } from "node:crypto";
@@ -115,6 +120,12 @@ export interface CastingDeps {
   which(command: string, env: Env): string | undefined;
   /** Runs `argv` in `cwd`. stderr passes through to the author's terminal (progress); stdout is captured. */
   run(argv: readonly string[], options: { readonly cwd: string; readonly env: Env }): CastingRun;
+  /**
+   * Runs `argv` like `run`, but hands each stdout line to `onLine` as it is
+   * written (AGT-1683: `perform --json-lines` relays its progress events live).
+   * Optional: without it, `runPythonStreaming` replays the lines after `run`.
+   */
+  stream?(argv: readonly string[], options: { readonly cwd: string; readonly env: Env }, onLine: (line: string) => void): Promise<CastingRun>;
   now(): Date;
 }
 
@@ -127,6 +138,29 @@ export function realCastingDeps(env: Env): CastingDeps {
       try {
         const result = Bun.spawnSync([...argv], { cwd, env: e, stdin: "ignore", stdout: "pipe", stderr: "inherit" });
         return { code: result.exitCode, stdout: result.stdout.toString("utf8"), stderr: "" };
+      } catch (error) {
+        return { code: 1, stdout: "", stderr: (error as Error).message };
+      }
+    },
+    stream: async (argv, { cwd, env: e }, onLine) => {
+      try {
+        const child = Bun.spawn([...argv], { cwd, env: e, stdin: "ignore", stdout: "pipe", stderr: "inherit" });
+        const decoder = new TextDecoder();
+        let all = "";
+        let pending = "";
+        for await (const chunk of child.stdout) {
+          const text = decoder.decode(chunk, { stream: true });
+          all += text;
+          pending += text;
+          const lines = pending.split("\n");
+          pending = lines.pop() ?? "";
+          for (const line of lines) onLine(line);
+        }
+        const tail = decoder.decode();
+        all += tail;
+        pending += tail;
+        if (pending !== "") onLine(pending);
+        return { code: await child.exited, stdout: all, stderr: "" };
       } catch (error) {
         return { code: 1, stdout: "", stderr: (error as Error).message };
       }
@@ -294,6 +328,30 @@ export function ensureProvisioned(
 /** Runs `python -m pablo_casting <args> --json` in a provisioned venv and returns its body as pablo's own. */
 export function runPython(layout: CastingLayout, deps: CastingDeps, ctx: CastingContext, args: readonly string[]): VerbResult {
   const run = deps.run([venvPython(layout), "-m", "pablo_casting", ...args, "--json"], { cwd: layout.source, env: ctx.env });
+  return parseBody(run, `pablo_casting ${args[0] ?? ""}`.trim());
+}
+
+/**
+ * `runPython`, relaying each stdout line to `onLine` as the child writes it
+ * (through `deps.stream`), or replaying them once it has finished when the
+ * machine cannot stream. The body is still the last line.
+ */
+export async function runPythonStreaming(
+  layout: CastingLayout,
+  deps: CastingDeps,
+  ctx: CastingContext,
+  args: readonly string[],
+  onLine: (line: string) => void,
+): Promise<VerbResult> {
+  const argv = [venvPython(layout), "-m", "pablo_casting", ...args, "--json"];
+  const options = { cwd: layout.source, env: ctx.env };
+  let run: CastingRun;
+  if (deps.stream !== undefined) {
+    run = await deps.stream(argv, options, onLine);
+  } else {
+    run = deps.run(argv, options);
+    for (const line of run.stdout.split("\n")) if (line !== "") onLine(line);
+  }
   return parseBody(run, `pablo_casting ${args[0] ?? ""}`.trim());
 }
 

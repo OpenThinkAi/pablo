@@ -42,11 +42,14 @@ def weights_sha256(model_id: str, env: Mapping[str, str]) -> str | None:
     content hash, in path order. `None` when the model is not cached. This is what a
     card's `designed.weights_sha256` records, so a re-uploaded checkpoint under the
     same id shows up as different weights."""
+    root = snapshot_dir(model_id, env)
+    return None if root is None else weights_sha256_at(root)
+
+
+def weights_sha256_at(root: Path) -> str | None:
+    """`weights_sha256` over one snapshot directory (a pinned revision's, for an engine)."""
     import hashlib
 
-    root = snapshot_dir(model_id, env)
-    if root is None:
-        return None
     digest = hashlib.sha256()
     files = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix in WEIGHT_SUFFIXES)
     if not files:

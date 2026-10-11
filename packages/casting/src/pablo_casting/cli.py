@@ -42,6 +42,11 @@ Commands:
 - `check --work W [--episode N]`  unknown directions (with line numbers) and unbound roles.
 - `status --work W --episode N`   ready, or exit 2 with the unbound roles in `missing`.
 - `bind --work W --role R --voice SLUG [--vault V | --library DIR]`  pin a role to a library voice.
+- `perform --work W --episode N [--engine chatterbox-turbo|dia] [--json-lines]
+             [--vault V | --library DIR]`  render the episode through the decided
+             engine with the gates, retakes and pace policy, into takes and
+             `renders/epNN/v1.json` (AGT-1683, `perform.py`); one JSON line per
+             line on stderr as each lands (also on stdout with `--json-lines`).
 - `gate`     score a take with the scorer stack and judge it against a card's
              thresholds; `gate calibrate` fits thresholds from approved takes
              (see `gate_command.py`). Writes nothing but a receipt unless
@@ -65,6 +70,7 @@ from pathlib import Path
 from pablo_casting import __version__
 from pablo_casting.binding import BindingRefusal, bind, episode_files, library_dir, read_cast, read_episode
 from pablo_casting.config import CastingConfig, ConfigRefusal, load_config
+from pablo_casting.engines import EngineFactory, real_engine
 from pablo_casting.gate_command import cmd_calibrate, cmd_gate
 from pablo_casting.hfcache import hub_cache, is_cached
 from pablo_casting.library import Library, LibraryRefusal, card_hash, check_slug, resolve_root, slugify
@@ -96,7 +102,7 @@ Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "cast", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform")
 VOICES_SUBCOMMANDS = ("list", "show", "retire")
 DEFAULT_CANDIDATES = 6
 
@@ -162,6 +168,9 @@ def _parser() -> _Parser:
     parser.add_argument("--approved")
     parser.add_argument("--others")
     parser.add_argument("--apply", action="store_true")
+    # perform
+    parser.add_argument("--engine")
+    parser.add_argument("--json-lines", action="store_true", dest="json_lines")
     return parser
 
 
@@ -546,6 +555,7 @@ def run(
     downloader: Downloader | None = None,
     scorers: ScorerFactory | None = None,
     toolkits: ToolkitFactory | None = None,
+    engines: EngineFactory | None = None,
 ) -> tuple[Result, bool]:
     """Parse and run one command. Returns `(result, json)`; never raises for a bad argv."""
     env = os.environ if env is None else env
@@ -622,6 +632,25 @@ def run(
     assert work is not None
     if args.command == "bind":
         return cmd_bind(env, work, args), args.json
+    if args.command == "perform":
+        from pablo_casting.perform import cmd_perform
+
+        try:
+            configured = load_config(env).library
+        except ConfigRefusal as refusal:
+            return refused(str(refusal)), args.json
+        return cmd_perform(
+            env,
+            work,
+            args.episode,
+            args.engine,
+            args.vault,
+            args.library,
+            configured,
+            args.json_lines,
+            engines or real_engine,
+            scorers or real_scorers,
+        ), args.json
     try:
         episode = _episode_number(args.episode)
     except ValueError:
@@ -639,8 +668,9 @@ def main(
     downloader: Downloader | None = None,
     scorers: ScorerFactory | None = None,
     toolkits: ToolkitFactory | None = None,
+    engines: EngineFactory | None = None,
 ) -> int:
-    (body, code), wants_json = run(argv, env, downloader, scorers, toolkits)
+    (body, code), wants_json = run(argv, env, downloader, scorers, toolkits, engines)
     if wants_json:
         print(json.dumps(body))
     elif body.get("ok"):

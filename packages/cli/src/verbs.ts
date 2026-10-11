@@ -105,6 +105,13 @@ export interface VerbContext {
   readonly env: Record<string, string | undefined>;
   readonly stderr: ProgressSink;
   /**
+   * AGT-1683: where a verb that streams JSON lines (`perform --json-lines`)
+   * writes them as they happen. `cli.ts` sets it to the process's stdout;
+   * `pablo mcp` never does (its stdout is the protocol), so a streaming verb
+   * called over MCP keeps its events on stderr only.
+   */
+  readonly stdout?: ProgressSink;
+  /**
    * AGT-1261: which surface invoked this verb. `mcp.ts`'s `runMcp` sets this
    * to `"mcp"`; `cli.ts` never sets it (every other caller — the CLI, and
    * every existing test's hand-built `ctx` — leaves it `undefined`, read as

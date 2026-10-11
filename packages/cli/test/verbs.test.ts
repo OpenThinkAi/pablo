@@ -36,7 +36,7 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the twenty-seven verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the twenty-eight verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "audition",
     "bind",
@@ -49,6 +49,7 @@ test("VERBS exposes exactly the twenty-seven verbs, each project-required verb r
     "migrate",
     "notes",
     "output",
+    "perform", // AGT-1683
     "promote",
     "prose",
     "publish",
@@ -158,6 +159,8 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     across: { type: "boolean", default: false }, // AGT-1671: check --across
     finding: { type: "string" }, // AGT-1671: promote --finding
     keep: { type: "string" }, // AGT-1671: promote --keep
+    engine: { type: "string" }, // AGT-1683: perform --engine
+    "json-lines": { type: "boolean", default: false }, // AGT-1683: perform --json-lines
   });
 });
 

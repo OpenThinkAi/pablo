@@ -34,8 +34,16 @@ def script_dir(work: Path) -> Path:
 
 
 def casting_dir(work: Path) -> Path:
-    radio = work / "outputs" / "radio"
-    return radio / "casting" if radio.is_dir() else work / "casting"
+    """Where `cast.json` lives: the radio output's `casting/`, or the top-level `casting/`
+    of a work with no output directory. A `cast.json` already on disk wins, so a work
+    bound before `perform` created `outputs/radio/casting/takes/` keeps its binding."""
+    radio = work / "outputs" / "radio" / "casting"
+    legacy = work / "casting"
+    if (radio / "cast.json").is_file():
+        return radio
+    if (legacy / "cast.json").is_file():
+        return legacy
+    return radio if radio.parent.is_dir() else legacy
 
 
 def cast_path(work: Path) -> Path:
