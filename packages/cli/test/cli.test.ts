@@ -231,11 +231,14 @@ test("status reports the branches waiting for review, in JSON and in prose", () 
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("there is no `review` verb any more", () => {
+test("`review` is the radio review player (AGT-1693), not the old branch-review verb", () => {
+  // The old `review list|approve|...` flow stays gone: `review` now needs a project and opens the player.
   const { stderr, exitCode } = runCli(["review", "list"]);
-  expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("unknown");
-  expect(runCli(["--help"]).stdout).not.toContain("pablo review");
+  expect(exitCode).toBe(2);
+  expect(stderr).toContain("review requires --project");
+  const help = runCli(["--help"]).stdout;
+  expect(help).toContain("pablo review --project <slug> [--episode N]");
+  expect(help).not.toContain("pablo review list");
 });
 
 test('status --project ice-house --for "ch 3" (no --json) prints the not-ready line and each missing item indented', () => {
