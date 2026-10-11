@@ -3,6 +3,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
+import { LEGACY_BEATS_FILE, beatsFile } from "@openthink/pablo-core";
 import { sourceOf, stripFrontmatter, type MainDoc } from "./document";
 
 const read = (path: string): string | undefined => {
@@ -30,7 +31,8 @@ export function loadDocument(root: string, id: string): MainDoc | undefined {
       return { title: `chapters/${file}${status ? ` · ${status}` : ""}`, text, file: `chapters/${file}`, editable: `chapters/${file}` };
     }
     case "file": {
-      const file = source.file;
+      // The beats file is `outline/beats.md` on a migrated work; sourceOf names the old name, the shim resolves it.
+      const file = source.file === LEGACY_BEATS_FILE ? beatsFile(root) : source.file;
       const text = read(join(root, file));
       return { title: file, text: text ?? `${file} does not exist yet.`, ...(text === undefined ? {} : { editable: file }) };
     }

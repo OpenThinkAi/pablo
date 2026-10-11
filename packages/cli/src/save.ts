@@ -8,8 +8,10 @@
  * stage:
  *
  *  - `premise`     replaces `bible/overview.md` whole.
- *  - `acts`        replaces the acts table in `outline/chapters.md`.
- *  - `beats`       replaces the chapter table in `outline/chapters.md`.
+ *  - `acts`        replaces the acts table in the beats file.
+ *  - `beats`       replaces the chapter table in the beats file.
+ *    (The beats file is `outline/beats.md`; an unmigrated work's is still
+ *    `outline/chapters.md`, see core's `beatsFile`.)
  *  - `bible/<file>` replaces `bible/<file>` whole (must stay under `bible/`,
  *    `.md` only).
  *
@@ -22,6 +24,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { beatsFile } from "@openthink/pablo-core";
 import { gitCommit } from "./init";
 
 const ACTS_HEADER = "| Act | Years | What it accomplishes |";
@@ -63,11 +66,10 @@ export function resolveStageTarget(projectPath: string, stage: string): StageTar
   if (stage === "premise") {
     return { ok: true, target: { kind: "premise", absPath: join(projectPath, "bible", "overview.md"), relPath: "bible/overview.md" } };
   }
-  if (stage === "acts") {
-    return { ok: true, target: { kind: "acts", absPath: join(projectPath, "outline", "chapters.md"), relPath: "outline/chapters.md" } };
-  }
-  if (stage === "beats") {
-    return { ok: true, target: { kind: "beats", absPath: join(projectPath, "outline", "chapters.md"), relPath: "outline/chapters.md" } };
+  if (stage === "acts" || stage === "beats") {
+    // The beats file: `outline/beats.md` on a migrated work, the old name on an unmigrated one.
+    const relPath = beatsFile(projectPath);
+    return { ok: true, target: { kind: stage, absPath: join(projectPath, relPath), relPath } };
   }
 
   if (stage.startsWith("bible/")) {

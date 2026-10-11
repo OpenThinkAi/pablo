@@ -22,7 +22,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter, ExtractedFact, Receipt } from "@openthink/pablo-core";
-import { NoToolCallError, estimateTokens, fileReceiptSink, hashPrompt, joinParagraphs } from "@openthink/pablo-core";
+import { NoToolCallError, continuityFile, estimateTokens, fileReceiptSink, hashPrompt, joinParagraphs } from "@openthink/pablo-core";
 import { insertUnderHeading } from "../markdown";
 import type { Ritual } from "./rituals";
 
@@ -257,9 +257,10 @@ export async function runContinuity(
   const adapter: Adapter = opts.adapter;
   const extract: NonNullable<Adapter["extractFactsWithAnchors"]> = opts.adapter.extractFactsWithAnchors;
 
-  const path = join(workDir, "continuity.md");
+  const rel = continuityFile(workDir);
+  const path = join(workDir, rel);
   if (!existsSync(path)) {
-    return { name: "continuity", status: "skipped", detail: "continuity.md not found" };
+    return { name: "continuity", status: "skipped", detail: `${rel} not found` };
   }
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_CONTINUITY_TIMEOUT_MS;

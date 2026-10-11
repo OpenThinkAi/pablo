@@ -1,7 +1,7 @@
 // The main pane's document: frontmatter hidden, sentence lines read as paragraphs, text sanitised, ids mapped to files.
 
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,6 +63,15 @@ test("loadDocument reads the fixture project: a chapter with its status, a missi
   expect(loadDocument(root, "../../etc/passwd")).toBeUndefined();
   writeFileSync(join(root, "outline", "chapters.md"), "# Beats\n");
   expect(loadDocument(root, "beats")!.text).toBe("# Beats\n");
+});
+
+test("loadDocument: on a migrated work (AGT-1666) acts and beats read outline/beats.md, the old name shimmed", () => {
+  const root = project();
+  renameSync(join(root, "outline", "chapters.md"), join(root, "outline", "beats.md"));
+  const beats = loadDocument(root, "beats")!;
+  expect(beats.title).toBe("outline/beats.md");
+  expect(beats.editable).toBe("outline/beats.md");
+  expect(beats.text).toContain("Black Ice");
 });
 
 // ---------------------------------------------------------------- sentences: display back to stored lines

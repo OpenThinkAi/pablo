@@ -108,15 +108,18 @@ test("initNovel scaffolds every template file with placeholders replaced, writes
   const marker = readMarker(dest);
   expect(marker.ok).toBe(true);
   if (marker.ok) {
+    // A new work is born in the story-core shape (AGT-1666): `outputs`, never the deprecated `format`.
     expect(marker.marker).toEqual({
-      format: "novel",
       title: "The Salt Road",
       slug: "salt-road",
       author: "matt",
       voice: ["../../style", "QWEN.md"],
       neverSend: ["research/", "notes/"],
       publish: {},
+      outputs: { novel: { dir: "chapters", added: "2026-03-14" } },
     });
+    expect(marker.deprecated).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(dest, "pablo.json"), "utf8"))).not.toHaveProperty("format");
   }
 
   const vaultReadme = readFileSync(join(vault, "README.md"), "utf8");
@@ -230,7 +233,8 @@ test("initAdopt writes only pablo.json (title from the README heading) and leave
   const marker = readMarker(projectDir);
   expect(marker.ok).toBe(true);
   if (marker.ok) {
-    expect(marker.marker.format).toBe("novel");
+    expect(marker.marker.outputs.novel).toMatchObject({ dir: "chapters" });
+    expect(marker.deprecated).toBeUndefined();
     expect(marker.marker.slug).toBe("no-marker");
     expect(marker.marker.title).toBe("The Ice House");
   }

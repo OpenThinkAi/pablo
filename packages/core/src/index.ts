@@ -8,3 +8,4 @@ export { joinManuscript, joinParagraphs, joinSentences, splitManuscript, splitSe
 export type { FactEntry, FactLine, FactScan, Provenance } from "./facts";
 export { formatFactLine, formatProvenance, parseFactLine, scanFacts, withProvenance } from "./facts";
 export * from "./review-map";
+export { BEATS_FILE, LEGACY_BEATS_FILE, LEGACY_CONTINUITY_FILE, NOVEL_CONTINUITY_FILE, beatsFile, continuityFile } from "./work-paths";

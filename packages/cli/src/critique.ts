@@ -30,7 +30,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { parseDiff, readStyle, timelineAt, workRuleSections } from "@openthink/pablo-core";
+import { continuityFile, parseDiff, readStyle, timelineAt, workRuleSections } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { BRANCH_KINDS, branchDiff, branchKind, repoRoot } from "./branch";
 import { branchFileName, readComments, type StoredComment } from "./comments";
@@ -326,7 +326,7 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
   const files = parseDiff(diff.text).filter((f) => f.status !== "deleted" && !f.binary && f.path.startsWith(prefix) && f.path.endsWith(".md"));
 
   const ref = {
-    continuity: readOr(join(opts.projectPath, "continuity.md")),
+    continuity: readOr(join(opts.projectPath, continuityFile(opts.projectPath))),
     bible: bibleFiles(opts.projectPath),
     style: styleReference(opts.vaultRoot, opts.projectPath),
   };

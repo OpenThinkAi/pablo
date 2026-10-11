@@ -66,6 +66,7 @@ import { checkWork } from "./check";
 import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
+import { migrateOutputs } from "./migrate-outputs";
 import { mergeDraftInProject } from "./novel/merge";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
@@ -592,16 +593,23 @@ async function runBindVerb(args: z.infer<typeof BIND_ARGS>, ctx: VerbContext): P
 // ---------------------------------------------------------------------------
 
 const MIGRATE_ARGS = z.object({
-  sub: z.enum(["lines"]).describe("The migration to run: `lines` splits chapters to one sentence per line."),
+  sub: z
+    .enum(["lines", "outputs"])
+    .describe(
+      "The migration to run: `lines` splits chapters to one sentence per line; `outputs` turns a `format: novel` work into a story core plus a novel output (pablo.json `outputs`, outputs/novel/, outline/beats.md, facts.md).",
+    ),
   project: projectField,
-  "dry-run": z.boolean().optional().default(false).describe("List the chapters that would change; write and commit nothing."),
+  "dry-run": z.boolean().optional().default(false).describe("List the paths that would change; write and commit nothing."),
 });
 
 async function runMigrateVerb(args: z.infer<typeof MIGRATE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
 
-  const outcome = migrateLines(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] });
+  const outcome =
+    args.sub === "outputs"
+      ? migrateOutputs(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] })
+      : migrateLines(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] });
   if (!outcome.ok) return { body: outcome, exitCode: outcome.code };
   return { body: outcome, exitCode: 0 };
 }
@@ -1397,7 +1405,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "migrate",
     description:
-      "One-time migrations of a project. `lines` splits chapters/*.md to one sentence per line (frontmatter untouched) and commits exactly those files; idempotent, `dry-run` lists what would change.",
+      "One-time migrations of a project. `lines` splits chapters/*.md to one sentence per line (frontmatter untouched) and commits exactly those files. `outputs` rewrites pablo.json's `format` to `outputs.novel`, creates outputs/novel/ (plan.md, RULES.md), moves continuity.md to outputs/novel/continuity.md and outline/chapters.md to outline/beats.md, creates facts.md, and commits exactly those paths. Both are idempotent; `dry-run` lists what would change.",
     args: MIGRATE_ARGS,
     run: runMigrateVerb,
     positionalArgs: ["sub"],

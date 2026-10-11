@@ -61,7 +61,7 @@ export function splitChapter(content: string): string {
 }
 
 /** Of `relPaths` (vault-relative), those with uncommitted changes — a commit of exactly the migrated files must not sweep up an author's edits. */
-function dirtyPaths(vault: string, relPaths: readonly string[]): string[] {
+export function dirtyPaths(vault: string, relPaths: readonly string[]): string[] {
   try {
     const out = execFileSync("git", ["-C", vault, "status", "--porcelain", "--", ...relPaths], { stdio: "pipe", encoding: "utf8" });
     return out.split("\n").filter(Boolean).map((l) => l.slice(3));

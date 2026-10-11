@@ -12,7 +12,8 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { readMarker } from "./marker";
+import { beatsFile } from "@openthink/pablo-core";
+import { outputsLabel, readMarker } from "./marker";
 import { waitingForReview } from "./branch";
 import { readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
@@ -151,9 +152,9 @@ function walkMarkdown(dir: string): string[] {
   return results;
 }
 
-/** `headingBullets` over every `bible/**\/*.md` file plus `outline/chapters.md`. */
+/** `headingBullets` over every `bible/**\/*.md` file plus the beats file (`outline/beats.md`, or `outline/chapters.md` unmigrated). */
 function bibleAndOutlineOpen(workDir: string): OpenItem[] {
-  const outlinePath = join(workDir, "outline", "chapters.md");
+  const outlinePath = join(workDir, beatsFile(workDir));
   const files = [...walkMarkdown(join(workDir, "bible")), ...(existsSync(outlinePath) ? [outlinePath] : [])];
 
   const items: OpenItem[] = [];
@@ -246,7 +247,7 @@ export async function buildResume(
   const briefPromise = runBrief(slug, env, timeoutMs);
 
   const markerResult = readMarker(workDir);
-  const format = markerResult.ok ? markerResult.marker.format : "";
+  const format = markerResult.ok ? outputsLabel(markerResult.marker) : "";
   const title = markerResult.ok ? markerResult.marker.title : "";
 
   const state = readNovelState(workDir);

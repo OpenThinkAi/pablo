@@ -12,8 +12,10 @@
  *     <work>/bible/timeline.md                | year | real events | in the novel |
  *     <work>/bible/places.md                  places
  *     <work>/bible/characters/family-tree.md  the cast
- *     <work>/outline/chapters.md              | # | story date | title | beat | POV | status |
- *     <work>/continuity.md                    what the text has established
+ *     <work>/outline/beats.md                 | # | story date | title | beat | POV | status |
+ *                                             (outline/chapters.md on an unmigrated work)
+ *     <work>/outputs/novel/continuity.md      what the text has established
+ *                                             (continuity.md on an unmigrated work)
  *     <work>/chapters/NN-slug.md              the manuscript
  *
  * A missing file is not an error: a work with no continuity ledger yet gets a
@@ -23,6 +25,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { joinParagraphs } from "../sentences";
+import { beatsFile, continuityFile } from "../work-paths";
 import type { BeatRow, DraftingInputs, TextSource, TimelineGate, WorkIdentity } from "./types";
 
 /** Words of the previous chapter carried into a drafting pack, as `draft-chapter` sends. */
@@ -74,7 +77,7 @@ export interface ReadDraftingOptions {
  */
 export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs {
   const { vaultRoot, workRoot, chapter } = options;
-  const outlinePath = join(workRoot, "outline", "chapters.md");
+  const outlinePath = join(workRoot, beatsFile(workRoot));
   const beat = parseBeatRow(read(outlinePath) ?? "", chapter, label(vaultRoot, outlinePath));
   if (beat === undefined) {
     throw new Error(`pablo: chapter ${chapter} has no row in ${outlinePath}`);
@@ -106,7 +109,7 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
       section(text, { from: options.placesStartsAt }),
     ),
     timeline: gateTimeline(read(timelinePath) ?? "", beat.storyDate, label(vaultRoot, timelinePath)),
-    continuity: sourceOfFile(vaultRoot, join(workRoot, "continuity.md")),
+    continuity: sourceOfFile(vaultRoot, join(workRoot, continuityFile(workRoot))),
     previousTail: readPreviousTail(vaultRoot, workRoot, chapter, options.tailWords ?? DEFAULT_TAIL_WORDS),
     wordTarget: options.wordTarget,
     minScenes: options.minScenes,

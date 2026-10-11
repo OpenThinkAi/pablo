@@ -1,22 +1,37 @@
 /**
  * `pablo.json` — the project marker. Its presence (and shape) is what tells
- * an agent a directory is a pablo project and which format it follows; every
- * verb but `init` refuses when it is missing or malformed. See the design
- * doc's "The project" section (`pm project show ai-terminal`)
- * for the canonical shape this mirrors.
+ * an agent a directory is a pablo project and which outputs its story core
+ * has; every verb but `init` refuses when it is missing or malformed. See the
+ * `pablo-story-core` design doc (`pm project show pablo-story-core`, "The
+ * work") for the canonical shape this mirrors.
  *
  * MARKER_SCHEMA — `pablo.json` fields:
  *
  * | key         | required | default                          |
  * |-------------|----------|----------------------------------|
- * | `format`    | yes      | —  ("novel" for P0; any other value is refused, naming it) |
  * | `title`     | yes      | —                                |
  * | `slug`      | yes      | —                                |
+ * | `outputs`   | no       | `{}` (a core with nothing derived yet) |
  * | `author`    | no       | `"matt"`                         |
  * | `voice`     | no       | `["../../style", "QWEN.md"]`     |
  * | `neverSend` | no       | `["research/", "notes/"]`        |
  * | `publish`   | no       | `{}`                              |
  * | `policy`    | no       | —  (the harness's minimal default judgement policy) |
+ * | `format`    | deprecated | —  (`"novel"` only; read as `outputs.novel`) |
+ *
+ * `outputs` maps an output type to its entry: `{ dir?, added, ...more }`.
+ * `added` (YYYY-MM-DD) is required; `dir` is where the type's units land
+ * (the novel's is fixed at `"chapters"`); any other key is the type's own
+ * and kept as written. Until the output registry lands (AGT-1666's S4,
+ * `pablo-story-core`), `novel` is the only known type: any other is refused
+ * by name.
+ *
+ * `format` (AGT-1666): the one-format-per-work key `outputs` replaced
+ * (decided 2026-10-10). For one release `format: "novel"` is read as
+ * migrated in memory, `outputs: { novel: { dir: "chapters" } }`, with a
+ * deprecation notice on stderr naming `pablo migrate outputs`; any other
+ * `format` value is refused by name, and a marker carrying both `format` and
+ * `outputs` is refused naming both keys.
  *
  * `policy` names a judgement policy pablo ships under `packages/cli/policies/`
  * (e.g. `"historical-fiction"`); the harness loads it into its system prompt
@@ -24,18 +39,28 @@
  * hyphens) is refused here; a well-formed name pablo does not ship is refused
  * when the harness loads it.
  *
- * A missing required key is refused by name (`message` names the exact key);
- * an unknown `format` is refused by name too. A directory with no `pablo.json`
- * at all is refused with a pointer at `pablo init --adopt --project <slug>`.
+ * A missing required key is refused by name (`message` names the exact key).
+ * A directory with no `pablo.json` at all is refused with a pointer at
+ * `pablo init --adopt --project <slug>`.
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Refusal } from "./project";
 
-/** Formats pablo's stage machine understands. Only "novel" ships in P0. */
-const SUPPORTED_FORMATS = ["novel"] as const;
-export type Format = (typeof SUPPORTED_FORMATS)[number];
+/**
+ * The output types pablo knows. Only `novel` until the output registry
+ * (`packages/cli/src/outputs/registry.ts`, pablo-story-core S4) replaces this
+ * list as the single source.
+ */
+export const OUTPUT_TYPES = ["novel"] as const;
+export type OutputType = (typeof OUTPUT_TYPES)[number];
+
+/** The novel output's units live in `chapters/` at the work root, always (decided 2026-10-10). */
+export const NOVEL_DIR = "chapters";
+
+/** The only value the deprecated `format` key may hold. */
+const LEGACY_FORMATS = ["novel"] as const;
 
 export const DEFAULT_AUTHOR = "matt";
 export const DEFAULT_VOICE: readonly string[] = ["../../style", "QWEN.md"];
@@ -45,9 +70,19 @@ export const DEFAULT_PUBLISH: Readonly<Record<string, unknown>> = {};
 /** What a `policy` value may look like: a file name under `policies/`, never a path. */
 export const POLICY_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** One `outputs` entry. `added` is absent only on an entry the `format` shim made in memory. */
+export interface OutputEntry {
+  readonly dir?: string;
+  readonly added?: string;
+  readonly [key: string]: unknown;
+}
+
+export type Outputs = Readonly<Partial<Record<OutputType, OutputEntry>>>;
+
 /** The typed shape of `pablo.json`. */
 export interface Marker {
-  readonly format: Format;
   readonly title: string;
   readonly slug: string;
   readonly author: string;
@@ -56,11 +91,18 @@ export interface Marker {
   readonly publish: Readonly<Record<string, unknown>>;
   /** The judgement policy's name; absent means the harness's minimal default. */
   readonly policy?: string;
+  /** The outputs derived from the work's story core; `{}` is a core with nothing derived yet. */
+  readonly outputs: Outputs;
 }
 
 export interface MarkerFound {
   readonly ok: true;
   readonly marker: Marker;
+  /**
+   * Set when the marker was read through the `format` shim: the deprecation
+   * notice (also written to stderr, once per marker per process).
+   */
+  readonly deprecated?: string;
 }
 
 export type MarkerResult = MarkerFound | Refusal;
@@ -73,11 +115,65 @@ export function markerPath(workDir: string): string {
   return join(workDir, "pablo.json");
 }
 
+/** The notice an unmigrated marker carries; names the migration that rewrites it. */
+export function formatDeprecation(path: string, slug: string): string {
+  return `pablo: ${path} uses the deprecated "format" key, read as outputs.novel for this release; run \`pablo migrate outputs --project ${slug}\` to rewrite it`;
+}
+
+const warned = new Set<string>();
+
+/** A short name for the work's outputs, for prompts and the status line: `"novel"`, `"novel, radio"`, or `"core"` with none. */
+export function outputsLabel(marker: Marker): string {
+  const types = Object.keys(marker.outputs);
+  return types.length === 0 ? "core" : types.join(", ");
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Validates the `outputs` value, refusing by the exact key (`outputs`, `outputs.<type>`, `outputs.<type>.<field>`). */
+function readOutputs(value: unknown, path: string): { ok: true; outputs: Outputs } | Refusal {
+  if (!isObject(value)) {
+    return refuse(`pablo: ${path} has an invalid "outputs" (${JSON.stringify(value)}); it maps an output type to its entry, e.g. {"novel": {"dir": "chapters", "added": "2026-10-10"}}`, [path]);
+  }
+  const outputs: Record<string, OutputEntry> = {};
+  for (const [type, entry] of Object.entries(value)) {
+    const key = `outputs.${type}`;
+    if (!(OUTPUT_TYPES as readonly string[]).includes(type)) {
+      return refuse(`pablo: ${path} has unknown output type "${type}" at "${key}" (known: ${OUTPUT_TYPES.join(", ")})`, [path]);
+    }
+    if (!isObject(entry)) {
+      return refuse(`pablo: ${path} has an invalid "${key}" (${JSON.stringify(entry)}); an output entry is an object with "added"`, [path]);
+    }
+    const dir = entry["dir"];
+    if (dir !== undefined && (typeof dir !== "string" || dir === "")) {
+      return refuse(`pablo: ${path} has an invalid "${key}.dir" (${JSON.stringify(dir)})`, [path]);
+    }
+    if (type === "novel" && dir !== undefined && dir !== NOVEL_DIR) {
+      return refuse(`pablo: ${path} has "${key}.dir" ${JSON.stringify(dir)}; the novel's chapters live in "${NOVEL_DIR}"`, [path]);
+    }
+    const added = entry["added"];
+    if (typeof added !== "string" || !DATE.test(added)) {
+      return refuse(
+        added === undefined
+          ? `pablo: ${path} is missing required key "${key}.added" (the date the output was added, YYYY-MM-DD)`
+          : `pablo: ${path} has an invalid "${key}.added" (${JSON.stringify(added)}); expected YYYY-MM-DD`,
+        [path],
+      );
+    }
+    outputs[type] = entry as OutputEntry;
+  }
+  return { ok: true, outputs };
+}
+
 /**
  * Reads and validates `<workDir>/pablo.json`. A missing file, invalid JSON,
- * a missing required key, or an unsupported `format` are all refusals (exit
- * code 2 everywhere in the CLI) rather than thrown errors, so callers can
- * relay `message` directly.
+ * a missing required key, an unknown output type, both `format` and
+ * `outputs`, or an unsupported `format` are all refusals (exit code 2
+ * everywhere in the CLI) rather than thrown errors, so callers can relay
+ * `message` directly. A `format: "novel"` marker reads as migrated (see the
+ * header) and writes its deprecation notice to stderr once per process.
  */
 export function readMarker(workDir: string): MarkerResult {
   const path = markerPath(workDir);
@@ -96,23 +192,43 @@ export function readMarker(workDir: string): MarkerResult {
     return refuse(`pablo: ${path} is not valid JSON (${(err as Error).message})`, [path]);
   }
 
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+  if (!isObject(raw)) {
     return refuse(`pablo: ${path} must contain a JSON object`, [path]);
   }
-  const data = raw as Record<string, unknown>;
+  const data = raw;
 
-  for (const key of ["format", "title", "slug"] as const) {
+  for (const key of ["title", "slug"] as const) {
     if (typeof data[key] !== "string" || data[key] === "") {
       return refuse(`pablo: ${path} is missing required key "${key}"`, [path]);
     }
   }
+  const slug = data["slug"] as string;
 
-  const format = data["format"] as string;
-  if (!(SUPPORTED_FORMATS as readonly string[]).includes(format)) {
+  const hasFormat = data["format"] !== undefined;
+  const hasOutputs = data["outputs"] !== undefined;
+  if (hasFormat && hasOutputs) {
     return refuse(
-      `pablo: ${path} has unknown format "${format}" (supported: ${SUPPORTED_FORMATS.join(", ")})`,
+      `pablo: ${path} has both "format" and "outputs"; "outputs" replaces "format" — remove "format" (or run \`pablo migrate outputs --project ${slug}\` on a marker with only "format")`,
       [path],
     );
+  }
+
+  let outputs: Outputs = {};
+  let deprecated: string | undefined;
+  if (hasFormat) {
+    const format = data["format"];
+    if (typeof format !== "string" || !(LEGACY_FORMATS as readonly string[]).includes(format)) {
+      return refuse(
+        `pablo: ${path} has unknown format ${JSON.stringify(format)} at "format" (supported: ${LEGACY_FORMATS.join(", ")}; "format" is deprecated, use "outputs")`,
+        [path],
+      );
+    }
+    outputs = { novel: { dir: NOVEL_DIR } };
+    deprecated = formatDeprecation(path, slug);
+  } else if (hasOutputs) {
+    const read = readOutputs(data["outputs"], path);
+    if (!read.ok) return read;
+    outputs = read.outputs;
   }
 
   const policy = data["policy"];
@@ -124,19 +240,24 @@ export function readMarker(workDir: string): MarkerResult {
   }
 
   const marker: Marker = {
-    format: format as Format,
     title: data["title"] as string,
-    slug: data["slug"] as string,
+    slug,
     author: typeof data["author"] === "string" ? (data["author"] as string) : DEFAULT_AUTHOR,
     voice: Array.isArray(data["voice"]) ? (data["voice"] as string[]) : DEFAULT_VOICE,
     neverSend: Array.isArray(data["neverSend"]) ? (data["neverSend"] as string[]) : DEFAULT_NEVER_SEND,
-    publish:
-      typeof data["publish"] === "object" && data["publish"] !== null && !Array.isArray(data["publish"])
-        ? (data["publish"] as Record<string, unknown>)
-        : DEFAULT_PUBLISH,
+    publish: isObject(data["publish"]) ? data["publish"] : DEFAULT_PUBLISH,
     ...(policy === undefined ? {} : { policy }),
+    outputs,
   };
 
+  if (deprecated !== undefined) {
+    const key = resolve(path);
+    if (!warned.has(key)) {
+      warned.add(key);
+      process.stderr.write(`${deprecated}\n`);
+    }
+    return { ok: true, marker, deprecated };
+  }
   return { ok: true, marker };
 }
 

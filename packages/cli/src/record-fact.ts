@@ -12,7 +12,16 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { formatFactLine, formatProvenance, parseFactLine, type Provenance, withProvenance } from "@openthink/pablo-core";
+import {
+  LEGACY_CONTINUITY_FILE,
+  NOVEL_CONTINUITY_FILE,
+  continuityFile,
+  formatFactLine,
+  formatProvenance,
+  parseFactLine,
+  type Provenance,
+  withProvenance,
+} from "@openthink/pablo-core";
 import { insertUnderHeading } from "./markdown";
 import { type PlanSession, planWrite } from "./plan";
 
@@ -39,9 +48,12 @@ export type RecordFactResult =
 const refuse = (why: string): RecordFactResult => ({ ok: false, notice: `pablo: record_fact: ${why}` });
 
 /** The work-relative path `where` names, or a refusal message. Never under `research/`. */
-function resolveWhere(where: string): { ok: true; rel: string } | { ok: false; message: string } {
+function resolveWhere(workPath: string, where: string): { ok: true; rel: string } | { ok: false; message: string } {
   const w = where.trim().replace(/^\.?\//, "");
-  if (w === "continuity" || w === "continuity.md") return { ok: true, rel: "continuity.md" };
+  // The novel's ledger: `outputs/novel/continuity.md` on a migrated work, `continuity.md` before.
+  if (w === "continuity" || w === LEGACY_CONTINUITY_FILE || w === NOVEL_CONTINUITY_FILE) {
+    return { ok: true, rel: continuityFile(workPath) };
+  }
   let rel = w.startsWith("bible/") ? w : `bible/${w}`;
   if (!rel.endsWith(".md")) rel += ".md";
   if (rel.split("/").includes("..") || !/^bible\/[A-Za-z0-9._\/-]+$/.test(rel)) {
@@ -82,7 +94,7 @@ export function recordFact(session: PlanSession, workPath: string, args: RecordF
   if (text === "") return refuse("the fact is empty");
   const provenance = provenanceOf(args);
   if (typeof provenance === "string") return refuse(provenance);
-  const target = resolveWhere(args.where);
+  const target = resolveWhere(workPath, args.where);
   if (!target.ok) return refuse(target.message);
   const chapter = args.chapter?.trim();
   if (chapter !== undefined && chapter !== "" && !/^ch\d+$/.test(chapter)) return refuse(`chapter tag "${chapter}" is not chNN`);
@@ -193,7 +205,7 @@ export async function tagFactsInFile(
   where: string,
   classify: TagClassifier,
 ): Promise<TagFactsResult> {
-  const target = resolveWhere(where);
+  const target = resolveWhere(workPath, where);
   if (!target.ok) return { ok: false, notice: `pablo: record_fact: ${target.message}` };
   const vaultRel = `${relative(session.repo, workPath).split("\\").join("/")}/${target.rel}`.replace(/^\//, "");
   const existing = currentText(session, workPath, target.rel, vaultRel);
