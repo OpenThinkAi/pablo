@@ -130,7 +130,7 @@ export interface DraftingInputs {
   readonly unit?: number | undefined;
   /**
    * What the unit is called in the brief, replacing "chapter N" (`the whole
-   * story` for the story output, AGT-1689). Absent means a chapter, worded as
+   * piece` for the story output, AGT-1689). Absent means a chapter, worded as
    * every novel pack has always been.
    */
   readonly unitLabel?: string | undefined;

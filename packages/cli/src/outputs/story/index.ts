@@ -49,7 +49,8 @@ function storyReport(workDir: string, core: CoreState): OutputReport {
   const first = core.beats.find((b) => b.chapter === beats[0]);
   const path = join(workDir, STORY_DIR, STORY_FILE);
   const drafted = existsSync(path);
-  const title = drafted ? (frontmatterField(readFileSync(path, "utf8"), "title") ?? first?.title) : first?.title;
+  const text = drafted ? readFileSync(path, "utf8") : undefined;
+  const title = (text === undefined ? undefined : frontmatterField(text, "title")) ?? first?.title;
   const units: OutputUnit[] =
     beats.length === 0 && !drafted
       ? []
@@ -58,7 +59,7 @@ function storyReport(workDir: string, core: CoreState): OutputReport {
             unit: STORY_UNIT,
             title: title ?? STORY_TITLE,
             ...(first !== undefined && first.storyDate !== "" ? { storyDate: first.storyDate } : {}),
-            status: drafted ? (frontmatterField(readFileSync(path, "utf8"), "status") ?? "unknown") : "beat",
+            status: text === undefined ? "beat" : (frontmatterField(text, "status") ?? "unknown"),
             ...(drafted ? { file: `${STORY_DIR}/${STORY_FILE}` } : {}),
           },
         ];
@@ -69,7 +70,7 @@ function storyReport(workDir: string, core: CoreState): OutputReport {
     units,
     drafted: drafted ? 1 : 0,
     total: units.length,
-    ...(units.length > 0 && !drafted ? { next: `write the story (pablo write --output story --unit ${STORY_UNIT})` } : {}),
+    ...(units.length > 0 && !drafted ? { next: `write the story (pablo write --output story)` } : {}),
   };
 }
 
