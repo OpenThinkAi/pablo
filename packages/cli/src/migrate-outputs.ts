@@ -4,7 +4,7 @@
  * Design: the `pablo-story-core` pm doc, "Migration: today's novel into core +
  * novel output"; the beats rename is Matt's 2026-10-10 decision 3.
  *
- *   pablo.json                    `format` dropped, `outputs.novel = {dir: "chapters", added}`
+ *   pablo.json                    `format` dropped, `outputs.novel = {dir: <the novel's artifactDir>, added}`
  *                                 (`added`: the first chapter's `generated` date, else today)
  *   outputs/novel/plan.md         one unit per beat; a unit whose chapter exists carries its status
  *   outputs/novel/RULES.md        the novel-only sections of the work's `QWEN.md` (point of view,
@@ -13,7 +13,7 @@
  *   outline/chapters.md        -> outline/beats.md   (content unchanged; readers shim the old name)
  *   facts.md                      the promoted-facts ledger, header only
  *
- * `chapters/`, `bible/`, `research/`, `notes/` and the work's `QWEN.md` are
+ * The novel's chapters, `bible/`, `research/`, `notes/` and the work's `QWEN.md` are
  * never written (the QWEN.md sections stay where they are until the pack layers
  * `RULES.md`, pablo-story-core S6, so the writer's voice does not change here).
  *
@@ -23,12 +23,14 @@
  * new paths both exist is a refusal: pablo will not pick one for the author.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { BEATS_FILE, LEGACY_BEATS_FILE, LEGACY_CONTINUITY_FILE, NOVEL_CONTINUITY_FILE, parseBeatRows } from "@openthink/pablo-core";
+import { BEATS_FILE, LEGACY_BEATS_FILE, LEGACY_CONTINUITY_FILE, NOVEL_CONTINUITY_FILE } from "@openthink/pablo-core";
 import { gitCommit } from "./init";
-import { NOVEL_DIR, markerPath, readMarker } from "./marker";
+import { markerPath, readMarker } from "./marker";
 import { dirtyPaths } from "./migrate";
+import { frontmatterField, novelPlanRows, novelUnitFiles, renderNovelPlan } from "./outputs/novel/plan";
+import { OUTPUTS } from "./outputs/registry";
 
 export const MIGRATE_OUTPUTS_COMMIT_MESSAGE = "migrate: story core and novel output";
 
@@ -71,14 +73,6 @@ Each fact names where it came from, e.g. \`established-by: novel/ch03\`.
 Nothing lands here by itself; promotion is explicit.
 `;
 
-const RULES_INTRO = `# Novel rules
-
-Rules for the novel output only, layered after the work's voice (\`QWEN.md\`)
-and before a chapter's own slices. Copied from the work's \`QWEN.md\` by
-\`pablo migrate outputs\`; the ground rules and period facts stay there as
-core.
-`;
-
 function refuse(message: string): MigrateOutputsResult {
   return { ok: false, code: 2, message: `pablo: migrate outputs: ${message}` };
 }
@@ -87,28 +81,9 @@ function localDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function frontmatterField(text: string, key: string): string | undefined {
-  const fm = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1];
-  if (fm === undefined) return undefined;
-  const m = new RegExp(`^${key}:[ \\t]*["']?([^"'\\r\\n]*)["']?[ \\t]*$`, "m").exec(fm);
-  return m?.[1]?.trim() || undefined;
-}
-
-/** `chapters/NN-*.md` by number. */
-function chapterFiles(workDir: string): Map<number, string> {
-  const dir = join(workDir, NOVEL_DIR);
-  const out = new Map<number, string>();
-  if (!existsSync(dir)) return out;
-  for (const name of readdirSync(dir).sort()) {
-    const m = /^(\d{2,})-.*\.md$/.exec(name);
-    if (m) out.set(Number(m[1]), join(dir, name));
-  }
-  return out;
-}
-
 /** The first chapter's `generated` date (YYYY-MM-DD), else today. */
 function addedDate(workDir: string, now: () => Date): string {
-  const chapters = chapterFiles(workDir);
+  const chapters = novelUnitFiles(workDir);
   const first = [...chapters.keys()].sort((a, b) => a - b)[0];
   if (first !== undefined) {
     const generated = frontmatterField(readFileSync(chapters.get(first) as string, "utf8"), "generated");
@@ -122,33 +97,15 @@ function addedDate(workDir: string, now: () => Date): string {
 function rewrittenMarker(raw: Record<string, unknown>, added: string): string {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (key === "format") out["outputs"] = { novel: { dir: NOVEL_DIR, added } };
+    if (key === "format") out["outputs"] = { novel: { dir: OUTPUTS.novel.artifactDir, added } };
     else out[key] = value;
   }
   return `${JSON.stringify(out, null, 2)}\n`;
 }
 
-const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
-
 /** `outputs/novel/plan.md`: one unit per beat, the unit's status the chapter's when it exists, else `beat`. */
 export function novelPlan(workDir: string, beatsText: string): string {
-  const chapters = chapterFiles(workDir);
-  const rows = parseBeatRows(beatsText, BEATS_FILE).map((b) => {
-    const file = chapters.get(b.chapter);
-    const status = file === undefined ? "beat" : (frontmatterField(readFileSync(file, "utf8"), "status") ?? "draft");
-    return `| ${b.chapter} | ${cell(b.title)} | ${b.chapter} | ${cell(status)} |`;
-  });
-  return [
-    "# Plan: novel",
-    "",
-    `The novel's units (chapters) mapped onto the core beats in \`${BEATS_FILE}\`:`,
-    "one chapter per beat. A unit whose chapter exists carries the chapter's status.",
-    "",
-    "| unit | title | beats | status |",
-    "|---|---|---|---|",
-    ...rows,
-    "",
-  ].join("\n");
+  return renderNovelPlan(novelPlanRows(workDir, beatsText));
 }
 
 /** `outputs/novel/RULES.md`: the intro, then each `## ` section of `QWEN.md` whose heading is a novel-only rule, verbatim. */
@@ -164,8 +121,8 @@ export function novelRules(qwen: string): string {
     i = end - 1;
   }
   return sections.length === 0
-    ? `${RULES_INTRO}\n(No novel-only section was found in \`QWEN.md\`; add the novel's rules here.)\n`
-    : `${RULES_INTRO}\n${sections.join("\n\n")}\n`;
+    ? `${OUTPUTS.novel.rulesTemplate}\n(No novel-only section was found in \`QWEN.md\`; add the novel's rules here.)\n`
+    : `${OUTPUTS.novel.rulesTemplate}\n${sections.join("\n\n")}\n`;
 }
 
 /**

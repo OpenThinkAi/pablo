@@ -1,0 +1,8 @@
+{
+  "title": "The Lamp Keeper",
+  "slug": "four-beats",
+  "author": "matt",
+  "voice": ["../../style", "QWEN.md"],
+  "neverSend": ["research/", "notes/"],
+  "outputs": { "novel": { "dir": "chapters", "added": "2026-10-10" } }
+}

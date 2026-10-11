@@ -17,13 +17,13 @@ import { createProviders, loadConfig } from "@openthink/pablo-core";
 import type { Adapter, Intent } from "@openthink/pablo-core";
 import { deleteBranch, mergeBranch, repoRoot } from "../branch";
 import { readMarker } from "../marker";
-import { chapterOfPath, runAfterMerge, runAfterRevision } from "./rituals";
+import { OUTPUTS, outputForWork } from "../outputs/registry";
+import type { OutputDefinition } from "../outputs/types";
 import type { Ritual, RitualOptions } from "./rituals";
 
-/** `draft/ch05` or `draft/ch05-v2` -> 5; undefined for any other branch. */
+/** `draft/ch05` or `draft/ch05-v2` -> 5; undefined for any other branch. The novel output's `unitOfBranch`. */
 export function draftChapter(branch: string): number | undefined {
-  const m = branch.match(/^draft\/ch(\d+)(?:-v\d+)?$/);
-  return m ? Number(m[1]) : undefined;
+  return OUTPUTS.novel.unitOfBranch(branch);
 }
 
 export type MergeDraftResult =
@@ -33,9 +33,9 @@ export type MergeDraftResult =
 /** The options `runAfterMerge` takes, minus what the merged chapter's own frontmatter supplies. */
 export type MergeDraftOptions = Omit<RitualOptions, "words" | "model" | "receiptLine">;
 
-/** The `chapters/NN-*.md` file on the merged tree, or undefined. */
-function findChapterFile(projectPath: string, chapter: number): string | undefined {
-  const dir = join(projectPath, "chapters");
+/** The unit's `NN-*.md` file in the output's artifact directory on the merged tree, or undefined. */
+function findChapterFile(output: OutputDefinition, projectPath: string, chapter: number): string | undefined {
+  const dir = join(projectPath, output.artifactDir);
   if (!existsSync(dir)) return undefined;
   const prefix = `${String(chapter).padStart(2, "0")}-`;
   const name = readdirSync(dir).find((f) => f.startsWith(prefix) && f.endsWith(".md"));
@@ -57,7 +57,8 @@ export async function mergeDraft(
   branch: string,
   opts: MergeDraftOptions,
 ): Promise<MergeDraftResult> {
-  const chapter = draftChapter(branch);
+  const output = outputForWork(projectPath);
+  const chapter = output.unitOfBranch(branch);
   if (chapter === undefined) return { ok: false, notice: `pablo: merge: "${branch}" is not a draft branch (draft/chNN)` };
   const repo = repoRoot(projectPath);
   if (repo === undefined) return { ok: false, notice: `pablo: merge: ${projectPath} is not in a git repository` };
@@ -71,19 +72,19 @@ export async function mergeDraft(
   const removed = deleteBranch(repo, opts.slug, branch, { env });
   if (!removed.ok) notices.push(removed.notice);
 
-  const rituals = await ritualsFor(projectPath, chapter, branch, opts, notices);
+  const rituals = await ritualsFor(output, projectPath, chapter, branch, opts, notices);
   return { ok: true, sha, chapter, rituals, notices };
 }
 
 /** The after-write steps for one chapter on the merged tree; a missing chapter file is a notice, not a failure. */
-async function ritualsFor(projectPath: string, chapter: number, branch: string, opts: MergeDraftOptions, notices: string[]): Promise<Ritual[]> {
-  const chapterPath = findChapterFile(projectPath, chapter);
+async function ritualsFor(output: OutputDefinition, projectPath: string, chapter: number, branch: string, opts: MergeDraftOptions, notices: string[]): Promise<Ritual[]> {
+  const chapterPath = findChapterFile(output, projectPath, chapter);
   if (chapterPath === undefined) {
-    notices.push(`pablo: merge: no chapters/${String(chapter).padStart(2, "0")}-*.md on main after merging ${branch}`);
+    notices.push(`pablo: merge: no ${output.artifactDir}/${String(chapter).padStart(2, "0")}-*.md on main after merging ${branch}`);
     return [];
   }
   const text = readFileSync(chapterPath, "utf8");
-  return runAfterMerge(projectPath, chapter, chapterPath, {
+  return output.rituals.afterMerge(projectPath, chapter, chapterPath, {
     ...opts,
     words: Number(frontmatterField(text, "words")) || 0,
     model: frontmatterField(text, "model") ?? "unknown",
@@ -95,13 +96,13 @@ export type MergeChangesResult =
   | { readonly ok: true; readonly sha: string; readonly chapters: readonly number[]; readonly rituals: Ritual[]; readonly notices: string[] }
   | { readonly ok: false; readonly notice: string };
 
-/** The chapter numbers of `chapters/NN-*.md` files `branch` changes against `main`. */
-function chaptersTouched(repo: string, branch: string): number[] {
+/** The units of the output's files (its `unitOfPath`) that `branch` changes against `main`. */
+function chaptersTouched(output: OutputDefinition, repo: string, branch: string): number[] {
   const out = Bun.spawnSync(["git", "-C", repo, "diff", "--name-only", `main...${branch}`, "--"], { stdout: "pipe", stderr: "pipe" });
   const found = new Set<number>();
   for (const line of out.stdout.toString("utf8").split("\n")) {
-    const m = line.match(/(?:^|\/)chapters\/(\d+)-[^/]*\.md$/);
-    if (m) found.add(Number(m[1]));
+    const unit = output.unitOfPath(line);
+    if (unit !== undefined) found.add(unit);
   }
   return [...found].sort((a, b) => a - b);
 }
@@ -115,14 +116,15 @@ function chaptersTouched(repo: string, branch: string): number[] {
 export async function mergeChanges(projectPath: string, branch: string, opts: MergeDraftOptions): Promise<MergeChangesResult> {
   const repo = repoRoot(projectPath);
   if (repo === undefined) return { ok: false, notice: `pablo: merge: ${projectPath} is not in a git repository` };
-  const draft = draftChapter(branch);
+  const output = outputForWork(projectPath);
+  const draft = output.unitOfBranch(branch);
   if (draft !== undefined) {
     const merged = await mergeDraft(projectPath, branch, opts);
     return merged.ok ? { ok: true, sha: merged.sha, chapters: [merged.chapter], rituals: merged.rituals, notices: merged.notices } : merged;
   }
   // The chapters the author commented on count too: a comments-only review changes no file but still gets its notes written.
-  const commented = (opts.authorNotes ?? []).map((n) => chapterOfPath(n.path)).filter((c): c is number => c !== undefined);
-  const chapters = [...new Set([...chaptersTouched(repo, branch), ...commented])].sort((a, b) => a - b);
+  const commented = (opts.authorNotes ?? []).map((n) => output.unitOfPath(n.path)).filter((c): c is number => c !== undefined);
+  const chapters = [...new Set([...chaptersTouched(output, repo, branch), ...commented])].sort((a, b) => a - b);
   const merged = mergeBranch(repo, branch, opts.env ?? process.env);
   if (!merged.ok) return merged;
   const notices: string[] = [];
@@ -131,7 +133,7 @@ export async function mergeChanges(projectPath: string, branch: string, opts: Me
   // Not a draft: nothing was drafted, so only the author's own comments are written down (AGT-1642).
   const revision = { slug: opts.slug, branch, authorNotes: opts.authorNotes, now: opts.now };
   const rituals: Ritual[] = [];
-  for (const chapter of chapters) rituals.push(...runAfterRevision(projectPath, chapter, revision));
+  for (const chapter of chapters) rituals.push(...output.rituals.afterRevision(projectPath, chapter, revision));
   return { ok: true, sha: merged.sha as string, chapters, rituals, notices };
 }
 
@@ -151,7 +153,7 @@ export async function mergeDraftInProject(
   /** Overrides the routed extraction adapter; tests inject a fake so no model is called. */
   extractorOverride?: Adapter,
 ): Promise<{ readonly exitCode: number; readonly body: Record<string, unknown> }> {
-  if (draftChapter(branch) === undefined) {
+  if (outputForWork(projectPath).unitOfBranch(branch) === undefined) {
     return { exitCode: 2, body: { ok: false, code: 2, message: `pablo: merge: "${branch}" is not a draft branch (draft/chNN)` } };
   }
   const marker = readMarker(projectPath);

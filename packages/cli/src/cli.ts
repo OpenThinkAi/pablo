@@ -40,7 +40,7 @@ import { chapterPreconditions, readNovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
-import { publishWork } from "./publish";
+import { OUTPUTS, workOutput } from "./outputs/registry";
 import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
 import { readTool, searchTool } from "./harness-tools";
@@ -130,7 +130,7 @@ function helpText(): string {
     "                                            {ready, missing[]} for one chapter;",
     "                                            exit 0 if ready, 2 if not",
     "  pablo migrate lines --project <slug> [--dry-run]",
-    "                                            one-time split of chapters/*.md to one",
+    `                                            one-time split of ${OUTPUTS.novel.artifactDir}/*.md to one`,
     "                                            sentence per line, committed on its own",
     "  pablo migrate outputs --project <slug> [--dry-run]",
     "                                            one-time move of a format:novel work to a",
@@ -1238,7 +1238,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit(refusalResult(markerResult), args.json);
       return markerResult.code;
     }
-    const outcome = publishWork(projectPath, markerResult.marker.slug, markerResult.marker.title, args.target);
+    const outcome = workOutput(markerResult.marker.outputs).publish.run(projectPath, markerResult.marker.slug, markerResult.marker.title, args.target);
     if (!outcome.ok) {
       emit(refusalResult(outcome), args.json);
       return outcome.code;

@@ -112,6 +112,16 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 use a fake `mount`, never a window.
                 Any new dependency the CLI needs
                 goes here; core stays dependency-free.
+                The output registry (AGT-1668): `src/outputs/registry.ts`'s
+                `OUTPUTS` is the single source of output types, like `VERBS`;
+                each type is a directory (`src/outputs/novel/`) exporting an
+                `OutputDefinition` (`src/outputs/types.ts`: artifact dir,
+                rules template, plan, stages, preconditions, pack, rituals,
+                publish targets, branch naming). Verbs ask the work's output
+                (`workOutput`/`outputForWork`), never a type's paths: nothing
+                under `src/` outside `outputs/novel/` spells `chapters/`
+                (`test/outputs.test.ts` greps for it), and every type passes
+                `src/outputs/conformance.ts` over the four-beat fixture.
                 `src/casting.ts` (AGT-1678) is the runner for the Python
                 side: `pablo doctor` reports it, and the first casting verb
                 (`audition`, `cast`, `voices`: `src/casting-verbs.ts`,

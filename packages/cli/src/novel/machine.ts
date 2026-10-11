@@ -3,7 +3,7 @@
  * AGT-1667, pm project `pablo-story-core`). The story core's stages
  * (premise, research, bible, acts, beats, facts decided) live in
  * `core/machine.ts`; this file adds what only the novel needs: its units
- * (`chapters/NN-*.md`) and a chapter's own preconditions (the previous
+ * (`NN-*.md` in its artifact directory, `outputs/novel/units.ts`) and a chapter's own preconditions (the previous
  * chapter, the timeline year gate) on top of the core's (a beat row, no
  * undecided `[pick]` the beat names).
  *
@@ -18,11 +18,11 @@ import { join, relative } from "node:path";
 import { gateTimeline } from "@openthink/pablo-core";
 import { readCoreState, undecidedPicks } from "../core/machine";
 import type { CoreState } from "../core/machine";
-import { NOVEL_DIR } from "../marker";
+import { NOVEL_UNIT_FILE, novelUnitDir } from "../outputs/novel/units";
 
 export type { ActRow, BibleFile, PickRow } from "../core/machine";
 
-/** One `chapters/NN-*.md` file, parsed just enough to gate on it. */
+/** One chapter file (`NN-*.md`), parsed just enough to gate on it. */
 export interface ChapterFile {
   readonly number: number;
   readonly file: string;
@@ -48,7 +48,7 @@ function read(path: string): string | undefined {
 }
 
 /**
- * `chapters/NN-*.md` (NN = 2+ digits) frontmatter, parsed by a small hand
+ * A chapter file's (`NN-*.md`, NN = 2+ digits) frontmatter, parsed by a small hand
  * parser. Exported so other frontmatter readers (`check.ts`'s
  * `isUnprovenanced`) reuse this instead of writing a second one.
  */
@@ -66,12 +66,12 @@ export function parseFrontmatter(text: string): Record<string, string> {
 }
 
 function readChapters(workDir: string): ChapterFile[] {
-  const dir = join(workDir, NOVEL_DIR);
+  const dir = novelUnitDir(workDir);
   if (!existsSync(dir)) return [];
 
   const chapters: ChapterFile[] = [];
   for (const name of readdirSync(dir).sort()) {
-    const match = /^(\d{2,})-.*\.md$/.exec(name);
+    const match = NOVEL_UNIT_FILE.exec(name);
     if (!match) continue;
     const path = join(dir, name);
     const fields = parseFrontmatter(read(path) ?? "");
@@ -91,7 +91,7 @@ function yearIn(text: string): number | undefined {
   return match === null ? undefined : Number(match[1]);
 }
 
-/** Reads the novel output's own state: the chapter files in `chapters/`. */
+/** Reads the novel output's own state: the chapter files in its artifact directory. */
 export function readNovelOutputState(workDir: string): NovelOutputState {
   return { chapters: readChapters(workDir) };
 }
@@ -99,7 +99,7 @@ export function readNovelOutputState(workDir: string): NovelOutputState {
 /**
  * Reads `<workDir>`'s vault files into the core state plus the novel
  * output's. A missing file is not an error anywhere here — an absent
- * `bible/overview.md` just makes `premise` false, an absent `chapters/` makes
+ * `bible/overview.md` just makes `premise` false, an absent chapter directory makes
  * `chapters` empty — because `status` exists to report what is missing.
  */
 export function readNovelState(workDir: string): NovelState {

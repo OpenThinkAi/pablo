@@ -4,7 +4,7 @@
  * `pm project show ai-terminal --doc readers` ("How it maps to GitHub", "What
  * Matt does").
  *
- * The reading repo holds `chapters/` files and nothing else, so the reader
+ * The reading repo holds the novel's chapter files and nothing else, so the reader
  * never receives the bible, beats or notes. A round is two branches in it:
  *
  *  - `round/<reader>-<date>-base` — one empty commit, WITHOUT the shared chapters;
@@ -28,12 +28,15 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ReaderConfig } from "@openthink/pablo-core";
+import { NOVEL_UNIT_PATH } from "./outputs/novel/units";
+import { outputForWork } from "./outputs/registry";
+import type { OutputDefinition } from "./outputs/types";
 
 /** The GitHub org the reading repos live under (private; confirmed 2026-10-02). */
 export const READING_ORG = "OpenThinkAi";
 
 /** The only files that ever reach a reading repo: a work's chapter files, by their vault path. */
-export const CHAPTER_PATH = /^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*chapters\/[^/]+\.md$/;
+export const CHAPTER_PATH = NOVEL_UNIT_PATH;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ROUND_ID = SLUG;
 /** A GitHub username: 1-39 alphanumerics or single hyphens, never leading or trailing one. Gates the one login `share` may invite. */
@@ -88,7 +91,7 @@ export type RoundState = "open" | "pulled";
 
 export interface RoundChapter {
   readonly number: number;
-  /** The chapter's path in the vault (and in the reading repo), e.g. `novels/ice-house/chapters/03-the-saws.md`. */
+  /** The chapter's path in the vault (and in the reading repo), e.g. `novels/ice-house/<artifactDir>/03-the-saws.md`. */
   readonly path: string;
 }
 
@@ -284,14 +287,15 @@ function localDate(now: Date): string {
 }
 
 /**
- * The chapter files on the vault's `main`, by chapter number: `NN-<name>.md` under `<prefix>chapters/`.
+ * The output's unit files on the vault's `main`, by number: `NN-<name>.md` under `<prefix><artifactDir>/`.
  * `root` is the git work tree root: `ls-tree` paths and pathspecs are relative to the working directory. */
-function chaptersOnMain(run: Runner, root: string, prefix: string): Map<number, string[]> | ShareFailure {
-  const listed = run("git", ["ls-tree", "--name-only", "main", "--", `${prefix}chapters/`], { cwd: root });
+function chaptersOnMain(run: Runner, root: string, prefix: string, output: OutputDefinition): Map<number, string[]> | ShareFailure {
+  const dir = `${prefix}${output.artifactDir}/`;
+  const listed = run("git", ["ls-tree", "--name-only", "main", "--", dir], { cwd: root });
   if (listed.code !== 0) return fail(`pablo: share: cannot list chapters on main (${describe(listed)})`);
   const byNumber = new Map<number, string[]>();
   for (const path of listed.stdout.split("\n").filter((line) => line !== "")) {
-    const match = /^(\d{2,})-[^/]*\.md$/.exec(path.slice(`${prefix}chapters/`.length));
+    const match = /^(\d{2,})-[^/]*\.md$/.exec(path.slice(dir.length));
     if (!match) continue;
     const number = Number(match[1]);
     byNumber.set(number, [...(byNumber.get(number) ?? []), path]);
@@ -342,7 +346,8 @@ export function shareRound(options: ShareOptions): ShareOutcome {
   const vaultCommit = mainResult.stdout.trim();
 
   // Every shared chapter must be on main, as committed there.
-  const onMain = chaptersOnMain(run, gitRoot, prefix);
+  const output = outputForWork(options.projectPath);
+  const onMain = chaptersOnMain(run, gitRoot, prefix, output);
   if (!(onMain instanceof Map)) return onMain;
   const chapters: RoundChapter[] = [];
   for (const number of numbers) {
@@ -350,7 +355,7 @@ export function shareRound(options: ShareOptions): ShareOutcome {
     if (paths.length === 0) return refuse(`pablo: share: chapter ${number} is not on main (merge it before sharing)`);
     if (paths.length > 1) return refuse(`pablo: share: chapter ${number} matches more than one file on main (${paths.join(", ")})`);
     const path = paths[0] as string;
-    if (!CHAPTER_PATH.test(path)) return refuse(`pablo: share: ${path} is not a chapter file; only chapters/ files are shared`);
+    if (!CHAPTER_PATH.test(path)) return refuse(`pablo: share: ${path} is not a chapter file; only ${output.artifactDir}/ files are shared`);
     chapters.push({ number, path });
   }
 

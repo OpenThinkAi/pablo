@@ -5,7 +5,7 @@
  * git" ("Migration"). Splitting is core's `splitSentences`; this file only
  * decides which text is prose, rewrites chapter files, and commits them.
  *
- * Only `chapters/*.md` is touched, and only the body: frontmatter is copied
+ * Only the novel's chapter files (`*.md` in its artifact directory) are touched, and only the body: frontmatter is copied
  * byte for byte. Idempotent — a chapter already one-sentence-per-line splits
  * to itself, so a second run changes nothing and commits nothing.
  */
@@ -15,6 +15,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { splitSentences } from "@openthink/pablo-core";
 import { gitCommit } from "./init";
+import { OUTPUTS } from "./outputs/registry";
 
 export const MIGRATE_COMMIT_MESSAGE = "migrate: one sentence per line";
 
@@ -71,7 +72,7 @@ export function dirtyPaths(vault: string, relPaths: readonly string[]): string[]
 }
 
 export function migrateLines(vaultRoot: string, projectPath: string, opts: { dryRun: boolean }): MigrateResult {
-  const chaptersDir = join(projectPath, "chapters");
+  const chaptersDir = join(projectPath, OUTPUTS.novel.artifactDir);
   const files = existsSync(chaptersDir)
     ? readdirSync(chaptersDir)
         .filter((f) => f.endsWith(".md"))

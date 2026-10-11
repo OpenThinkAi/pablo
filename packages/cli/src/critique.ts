@@ -35,6 +35,7 @@ import type { Adapter } from "@openthink/pablo-core";
 import { BRANCH_KINDS, branchDiff, branchKind, repoRoot } from "./branch";
 import { branchFileName, readComments, type StoredComment } from "./comments";
 import { stripWriterOnly } from "./harness/prompt";
+import { outputForWork } from "./outputs/registry";
 
 export const CRITIQUE_KINDS = ["continuity", "timeline", "tells"] as const;
 export type CritiqueKind = (typeof CRITIQUE_KINDS)[number];
@@ -322,7 +323,7 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
   const diff = branchDiff(repo, opts.branch);
   if (!diff.ok) return { ok: false, kind: "error", notice: diff.notice };
 
-  const prefix = `${relative(repo, opts.projectPath).split("\\").join("/")}/chapters/`;
+  const prefix = `${relative(repo, opts.projectPath).split("\\").join("/")}/${outputForWork(opts.projectPath).artifactDir}/`;
   const files = parseDiff(diff.text).filter((f) => f.status !== "deleted" && !f.binary && f.path.startsWith(prefix) && f.path.endsWith(".md"));
 
   const ref = {

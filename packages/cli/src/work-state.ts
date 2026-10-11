@@ -9,35 +9,24 @@
  *     <type>: <action>      the first output with a unit still to draft
  *     all outputs drafted   nothing is short
  *
- * Until the output registry (pablo-story-core S4) lands, the per-type state
- * readers are the `OUTPUT_READERS` table below, `novel` its only row.
+ * Each output's state comes from its row in the output registry
+ * (`OUTPUTS[type].report`, AGT-1668), so a type added there is reported here
+ * with no change to this file.
  */
 
 import { coreNext, coreStages, readCoreState } from "./core/machine";
 import type { CoreStage, CoreState } from "./core/machine";
 import { waitingForReview } from "./branch";
-import type { Outputs, OutputType } from "./marker";
-import { NOVEL_DIR, readMarker } from "./marker";
-import { novelNext, novelUnits, readNovelOutputState } from "./novel/machine";
-import type { NovelUnit } from "./novel/machine";
+import type { Outputs } from "./marker";
+import { readMarker } from "./marker";
+import { isOutputId, OUTPUTS } from "./outputs/registry";
+import type { OutputReport } from "./outputs/types";
+
+export type { OutputReport };
 
 /** The core's state with its stages evaluated, as reported. */
 export interface CoreReport extends CoreState {
   readonly stages: readonly CoreStage[];
-}
-
-/** One output's state as reported: its units and the next one to draft. */
-export interface OutputReport {
-  readonly noun: string;
-  readonly plural: string;
-  /** Where the output's units land, work-relative. */
-  readonly dir: string;
-  readonly units: readonly NovelUnit[];
-  /** Units with a file on disk. */
-  readonly drafted: number;
-  readonly total: number;
-  /** The output's next action, absent when every unit is drafted. */
-  readonly next?: string;
 }
 
 export interface WorkReport {
@@ -45,26 +34,6 @@ export interface WorkReport {
   readonly outputs: Readonly<Record<string, OutputReport>>;
   readonly next: string;
 }
-
-/** Reads one output type's report over the core state. */
-type OutputReader = (workDir: string, core: CoreState) => OutputReport;
-
-const OUTPUT_READERS: Readonly<Record<OutputType, OutputReader>> = {
-  novel: (workDir, core) => {
-    const state = { ...core, ...readNovelOutputState(workDir) };
-    const units = novelUnits(state);
-    const next = novelNext(state);
-    return {
-      noun: "chapter",
-      plural: "chapters",
-      dir: NOVEL_DIR,
-      units,
-      drafted: units.filter((u) => u.file !== undefined).length,
-      total: units.length,
-      ...(next !== undefined ? { next } : {}),
-    };
-  },
-};
 
 /** The work-level next action over an evaluated core and its outputs. Pure. */
 export function workNext(core: CoreState, outputs: Readonly<Record<string, OutputReport>>): string {
@@ -83,9 +52,8 @@ export function workNext(core: CoreState, outputs: Readonly<Record<string, Outpu
 export function readWorkReport(workDir: string, declared: Outputs): WorkReport {
   const core = readCoreState(workDir);
   const outputs: Record<string, OutputReport> = {};
-  for (const type of Object.keys(declared) as OutputType[]) {
-    const reader = OUTPUT_READERS[type];
-    if (reader !== undefined) outputs[type] = reader(workDir, core);
+  for (const type of Object.keys(declared)) {
+    if (isOutputId(type)) outputs[type] = OUTPUTS[type].report(workDir, core);
   }
   return { core: { ...core, stages: coreStages(core) }, outputs, next: workNext(core, outputs) };
 }

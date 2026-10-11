@@ -18,8 +18,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, sep } from "node:path";
 import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
+import { NOVEL_PUBLISH_TARGETS, NOVEL_UNIT_FILE, novelUnitDir, NOVEL_DIR } from "./outputs/novel/units";
 
-export const PUBLISH_TARGETS = ["draft", "review", "final"] as const;
+/** The novel output's publish targets (`OUTPUTS.novel.publish.targets`). */
+export const PUBLISH_TARGETS = NOVEL_PUBLISH_TARGETS;
 export type PublishTarget = (typeof PUBLISH_TARGETS)[number];
 
 const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/;
@@ -132,7 +134,11 @@ function refuse(message: string, tried: readonly string[] = []): PublishRefusal 
   return { ok: false, code: 2, message, tried };
 }
 
-/** Compiles `<workDir>/chapters/NN-*.md` into `<workDir>/.pablo/out/<slug>-draft.md`. */
+/**
+ * The novel output's publish (`OUTPUTS.novel.publish.run`): compiles the
+ * work's chapter files (`NN-*.md` in the novel's artifact directory) into
+ * `<workDir>/.pablo/out/<slug>-draft.md`.
+ */
 export function publishWork(workDir: string, slug: string, title: string, target: string | undefined): PublishOutcome {
   if (target === undefined) {
     return refuse(`pablo: publish requires --target (${PUBLISH_TARGETS.join("|")})`);
@@ -144,16 +150,16 @@ export function publishWork(workDir: string, slug: string, title: string, target
     return refuse(`pablo: publish --target ${target} is not implemented yet (only draft is)`);
   }
 
-  const dir = join(workDir, "chapters");
+  const dir = novelUnitDir(workDir);
   const chapters: CompileChapter[] = [];
   if (existsSync(dir)) {
     for (const name of readdirSync(dir).sort()) {
-      const match = /^(\d{2,})-.*\.md$/.exec(name);
+      const match = NOVEL_UNIT_FILE.exec(name);
       if (match) chapters.push({ number: Number(match[1]), text: readFileSync(join(dir, name), "utf8") });
     }
   }
   if (chapters.length === 0) {
-    return refuse("pablo: publish: no chapters to compile (chapters/NN-*.md)", [dir]);
+    return refuse(`pablo: publish: no chapters to compile (${NOVEL_DIR}/NN-*.md)`, [dir]);
   }
 
   const compiled = compileDraft(title, chapters);
