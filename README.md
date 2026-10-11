@@ -115,8 +115,8 @@ including an unresolvable project), `1` error.
 |---|---|---|
 | `pablo init <format> <slug> "<Title>"` | scaffold from `<vault>/templates/<format>`, write the marker, commit | `{ok, path, format, slug, title, committed, notice?}` |
 | `pablo init --adopt --project <slug>` | write only the marker into a work that already exists, touching nothing else; never commits | same shape, `committed: false` |
-| `pablo resume --project <slug>` | the structured summary: stage per part, last event, open decisions, next step | `{format, title, stages, waiting[], last, open, next, brief?, notices?}` |
-| `pablo status --project <slug>` | the novel machine's state: premise, bible (files + `[pick]` rows), acts, beats, chapters | the state object plus `waiting[]`, the branches waiting for review (AGT-1541); exit 0 |
+| `pablo resume --project <slug>` | the structured summary: the core's stages, each output's units, last event, open decisions, next step (AGT-1667) | `{format, title, core, outputs, waiting[], last, open, next, brief?, notices?}` |
+| `pablo status --project <slug>` | the work in two layers (AGT-1667): the story core's stages (premise, research, bible, acts, beats, facts), then each output the marker names with its units | `{core: {stages[], premise, research[], bible, acts, beats, outlineFile}, outputs: {<type>: {noun, plural, dir, units[], drafted, total, next?}}, waiting[], next}`; exit 0 |
 | `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
 | `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--temperature T] [--seed N] [--direction "..."] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, runs the post-write check (AGT-1237), then commits the chapter on `draft/chNN` in a worktree (AGT-1536); the after-write rituals (AGT-1231) run when that branch is merged. Sends a sampling temperature (`--temperature`, else the provider's `temperature` in config, else 0.8; AGT-1272) so a re-run differs; temperature and seed are in the receipt, never in `prompt_hash`. `--direction` (AGT-1562) is a steer for the chapter beyond its beat row ("slower, stay on Cora"): its own pack slice after the chapter slice, recorded in the chapter's frontmatter as `direction:`. The harness's `draft_chapter(n, direction?)` tool (MCP and harness only) runs this and returns the branch, path and receipt, never the prose | `{ok, path, branch, worktree, commit, receipt, check[]}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
 | `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
@@ -151,11 +151,16 @@ doc's `Commands` table for the full return shapes and the `Build order` section 
 what ships next.
 
 `pablo resume` is how an agent gets competent on a project in one call instead of
-reading ten files: `format`/`title` come from the marker, `stages` from the novel
-machine, `last` is the newest `notes/` file plus the last commit touching the work,
-`open` is every `[pick]` row and every bullet under a "Decisions"/"Open questions"
-heading in `bible/` and `outline/chapters.md`, and `next` is the first unmet stage or
-the next unwritten chapter. A `think brief` for the project's cortex runs off the
+reading ten files: `format`/`title` come from the marker, `core` and `outputs` are
+the same two layers `pablo status` reports, `last` is the newest `notes/` file plus
+the last commit touching the work, `open` is every `[pick]` row and every bullet
+under a "Decisions"/"Open questions" heading in `bible/` and the beats file, and
+`next` names the layer that is short: `core: <action>` while the core lacks a
+premise, bible, acts or beats; `add an output` when the core is ready and the work
+derives nothing from it yet; else `<type>: <action>` for the first output with a unit
+still to draft (`novel: write chapter 2 (pablo write --chapter 2)`). The prose form
+lists the core's stages first, then one line per output (`novel: 2 of 24 chapters
+drafted`). A `think brief` for the project's cortex runs off the
 critical path with a 20s timeout and lands as `brief` when it's ready in time; a
 missing `think`, a timeout, or a non-zero exit is a one-line entry in `notices`,
 never a failure. The prose form is under 30 lines and always ends with `next: ...`.
@@ -183,16 +188,24 @@ marker: it writes only `pablo.json` (title taken from the work's `README.md` fir
 line — nothing else in the work changes, and it never commits. Refuses (exit 2) if
 the work already has a `pablo.json`.
 
-`pablo status --project <slug>` reads the novel machine's state from the vault (see
-the design doc's `Novel` stage table): `premise` (`bible/overview.md` has a
-`## Logline` with text), `bible` (`{file, exists}` for each `bible/characters/*.md`,
-`bible/places.md`, `bible/timeline.md`, plus every `[pick]` placeholder found in a
-bible file's table rows), `acts` (the first `| Act | ... |` table in
-`outline/chapters.md`), `beats` (every numbered row of that file's chapter table),
-and `chapters` (`chapters/NN-*.md` files with their frontmatter), plus `waiting`, the
-change branches (`draft/`, `revise/`, `edit/`, `reader/`, `plan/`) with commits `main`
-does not have yet. `pablo resume` reports the same list. With no `--json` it prints one
-line per stage instead of the state object.
+`pablo status --project <slug>` reports the work in two layers (AGT-1667; pm project
+`pablo-story-core`). `core` is the story core's state (`core/machine.ts`): `premise`
+(`bible/overview.md` has a `## Logline` with text), `research` (the files under
+`research/`; optional, never what makes the core short), `bible` (`{file, exists}`
+for each `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`, plus every
+`[pick]` placeholder found in a bible file's table rows), `acts` (the first
+`| Act | ... |` table in the beats file, `outline/beats.md` or `outline/chapters.md`
+unmigrated), `beats` (every numbered row of that file's beat table), and `stages`,
+one `{id, done, summary, missing[]}` per core stage (`premise`, `research`, `bible`,
+`acts`, `beats`, `facts`; facts are checked per unit, so an open `[pick]` blocks only
+the units whose beat names it). `outputs` has one entry per output the marker names:
+the novel's `units` are its beats and `chapters/NN-*.md` files (`status` is the
+file's frontmatter status, or `beat` when only the beat exists), with `drafted`,
+`total` and the output's `next`. A core with no outputs reports `outputs: {}` and
+`next: "add an output"`. `waiting` is the change branches (`draft/`, `revise/`,
+`edit/`, `reader/`, `plan/`) with commits `main` does not have yet; `pablo resume`
+reports the same list. With no `--json` it prints the core's stages, then one line
+per output, then `waiting` and `next`.
 
 `pablo status --project <slug> --for "chapter N"` (also accepts `chapter-N`, `ch N`,
 or a bare `N`; anything else is a refusal naming the expected form) checks one
@@ -303,7 +316,7 @@ tool error (only a genuine crash does that).
 | Tool | One line |
 |---|---|
 | `resume` | The structured session summary: stage per part, last event, open decisions, next step. |
-| `status` | The novel machine's per-stage state, or (with `for`) one chapter's draft preconditions. |
+| `status` | The core's stages then each output's units, or (with `for`) one chapter's draft preconditions. |
 | `write` | Draft one chapter on the configured local model: check, pack, send, write, receipt. |
 | `save` | Save the agent's planning output (acts, beats, bible facts, premise) into the vault. |
 | `check` | Scan a work's chapters for mechanical tells and provenance gaps. |

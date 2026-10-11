@@ -1,38 +1,26 @@
 /**
- * The novel stage machine (AGT-1228): reads a work's vault files into the
- * state the framework checks against — see the design doc's "Novel" stage
- * table (`pm project show ai-terminal`) — and
- * evaluates the preconditions for drafting one chapter.
+ * The novel output's stage machine (AGT-1228; split from the core by
+ * AGT-1667, pm project `pablo-story-core`). The story core's stages
+ * (premise, research, bible, acts, beats, facts decided) live in
+ * `core/machine.ts`; this file adds what only the novel needs: its units
+ * (`chapters/NN-*.md`) and a chapter's own preconditions (the previous
+ * chapter, the timeline year gate) on top of the core's (a beat row, no
+ * undecided `[pick]` the beat names).
  *
- * `readNovelState` does the only disk I/O in this file; `chapterPreconditions`
- * is pure over the state it returns, so a caller (a test, `pablo status`) can
- * build one state and check every chapter against it without re-reading the
- * vault each time.
+ * `readNovelState` is the core state plus the novel output's, the shape every
+ * novel caller (write, book, status --for) reads; `chapterPreconditions` is
+ * pure over it, so a caller can build one state and check every chapter
+ * against it without re-reading the vault each time.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { beatsFile, gateTimeline, parseBeatRows, section } from "@openthink/pablo-core";
-import type { BeatRow } from "@openthink/pablo-core";
+import { gateTimeline } from "@openthink/pablo-core";
+import { readCoreState, undecidedPicks } from "../core/machine";
+import type { CoreState } from "../core/machine";
+import { NOVEL_DIR } from "../marker";
 
-/** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
-export interface BibleFile {
-  readonly file: string;
-  readonly exists: boolean;
-}
-
-/** One `[pick]` placeholder found in a bible file's table rows. */
-export interface PickRow {
-  readonly file: string;
-  readonly name: string;
-}
-
-/** One row of the first `| Act | ... |` table in the beats file (`outline/beats.md`, or `outline/chapters.md` unmigrated). */
-export interface ActRow {
-  readonly act: string;
-  readonly years: string;
-  readonly summary: string;
-}
+export type { ActRow, BibleFile, PickRow } from "../core/machine";
 
 /** One `chapters/NN-*.md` file, parsed just enough to gate on it. */
 export interface ChapterFile {
@@ -42,103 +30,21 @@ export interface ChapterFile {
   readonly title: string | undefined;
 }
 
-export interface NovelState {
-  /** `bible/overview.md` exists and has non-empty text under `## Logline`. */
-  readonly premise: boolean;
-  readonly bible: {
-    readonly files: readonly BibleFile[];
-    readonly picks: readonly PickRow[];
-    /**
-     * The raw text of `bible/timeline.md` (`""` if it does not exist). Kept
-     * here — beyond the `{file, exists}` shape the design doc describes —
-     * so `chapterPreconditions` can re-run the story-time gate purely over
-     * `state`, without a second disk read.
-     */
-    readonly timelineText: string;
-  };
-  readonly acts: readonly ActRow[];
-  readonly beats: readonly BeatRow[];
+/** The novel output's own state: its units on disk. */
+export interface NovelOutputState {
   readonly chapters: readonly ChapterFile[];
-  /**
-   * The work-relative beats file the acts and beats were read from:
-   * `outline/beats.md` on a migrated work, `outline/chapters.md` (the old
-   * name, shimmed) on an unmigrated one. Messages name it.
-   */
-  readonly outlineFile: string;
 }
+
+/** The core's state plus the novel output's. */
+export interface NovelState extends CoreState, NovelOutputState {}
 
 export interface ChapterPreconditions {
   readonly ready: boolean;
   readonly missing: readonly string[];
 }
 
-const PICK_TOKEN = "[pick]";
-
 function read(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, "utf8") : undefined;
-}
-
-function relLabel(workDir: string, path: string): string {
-  return relative(workDir, path);
-}
-
-/** The next `## ` heading line after the first occurrence of `heading`, if any. */
-function nextHeadingAfter(text: string, heading: string): string | undefined {
-  const idx = text.indexOf(heading);
-  if (idx < 0) return undefined;
-  const match = /\n(##\s[^\n]*)/.exec(text.slice(idx + heading.length));
-  return match?.[1];
-}
-
-/** True if `overviewText` has a `## Logline` heading with non-empty prose under it. */
-function hasLogline(overviewText: string): boolean {
-  if (!overviewText.includes("## Logline")) return false;
-  const raw = section(overviewText, { from: "## Logline", to: nextHeadingAfter(overviewText, "## Logline") });
-  const body = raw.replace(/^##[^\n]*\n?/, "").trim();
-  return body !== "";
-}
-
-/**
- * `[pick]` rows in `text`'s TABLE ROWS ONLY (lines starting with `|`) — a
- * bullet like family-tree.md's own "`[pick]` marks a placeholder" legend is
- * not a cast row and must not be flagged. `name` is the row's first cell
- * with the literal `[pick]` token removed, whitespace-collapsed and trimmed
- * (`"Ortega grandchild [pick]"` -> `"Ortega grandchild"`).
- */
-function parsePicks(text: string, fileLabel: string): PickRow[] {
-  const picks: PickRow[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trimStart().startsWith("|")) continue;
-    if (!line.includes(PICK_TOKEN)) continue;
-    const cells = line.split("|");
-    const firstCell = (cells[1] ?? "").split(PICK_TOKEN).join("").replace(/\s+/g, " ").trim();
-    if (firstCell !== "") picks.push({ file: fileLabel, name: firstCell });
-  }
-  return picks;
-}
-
-/**
- * Rows of the first markdown table in `outline` whose header starts with
- * `| Act |` (case-insensitive) — detected by the table header, not by a
- * heading, because the real vault's heading text
- * ("## The five acts (Matt, 2026-09-01)") and the fixture's ("## The acts")
- * don't match each other.
- */
-function parseActs(outline: string): ActRow[] {
-  const lines = outline.split("\n");
-  const headerIndex = lines.findIndex((line) => /^\s*\|\s*act\s*\|/i.test(line));
-  if (headerIndex === -1) return [];
-
-  const rows: ActRow[] = [];
-  for (let i = headerIndex + 2; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    if (!line.trimStart().startsWith("|")) break;
-    const cells = line.split("|").map((cell) => cell.trim());
-    const act = cells[1] ?? "";
-    if (act === "") continue;
-    rows.push({ act, years: cells[2] ?? "", summary: cells[3] ?? "" });
-  }
-  return rows;
 }
 
 /**
@@ -160,7 +66,7 @@ export function parseFrontmatter(text: string): Record<string, string> {
 }
 
 function readChapters(workDir: string): ChapterFile[] {
-  const dir = join(workDir, "chapters");
+  const dir = join(workDir, NOVEL_DIR);
   if (!existsSync(dir)) return [];
 
   const chapters: ChapterFile[] = [];
@@ -171,7 +77,7 @@ function readChapters(workDir: string): ChapterFile[] {
     const fields = parseFrontmatter(read(path) ?? "");
     chapters.push({
       number: Number(match[1]),
-      file: relLabel(workDir, path),
+      file: relative(workDir, path),
       status: fields["status"],
       title: fields["title"],
     });
@@ -185,70 +91,26 @@ function yearIn(text: string): number | undefined {
   return match === null ? undefined : Number(match[1]);
 }
 
-/** Case-insensitive whole-word-phrase match: `name` must appear as a full word (or run of words), not as a substring of a longer word. */
-function containsPhrase(haystack: string, phrase: string): boolean {
-  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(haystack);
+/** Reads the novel output's own state: the chapter files in `chapters/`. */
+export function readNovelOutputState(workDir: string): NovelOutputState {
+  return { chapters: readChapters(workDir) };
 }
 
 /**
- * Reads `<workDir>`'s vault files into the novel machine's stage state. A
- * missing file is not an error anywhere here — an absent `bible/overview.md`
- * just makes `premise` false, an absent `chapters/` makes `chapters` empty —
- * because `status` exists to report what is missing, not to throw on it.
+ * Reads `<workDir>`'s vault files into the core state plus the novel
+ * output's. A missing file is not an error anywhere here — an absent
+ * `bible/overview.md` just makes `premise` false, an absent `chapters/` makes
+ * `chapters` empty — because `status` exists to report what is missing.
  */
 export function readNovelState(workDir: string): NovelState {
-  const overviewText = read(join(workDir, "bible", "overview.md"));
-  const premise = overviewText !== undefined && hasLogline(overviewText);
-
-  const files: BibleFile[] = [];
-  const picks: PickRow[] = [];
-
-  const charactersDir = join(workDir, "bible", "characters");
-  const characterNames = existsSync(charactersDir)
-    ? readdirSync(charactersDir)
-        .filter((name) => name.endsWith(".md"))
-        .sort()
-    : [];
-  for (const name of characterNames) {
-    const path = join(charactersDir, name);
-    const label = relLabel(workDir, path);
-    files.push({ file: label, exists: true });
-    picks.push(...parsePicks(read(path) ?? "", label));
-  }
-
-  const placesPath = join(workDir, "bible", "places.md");
-  const placesLabel = relLabel(workDir, placesPath);
-  const placesExists = existsSync(placesPath);
-  files.push({ file: placesLabel, exists: placesExists });
-  if (placesExists) picks.push(...parsePicks(read(placesPath) ?? "", placesLabel));
-
-  const timelinePath = join(workDir, "bible", "timeline.md");
-  const timelineLabel = relLabel(workDir, timelinePath);
-  const timelineExists = existsSync(timelinePath);
-  const timelineText = timelineExists ? (read(timelinePath) ?? "") : "";
-  files.push({ file: timelineLabel, exists: timelineExists });
-  if (timelineExists) picks.push(...parsePicks(timelineText, timelineLabel));
-
-  const outlineFile = beatsFile(workDir);
-  const outlinePath = join(workDir, outlineFile);
-  const outlineText = read(outlinePath) ?? "";
-  const outlineLabel = relLabel(workDir, outlinePath);
-
-  return {
-    premise,
-    bible: { files, picks, timelineText },
-    acts: parseActs(outlineText),
-    beats: parseBeatRows(outlineText, outlineLabel),
-    chapters: readChapters(workDir),
-    outlineFile,
-  };
+  return { ...readCoreState(workDir), ...readNovelOutputState(workDir) };
 }
 
 /**
- * The preconditions for `chapter` in `state`: beat row N exists; chapter N-1
- * exists (or N=1); the timeline has a row dated at or before the chapter's
- * year; no `[pick]` on a cast row whose name appears in beat N's text.
+ * The preconditions for `chapter` in `state`: beat row N exists (core);
+ * chapter N-1 exists (or N=1) and the timeline has a row dated at or before
+ * the chapter's year (novel); no `[pick]` on a cast row whose name appears in
+ * beat N's text (core, facts decided).
  *
  * When no beat exists for `chapter`, that is the ONLY missing entry — the
  * other checks all need the beat's story date or text and cannot run
@@ -274,16 +136,43 @@ export function chapterPreconditions(state: NovelState, chapter: number): Chapte
     }
   }
 
-  // DELIBERATE DEVIATION from the ticket's "first word" wording: the real
-  // family tree has rows like "Ortega grandchild [pick]" and "The film star
-  // [pick]" — matching only the first word would flag "Ortega" (a resolved
-  // character) in every beat that names him, and "The" in nearly every beat.
-  // Matching the full name phrase is what the AC4 numbers actually require.
-  for (const pick of state.bible.picks) {
-    if (containsPhrase(beat.beat, pick.name)) {
-      missing.push(`${pick.name} still has a [pick] in ${pick.file}`);
-    }
-  }
+  // The core's "facts decided" stage, checked for this unit's beat.
+  missing.push(...undecidedPicks(state, beat.beat));
 
   return { ready: missing.length === 0, missing };
+}
+
+/** One novel unit (a chapter) as `status` and `resume` report it: a beat row, a chapter file, or both. */
+export interface NovelUnit {
+  readonly unit: number;
+  readonly title?: string;
+  readonly storyDate?: string;
+  /** The chapter file's frontmatter `status` (`"unknown"` when it has none), or `"beat"` when only the beat exists. */
+  readonly status: string;
+  /** The chapter file, work-relative, when it is drafted. */
+  readonly file?: string;
+}
+
+/** Every chapter number with a beat row or a file, ascending, as units. Pure. */
+export function novelUnits(state: NovelState): NovelUnit[] {
+  const numbers = [...new Set([...state.beats.map((b) => b.chapter), ...state.chapters.map((c) => c.number)])].sort((a, b) => a - b);
+  return numbers.map((n) => {
+    const beat = state.beats.find((b) => b.chapter === n);
+    const file = state.chapters.find((c) => c.number === n);
+    const title = file?.title ?? beat?.title;
+    return {
+      unit: n,
+      ...(title !== undefined && title !== "" ? { title } : {}),
+      ...(beat !== undefined && beat.storyDate !== "" ? { storyDate: beat.storyDate } : {}),
+      status: file !== undefined ? (file.status ?? "unknown") : "beat",
+      ...(file !== undefined ? { file: file.file } : {}),
+    };
+  });
+}
+
+/** The lowest-numbered beat with no chapter file, as the action that drafts it; `undefined` when every beat is drafted. Pure. */
+export function novelNext(state: NovelState): string | undefined {
+  const written = new Set(state.chapters.map((chapter) => chapter.number));
+  const beat = [...state.beats].sort((a, b) => a.chapter - b.chapter).find((b) => !written.has(b.chapter));
+  return beat === undefined ? undefined : `write chapter ${beat.chapter} (pablo write --chapter ${beat.chapter})`;
 }

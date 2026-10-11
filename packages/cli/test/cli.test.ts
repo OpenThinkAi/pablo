@@ -148,32 +148,38 @@ test("init novel onto an existing slug exits 2", () => {
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("status --project ice-house --json exits 0 with the novel machine's state", () => {
+test("status --project ice-house --json exits 0 with the core's state, then the novel output's units", () => {
   const vault = tempVault();
   const { stdout, exitCode } = runCli(["status", "--project", "ice-house", "--json"], { PABLO_VAULT: vault });
 
   expect(exitCode).toBe(0);
   const body = JSON.parse(stdout);
-  expect(body.premise).toBe(true);
-  expect(body.beats).toHaveLength(4);
-  expect(body.chapters).toEqual([
-    { number: 1, file: "chapters/01-the-last-full-cut.md", status: "draft", title: "The Last Full Cut" },
-  ]);
+  expect(body.core.premise).toBe(true);
+  expect(body.core.beats).toHaveLength(4);
+  expect(body.outputs.novel.units[0]).toEqual({
+    unit: 1,
+    title: "The Last Full Cut",
+    storyDate: body.core.beats[0].storyDate,
+    status: "draft",
+    file: "chapters/01-the-last-full-cut.md",
+  });
   expect(body.waiting).toEqual([]); // the temp vault is no git repository: no branches to wait on
 
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("status --project ice-house (no --json) prints one prose line per stage", () => {
+test("status --project ice-house (no --json) prints the core's stages, then each output's", () => {
   const vault = tempVault();
 
   const { stdout, exitCode } = runCli(["status", "--project", "ice-house"], { PABLO_VAULT: vault });
 
   expect(exitCode).toBe(0);
-  expect(stdout).toContain("premise: ok");
-  expect(stdout).toContain("acts: 2");
-  expect(stdout).toContain("beats: 4 (chapters 1");
-  expect(stdout).toContain("chapters: 1 written");
+  expect(stdout).toContain("  premise: ok");
+  expect(stdout).toContain("  acts: 2");
+  expect(stdout).toContain("  beats: 4");
+  expect(stdout).toContain("novel: 1 of 4 chapters drafted (draft: 1)");
+  expect(stdout.indexOf("core:")).toBeLessThan(stdout.indexOf("novel:"));
+  expect(stdout.trimEnd().split("\n").at(-1)).toBe("next: novel: write chapter 2 (pablo write --chapter 2)");
 
   rmSync(vault, { recursive: true, force: true });
 });

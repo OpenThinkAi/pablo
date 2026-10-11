@@ -61,7 +61,6 @@ import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
-import { waitingForReview } from "./branch";
 import { checkWork } from "./check";
 import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import { KNOWN_FORMATS } from "./formats";
@@ -84,6 +83,7 @@ import { revisePassage } from "./screen-revise";
 import { reviseCore } from "./revise";
 import type { ReviseCoreArgs } from "./revise";
 import { buildResume } from "./resume";
+import { readWorkStatus } from "./work-state";
 import { saveCore } from "./save";
 import { addExemplar, addRule, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { VoiceLocation } from "./voice";
@@ -257,7 +257,7 @@ const STATUS_ARGS = z.object({
     .string()
     .optional()
     .describe(
-      'A chapter target, e.g. "chapter 3" (also accepts "chapter-3", "ch 3", or a bare "3"), or a radio episode, e.g. "episode 3": ready only when every role in its script is bound to a voice. Omit for the whole-project stage summary.',
+      'A chapter target, e.g. "chapter 3" (also accepts "chapter-3", "ch 3", or a bare "3"), or a radio episode, e.g. "episode 3": ready only when every role in its script is bound to a voice. Omit for the whole work: {core: {stages, ...}, outputs: {<type>: {units, drafted, total, next?}}, waiting, next}, where next names the layer that is short.',
     ),
 });
 
@@ -265,9 +265,8 @@ async function runStatusVerb(args: z.infer<typeof STATUS_ARGS>, ctx: VerbContext
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
 
-  const state = readNovelState(resolved.projectPath);
   if (args.for === undefined) {
-    return { body: { ...state, waiting: waitingForReview(resolved.projectPath) }, exitCode: 0 };
+    return { body: readWorkStatus(resolved.projectPath), exitCode: 0 };
   }
 
   const episode = parseForEpisode(args.for);
@@ -280,7 +279,7 @@ async function runStatusVerb(args: z.infer<typeof STATUS_ARGS>, ctx: VerbContext
     return { body: { ok: false, code: 2, message: 'pablo: --for expects "chapter N" or "episode N"' }, exitCode: 2 };
   }
 
-  const preconditions = chapterPreconditions(state, chapter);
+  const preconditions = chapterPreconditions(readNovelState(resolved.projectPath), chapter);
   return { body: { ready: preconditions.ready, missing: preconditions.missing }, exitCode: preconditions.ready ? 0 : 2 };
 }
 

@@ -19,7 +19,7 @@ import { parseArgs } from "node:util";
 import { bookStages } from "./book";
 import { doctorText, gateText, realCastingDeps, runAudition, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
 import { parseForEpisode, radioBind, radioStatus } from "./radio";
-import { branchDiff, fileAt, repoRoot, waitingBranches, waitingForReview } from "./branch";
+import { branchDiff, fileAt, repoRoot, waitingBranches } from "./branch";
 import { runCheck, screenChecks } from "./check";
 import { reviewCommentsOf } from "./critique";
 import { migrateLines } from "./migrate";
@@ -37,7 +37,6 @@ import { loadPromptWork } from "./harness/prompt";
 import type { HarnessSpec } from "./harness/session";
 import { runMcp } from "./mcp";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
-import type { NovelState } from "./novel/machine";
 import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
@@ -46,6 +45,7 @@ import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
 import { readTool, searchTool } from "./harness-tools";
 import { runResumeVerb } from "./resume";
+import { formatStatusProse, readWorkStatus } from "./work-state";
 import { runSave } from "./save";
 import { screenEditor } from "./edit-session";
 import { screenCommenter, screenFinisher } from "./review-finish";
@@ -497,51 +497,16 @@ function runInit(args: ParsedArgs, cwd: string): number {
 }
 
 /**
- * `status`'s prose: one line per stage, in the state's own order. `bible`'s
- * file count is how many of the checked files exist, not how many were
- * checked — an absent `places.md` shouldn't read as "1 file" the way a
- * present one does.
- */
-function proseState(state: NovelState, waiting: readonly string[]): string {
-  const lines: string[] = [];
-  lines.push(`premise: ${state.premise ? "ok" : "missing"}`);
-
-  const existingBibleFiles = state.bible.files.filter((f) => f.exists).length;
-  lines.push(`bible: ${existingBibleFiles} files, ${state.bible.picks.length} [pick] rows`);
-
-  lines.push(`acts: ${state.acts.length}`);
-
-  if (state.beats.length === 0) {
-    lines.push("beats: 0");
-  } else {
-    const numbers = state.beats.map((b) => b.chapter);
-    lines.push(`beats: ${state.beats.length} (chapters ${Math.min(...numbers)}–${Math.max(...numbers)})`);
-  }
-
-  const statusCounts = new Map<string, number>();
-  for (const chapter of state.chapters) {
-    const key = chapter.status ?? "unknown";
-    statusCounts.set(key, (statusCounts.get(key) ?? 0) + 1);
-  }
-  const counts = [...statusCounts.entries()].map(([status, count]) => `${status}: ${count}`).join(", ");
-  lines.push(`chapters: ${state.chapters.length} written${counts ? ` (${counts})` : ""}`);
-  lines.push(waiting.length === 0 ? "waiting for review: none" : `waiting for review: ${waiting.length} (${waiting.join(", ")})`);
-
-  return lines.join("\n");
-}
-
-/**
  * `pablo status --project <slug> [--for "chapter N"]`. With no `--for`, the
- * novel machine's state plus the branches waiting for review (JSON: the state
- * object with `waiting`; prose: `proseState`). With
+ * work in both layers (AGT-1667): the core's stages, then each output's
+ * units, the branches waiting for review, and `next` (JSON: `readWorkStatus`;
+ * prose: `formatStatusProse`). With
  * `--for`, one chapter's preconditions — JSON body is `{ready, missing}`
  * (no `ok`/`code` wrapper: a refused precondition is data here, not a
  * framework-resolution failure), and the exit code carries readiness: 0 when
  * ready, 2 when not (a framework precondition, same as every other refusal).
  */
 function runStatus(args: ParsedArgs, projectPath: string): number {
-  const state = readNovelState(projectPath);
-
   if (args.for !== undefined) {
     // `--for "episode N"` (AGT-1680): a radio episode is ready when every role in its script is bound to a voice.
     const episode = parseForEpisode(args.for);
@@ -563,7 +528,7 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
       return EXIT_REFUSED;
     }
 
-    const result = chapterPreconditions(state, chapter);
+    const result = chapterPreconditions(readNovelState(projectPath), chapter);
     if (args.json) {
       console.log(JSON.stringify({ ready: result.ready, missing: result.missing }));
     } else {
@@ -573,12 +538,8 @@ function runStatus(args: ParsedArgs, projectPath: string): number {
     return result.ready ? EXIT_OK : EXIT_REFUSED;
   }
 
-  const waiting = waitingForReview(projectPath);
-  if (args.json) {
-    console.log(JSON.stringify({ ...state, waiting }));
-  } else {
-    console.log(proseState(state, waiting));
-  }
+  const status = readWorkStatus(projectPath);
+  console.log(args.json ? JSON.stringify(status) : formatStatusProse(status));
   return EXIT_OK;
 }
 

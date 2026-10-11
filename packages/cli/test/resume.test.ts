@@ -39,9 +39,12 @@ test("buildResume on the fixture novel has the right shape and next is 'write ch
 
   expect(result.format).toBe("novel");
   expect(result.title).toBe("The Ice House");
-  expect(result.stages.beats).toHaveLength(4);
-  expect(result.stages.chapters).toHaveLength(1);
-  expect(result.next).toBe("write chapter 2 (pablo write --chapter 2)");
+  expect(result.core.beats).toHaveLength(4);
+  expect(result.core.stages.map((s) => s.id)).toEqual(["premise", "research", "bible", "acts", "beats", "facts"]);
+  expect(Object.keys(result.outputs)).toEqual(["novel"]);
+  expect(result.outputs["novel"]?.drafted).toBe(1);
+  expect(result.outputs["novel"]?.total).toBe(4);
+  expect(result.next).toBe("novel: write chapter 2 (pablo write --chapter 2)");
 
   expect(result.last.note).toEqual({
     file: "notes/1929-01-09-first-session.md",
@@ -73,7 +76,7 @@ test("formatResumeProse is under 30 lines and its final line starts with 'next:'
 
   expect(lines.length).toBeLessThan(30);
   expect(lines[lines.length - 1]).toMatch(/^next: /);
-  expect(lines[lines.length - 1]).toBe("next: write chapter 2 (pablo write --chapter 2)");
+  expect(lines[lines.length - 1]).toBe("next: novel: write chapter 2 (pablo write --chapter 2)");
 });
 
 test("a think that sleeps past a short injected timeout produces a 'timed out' notice", async () => {

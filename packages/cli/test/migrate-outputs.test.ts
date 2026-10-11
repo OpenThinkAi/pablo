@@ -240,7 +240,7 @@ test("CLI: an unmigrated work still runs, with a stderr notice naming pablo migr
   const after = runCli(["status", "--project", "ice-house", "--json"], vault);
   expect(after.exitCode).toBe(0);
   expect(after.stderr).not.toContain("deprecated");
-  expect(JSON.parse(after.stdout).beats).toHaveLength(4);
+  expect(JSON.parse(after.stdout).core.beats).toHaveLength(4);
   rmSync(vault, { recursive: true, force: true });
 });
 
