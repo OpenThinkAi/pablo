@@ -1,0 +1,562 @@
+{
+  "base": {
+    "schema": 1,
+    "episode": 1,
+    "version": 1,
+    "manifest_version": 1,
+    "parent": null,
+    "by": "human",
+    "created": "2026-10-11T00:00:00Z",
+    "tracks": {
+      "dialogue": {
+        "lanes": {
+          "KEEPER": {
+            "clips": [
+              {
+                "id": "line-0",
+                "source": {
+                  "kind": "take",
+                  "key": "0000000000000000000000000000000000000000000000000000000000000001",
+                  "stretch": 1
+                },
+                "lines": [
+                  0
+                ],
+                "in": 0,
+                "out": 1.25,
+                "anchor": {
+                  "at": 0.5
+                },
+                "gain": 0
+              },
+              {
+                "id": "line-2",
+                "source": {
+                  "kind": "take",
+                  "key": "0000000000000000000000000000000000000000000000000000000000000003",
+                  "stretch": 0.9
+                },
+                "lines": [
+                  2,
+                  3
+                ],
+                "in": 0.1,
+                "out": 2,
+                "anchor": {
+                  "line": 1,
+                  "edge": "end",
+                  "offset": 0.15
+                },
+                "gain": -3,
+                "fade_in": {
+                  "len": 0.05,
+                  "curve": "scurve"
+                },
+                "fade_out": {
+                  "len": 0.3,
+                  "curve": "exp"
+                }
+              }
+            ]
+          },
+          "TOLLER": {
+            "clips": [
+              {
+                "id": "line-1",
+                "source": {
+                  "kind": "take",
+                  "key": "0000000000000000000000000000000000000000000000000000000000000002",
+                  "stretch": 1.1
+                },
+                "lines": [
+                  1
+                ],
+                "in": 0,
+                "out": 0.9,
+                "anchor": {
+                  "line": 0,
+                  "edge": "end",
+                  "offset": -0.2
+                },
+                "gain": 2
+              }
+            ]
+          }
+        },
+        "volume": 0,
+        "mute": false,
+        "solo": false,
+        "automation": []
+      },
+      "sfx": {
+        "lanes": {
+          "main": {
+            "clips": [
+              {
+                "id": "cue-0",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000a0"
+                },
+                "cue": 0,
+                "in": 0,
+                "out": 0.4,
+                "anchor": {
+                  "line": 2,
+                  "edge": "start",
+                  "offset": 0.333333
+                },
+                "gain": -6,
+                "fade_out": {
+                  "len": 0.35,
+                  "curve": "linear"
+                }
+              }
+            ]
+          }
+        },
+        "volume": -2,
+        "mute": false,
+        "solo": false,
+        "automation": []
+      },
+      "beds": {
+        "lanes": {
+          "main": {
+            "clips": [
+              {
+                "id": "bed-a",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000b0"
+                },
+                "cue": 1,
+                "in": 0,
+                "out": 3,
+                "anchor": {
+                  "line": 0,
+                  "edge": "start",
+                  "offset": -0.5
+                },
+                "gain": -12,
+                "fade_in": {
+                  "len": 0.5,
+                  "curve": "log"
+                }
+              },
+              {
+                "id": "bed-b",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000b0"
+                },
+                "cue": 1,
+                "in": 1.5,
+                "out": 4,
+                "anchor": {
+                  "line": 1,
+                  "edge": "start",
+                  "offset": 0.7
+                },
+                "gain": -12,
+                "fade_out": {
+                  "len": 0.75,
+                  "curve": "scurve"
+                }
+              },
+              {
+                "id": "bed-c",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000b0"
+                },
+                "cue": 1,
+                "in": 0.2,
+                "out": 0.6,
+                "anchor": {
+                  "line": 1,
+                  "edge": "start",
+                  "offset": 0.9
+                },
+                "gain": -12
+              }
+            ]
+          }
+        },
+        "volume": 0,
+        "mute": false,
+        "solo": false,
+        "automation": [
+          {
+            "anchor": {
+              "at": 0
+            },
+            "db": 0,
+            "curve": "linear"
+          },
+          {
+            "anchor": {
+              "line": 1,
+              "edge": "start",
+              "offset": 0
+            },
+            "db": -6,
+            "curve": "exp"
+          },
+          {
+            "anchor": {
+              "line": 3,
+              "edge": "end",
+              "offset": 0.25
+            },
+            "db": 0,
+            "curve": "linear"
+          }
+        ]
+      },
+      "music": {
+        "lanes": {
+          "main": {
+            "clips": [
+              {
+                "id": "sting",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000c0"
+                },
+                "cue": 2,
+                "in": 0,
+                "out": 1.5,
+                "anchor": {
+                  "line": 2,
+                  "edge": "end",
+                  "offset": 0
+                },
+                "gain": 0,
+                "fade_in": {
+                  "len": 0,
+                  "curve": "linear"
+                }
+              }
+            ]
+          }
+        },
+        "volume": 0,
+        "mute": false,
+        "solo": false,
+        "automation": []
+      }
+    },
+    "master": {
+      "gain": 0,
+      "peak_db": -1,
+      "target_lufs": null
+    }
+  },
+  "edited": {
+    "manifest_version": 1,
+    "tracks": {
+      "dialogue": {
+        "lanes": {
+          "KEEPER": {
+            "clips": [
+              {
+                "id": "line-0",
+                "source": {
+                  "kind": "take",
+                  "key": "0000000000000000000000000000000000000000000000000000000000000001",
+                  "stretch": 1
+                },
+                "lines": [
+                  0
+                ],
+                "in": 0,
+                "out": 1.25,
+                "anchor": {
+                  "at": 0.5
+                },
+                "gain": 0
+              },
+              {
+                "id": "line-2",
+                "source": {
+                  "kind": "take",
+                  "key": "0000000000000000000000000000000000000000000000000000000000000003",
+                  "stretch": 0.9
+                },
+                "lines": [
+                  2,
+                  3
+                ],
+                "in": 0.1,
+                "out": 2,
+                "anchor": {
+                  "line": 1,
+                  "edge": "end",
+                  "offset": -0.3
+                },
+                "gain": -3,
+                "fade_in": {
+                  "len": 0.05,
+                  "curve": "scurve"
+                },
+                "fade_out": {
+                  "len": 0.3,
+                  "curve": "exp"
+                }
+              }
+            ]
+          },
+          "TOLLER": {
+            "clips": [
+              {
+                "id": "line-1",
+                "source": {
+                  "kind": "take",
+                  "key": "0000000000000000000000000000000000000000000000000000000000000002",
+                  "stretch": 1.1
+                },
+                "lines": [
+                  1
+                ],
+                "in": 0,
+                "out": 0.9,
+                "anchor": {
+                  "line": 0,
+                  "edge": "end",
+                  "offset": -0.2
+                },
+                "gain": 2
+              }
+            ]
+          }
+        },
+        "volume": 0,
+        "mute": false,
+        "solo": false,
+        "automation": []
+      },
+      "sfx": {
+        "lanes": {
+          "main": {
+            "clips": [
+              {
+                "id": "cue-0",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000a0"
+                },
+                "cue": 0,
+                "in": 0,
+                "out": 0.4,
+                "anchor": {
+                  "line": 2,
+                  "edge": "start",
+                  "offset": 0.333333
+                },
+                "gain": -6,
+                "fade_out": {
+                  "len": 0.35,
+                  "curve": "linear"
+                }
+              }
+            ]
+          }
+        },
+        "volume": -2,
+        "mute": false,
+        "solo": false,
+        "automation": []
+      },
+      "beds": {
+        "lanes": {
+          "main": {
+            "clips": [
+              {
+                "id": "bed-a",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000b0"
+                },
+                "cue": 1,
+                "in": 0,
+                "out": 2.4,
+                "anchor": {
+                  "line": 0,
+                  "edge": "start",
+                  "offset": -0.5
+                },
+                "gain": -12,
+                "fade_in": {
+                  "len": 0.5,
+                  "curve": "log"
+                },
+                "fade_out": {
+                  "len": 0.8,
+                  "curve": "scurve"
+                }
+              },
+              {
+                "id": "bed-b",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000b0"
+                },
+                "cue": 1,
+                "in": 1.5,
+                "out": 2.75,
+                "anchor": {
+                  "line": 1,
+                  "edge": "start",
+                  "offset": 0.7
+                },
+                "gain": -12
+              },
+              {
+                "id": "bed-b.2",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000b0"
+                },
+                "cue": 1,
+                "in": 2.75,
+                "out": 4,
+                "anchor": {
+                  "line": 1,
+                  "edge": "start",
+                  "offset": 1.95
+                },
+                "gain": -15,
+                "fade_out": {
+                  "len": 0.75,
+                  "curve": "scurve"
+                }
+              },
+              {
+                "id": "bed-c",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000b0"
+                },
+                "cue": 1,
+                "in": 0.2,
+                "out": 0.6,
+                "anchor": {
+                  "line": 1,
+                  "edge": "start",
+                  "offset": 0.9
+                },
+                "gain": -12
+              }
+            ]
+          }
+        },
+        "volume": -2,
+        "mute": false,
+        "solo": false,
+        "automation": [
+          {
+            "anchor": {
+              "at": 0
+            },
+            "db": 0,
+            "curve": "linear"
+          },
+          {
+            "anchor": {
+              "line": 1,
+              "edge": "start",
+              "offset": 0
+            },
+            "db": -6,
+            "curve": "exp"
+          },
+          {
+            "anchor": {
+              "line": 3,
+              "edge": "end",
+              "offset": 0.25
+            },
+            "db": 0,
+            "curve": "linear"
+          }
+        ]
+      },
+      "music": {
+        "lanes": {
+          "main": {
+            "clips": [
+              {
+                "id": "sting",
+                "source": {
+                  "kind": "cue",
+                  "key": "00000000000000000000000000000000000000000000000000000000000000c0"
+                },
+                "cue": 2,
+                "in": 0,
+                "out": 1.5,
+                "anchor": {
+                  "line": 2,
+                  "edge": "end",
+                  "offset": 0
+                },
+                "gain": 0,
+                "fade_in": {
+                  "len": 0,
+                  "curve": "linear"
+                }
+              }
+            ]
+          }
+        },
+        "volume": 0,
+        "mute": false,
+        "solo": false,
+        "automation": []
+      }
+    },
+    "master": {
+      "gain": 0,
+      "peak_db": -1,
+      "target_lufs": null
+    }
+  },
+  "placement": {
+    "line-0": [
+      22050,
+      77175
+    ],
+    "line-2": [
+      94815,
+      178605
+    ],
+    "line-1": [
+      68355,
+      108045
+    ],
+    "cue-0": [
+      109515,
+      127155
+    ],
+    "bed-a": [
+      0,
+      105840
+    ],
+    "bed-b": [
+      99225,
+      154350
+    ],
+    "bed-b.2": [
+      154350,
+      209475
+    ],
+    "bed-c": [
+      108045,
+      125685
+    ],
+    "sting": [
+      178605,
+      244755
+    ]
+  }
+}
