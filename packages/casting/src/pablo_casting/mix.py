@@ -27,9 +27,16 @@ Valley's Shadow sandbox), expressed as clips:
   before the first). An SFX starts 0.4 s early, over the air before it, at
   0.75 gain; MUSIC starts at once at 0.9 gain; both hold the voice track for
   their whole length plus 0.2 s;
-- a BED runs from its cue to the next BED cue (or the end of the speech), looped
-  at 0.16 gain with 1.5 s fades (a quarter of its span at most); `[BED: off]`
-  ends it with nothing in its place;
+- a BED runs from its cue to the next BED cue (or the end of the speech) at 0.16
+  gain with 1.5 s fades (a quarter of its span at most); `[BED: off]` ends it with
+  nothing in its place. It is not a loop: it is segments of its asset at varied
+  offsets, each crossfading into the next (`BedPlan`, seeded by the cue key), so
+  nothing in a 20 s clip comes back on a fixed period (AGT-1767);
+- a MUSIC cue sounding over an open bed ducks the beds track (volume automation:
+  out over 0.5 s before the cue, -96 dB through it, back over 0.5 s after, or by
+  the time a new bed starts); the last MUSIC cue, when it follows a spoken line
+  and no bed is cued after it, is the closing theme: it ends every bed, and a bed
+  cued at or after it never starts;
 - the sum is scaled under 0.95 peak, then to -1 dBFS (the prototype's sox
   `gain -n -1`), and encoded to AAC at 160 kb/s.
 
@@ -59,7 +66,9 @@ The gain, fade, crossfade and automation formulas are `mixmath.py`'s
 
 from __future__ import annotations
 
+import hashlib
 import json
+import random
 import shutil
 import subprocess
 import tempfile
@@ -107,6 +116,11 @@ END_PAD_SECONDS = 1.0
 CUE_GAIN = {"SFX": 0.75, "MUSIC": 0.9}
 BED_GAIN = 0.16
 BED_FADE_SECONDS = 1.5
+BED_XFADE_SECONDS = 1.5
+"""The most two segments of one bed overlap (equal-power). It is no more than `BED_FADE_SECONDS` so the streamed frontier, which holds that far behind an open bed, covers a segment dropped or cut where the bed closes."""
+BED_DUCK_SECONDS = 0.5
+BED_DUCK_DB = -96.0
+"""A bed is ducked to -96 dB (below 16-bit resolution at its 0.16 gain) for a MUSIC cue's whole span, over `BED_DUCK_SECONDS` each way."""
 PEAK = 0.95
 FINAL_PEAK_DB = -1.0
 AAC_BITRATE = 160_000
@@ -347,14 +361,15 @@ def _clip(
     *,
     fade_in: int = 0,
     fade_out: int = 0,
+    offset: int = 0,
     **extra: object,
 ) -> dict[str, object]:
     return {
         "id": clip_id,
         "source": source,
         **extra,
-        "in": 0.0,
-        "out": length / SR,
+        "in": offset / SR,
+        "out": (offset + length) / SR,
         "anchor": anchor,
         "gain": round(gain_to_db(gain), 6),
         "fade_in": {"len": fade_in / SR, "curve": "linear"},
@@ -524,11 +539,68 @@ def _cue_places(cues: Sequence[Mapping[str, object]], placed: Sequence[_Placed])
     return out
 
 
+# --- non-repeating beds -----------------------------------------------------------------------------
+
+
+class BedPlan:
+    """The segments one bed is built from: `(start, in, length)` in samples, start counted from the bed's start.
+
+    A bed asset is a short clip (Stable Audio's 20 s); tiled back to back it
+    repeats on its own length, and the ear catches whatever stands out in it (a
+    glassware clink) every time. So a bed is a chain of segments of the asset
+    at varied offsets, each overlapping the next by `xfade` samples (the lane's
+    equal-power crossfade), their lengths drawn between 40% and 80% of the
+    asset so no period recurs. The draw is seeded by the cue key: the same bed
+    always has the same plan, and a plan's prefix does not depend on how far it
+    is asked to run (a still-open bed and its finished form agree).
+    """
+
+    def __init__(self, key: str, size: int) -> None:
+        self.size = size
+        self.xfade = min(int(SR * BED_XFADE_SECONDS), size // 3)
+        self.longest = min(size, max(3 * self.xfade, int(0.8 * size)))
+        self.shortest = min(self.longest, max(3 * self.xfade, int(0.4 * size)))
+        self.rng = random.Random(int.from_bytes(hashlib.sha256(f"bed-segments:{key}".encode()).digest()[:8], "big"))
+        self.segments: list[tuple[int, int, int]] = []
+
+    def upto(self, span: int) -> list[tuple[int, int, int]]:
+        """Every segment that starts before `span` samples."""
+        while self.size and (not self.segments or self.segments[-1][0] + self.segments[-1][2] - self.xfade < span):
+            length = self.rng.randint(self.shortest, self.longest)
+            room = self.size - length
+            previous = self.segments[-1][1] if self.segments else None
+            offset = 0
+            for _ in range(8):
+                offset = self.rng.randint(0, room)
+                if previous is None or abs(offset - previous) >= self.size // 4:
+                    break
+            start = self.segments[-1][0] + self.segments[-1][2] - self.xfade if self.segments else 0
+            self.segments.append((start, offset, length))
+        return [s for s in self.segments if s[0] < span]
+
+
+@dataclass
+class _Bed:
+    cue: int
+    key: str
+    start: int
+    loop: np.ndarray
+    base: tuple[int, int] | None  # the anchor reference when it opened
+    plan: BedPlan
+
+
+@dataclass
+class _Duck:
+    """A MUSIC cue sounding while a bed is open: the beds track is out from `down` (a fade) through `end`, the music's last sample."""
+
+    bed: int
+    down: int
+    start: int
+    end: int
+    base: tuple[int, int] | None
+
+
 # --- the auto mix: the Timeline -----------------------------------------------------------------------
-
-
-def _no_anchor(anchor: Mapping[str, object]) -> int | None:
-    return None
 
 
 class Timeline:
@@ -537,13 +609,14 @@ class Timeline:
     It is the AGT-1684 rules expressed as clips: each take group follows the
     one before it by its length plus 0.35 s of air; an SFX starts 0.4 s early at
     0.75 gain and MUSIC at once at 0.9, both holding the next line for their
-    length plus 0.2 s; a BED is tiled back to back from its cue to the next BED
-    cue (or the end of the speech) at 0.16 gain with 1.5 s linear fades (a
-    quarter of its span at most). Each clip is anchored to the end of the line
+    length plus 0.2 s; a BED is a chain of crossfading segments of its asset
+    (`BedPlan`) from its cue to the next BED cue (or the end of the speech) at
+    0.16 gain with 1.5 s linear fades (a quarter of its span at most); MUSIC over
+    a bed ducks it (`_automation`) and the closing theme ends every bed. Each clip is anchored to the end of the line
     group before it (a free `{at}` before the first line), so a re-timed line
-    carries what follows it along; a bed's tiles all hang off its cue's anchor.
+    carries what follows it along; a bed's segments all hang off its cue's anchor.
     A cue that would overlap the last clip on its lane goes on the next lane
-    (`main`, `2`, ...), so the auto mix never crossfades: it sums as it always did.
+    (`main`, `2`, ...), so the only crossfades are a bed's own segments: all else sums as it always did.
 
     `add` places each clip twice over, as document data (`document()`, written
     as `mix.v<m>` with `by: "auto"`) and at its sample position; `mixdown` sums
@@ -553,9 +626,12 @@ class Timeline:
 
     A sample is final once nothing still to come can write to it
     (`frontier`): a voice take or MUSIC starts at `t`, an SFX up to
-    `SFX_OVERLAP_SECONDS` before it, and an open BED's last tile fades out where
+    `SFX_OVERLAP_SECONDS` before it, and an open BED's last segment fades out where
     it closes (no earlier than `t`) over at most `BED_FADE_SECONDS`; while a BED
-    is shorter than four fades its fade-in is not settled either.
+    is shorter than four fades its fade-in is not settled either. An open bed holds
+    the frontier 1.5 s behind `t`, which also covers what can still change at a bed's
+    end (a last segment cut or dropped: `BED_XFADE_SECONDS` is no more than that), the
+    fade out of a MUSIC cue (0.5 s, placed at `t`) and the way back after one.
     """
 
     def __init__(
@@ -579,7 +655,12 @@ class Timeline:
         self.t = 0
         self.total: int | None = None
         self._ref: tuple[int, int] | None = None  # (last line id of the previous group, its clip's end)
-        self._bed: tuple[int, str, int, np.ndarray, tuple[int, int] | None] | None = None  # (cue, key, start, loop, anchor ref)
+        self._line_end: dict[int, int] = {}
+        self._bed: _Bed | None = None
+        self._ducks: list[_Duck] = []
+        self._bed_closed: dict[int, int] = {}
+        self._ended = False  # the closing theme has begun: every bed is over
+        self.closing = self._closing_theme()
 
     @property
     def generated(self) -> int:
@@ -588,6 +669,20 @@ class Timeline:
     @property
     def reused(self) -> int:
         return self.sources.reused
+
+    def _closing_theme(self) -> int | None:
+        """The cue that ends every bed: the last MUSIC cue, when it follows a spoken line and no bed is cued after it."""
+        music = [k for k in self.pending if self.cues[k].get("kind") == "MUSIC"]
+        if not music:
+            return None
+        last = int(self.cues[music[-1]].get("after", -1))  # type: ignore[call-overload]
+        if last < 0:
+            return None
+        later = any(
+            self.cues[k].get("kind") == "BED" and not is_stop(str(self.cues[k].get("desc", ""))) and int(self.cues[k].get("after", -1)) > last  # type: ignore[call-overload]
+            for k in self.pending
+        )
+        return None if later else music[-1]
 
     def _anchor(self, at: int, base: tuple[int, int] | None) -> dict[str, object]:
         if base is None:
@@ -607,51 +702,93 @@ class Timeline:
         raise AssertionError("unreachable")
 
     def _tiles(self, at: int, *, closing: bool) -> list[tuple[dict[str, object], int, np.ndarray]]:
-        """The open bed's tiles up to `at`: with its fade-out when it closes there, else the settled part only."""
+        """The open bed's segments up to `at`: cut at `at` with a fade-out when it closes there, else the settled part only.
+
+        A closing bed drops a last segment that would start less than one crossfade before `at` (the one before it
+        simply runs to `at`), so a segment that is kept always has its whole crossfade in; that, and `BED_XFADE_SECONDS`
+        being no more than the fade the frontier waits for, keeps every sample behind the frontier as it will be.
+        """
         assert self._bed is not None
-        k, key, start, loop, base = self._bed
-        span = at - start
-        if span <= 0 or not len(loop):
+        bed = self._bed
+        span = at - bed.start
+        if span <= 0 or not len(bed.loop):
             return []
         fade = min(int(SR * BED_FADE_SECONDS), span // 4) if closing else int(SR * BED_FADE_SECONDS)
-        tiles = (span + len(loop) - 1) // len(loop)
+        segments = bed.plan.upto(span)
+        if closing:
+            segments = [s for n, s in enumerate(segments) if n == 0 or span - s[0] >= bed.plan.xfade]
         out = []
-        for n in range(tiles):
-            length = min(len(loop), span - n * len(loop))
+        for n, (offset, source_in, length) in enumerate(segments):
+            if closing:
+                length = min(length, span - offset)
+            last = n == len(segments) - 1
             clip = _clip(
-                f"bed-{k}-{n}",
-                {"kind": "cue", "key": key},
+                f"bed-{bed.cue}-{n}",
+                {"kind": "cue", "key": bed.key},
                 length,
-                self._anchor(start + n * len(loop), base),
+                self._anchor(bed.start + offset, bed.base),
                 BED_GAIN,
                 fade_in=min(fade, length) if n == 0 else 0,
-                fade_out=min(fade, length) if closing and n == tiles - 1 else 0,
-                cue=k,
+                fade_out=min(fade, length) if closing and last else 0,
+                offset=source_in,
+                cue=bed.cue,
             )
-            out.append((clip, start + n * len(loop), loop[:length]))
+            out.append((clip, bed.start + offset, bed.loop[source_in : source_in + length]))
         return out
 
     def _close_bed(self, at: int) -> None:
         if self._bed is not None:
             for clip, start, audio in self._tiles(at, closing=True):
                 self._put("beds", "main", clip, start, audio)
+            self._bed_closed[self._bed.cue] = at
             self._bed = None
+
+    def _automation(self) -> list[dict[str, object]]:
+        """The beds track's volume automation: out around each MUSIC cue that sounded over a bed, back in after.
+
+        The way back is `BED_DUCK_SECONDS` long, or shorter when the bed closes sooner (a new bed starting there
+        begins at full volume). A cue that follows another within the fades stays down between them.
+        """
+        points: list[tuple[int, float, tuple[int, int] | None]] = []
+        ramp_end = -1
+        for duck in self._ducks:
+            back = duck.end + int(SR * BED_DUCK_SECONDS)
+            closed = self._bed_closed.get(duck.bed)
+            if closed is not None:
+                back = max(duck.end + 1, min(back, closed))
+            if points and duck.down < ramp_end:
+                points.pop()  # the previous cue's way back is not taken
+            else:
+                points.append((duck.down, 0.0, duck.base))
+            points += [(duck.start, BED_DUCK_DB, duck.base), (duck.end, BED_DUCK_DB, duck.base), (back, 0.0, duck.base)]
+            ramp_end = back
+        return [{"anchor": self._anchor(at, base), "db": db, "curve": "linear"} for at, db, base in points]
+
+    def _when(self, anchor: Mapping[str, object]) -> int | None:
+        if "at" in anchor:
+            return _samples(anchor["at"])
+        return self._line_end[int(anchor["line"])] + _samples(anchor.get("offset", 0.0))  # type: ignore[call-overload]
 
     def _place(self, k: int) -> None:
         cue = self.cues[k]
         kind = str(cue["kind"])
         if kind == "BED":
             self._close_bed(self.t)
-            if is_stop(str(cue["desc"])):
+            if is_stop(str(cue["desc"])) or self._ended:
                 return
             asset, audio = self.sources.ensure(kind, str(cue["desc"]))
-            self._bed = (k, asset.key, self.t, audio, self._ref)
+            self._bed = _Bed(k, asset.key, self.t, audio, self._ref, BedPlan(asset.key, len(audio)))
             return
+        if k == self.closing:
+            self._close_bed(self.t)
+            self._ended = True
         asset, audio = self.sources.ensure(kind, str(cue["desc"]))
         start = max(0, self.t - (int(SR * SFX_OVERLAP_SECONDS) if kind == "SFX" else 0))
         track = CUE_TRACK.get(kind, "sfx")
         clip = _clip(f"cue-{k}", {"kind": "cue", "key": asset.key}, len(audio), self._anchor(start, self._ref), CUE_GAIN.get(kind, 0.75), cue=k)
         self._put(track, self._free_lane(track, start), clip, start, audio)
+        if kind == "MUSIC" and self._bed is not None:
+            self._ducks.append(_Duck(self._bed.cue, max(0, start - int(SR * BED_DUCK_SECONDS)), start, start + len(audio), self._ref))
         self.t = start + len(audio) + int(SR * CUE_TAIL_SECONDS)
 
     def add(self, group: Sequence[Mapping[str, object]]) -> None:
@@ -673,6 +810,8 @@ class Timeline:
         by_id = {int(line["i"]): line for line in group}  # type: ignore[call-overload]
         self.lines.extend(_timed(by_id[i], [entry]) for i, entry in _line_spans(self.placed[-1], by_id, self.sources))
         self._ref = (ids[-1], self.t + len(paced.audio))
+        for i in ids:
+            self._line_end[i] = self._ref[1]
         self.t = self.t + len(paced.audio) + int(SR * GAP_SECONDS)
 
     def finish(self) -> int:
@@ -690,27 +829,30 @@ class Timeline:
             return self.total
         final = self.t - int(SR * SFX_OVERLAP_SECONDS)
         if self._bed is not None:
-            if self.t - self._bed[2] < 4 * int(SR * BED_FADE_SECONDS):
-                final = min(final, self._bed[2])
+            if self.t - self._bed.start < 4 * int(SR * BED_FADE_SECONDS):
+                final = min(final, self._bed.start)
             else:
                 final = min(final, self.t - int(SR * BED_FADE_SECONDS))
         return max(0, final)
 
     def mixdown(self, start: int, end: int) -> np.ndarray:
-        """The summed, unnormalised samples `[start, end)`; an open bed's settled part is its tiles so far, faded in."""
+        """The summed, unnormalised samples `[start, end)`; an open bed's settled part is its segments so far, faded in, under the beds automation so far."""
         total = self.total if self.total is not None else end
         end = min(end, total)
         placed = list(self.placed)
-        if self._bed is not None and end > self._bed[2]:
+        if self._bed is not None and end > self._bed.start:
             for clip, at, audio in self._tiles(end, closing=False):
                 placed.append(_Placed(track="beds", lane="main", field="(open bed)", clip=clip, audio=audio, start=at))
-        return _mix_range(placed, {}, _no_anchor, start, end)
+        return _mix_range(placed, {"beds": {"automation": self._automation()}}, self._when, start, end)
 
     def document(self) -> dict[str, object]:
         """The auto mix as a document proposal (`write_mix`, `by: "auto"`)."""
         return {
             "manifest_version": self.manifest_version,
-            "tracks": {name: {"lanes": self.lanes[name], "volume": 0.0, "mute": False, "solo": False, "automation": []} for name in TRACKS},
+            "tracks": {
+                name: {"lanes": self.lanes[name], "volume": 0.0, "mute": False, "solo": False, "automation": self._automation() if name == "beds" else []}
+                for name in TRACKS
+            },
             "master": dict(AUTO_MASTER),
         }
 
