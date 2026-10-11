@@ -11,6 +11,7 @@
  * that binds it into a registry entry.
  */
 
+import { planBeatsFor } from "@openthink/pablo-core";
 import type { CoreState } from "../../core/machine";
 import { chapterPreconditions, novelNext, novelUnits, readNovelOutputState, readNovelState } from "../../novel/machine";
 import { buildChapterPack } from "../../novel/pack";
@@ -60,7 +61,8 @@ export const NOVEL: OutputDefinition = {
   rulesTemplate: NOVEL_RULES_TEMPLATE,
   stages: ["chapter", "revise", "publish"],
   plan: novelDefaultPlan,
-  preconditions: (workDir, unit) => chapterPreconditions(readNovelState(workDir), unit),
+  preconditions: (workDir, unit) =>
+    chapterPreconditions(readNovelState(workDir), unit, planBeatsFor(workDir, NOVEL_ID, unit)),
   pack: buildChapterPack,
   rituals: { afterMerge: runAfterMerge, afterRevision: runAfterRevision },
   publish: { targets: NOVEL_PUBLISH_TARGETS, run: publishWork },

@@ -28,7 +28,8 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { BEATS_FILE } from "@openthink/pablo-core";
+import { BEATS_FILE, parsePlanRows } from "@openthink/pablo-core";
+import type { PlanFileRow } from "@openthink/pablo-core";
 import { coreNext, coreStages, readCoreState } from "./core/machine";
 import { gitCommit } from "./init";
 import { markerPath, readMarker } from "./marker";
@@ -287,6 +288,42 @@ export function removeOutput(vaultRoot: string, workDir: string, type: string | 
   return { ok: true, action: "remove", type: id, paths, committed, ...(to !== undefined ? { archived: to } : {}), ...(notice ? { notice } : {}) };
 }
 
+/**
+ * The plan to write: the existing `plan.md`'s rows kept (the author edits the
+ * mapping, so a unit's number, title and beats are never rewritten), their
+ * status refreshed from the unit's file; a row whose unit has no file and
+ * whose beats no longer all exist is dropped as stale; and a row appended for
+ * every beat no kept row covers, from the type's default plan, numbered after
+ * the last kept unit. With no existing plan this is the default
+ * plan itself.
+ */
+export function mergePlan(def: OutputDefinition, workDir: string, existing: readonly PlanFileRow[]): PlanRow[] {
+  const defaults = def.plan(workDir);
+  if (existing.length === 0) return [...defaults];
+  const units = new Map(def.report(workDir, readCoreState(workDir)).units.map((u) => [u.unit, u]));
+  const beats = new Set(defaults.flatMap((r) => r.beats));
+  const byUnit = new Map(defaults.map((r) => [r.unit, r]));
+  const kept: PlanRow[] = [];
+  for (const row of existing) {
+    const unit = units.get(row.unit);
+    // The type's own account of the unit wins (the default plan's status, the same one a first run wrote), else its file's.
+    const status = byUnit.get(row.unit)?.status ?? (unit !== undefined && unit.file !== undefined ? unit.status : "beat");
+    const drafted = status !== "beat" || (unit !== undefined && unit.file !== undefined);
+    if (!drafted && row.beats.some((b) => !beats.has(b))) continue;
+    kept.push({ unit: row.unit, title: row.title, beats: row.beats, status });
+  }
+  const covered = new Set(kept.flatMap((r) => r.beats));
+  let next = Math.max(0, ...kept.map((r) => r.unit)) + 1;
+  for (const d of defaults) {
+    if (d.beats.length === 0 || d.beats.every((b) => covered.has(b))) continue;
+    const unit = next;
+    next += 1;
+    for (const b of d.beats) covered.add(b);
+    kept.push({ ...d, unit });
+  }
+  return kept.sort((a, b) => a.unit - b.unit);
+}
+
 /** `pablo output plan <type>`: rewrite `outputs/<type>/plan.md` from the type's default plan and commit it. */
 export function planOutput(vaultRoot: string, workDir: string, type: string | undefined, opts: { readonly dryRun?: boolean } = {}): OutputPlanResult {
   const def = known("plan", type);
@@ -297,9 +334,10 @@ export function planOutput(vaultRoot: string, workDir: string, type: string | un
   if (found.marker.outputs[id] === undefined) return refuse("plan", `the work has no ${id} output; add it with \`pablo output add ${id}\``);
 
   const rel = planFile(id);
-  const rows = def.def.plan(workDir);
-  const text = renderPlan(def.def, rows);
   const abs = join(workDir, rel);
+  const existing = existsSync(abs) ? parsePlanRows(readFileSync(abs, "utf8")) : [];
+  const rows = mergePlan(def.def, workDir, existing);
+  const text = renderPlan(def.def, rows);
   const changed = !existsSync(abs) || readFileSync(abs, "utf8") !== text;
   const dryRun = opts.dryRun === true;
   if (dryRun || !changed) return { ok: true, type: id, path: rel, rows, changed, dryRun, committed: false };

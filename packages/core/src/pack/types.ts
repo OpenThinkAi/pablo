@@ -119,7 +119,15 @@ export interface WorkIdentity {
 
 export interface DraftingInputs {
   readonly work: WorkIdentity;
+  /** The unit's first (primary) beat. */
   readonly beat: BeatRow;
+  /**
+   * The rest of the beats the unit tells, in order (AGT-1670: a plan row may
+   * map one unit onto several beats). Empty or absent for the usual one beat.
+   */
+  readonly moreBeats?: readonly BeatRow[] | undefined;
+  /** The unit's number when it differs from its beat's (a plan that maps unit 1 to beats 4-5); defaults to the beat's. */
+  readonly unit?: number | undefined;
   /** `<vault>/style/*.md`. The built-in craft rules are added on top, always. */
   readonly style: readonly TextSource[];
   /**
@@ -127,6 +135,11 @@ export interface DraftingInputs {
    * and voice), layered after `style`. The period facts are in `periodFacts`.
    */
   readonly workRules?: TextSource | undefined;
+  /**
+   * The output's own `outputs/<type>/RULES.md` (AGT-1670), layered after the
+   * work's rules and before the unit's slices. Its own slice, `outputRules`.
+   */
+  readonly outputRules?: TextSource | undefined;
   /** The work's period and place facts, usually a section of its `QWEN.md`. */
   readonly periodFacts?: TextSource | undefined;
   /** `bible/characters/*`: who exists. */

@@ -116,11 +116,23 @@ export function readNovelState(workDir: string): NovelState {
  * other checks all need the beat's story date or text and cannot run
  * without it.
  */
-export function chapterPreconditions(state: NovelState, chapter: number): ChapterPreconditions {
-  const beat = state.beats.find((row) => row.chapter === chapter);
-  if (beat === undefined) {
-    return { ready: false, missing: [`no beat for chapter ${chapter} in ${state.outlineFile}`] };
+export function chapterPreconditions(
+  state: NovelState,
+  chapter: number,
+  /** The beats the unit tells when its plan row maps it onto others (AGT-1670); default `[chapter]`. */
+  beatNumbers: readonly number[] = [chapter],
+): ChapterPreconditions {
+  const numbers = beatNumbers.length > 0 ? beatNumbers : [chapter];
+  const found = numbers.map((n) => ({ n, row: state.beats.find((row) => row.chapter === n) }));
+  const absent = found.filter((f) => f.row === undefined);
+  if (absent.length > 0) {
+    return {
+      ready: false,
+      missing: absent.map((f) => `no beat for chapter ${f.n} in ${state.outlineFile}`),
+    };
   }
+  const beats = found.map((f) => f.row as NonNullable<typeof f.row>);
+  const beat = beats[0] as NonNullable<(typeof beats)[number]>;
 
   const missing: string[] = [];
 
@@ -137,7 +149,7 @@ export function chapterPreconditions(state: NovelState, chapter: number): Chapte
   }
 
   // The core's "facts decided" stage, checked for this unit's beat.
-  missing.push(...undecidedPicks(state, beat.beat));
+  for (const b of beats) missing.push(...undecidedPicks(state, b.beat));
 
   return { ready: missing.length === 0, missing };
 }

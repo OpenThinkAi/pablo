@@ -47,15 +47,20 @@ export type {
 } from "./receipts";
 export { withReceipts } from "./receipts";
 export { fileReceiptSink, RECEIPTS_RELATIVE_PATH, receiptsPath } from "./receipt-log";
-export type { ReadDraftingOptions, TimelineAt } from "./vault";
+export type { PlanFileRow, ReadDraftingOptions, TimelineAt } from "./vault";
 export {
   AGENT_SECTION_HEADING,
   chapterTail,
   DEFAULT_TAIL_WORDS,
   gateTimeline,
+  outputPlanFile,
+  outputRulesFile,
+  parseBeatList,
   parseBeatRow,
   parseBeatRows,
+  parsePlanRows,
   parseWorkTitle,
+  planBeatsFor,
   PERIOD_FACTS_SECTION,
   readDraftingInputs,
   readStyle,

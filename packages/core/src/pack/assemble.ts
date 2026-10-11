@@ -254,21 +254,35 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
 function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
   const minScenes = inputs.minScenes ?? DEFAULT_MIN_SCENES;
   const { beat } = inputs;
+  const beats = [beat, ...(inputs.moreBeats ?? [])];
   const form = inputs.work.description ?? "a novel";
 
   const brief = [
-    `You are drafting chapter ${beat.chapter} of ${form}, working title "${inputs.work.title}".`,
+    `You are drafting chapter ${inputs.unit ?? beat.chapter} of ${form}, working title "${inputs.work.title}".`,
     "This is a first draft the author will cut and reshape. Write the chapter and nothing",
     "else: no title, no notes, no summary, no questions.",
   ].join("\n");
 
-  const chapter = [
-    `- Story date: ${beat.storyDate}`,
-    `- Working title: ${beat.title}`,
-    `- Point of view: ${beat.pov} (close third person, one point-of-view character per scene)`,
-    `- Beat: ${beat.beat}`,
-    `- Length: about ${inputs.wordTarget} words. Stay within ten percent.`,
-  ].join("\n");
+  const length = `- Length: about ${inputs.wordTarget} words. Stay within ten percent.`;
+  // One beat is the usual unit; a plan row may map a unit onto several (AGT-1670), told in order.
+  const chapter =
+    beats.length === 1
+      ? [
+          `- Story date: ${beat.storyDate}`,
+          `- Working title: ${beat.title}`,
+          `- Point of view: ${beat.pov} (close third person, one point-of-view character per scene)`,
+          `- Beat: ${beat.beat}`,
+          length,
+        ].join("\n")
+      : [
+          `- Working title: ${beat.title}`,
+          `- This chapter tells ${beats.length} beats, in order; tell all of them and nothing beyond them:`,
+          ...beats.map(
+            (b, i) =>
+              `  ${i + 1}. Story date: ${b.storyDate}. Title: ${b.title}. Point of view: ${b.pov} (close third person, one point-of-view character per scene). Beat: ${b.beat}`,
+          ),
+          length,
+        ].join("\n");
 
   const specs: SliceSpec[] = [
     {
@@ -320,6 +334,17 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       heading: "# Rules for this work (binding; they add to the prose rules above)",
       text: inputs.workRules?.text.trim() ?? "",
       source: inputs.workRules?.path,
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 2,
+    },
+    {
+      name: "outputRules",
+      heading: "# Rules for this output (binding; they add to the rules above)",
+      text: inputs.outputRules?.text.trim() ?? "",
+      source: inputs.outputRules?.path,
       required: false,
       keep: "head",
       minTokens: 0,
