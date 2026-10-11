@@ -10,13 +10,14 @@
  * so none of this runs for it: no `uv`, no venv, no provisioning.
  *
  * Where scripts live matches `packages/casting/src/pablo_casting/binding.py`:
- * `outputs/radio/episodes/` when the work has one, else `chapters/` (the
+ * `outputs/radio/episodes/` when the work has one, else the novel's chapter directory (the
  * sandbox drama, whose episode scripts are chapter files).
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensureProvisioned, realCastingDeps, runPython } from "./casting";
+import { OUTPUTS } from "./outputs/registry";
 import type { CastingContext, CastingDeps } from "./casting";
 import type { VerbResult } from "./verbs";
 
@@ -29,7 +30,7 @@ const EPISODE_FILE = /^\d+-.*\.md$/;
 /** The directory a work's episode scripts are read from. */
 export function radioScriptDir(work: string): string {
   const episodes = join(work, "outputs", "radio", "episodes");
-  return existsSync(episodes) ? episodes : join(work, "chapters");
+  return existsSync(episodes) ? episodes : join(work, OUTPUTS.novel.artifactDir);
 }
 
 /** Whether any `NN-*.md` in the script directory carries a `CAST:` line, i.e. the work has radio scripts. */

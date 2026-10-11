@@ -1,7 +1,8 @@
 /**
  * `pablo check` (AGT-1234): provenance and mechanical-tells scanning.
  *
- * Two independent checks over a work's `chapters/*.md`:
+ * Two independent checks over the `*.md` units of a work's output (the
+ * novel's chapters; the registry's `artifactDir`):
  *
  * 1. **Provenance** — a chapter whose frontmatter lacks `model` or
  *    `prompt_hash` is "unprovenanced": prose the model never produced, or
@@ -24,6 +25,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { TextSource } from "@openthink/pablo-core";
 import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
+import { outputForWork } from "./outputs/registry";
 import { radioCheck, radioCheckLines, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
 
@@ -360,7 +362,8 @@ export function isUnprovenanced(text: string): boolean {
  * `checkFile` + `isUnprovenanced` over each. `file`, when given, may be
  * work-relative or absolute — it must resolve inside `workDir`, or this
  * refuses (exit 2) instead of scanning outside the work. With no `file`,
- * every `chapters/*.md` file is scanned, sorted by name.
+ * every `*.md` file in the work's output directory (`artifactDir`) is
+ * scanned, sorted by name.
  *
  * Otherwise always succeeds with exit 0 (AC3): a hit, or an unprovenanced
  * file, is data the scan reports, never a reason to fail. AGT-1237's `write`
@@ -391,7 +394,7 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string): Ch
     }
     filePaths = [resolved];
   } else {
-    const chaptersDir = join(workDir, "chapters");
+    const chaptersDir = join(workDir, outputForWork(workDir).artifactDir);
     filePaths = existsSync(chaptersDir)
       ? readdirSync(chaptersDir)
           .filter((name) => name.endsWith(".md"))

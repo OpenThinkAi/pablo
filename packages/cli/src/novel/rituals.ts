@@ -24,6 +24,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import type { Adapter } from "@openthink/pablo-core";
 import { beatsFile, continuityFile } from "@openthink/pablo-core";
+import { novelUnitOfPath } from "../outputs/novel/units";
 import { runContinuity } from "./continuity";
 
 export type RitualStatus = "ran" | "skipped" | "failed";
@@ -37,7 +38,7 @@ export interface Ritual {
 /**
  * One of the author's own review comments (AGT-1581), with the text of the line it was on, handed to the merge so the
  * note step keeps it after the branch and its comment store are gone. `path` is the repo-relative path of the file
- * commented on; only a comment on `chapters/NN-*.md` reaches a chapter's note.
+ * commented on; only a comment on a chapter file (`novelUnitOfPath` names its number) reaches a chapter's note.
  */
 export interface AuthorNote {
   readonly path: string;
@@ -48,11 +49,8 @@ export interface AuthorNote {
   readonly body: string;
 }
 
-/** The chapter number a repo-relative path names (`.../chapters/03-the-well.md` is 3), or undefined. */
-export function chapterOfPath(path: string): number | undefined {
-  const m = path.match(/(?:^|\/)chapters\/(\d+)-[^/]*\.md$/);
-  return m ? Number(m[1]) : undefined;
-}
+/** The chapter number a repo-relative path names, or undefined: the novel output's `unitOfPath` (`outputs/novel/units.ts`). */
+export const chapterOfPath = novelUnitOfPath;
 
 export interface RitualOptions {
   /** The project's slug (from `pablo.json`), used in the git and think messages. */

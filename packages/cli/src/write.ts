@@ -32,8 +32,11 @@ import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./
 import { checkFile, loadCheckRules } from "./check";
 import type { Hit } from "./check";
 import { readMarker } from "./marker";
-import { buildChapterPack, DEFAULT_WORD_TARGET } from "./novel/pack";
-import { chapterPreconditions, readNovelState } from "./novel/machine";
+import { DEFAULT_WORD_TARGET } from "./novel/pack";
+import { novelUnitFileName, slugify } from "./outputs/novel/units";
+import { workOutput } from "./outputs/registry";
+
+export { slugify };
 
 /**
  * Exit codes: the contract every ticket builds on, defined once in `cli.ts`
@@ -129,17 +132,9 @@ function emitError(message: string, missing: readonly string[] | undefined, code
   if (missing !== undefined) for (const item of missing) console.error(`  ${item}`);
 }
 
-/** lowercase, non-alphanumerics collapsed to one `-`, leading/trailing `-` trimmed. */
-export function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-/** `NN-<slug>.md`, `NN` zero-padded to at least two digits — the filename `chapterPreconditions`'s `readChapters` also expects. */
+/** `NN-<slug>.md`, `NN` zero-padded to at least two digits — the novel output's `unitFileName`, the filename `chapterPreconditions`'s `readChapters` also expects. */
 export function chapterFileName(chapter: number, beatTitle: string): string {
-  return `${String(chapter).padStart(2, "0")}-${slugify(beatTitle)}.md`;
+  return novelUnitFileName(chapter, beatTitle);
 }
 
 /** A YAML scalar needs quoting only when it contains `:` or opens with a quote/indicator character. */
@@ -195,9 +190,8 @@ interface DraftBranch {
   readonly sha: string;
 }
 
-/** `draft/chNN`, or the first free `draft/chNN-vK` when that branch already exists (a re-draft). */
-function draftBranchName(repo: string, chapter: number): string {
-  const base = `draft/ch${String(chapter).padStart(2, "0")}`;
+/** The output's draft branch (`draft/chNN`), or the first free `<branch>-vK` when that branch already exists (a re-draft). */
+function draftBranchName(repo: string, base: string): string {
   if (!branchExists(repo, base)) return base;
   for (let v = 2; ; v += 1) {
     if (!branchExists(repo, `${base}-v${v}`)) return `${base}-v${v}`;
@@ -255,8 +249,8 @@ function emitWriteSuccess(
  * it (refuse, exit 2, naming `missing[]`, if unmet — AC1); assemble the
  * drafting pack (`buildChapterPack`, which also refuses on a `neverSend`
  * violation, AC3). With `--dry-run`, render it and exit 0. Without, send the
- * pack once to the routed provider, normalize the answer, write
- * `chapters/NN-<slug>.md` with provenance frontmatter (refusing instead of
+ * pack once to the routed provider, normalize the answer, write the unit
+ * file (`<artifactDir>/NN-<slug>.md`) with provenance frontmatter (refusing instead of
  * overwriting unless `--force`), append a receipt, run the post-write
  * mechanical-tells check, and return the receipt.
  */
@@ -295,14 +289,15 @@ export async function runWrite(
     return markerResult.code;
   }
 
-  const state = readNovelState(projectPath);
-  const preconditions = chapterPreconditions(state, chapter);
+  // The work's output (the novel, today) owns the preconditions, the pack, the file's place and the branch.
+  const output = workOutput(markerResult.marker.outputs);
+  const preconditions = output.preconditions(projectPath, chapter);
   if (!preconditions.ready) {
     emitError(`pablo: chapter ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
     return 2;
   }
 
-  const packResult = buildChapterPack(vaultRoot, projectPath, chapter, {
+  const packResult = output.pack(vaultRoot, projectPath, chapter, {
     words,
     scenes,
     marker: markerResult.marker,
@@ -349,9 +344,9 @@ export async function runWrite(
   // The filename comes from the beat's own title, not the model's answer — it
   // has to exist before anything is sent, so an existing file (without
   // --force) refuses before the model is ever called.
-  const fileName = chapterFileName(chapter, packResult.inputs.beat.title);
-  const workRelativePath = join("chapters", fileName).split(sep).join("/");
-  const filePath = join(projectPath, "chapters", fileName);
+  const fileName = output.unitFileName(chapter, packResult.inputs.beat.title);
+  const workRelativePath = join(output.artifactDir, fileName).split(sep).join("/");
+  const filePath = join(projectPath, output.artifactDir, fileName);
 
   if (existsSync(filePath) && !args.force) {
     emitError(`pablo: ${workRelativePath} already exists; use --force to overwrite`, undefined, 2, args.json);
@@ -363,11 +358,11 @@ export async function runWrite(
   // is not a git repository refuses up front rather than after the draw.
   const repo = repoRoot(projectPath);
   if (repo === undefined) {
-    emitError(`pablo: write needs ${projectPath} inside a git repository (the draft is committed on draft/ch${String(chapter).padStart(2, "0")})`, undefined, 2, args.json);
+    emitError(`pablo: write needs ${projectPath} inside a git repository (the draft is committed on ${output.branch(chapter)})`, undefined, 2, args.json);
     return 2;
   }
   const env = deps.env ?? process.env;
-  const branchName = draftBranchName(repo, chapter);
+  const branchName = draftBranchName(repo, output.branch(chapter));
   const created = createBranch(repo, markerResult.marker.slug, branchName, env);
   if (!created.ok) {
     emitError(created.notice, undefined, 1, args.json);
@@ -472,7 +467,7 @@ export async function runWrite(
 
   // The project's path inside the repo, so the file lands at the same place in the worktree.
   const projectInRepo = relative(realpathSync(repo), realpathSync(projectPath));
-  const worktreeFile = join(worktree, projectInRepo, "chapters", fileName);
+  const worktreeFile = join(worktree, projectInRepo, output.artifactDir, fileName);
   mkdirSync(dirname(worktreeFile), { recursive: true });
   writeFileSync(worktreeFile, fileContent, "utf8");
 
@@ -498,7 +493,7 @@ export async function runWrite(
     message: `${markerResult.marker.slug}: draft chapter ${chapter}`,
     author: { name: draftAdapter.model, email: `${slugify(draftAdapter.model) || "model"}@pablo.local` },
     receipt: pack.hash,
-    paths: [join(projectInRepo, "chapters", fileName)],
+    paths: [join(projectInRepo, output.artifactDir, fileName)],
   });
   if (!committed.ok) {
     emitError(`${committed.notice}\n  the draft is in ${worktree}, uncommitted`, undefined, 1, args.json);

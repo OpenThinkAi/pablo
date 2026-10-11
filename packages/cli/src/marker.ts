@@ -21,14 +21,14 @@
  *
  * `outputs` maps an output type to its entry: `{ dir?, added, ...more }`.
  * `added` (YYYY-MM-DD) is required; `dir` is where the type's units land
- * (the novel's is fixed at `"chapters"`); any other key is the type's own
- * and kept as written. Until the output registry lands (AGT-1666's S4,
- * `pablo-story-core`), `novel` is the only known type: any other is refused
- * by name.
+ * (the novel's is fixed at its artifact directory); any other key is the
+ * type's own and kept as written. The known types are the output registry's
+ * rows (`OUTPUTS`, `outputs/registry.ts`, AGT-1668); any other is refused by
+ * name.
  *
  * `format` (AGT-1666): the one-format-per-work key `outputs` replaced
  * (decided 2026-10-10). For one release `format: "novel"` is read as
- * migrated in memory, `outputs: { novel: { dir: "chapters" } }`, with a
+ * migrated in memory, `outputs: { novel: { dir: NOVEL_DIR } }`, with a
  * deprecation notice on stderr naming `pablo migrate outputs`; any other
  * `format` value is refused by name, and a marker carrying both `format` and
  * `outputs` is refused naming both keys.
@@ -46,18 +46,16 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { NOVEL_DIR } from "./outputs/novel/units";
+import type { OutputId } from "./outputs/registry";
+import { isOutputId, outputIds } from "./outputs/registry";
 import type { Refusal } from "./project";
 
-/**
- * The output types pablo knows. Only `novel` until the output registry
- * (`packages/cli/src/outputs/registry.ts`, pablo-story-core S4) replaces this
- * list as the single source.
- */
-export const OUTPUT_TYPES = ["novel"] as const;
-export type OutputType = (typeof OUTPUT_TYPES)[number];
+/** An output type's id: a key of the output registry (`OUTPUTS`, `outputs/registry.ts`). */
+export type OutputType = OutputId;
 
-/** The novel output's units live in `chapters/` at the work root, always (decided 2026-10-10). */
-export const NOVEL_DIR = "chapters";
+/** The novel output's artifact directory (the registry's `OUTPUTS.novel.artifactDir`), kept here for the marker's own checks. */
+export { NOVEL_DIR };
 
 /** The only value the deprecated `format` key may hold. */
 const LEGACY_FORMATS = ["novel"] as const;
@@ -135,13 +133,13 @@ function isObject(value: unknown): value is Record<string, unknown> {
 /** Validates the `outputs` value, refusing by the exact key (`outputs`, `outputs.<type>`, `outputs.<type>.<field>`). */
 function readOutputs(value: unknown, path: string): { ok: true; outputs: Outputs } | Refusal {
   if (!isObject(value)) {
-    return refuse(`pablo: ${path} has an invalid "outputs" (${JSON.stringify(value)}); it maps an output type to its entry, e.g. {"novel": {"dir": "chapters", "added": "2026-10-10"}}`, [path]);
+    return refuse(`pablo: ${path} has an invalid "outputs" (${JSON.stringify(value)}); it maps an output type to its entry, e.g. {"novel": {"dir": "${NOVEL_DIR}", "added": "2026-10-10"}}`, [path]);
   }
   const outputs: Record<string, OutputEntry> = {};
   for (const [type, entry] of Object.entries(value)) {
     const key = `outputs.${type}`;
-    if (!(OUTPUT_TYPES as readonly string[]).includes(type)) {
-      return refuse(`pablo: ${path} has unknown output type "${type}" at "${key}" (known: ${OUTPUT_TYPES.join(", ")})`, [path]);
+    if (!isOutputId(type)) {
+      return refuse(`pablo: ${path} has unknown output type "${type}" at "${key}" (known: ${outputIds().join(", ")})`, [path]);
     }
     if (!isObject(entry)) {
       return refuse(`pablo: ${path} has an invalid "${key}" (${JSON.stringify(entry)}); an output entry is an object with "added"`, [path]);

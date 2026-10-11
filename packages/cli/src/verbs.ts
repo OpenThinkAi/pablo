@@ -75,7 +75,7 @@ import type { Refusal } from "./project";
 import { proseCore } from "./prose";
 import { parseForEpisode, radioBind, radioCheck, radioStatus, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
-import { publishWork } from "./publish";
+import { OUTPUTS, workOutput } from "./outputs/registry";
 import { realRunner, shareRound } from "./share";
 import { listRoundStatus, notesPull } from "./notes";
 import type { Runner } from "./share";
@@ -532,7 +532,7 @@ async function runSaveVerb(args: z.infer<typeof SAVE_ARGS>, ctx: VerbContext): P
 
 const CHECK_ARGS = z.object({
   project: projectField,
-  file: z.string().optional().describe("Work-relative or absolute path to scan; omit to scan every chapters/*.md file."),
+  file: z.string().optional().describe(`Work-relative or absolute path to scan; omit to scan every ${OUTPUTS.novel.artifactDir}/*.md file.`),
 });
 
 async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext): Promise<VerbResult> {
@@ -646,7 +646,7 @@ async function runPublishVerb(args: z.infer<typeof PUBLISH_ARGS>, ctx: VerbConte
   const marker = readMarker(resolved.projectPath);
   if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
 
-  const outcome = publishWork(resolved.projectPath, marker.marker.slug, marker.marker.title, args.target);
+  const outcome = workOutput(marker.marker.outputs).publish.run(resolved.projectPath, marker.marker.slug, marker.marker.title, args.target);
   if (!outcome.ok) return { body: refusalBody(outcome), exitCode: outcome.code };
   return { body: { ok: true, target: outcome.target, where: outcome.where, chapters: outcome.chapters, words: outcome.words }, exitCode: 0 };
 }
@@ -1315,7 +1315,9 @@ const READ_ARGS = z.object({
   path: z
     .string()
     .describe(
-      'A file of the work, relative to it: a bible file ("bible/overview.md"), a chapter ("chapters/01-….md", returned joined into paragraphs), an outline, "continuity.md", or a research note ("research/…"). A directory lists its entries.',
+      'A file of the work, relative to it: a bible file ("bible/overview.md"), a chapter ("' +
+        OUTPUTS.novel.artifactDir +
+        '/01-….md", returned joined into paragraphs), an outline, "continuity.md", or a research note ("research/…"). A directory lists its entries.',
     ),
 });
 
@@ -1405,7 +1407,9 @@ export const VERBS: readonly Verb[] = [
   {
     name: "migrate",
     description:
-      "One-time migrations of a project. `lines` splits chapters/*.md to one sentence per line (frontmatter untouched) and commits exactly those files. `outputs` rewrites pablo.json's `format` to `outputs.novel`, creates outputs/novel/ (plan.md, RULES.md), moves continuity.md to outputs/novel/continuity.md and outline/chapters.md to outline/beats.md, creates facts.md, and commits exactly those paths. Both are idempotent; `dry-run` lists what would change.",
+      "One-time migrations of a project. `lines` splits " +
+      OUTPUTS.novel.artifactDir +
+      "/*.md to one sentence per line (frontmatter untouched) and commits exactly those files. `outputs` rewrites pablo.json's `format` to `outputs.novel`, creates outputs/novel/ (plan.md, RULES.md), moves continuity.md to outputs/novel/continuity.md and outline/chapters.md to outline/beats.md, creates facts.md, and commits exactly those paths. Both are idempotent; `dry-run` lists what would change.",
     args: MIGRATE_ARGS,
     run: runMigrateVerb,
     positionalArgs: ["sub"],
