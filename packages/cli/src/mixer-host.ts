@@ -1,6 +1,6 @@
 /**
  * The mixer's host (AGT-1766, pm project `pablo-mixer`, "The mixer view"): what `pablo mixer`'s window
- * (`views/mixer.tsx`, a later ticket) is mounted on. Like the review player's host it is the only thing that
+ * (`views/mixer.tsx`, AGT-1768, opened by `openMixer` below) is mounted on. Like the review player's host it is the only thing that
  * touches the casting directory; the view is dumb and never reads a file.
  *
  * It answers four mutations (names and payloads in `views/mixer-protocol.ts`), each reading the disk afresh:
@@ -20,15 +20,18 @@
  * the shape of each call and relays. A failure is a thrown plain-words `Error`; ui-leaf hands it to the view.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MutationHandler } from "@openthink/ui-leaf";
+import { mount } from "@openthink/ui-leaf";
+import type { MountOptions, MutationHandler, View } from "@openthink/ui-leaf";
+import type { MixerData } from "../views/mixer";
 import { MUTATIONS } from "../views/mixer-protocol";
 import type { ClipAudioPayload, ManifestCue, ManifestLine, MixDiff, MixPayload, MixSource, MixVersionInfo, PeaksPayload, SavedMixPayload } from "../views/mixer-protocol";
 import { runCasting } from "./casting";
 import type { CastingDeps } from "./casting";
-import { episodeTitle } from "./review-host";
+import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./reader-host";
+import { REVIEW_CSP, castingDir, episodeTitle } from "./review-host";
 
 type Env = Record<string, string | undefined>;
 
@@ -37,6 +40,8 @@ export interface MixerHostOptions {
   readonly work: string;
   /** The vault the work lives in; the cue library defaults to `<vault>/casting/cues`. */
   readonly vault?: string;
+  /** `--library DIR`: the library root whose `cues/` hold the cue audio (over the config and the vault). */
+  readonly library?: string;
   readonly env: Env;
   /** The casting side (`realCastingDeps(env)` in production, a fake under `bun test`). */
   readonly casting: CastingDeps;
@@ -86,7 +91,8 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
   /** One `mixer` call; a refusal or error is thrown with the Python side's own words. */
   function call(op: string, args: readonly string[]): Record<string, unknown> {
     const vault = options.vault === undefined ? [] : ["--vault", options.vault];
-    const result = runCasting(["mixer", op, ...args, ...vault], ctx, options.casting, work);
+    const library = options.library === undefined ? [] : ["--library", options.library];
+    const result = runCasting(["mixer", op, ...args, ...vault, ...library], ctx, options.casting, work);
     const body = isRecord(result.body) ? result.body : {};
     if (result.exitCode !== 0 || body["ok"] === false) {
       throw new Error(typeof body["message"] === "string" ? body["message"] : `the mixer could not ${op} (exit ${result.exitCode})`);
@@ -167,4 +173,118 @@ export function mixerMutations(host: MixerHost): Record<string, MutationHandler>
     saveMix: async (args) => host.saveMix(args),
   };
   return handlers;
+}
+
+// ---------------------------------------------------------------------------
+// The window (AGT-1768)
+// ---------------------------------------------------------------------------
+
+export const NO_CHROME_MIXER_MESSAGE =
+  "pablo: the mixer opens in Google Chrome, and I could not find it on this Mac. Install Chrome (https://www.google.com/chrome) and run this again; nothing was changed.";
+
+/** The review player's CSP (ui-leaf's strict preset plus media from data:/blob:). */
+export const MIXER_CSP = REVIEW_CSP;
+
+/** After the window disconnects and does not come back, close its server. */
+const DISCONNECT_CLOSE_DELAY_MS = 5000;
+
+/** The mix versions on disk for an episode (`renders/epNN/mix.v<m>.json`), read without the Python side. */
+export function mixVersionsOnDisk(work: string, episode: number): number[] {
+  const dir = join(castingDir(work), "renders", `ep${String(episode).padStart(2, "0")}`);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .map((name) => /^mix\.v(\d+)\.json$/.exec(name)?.[1])
+    .filter((v): v is string => v !== undefined)
+    .map(Number)
+    .sort((a, b) => a - b);
+}
+
+export interface OpenMixerDeps {
+  readonly env: Env;
+  readonly mount: (options: MountOptions) => Promise<View>;
+  readonly existsExecutable?: (path: string) => boolean;
+  readonly binaryPath: () => string | undefined;
+}
+
+export interface OpenMixerRequest {
+  readonly work: string;
+  readonly title: string;
+  readonly episode: number;
+  readonly version?: number;
+  readonly vault?: string;
+  readonly library?: string;
+  readonly casting: CastingDeps;
+}
+
+export type OpenMixerOutcome =
+  | { readonly ok: true; readonly view: View; readonly closed: Promise<void>; readonly host: MixerHost }
+  | { readonly ok: false; readonly code: 1 | 2; readonly message: string };
+
+/**
+ * Mounts the mixer on one episode's mix document. Refuses (exit 2), opening nothing, when the episode has no mix
+ * document (or not the asked version), and (unless `UI_LEAF_NO_OPEN` is set, as headless runs and smoke tests
+ * do) when Google Chrome is missing.
+ */
+export async function openMixer(request: OpenMixerRequest, signal?: AbortSignal, overrides: Partial<OpenMixerDeps> = {}): Promise<OpenMixerOutcome> {
+  const deps: OpenMixerDeps = { env: process.env, mount, binaryPath: resolveUiLeafBinary, ...overrides };
+  const { work, title, episode, version } = request;
+  const headless = deps.env["UI_LEAF_NO_OPEN"] !== undefined && deps.env["UI_LEAF_NO_OPEN"] !== "0";
+  if (!headless && findChrome(deps.existsExecutable) === undefined) return { ok: false, code: 2, message: NO_CHROME_MIXER_MESSAGE };
+
+  const found = mixVersionsOnDisk(work, episode);
+  if (found.length === 0) {
+    return { ok: false, code: 2, message: `pablo: mixer: episode ${episode} has no mix document yet (run pablo mix --output radio --unit ${episode}); nothing was opened` };
+  }
+  if (version !== undefined && !found.includes(version)) {
+    return { ok: false, code: 2, message: `pablo: mixer: episode ${episode} has no mix v${version} (it has ${found.map((v) => `v${v}`).join(", ")}); nothing was opened` };
+  }
+
+  const host = createMixerHost({
+    work,
+    env: deps.env,
+    casting: request.casting,
+    ...(request.vault === undefined ? {} : { vault: request.vault }),
+    ...(request.library === undefined ? {} : { library: request.library }),
+  });
+
+  // ui-leaf reads this from its inherited environment and, on its own, suppresses the window under ssh;
+  // this is a window meant to open. An explicit UI_LEAF_NO_OPEN is still honoured.
+  if (process.env["UI_LEAF_NO_OPEN"] === undefined) process.env["UI_LEAF_NO_OPEN"] = "0";
+
+  const data: MixerData = { title, episode, ...(version === undefined ? {} : { version }) };
+  const binaryPath = deps.binaryPath();
+  let view: View;
+  try {
+    view = await deps.mount({
+      view: "mixer",
+      viewsRoot: VIEWS_ROOT,
+      data,
+      title: `${title} — pablo mixer`,
+      mutations: mixerMutations(host),
+      shell: "app",
+      windowSize: { width: 1280, height: 820 },
+      port: 0,
+      silent: true,
+      csp: MIXER_CSP,
+      heartbeatTimeoutMs: 90_000,
+      ...(binaryPath === undefined ? {} : { binaryPath }),
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch (error) {
+    return { ok: false, code: 1, message: `pablo: mixer: could not open the mixer (${(error as Error).message})` };
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  view.onDisconnect(() => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(() => void view.close(), DISCONNECT_CLOSE_DELAY_MS);
+  });
+  view.onReconnect(() => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  });
+  const closed = view.closed.then(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+  return { ok: true, view, closed, host };
 }

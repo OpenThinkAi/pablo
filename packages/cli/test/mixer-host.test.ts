@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CastingDeps, CastingLayout } from "../src/casting";
 import { venvPython } from "../src/casting";
-import { createMixerHost, mixerMutations } from "../src/mixer-host";
+import type { MountOptions, View } from "@openthink/ui-leaf";
+import { parseCliArgs, runMixerView } from "../src/cli";
+import { NO_CHROME_MIXER_MESSAGE, createMixerHost, mixVersionsOnDisk, mixerMutations, openMixer } from "../src/mixer-host";
+import type { OpenMixerRequest } from "../src/mixer-host";
 import { MUTATIONS } from "../views/mixer-protocol";
 import type { ClipAudioPayload, MixPayload, PeaksPayload, SavedMixPayload } from "../views/mixer-protocol";
 
@@ -189,6 +192,92 @@ test("a save against a base that is no longer the newest is refused and says so"
   const { m, work } = machine();
   m.respond = () => ({ code: 2, body: { ok: false, code: 2, stale: true, newest: 3, message: "mix v1 is not the newest (v3); reload v3 and apply your edits to it. Nothing was written" } });
   expect(() => host(m, work).saveMix({ episode: 1, base: 1, document: { manifest_version: 1 } })).toThrow("not the newest");
+});
+
+// --- AGT-1768: the window ----------------------------------------------------------------------------------
+
+function fakeMount(): { mount: (options: MountOptions) => Promise<View>; calls: MountOptions[] } {
+  const calls: MountOptions[] = [];
+  const view = {
+    url: "http://127.0.0.1:1/#token=x",
+    id: "v",
+    port: 1,
+    closed: Promise.resolve({ reason: "closed" }),
+    onDisconnect: () => undefined,
+    onReconnect: () => undefined,
+    close: async () => undefined,
+  } as unknown as View;
+  return { mount: async (o) => (calls.push(o), view), calls };
+}
+
+const mixDoc = (work: string, version: number): void => {
+  const dir = join(work, "outputs", "radio", "casting", "renders", "ep01");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `mix.v${version}.json`), JSON.stringify({ ...DOC, version }), "utf8");
+};
+
+test("openMixer mounts the mixer view on the episode with the host's three read mutations live and a CSP that plays blobs", async () => {
+  const { m, work } = machine();
+  mixDoc(work, 1);
+  mixDoc(work, 2);
+  const fake = fakeMount();
+  const out = await openMixer({ work, title: "The Lamp Room", episode: 1, version: 1, vault: "/vault", library: "/lib", casting: m.deps }, undefined, {
+    mount: fake.mount,
+    existsExecutable: () => true,
+    binaryPath: () => undefined,
+    env: { PATH: "/nowhere" },
+  });
+  expect(out.ok).toBe(true);
+  const options = fake.calls[0] as MountOptions;
+  expect(options.view).toBe("mixer");
+  expect(options.shell).toBe("app");
+  expect(options.csp).toContain("media-src 'self' data: blob:");
+  expect(options.data).toEqual({ title: "The Lamp Room", episode: 1, version: 1 });
+  expect(Object.keys(options.mutations ?? {}).sort()).toEqual([...MUTATIONS].sort());
+  // the library and the vault reach the Python side, so cue audio comes from the right library
+  await options.mutations?.["loadMix"]?.({ episode: 1 });
+  expect(m.calls[0]).toEqual(["mixer", "load", "--episode", "1", "--vault", "/vault", "--library", "/lib", "--work", work, "--json"]);
+});
+
+test("openMixer refuses (2), opening nothing, an episode with no mix document, a missing version, and a Mac without Chrome", async () => {
+  const { m, work } = machine();
+  const fake = fakeMount();
+  const deps = { mount: fake.mount, existsExecutable: () => true, binaryPath: () => undefined, env: {} };
+  const none = await openMixer({ work, title: "t", episode: 1, casting: m.deps }, undefined, deps);
+  expect(none).toMatchObject({ ok: false, code: 2 });
+  expect((none as { message: string }).message).toContain("episode 1 has no mix document yet (run pablo mix");
+  mixDoc(work, 1);
+  const missing = await openMixer({ work, title: "t", episode: 1, version: 4, casting: m.deps }, undefined, deps);
+  expect((missing as { message: string }).message).toContain("has no mix v4 (it has v1)");
+  const noChrome = await openMixer({ work, title: "t", episode: 1, casting: m.deps }, undefined, { ...deps, existsExecutable: () => false });
+  expect(noChrome).toEqual({ ok: false, code: 2, message: NO_CHROME_MIXER_MESSAGE });
+  expect(fake.calls).toHaveLength(0);
+  // headless (UI_LEAF_NO_OPEN set) needs no Chrome: smoke runs and CI
+  expect((await openMixer({ work, title: "t", episode: 1, casting: m.deps }, undefined, { ...deps, existsExecutable: () => false, env: { UI_LEAF_NO_OPEN: "1" } })).ok).toBe(true);
+  expect(mixVersionsOnDisk(work, 1)).toEqual([1]);
+  expect(mixVersionsOnDisk(work, 7)).toEqual([]);
+});
+
+test("pablo mixer: --episode and --version (the mix version, not pablo's) are parsed; bad arguments exit 2; the window holds the process", async () => {
+  const parsed = parseCliArgs(["mixer", "--project", "lamp-room", "--episode", "1", "--version", "2", "--library", "/lib"]);
+  expect(parsed.version).toBe(false); // not "print pablo's version"
+  expect(parsed.values["version"]).toBe("2");
+  expect(parsed.values["library"]).toBe("/lib");
+  const { work } = machine();
+  let asked: OpenMixerRequest | undefined;
+  const open = (async (request: OpenMixerRequest) => {
+    asked = request;
+    return { ok: true, view: { url: "http://127.0.0.1:1/#t" }, closed: Promise.resolve() };
+  }) as unknown as typeof openMixer;
+  expect(await runMixerView(parsed, work, work, open)).toBe(0);
+  expect([asked?.work, asked?.episode, asked?.version, asked?.library]).toEqual([work, 1, 2, "/lib"]);
+
+  expect(await runMixerView(parseCliArgs(["mixer"]), undefined, work, open)).toBe(2);
+  expect(await runMixerView(parseCliArgs(["mixer", "--project", "x"]), work, work, open)).toBe(2);
+  expect(await runMixerView(parseCliArgs(["mixer", "--project", "x", "--episode", "zero"]), work, work, open)).toBe(2);
+  expect(await runMixerView(parseCliArgs(["mixer", "--project", "x", "--episode", "1", "--version", "0"]), work, work, open)).toBe(2);
+  const refusing = (async () => ({ ok: false, code: 2, message: "pablo: mixer: nope" })) as unknown as typeof openMixer;
+  expect(await runMixerView(parseCliArgs(["mixer", "--project", "x", "--episode", "1"]), work, work, refusing)).toBe(2);
 });
 
 test("the window may call the four mixer mutations and nothing else", async () => {

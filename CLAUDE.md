@@ -265,6 +265,25 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `mixmath.py` (spec in its docstring); change one and you
                 change both plus `packages/casting/tests/fixtures/
                 mixmath-golden.json`, which both suites assert within 1e-4.
+                The mixer (`pablo mixer --project W --episode N [--version
+                k] [--library DIR]`, AGT-1768): a ui-leaf view,
+                `views/mixer.tsx`, mounted by `src/mixer-host.ts`'s
+                `openMixer` (refused, exit 2, with no mix document; CLI-only,
+                not in `VERBS`; `--version` is the mix version, read as for
+                `mix`). Fixed tracks (Dialogue a lane per role, SFX, Beds,
+                Music) of clips with waveforms (`peaks`) on a ruler, a
+                playhead, zoom and scroll; Web Audio plays every clip
+                (`views/mixer-audio.ts`) with its gain, fades, same-lane
+                equal-power crossfades, track automation, and live track
+                volume/mute/solo (not saved: editing is M5); the master
+                matches `mix.py`'s peak normalising by rendering the
+                document offline once. Placement, envelopes, scheduling and
+                mute/solo are `views/mixer-logic.ts`'s pure functions:
+                clip starts resolve from anchors in whole samples exactly as
+                `mix.py`'s `_resolve`, and `packages/casting/tests/fixtures/
+                mix-anchors-golden.json` holds both sides to the same
+                placement, envelopes and automation
+                (`test_mixer_view_parity.py`, `mixer-logic.test.ts`).
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`
