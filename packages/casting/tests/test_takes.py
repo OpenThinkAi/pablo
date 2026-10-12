@@ -185,6 +185,10 @@ def test_no_code_path_deletes_or_rewrites_a_take() -> None:
         ("mix.py", "mix", "unlink"),
         # AGT-1766: the mixer's peaks cache (.pablo/casting/peaks/) is written by an atomic swap of its own staging file; never a take.
         ("mixer.py", "cmd_peaks", "replace"),
+        # AGT-1799: a cue's measured loudness is cached into its own sidecar by an atomic swap of a staging file (dropped
+        # only when the swap fails); the cue WAV and every take are never touched.
+        ("cues.py", "_loudness", "replace"),
+        ("cues.py", "_loudness", "unlink"),
     }
     found: set[tuple[str, str, str]] = set()
     for path in SRC.glob("*.py"):

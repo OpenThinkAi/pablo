@@ -197,6 +197,16 @@ const MIX_ARGS = z.object({
     .positive()
     .optional()
     .describe("The manifest version to mix (default: the newest). An unmixed version is completed in place; a version that already has audio is remixed into a new version (the newest only)."),
+  auto: z
+    .boolean()
+    .optional()
+    .describe(
+      "Write a fresh automatic mix even when the newest mix document still fits the takes (after the sound library or the mix rules changed): cues are re-resolved, so a cue a CC0 recording now matches comes from that recording.",
+    ),
+  sounds: z
+    .string()
+    .optional()
+    .describe("The CC0 sound library directory SFX and BED cues are built from (default: the casting config's `sounds`, else ~/.local/share/pablo/sounds)."),
 });
 
 const FIX_ARGS = z.object({
@@ -577,6 +587,8 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
         "mix",
         ...flag("--episode", episode),
         ...flag("--version", args.version),
+        ...(args.auto === true ? ["--auto"] : []),
+        ...flag("--sounds", args.sounds),
         ...flag("--vault", where.vault),
         "--work",
         work,

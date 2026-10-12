@@ -72,7 +72,20 @@ Commands:
              manifest (AGT-1684, AGT-1764, `mix.py`). The document is `--from`'s
              (written as the next mix version, `by: "human"`), else the newest
              one that fits the manifest's takes, else the auto mix, written
-             `by: "auto"`. Mixing an already-mixed version is a new version.
+             `by: "auto"`; `--auto` writes a fresh auto mix even when the newest
+             fits. Mixing an already-mixed version is a new version. SFX and BED
+             cues come from the CC0 sound library (`--sounds DIR`, else the
+             config's `sounds`, else `$XDG_DATA_HOME/pablo/sounds`) when a
+             recording matches, else from the generator (AGT-1799); every cue is
+             loudness-normalised to its kind's target first (`loudness.py`).
+- `sounds list|check [--sounds DIR]`  the sound library's recordings; `check`
+             refuses (exit 2) when any record lacks a CC0 / public-domain licence,
+             its source URL or its author.
+- `sounds match --kind SFX|BED --describe "..." [--sounds DIR]`  every recording
+             that matches a cue description, ranked, with the words that matched.
+- `sounds add FILE --from RECORD.json [--sounds DIR]`  copy a downloaded recording
+             (read only as audio) into the library beside its record; refused
+             without a CC0 / public-domain licence, a source URL and an author.
 - `fix --work W --episode N [--cues DIR] [--json-lines] [--vault V | --library DIR]`
              re-record only the episode's flagged lines (`flags.json`: the player's
              and perform's automatic ones, a flag's reason may bump the engine:
@@ -111,6 +124,7 @@ from pablo_casting.library import Library, LibraryRefusal, card_hash, check_slug
 from pablo_casting.manifest import ManifestError, referenced_takes, write_version
 from pablo_casting.receipts import append_receipt, now
 from pablo_casting.scorers import ScorerFactory, describe, real_scorers
+from pablo_casting.sounds import Sound, SoundLibrary, SoundRefusal, open_sounds, sounds_dir_for
 from pablo_casting.takes import (
     KEY_RE,
     AmbiguousKey,
@@ -136,7 +150,7 @@ Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix", "mixer")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix", "mixer", "sounds")
 VOICES_SUBCOMMANDS = ("list", "show", "retire")
 DEFAULT_CANDIDATES = 6
 
@@ -208,6 +222,8 @@ def _parser() -> _Parser:
     # mix
     parser.add_argument("--version", type=int, dest="mix_version")
     parser.add_argument("--cues", help="the cue library directory (default <library>/cues)")
+    parser.add_argument("--sounds", help="the CC0 sound library directory (default: the config's, else $XDG_DATA_HOME/pablo/sounds)")
+    parser.add_argument("--kind", help="sounds match: SFX or BED")
     # mixer
     parser.add_argument("--source", help="mixer peaks/audio: take:<key> or cue:<key>")
     parser.add_argument("--stretch", type=float)
@@ -701,6 +717,82 @@ def cmd_bind(env: Mapping[str, str], work: Path, args: argparse.Namespace) -> Re
         return refused(str(refusal))
 
 
+def _real_seams(env: Mapping[str, str], sounds: str | None, *, log: bool) -> Seams:
+    """The real cue seams: Stable Audio and the organ, the CC0 sound library and the configured loudness targets."""
+    from pablo_casting.cues import real_generators
+    from pablo_casting.loudness import targets_from
+
+    config = load_config(env)
+    return Seams(
+        generators=real_generators(),
+        log=(lambda message: print(message, file=sys.stderr, flush=True)) if log else (lambda message: None),
+        sounds=open_sounds(sounds, config.sounds, env),
+        loudness=targets_from(config.loudness),
+    )
+
+
+def _sound_body(sound: Sound) -> dict[str, object]:
+    return {
+        **sound.provenance(),
+        "kinds": list(sound.kinds),
+        "subjects": list(sound.subjects),
+        "tags": list(sound.tags),
+        "rhythmic": sound.rhythmic,
+        "seconds": sound.seconds,
+        "file": sound.path.name,
+    }
+
+
+def cmd_sounds(env: Mapping[str, str], args: argparse.Namespace) -> Result:
+    """`sounds list|check|match|add`: the CC0 sound library (AGT-1799)."""
+    sub = args.rest[0] if args.rest else None
+    try:
+        configured = load_config(env).sounds
+    except ConfigRefusal as refusal:
+        return refused(str(refusal))
+    root = sounds_dir_for(args.sounds, configured, env)
+    try:
+        if sub == "add":
+            if len(args.rest) != 2 or not args.from_file:
+                return error("usage: sounds add FILE --from RECORD.json")
+            source = Path(args.rest[1])
+            if not source.is_file():
+                return refused(f"{source} is not a file", missing=[str(source)])
+            try:
+                record = json.loads(Path(args.from_file).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as broken:
+                return refused(f"--from {args.from_file}: {broken}")
+            library = SoundLibrary.load(root) if root.is_dir() else SoundLibrary(root, [])
+            sound = library.add(source, record)
+            return {"ok": True, "root": str(root), "sound": _sound_body(sound), "message": f"added {sound.id} ({sound.licence}, {sound.source_url})"}, EXIT_OK
+        if sub not in ("list", "check", "match"):
+            return error(f'unknown sounds subcommand "{sub}": one of list, check, match, add')
+        if len(args.rest) > 1:
+            return error(f"usage: unexpected argument(s) for sounds {sub}: {' '.join(args.rest[1:])}")
+        if not root.is_dir():
+            return refused(f"there is no sound library at {root} (sounds add creates one; --sounds or the config's `sounds` names another)", missing=[str(root)])
+        library = SoundLibrary.load(root)
+        if sub == "list":
+            return {"ok": True, "root": str(root), "sounds": [_sound_body(s) for s in library.sounds], "message": f"{len(library.sounds)} recording(s) in {root}"}, EXIT_OK
+        if sub == "check":
+            return {"ok": True, "root": str(root), "count": len(library.sounds), "message": f"{len(library.sounds)} recording(s), every one CC0 or public domain with its source and author"}, EXIT_OK
+        if args.kind not in ("SFX", "BED") or not args.describe:
+            return error('usage: sounds match --kind SFX|BED --describe "..."')
+        from pablo_casting.cues import cue_key
+
+        found = library.matches(args.kind, args.describe, cue_key(args.kind, args.describe))
+        return {
+            "ok": True,
+            "root": str(root),
+            "kind": args.kind,
+            "desc": args.describe,
+            "matches": [m.as_body() for m in found],
+            "message": f"{found[0].sound.id} (score {found[0].score})" if found else "no recording matches: the cue would be generated",
+        }, EXIT_OK
+    except SoundRefusal as refusal:
+        return refused(str(refusal), **({"problems": refusal.problems} if refusal.problems else {}))
+
+
 def run(
     argv: Sequence[str],
     env: Mapping[str, str] | None = None,
@@ -722,7 +814,7 @@ def run(
         return error(f"a command is required: one of {', '.join(COMMANDS)}"), args.json
     if args.command not in COMMANDS:
         return error(f'unknown command "{args.command}": one of {", ".join(COMMANDS)}'), args.json
-    if args.rest and args.command not in ("takes", "manifest", "gate", "voices", "mixer"):
+    if args.rest and args.command not in ("takes", "manifest", "gate", "voices", "mixer", "sounds"):
         return error(f"usage: unexpected argument(s) for {args.command}: {' '.join(args.rest)}"), args.json
 
     work: Path | None = None
@@ -737,6 +829,8 @@ def run(
         return cmd_doctor(env), args.json
     if args.command == "pull":
         return cmd_pull(env, work, downloader or _default_downloader), args.json
+    if args.command == "sounds":
+        return cmd_sounds(env, args), args.json
     if args.command in ("takes", "manifest"):
         sub = args.rest[0] if args.rest else None
         if work is None:
@@ -789,6 +883,12 @@ def run(
     assert work is not None
     if args.command == "bind":
         return cmd_bind(env, work, args), args.json
+    real: Seams | None = None  # the real cue seams (generators, sound library, loudness targets), when a command mixes
+    if mixer is None and (args.command in ("fix", "mixer", "mix") or (args.command == "perform" and args.stream)):
+        try:
+            real = _real_seams(env, args.sounds, log=args.command != "mixer")
+        except (ConfigRefusal, SoundRefusal) as refusal:
+            return refused(str(refusal), **({"problems": refusal.problems} if isinstance(refusal, SoundRefusal) and refusal.problems else {})), args.json
     if args.command == "perform":
         from pablo_casting.perform import cmd_perform
 
@@ -798,10 +898,7 @@ def run(
             return refused(str(refusal)), args.json
         stream_seams: Seams | None = None
         if args.stream:
-            from pablo_casting.cues import real_generators
-            from pablo_casting.mix import Seams as StreamSeams  # `Seams` is local to run() (the fix/mix branches import it)
-
-            stream_seams = mixer or StreamSeams(generators=real_generators(), log=lambda message: print(message, file=sys.stderr, flush=True))
+            stream_seams = mixer or real
         return cmd_perform(
             env,
             work,
@@ -818,15 +915,15 @@ def run(
             mixer=stream_seams,
         ), args.json
     if args.command == "fix":
-        from pablo_casting.cues import real_generators
         from pablo_casting.fix import cmd_fix
-        from pablo_casting.mix import Seams, cmd_mix
+        from pablo_casting.mix import cmd_mix
 
         try:
             configured = load_config(env).library
         except ConfigRefusal as refusal:
             return refused(str(refusal)), args.json
-        fix_seams = mixer or Seams(generators=real_generators(), log=lambda message: print(message, file=sys.stderr, flush=True))
+        fix_seams = mixer or real
+        assert fix_seams is not None
         fix_work = work
 
         def remix(version: int) -> Result:
@@ -836,29 +933,29 @@ def run(
             env, work, args.episode, args.vault, args.library, configured, args.json_lines, engines or real_engine, scorers or real_scorers, remix
         ), args.json
     if args.command == "mixer":
-        from pablo_casting.cues import real_generators
-        from pablo_casting.mix import Seams, cues_dir_for
+        from pablo_casting.mix import cues_dir_for
         from pablo_casting.mixer import cmd_mixer
 
         try:
             configured = load_config(env).library
         except ConfigRefusal as refusal:
             return refused(str(refusal)), args.json
-        mixer_seams = mixer or Seams(generators=real_generators())
+        mixer_seams = mixer or real
+        assert mixer_seams is not None
         cues_dir = cues_dir_for(work, args.cues, args.library or configured, args.vault)
         return cmd_mixer(
             args.rest[0] if args.rest else None, work, args.episode, args.mix_version, args.source, args.stretch, args.base, args.from_file, cues_dir, mixer_seams
         ), args.json
     if args.command == "mix":
-        from pablo_casting.cues import real_generators
-        from pablo_casting.mix import Seams, cmd_mix
+        from pablo_casting.mix import cmd_mix
 
         try:
             configured = load_config(env).library
         except ConfigRefusal as refusal:
             return refused(str(refusal)), args.json
-        seams = mixer or Seams(generators=real_generators(), log=lambda message: print(message, file=sys.stderr, flush=True))
-        return cmd_mix(work, args.episode, args.mix_version, args.cues, args.library or configured, args.vault, seams, args.from_file), args.json
+        seams = mixer or real
+        assert seams is not None
+        return cmd_mix(work, args.episode, args.mix_version, args.cues, args.library or configured, args.vault, seams, args.from_file, args.auto), args.json
     try:
         episode = _episode_number(args.episode)
     except ValueError:

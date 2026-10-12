@@ -18,6 +18,7 @@ from test_mix import cue, cues_dir, fake_pacer, mixed, performed, seams, work  #
 
 from pablo_casting.cli import run
 from pablo_casting.cues import cue_key
+from pablo_casting.loudness import DEFAULT_TARGETS, integrated_lufs
 from pablo_casting.manifest import read_version
 from pablo_casting.mix import SR, Seams
 from pablo_casting.mixdoc import mix_path, mix_versions, read_mix
@@ -150,7 +151,9 @@ def test_clip_audio_for_a_cue_is_the_library_asset(work: Path, cues_dir: Path, e
     body, code = ask(work, cues_dir, s, "audio", "--source", f"cue:{cue_key('SFX', 'A door creaks')}")
     assert code == 0
     audio, rate = decode(body)
-    assert rate == SR and len(audio) == pytest.approx(0.5 * SR, abs=2) and np.max(np.abs(audio)) > 0.3
+    assert rate == SR and len(audio) == pytest.approx(0.5 * SR, abs=2) and np.max(np.abs(audio)) > 0.05
+    # the asset as the mix plays it: brought to the SFX loudness target, as the export does (AGT-1799)
+    assert integrated_lufs(audio, SR) == pytest.approx(DEFAULT_TARGETS["SFX"], abs=0.5)
     assert ask(work, cues_dir, s, "audio", "--source", "take:" + "c" * 64)[1] == 2
 
 
