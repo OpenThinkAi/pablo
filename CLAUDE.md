@@ -1,10 +1,14 @@
 # pablo — agent guide
 
+This file is for working **on** pablo (contributors and their agents). To **use**
+pablo, read `README.md` and `docs/` (getting-started, configuration, vault,
+commands, agents, readers).
+
 **pablo is a CLI that writes, with a full-terminal screen of its own** (decided
 2026-10-01, pm project `ai-terminal`, `--doc screen`; it supersedes the
 2026-09-06 "no screen" decision). Bare `pablo` inside a project opens the Ink
 screen in `packages/tui`; the CLI verbs and `pablo mcp` stay, so whatever agent
-Matt already likes (Claude Code, Codex, pi) can still drive pablo over the shell
+the author already likes (Claude Code, Codex, pi) can still drive pablo over the shell
 or MCP. pablo is the *manager* of the writing project: it knows the vault, the framework a
 work's story core and outputs follow, the author's voice, version control, and publishing, and hands
 any agent a structured way in and out.
@@ -14,7 +18,8 @@ Two invariants:
 1. **Prose is produced only through `pablo write`, on the configured local
    model.** The agent plans and discusses; it never drafts prose itself and
    never sends prose through its own context. pablo assembles the prompt,
-   sends it to the configured writer (Gemma 4 for Matt, by default), writes
+   sends it to the configured writer (the built-in `local` provider, an
+   OpenAI-compatible server on 127.0.0.1:8002, by default), writes
    the file, and returns a receipt.
 2. **pablo enforces the framework, in two layers** (decided 2026-10-10, pm
    project `pablo-story-core`; it supersedes "a format is a stage machine").
@@ -27,23 +32,23 @@ Two invariants:
    exactly what is missing and which layer is short, so the agent can steer
    the author there instead of guessing.
 
-**The canonical design doc is the pm project `ai-terminal`'s design doc:
-`pm project show ai-terminal`** (named docs: `--doc prose`, `--doc screen`;
-the vault's `projects/ai-terminal/*.md` are a frozen pre-AGT-1407 snapshot — don't
-read or edit them). It holds the session model, the project layout, the full
-verb table, the stage machines, the voice model, and the binding-decisions
-table. Read it before any non-trivial change; this file deliberately does not
-restate it. A change that contradicts a binding decision there amends the doc
-in the same task or does not land.
+**Design docs live in the maintainer's private tracker**: `pm project show
+ai-terminal` (named docs: `--doc prose`, `--doc screen`, `--doc harness`,
+`--doc readers`; it holds the session model, the full verb table, the stage
+machines, the voice model and the binding-decisions table) and `pm project
+show pablo-story-core` (the two-layer design: core machine, output registry,
+`pablo.json` `outputs` in place of `format`, per-output continuity). If you
+have `pm` access, read them before any non-trivial change; a change that
+contradicts a binding decision there amends the doc in the same task. If you
+don't, the code, its tests, `README.md` and `docs/` are the reference, and the
+maintainer reconciles the design doc on review. References below to "the
+design doc", a `--doc` name or a pm project point there.
 
-The two-layer design (core machine, output registry, `pablo.json` `outputs`
-in place of `format`, per-output continuity) is the pm project
-`pablo-story-core`'s design doc (`pm project show pablo-story-core`). Core
-material (`research/`, `bible/`, `outline/`, `facts.md`, `notes/`) is shared;
-the novel output keeps `chapters/`, every other output lives under
+Core material (`research/`, `bible/`, `outline/`, `facts.md`, `notes/`) is
+shared; the novel output keeps `chapters/`, every other output lives under
 `outputs/<type>/`.
 
-Documents are the plain markdown files already in the `~/writing` vault. pablo
+Documents are the plain markdown files already in the author's real vault. pablo
 is a manager over that vault, never a replacement for it, and never a second
 store.
 
@@ -60,7 +65,18 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 adapters' streaming/normalization path, not by any manuscript
                 — no CriticMarkup is ever written to a vault file), the
                 context-pack assembler, the provider adapters
-                (OpenAI-compatible, Anthropic), and the fiction sentence
+                (`providers/`: OpenAI-compatible, Anthropic, and `claude-cli`,
+                the planner's `claude -p` subscription path; `registry.ts`
+                maps an intent to a provider, `planner.ts` picks the planning
+                model (`claude -p` unless an Anthropic key resolves),
+                `queue.ts` keeps one request in flight per local endpoint,
+                `rates.ts` the measured endpoint rates for wait estimates,
+                `keys.ts` API keys from the environment or the Keychain,
+                `config.ts` the `$XDG_CONFIG_HOME/pablo/config.json` loader),
+                `diff/` (the diff parser, move detection and the stitcher that
+                review mode and accept/reject share), `facts.ts` (the fact
+                provenance tag), `work-paths.ts` (migration-aware paths to a
+                work's files, e.g. `continuityFile`), and the fiction sentence
                 splitter (`splitSentences`/`joinSentences`) behind
                 one-sentence-per-line manuscripts.
                 `write` and `prose` save through `splitManuscript`; pack
@@ -112,6 +128,34 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 use a fake `mount`, never a window.
                 Any new dependency the CLI needs
                 goes here; core stays dependency-free.
+                Other modules, briefly: `src/core/machine.ts` is the story
+                core's stage machine (AGT-1667) and `src/novel/` the novel
+                output's machine, continuity, merge, pack and rituals;
+                `work-state.ts` is both layers' state for `status`/`resume`;
+                `book.ts` feeds the screen's table of contents; the screen's
+                seams are `screen-{write,revise,voice,reviews}.ts`,
+                `edit-session.ts` (`v e`, an `edit/` branch in a worktree,
+                AGT-1545) and `review-finish.ts`; `critique.ts` is the critic
+                (AGT-1564) and `comments.ts` the per-branch comment store
+                (`.pablo/comments/<branch>.json`, AGT-1580); `migrate.ts`
+                (`migrate lines`) and `migrate-outputs.ts` (`migrate
+                outputs`) are one-time migrations.
+                Reading rounds: `share.ts` opens a round as a PR on the
+                book's private reading repo (AGT-1582), `read.ts` lists and
+                fetches rounds for a reader, `notes.ts` (`notes pull`,
+                AGT-1587) turns a submitted review into a vault branch, and
+                `round-housekeeping.ts` closes a pulled round (AGT-1588).
+                The reader's tray (`pablo tray [install|uninstall]`,
+                AGT-1589, `src/tray/`, CLI-only, no `--project`): a
+                long-lived daemon that polls GitHub for rounds waiting for
+                this reader (`poll.ts`), notifies once per new round
+                (`notify.ts`), keeps `tray-state.json` for the Swift
+                menu-bar helper (`packages/cli/tray/PabloTray.swift`, built
+                and supervised by `bundle.ts`/`supervise.ts`), opens a round
+                through `pablo read <ref>`, and `install` writes a launchd
+                agent (`launchd.ts`). Every side effect is injected; tests
+                never touch launchctl or GitHub. `install-reader.sh` at the
+                repo root is the reader's installer (AGT-1590).
                 The output registry (AGT-1668): `src/outputs/registry.ts`'s
                 `OUTPUTS` is the single source of output types, like `VERBS`;
                 each type is a directory (`src/outputs/novel/`) exporting an
@@ -225,8 +269,9 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `uv sync --frozen` (venv in `packages/casting/.venv`, or
                 `$XDG_DATA_HOME/pablo/casting/venv` for an npm install),
                 pulls the configured weights and leaves a receipt. A missing
-                `uv` is a refusal naming `brew install uv`; only `cli.ts`
-                `radio.ts` and `casting-verbs.ts` import the runner, and it
+                `uv` is a refusal naming `brew install uv`; only `cli.ts`,
+                `radio.ts`, `casting-verbs.ts` and `mixer-host.ts` import the
+                runner, and it
                 runs only inside a casting verb, so a writing verb on a
                 writing work never touches it. `src/radio.ts` (AGT-1680) is
                 the radio door: `check` (on a work whose scripts carry a
@@ -236,8 +281,9 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `pablo gate` (AGT-1682) scoring audio provisions with
                 `--extra scorers` (recorded in the venv's stamp, never
                 dropped by a later sync); `gate calibrate` and
-                `gate --scores` need no extra. `gate` is CLI-only, not in
-                `verbs.ts`, until the casting verbs land there together.
+                `gate --scores` need no extra. `gate` is CLI-only: `cli.ts`
+                dispatches it directly, so unlike the `casting-verbs.ts`
+                entries it is not in `VERBS` and has no MCP tool.
                 Tests inject `CastingDeps`; `bun test` never needs uv or a
                 model. `prepack` copies the casting sources into
                 `packages/cli/casting/` (gitignored) for the npm `files`.
@@ -275,7 +321,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 playhead, zoom and scroll; Web Audio plays every clip
                 (`views/mixer-audio.ts`) with its gain, fades, same-lane
                 equal-power crossfades, track automation, and live track
-                volume/mute/solo (not saved: editing is M5); the master
+                volume/mute/solo; the master
                 matches `mix.py`'s peak normalising by rendering the
                 document offline once. Placement, envelopes, scheduling and
                 mute/solo are `views/mixer-logic.ts`'s pure functions:
@@ -284,12 +330,28 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 mix-anchors-golden.json` holds both sides to the same
                 placement, envelopes and automation
                 (`test_mixer_view_parity.py`, `mixer-logic.test.ts`).
+                Editing (AGT-1769): `views/mixer-edit.ts` is every edit as a
+                pure document -> document function (move re-anchors to the
+                nearest line edge, never into a cycle; trim; split; fades,
+                gain, track volume/mute/solo) plus undo/redo;
+                `views/mixer-inspector.tsx` is the selected clip's panel.
+                The host's `saveMix` writes `mix.v<m+1>` `by: "human"` through
+                `python -m pablo_casting mixer` (`mixer.py`), refused when the
+                base is not the newest version. Markers (AGT-1792):
+                `views/mixer-notes.ts` (pure) and `views/mixer-markers.tsx`
+                drop notes at the playhead with a snapshot of what is
+                sounding; `src/mixer-notes-host.ts` writes
+                `renders/epNN/notes.json`, a `punch-list.md` beside it, and
+                turns dialogue markers into `flags.json` entries that
+                `pablo fix` reads.
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`
-                (`version`, `doctor`, `pull`, `audition`, `cast`, `voices`,
-                `takes`, `manifest`, `script`, `check`, `status`, `bind`,
-                `gate`, `gate calibrate`, `perform`, `mix`),
+                (`version`, `doctor`, `pull`, `audition`, `cast`,
+                `describe`, `voices list|show|retire`, `takes`, `manifest`,
+                `script`, `check`, `status`, `bind`, `gate`, `gate
+                calibrate`, `perform`, `mix`, `fix`, `mixer`, `sounds`; the
+                list is `cli.py`'s `COMMANDS`),
                 never a user-facing binary; same body and exit codes as
                 pablo. The script reader (`script.py`), the direction
                 grammar (`directions.py`), the `CAST:` traits mapper and the
@@ -462,11 +524,14 @@ implemented, and the current `packages/tui` is the Ink screen rebuilt from
 2026-10-01 (AGT-1522). See the design doc's `History` section for what carried over as
 material (the pack assembler, the vault reader, the provider adapters, the
 config loader) versus what was cut outright (the screen, the CriticMarkup
-parser and renderer, span verbs). The **review queue** (a JSONL log, `pablo review`, AGT-1255..1263) and the **menu-bar tray**
-that watched it were both retired 2026-10-01 (AGT-1520, AGT-1541): the
-`pm project show ai-terminal --doc screen` decisions supersede them. Every manuscript
-change is a git branch, the screen's review mode is where the author decides, and
-`pablo status` / `pablo resume` report the branches waiting for review.
+parser and renderer, span verbs). The old **review queue** (a JSONL log the
+first `pablo review` read, AGT-1255..1263) and the author's **menu-bar tray**
+that watched it were both retired 2026-10-01 (AGT-1520, AGT-1541; the `screen`
+design doc's decisions supersede them). Two names came back for new things:
+`pablo review` is now the radio review player and `pablo tray` the reader's
+tray (both in `packages/cli` above). Every manuscript change is a git branch,
+the screen's review mode is where the author decides, and `pablo status` /
+`pablo resume` report the branches waiting for review.
 
 ## The project
 
@@ -474,7 +539,7 @@ A **project is a vault directory** under `<vault>/novels|stories|essays/<slug>`,
 with the writing vault's existing layout (`style/`, `bible/`, `outline/`,
 `chapters/`, ...). `--project <slug>` resolves it: the vault is `PABLO_VAULT`
 if set, else the nearest ancestor of the current directory holding a `style/`
-directory. An unresolvable project is a refusal, exit code 2, naming every
+or `voices/` directory. An unresolvable project is a refusal, exit code 2, naming every
 path it tried — see `packages/cli/src/project.ts`.
 
 pablo state that is not a document (last run, receipts, rates, share links)
@@ -487,15 +552,17 @@ Every verb accepts `--project <slug>` and `--json`. Exit codes are the
 contract every ticket builds on: **0** success, **2** refused (a framework
 precondition — an unresolvable project, or later an unmet stage
 precondition), **1** error (including "not implemented yet" for a verb whose
-body has not landed). See the design doc's `Commands` table for what each verb
-does and returns; `pablo --help` lists the P0 set.
+body has not landed). `pablo --help` lists the P0 set and its usage lines;
+`docs/commands.md` describes each verb (the design doc's `Commands` table too,
+if you have `pm` access). A change to a verb's behaviour updates
+`docs/commands.md` in the same change.
 
 ## Build commands
 
 ```sh
 bun install            # workspace install; commit the resulting bun.lock
-bun run typecheck      # tsc --noEmit across packages/core and packages/cli
-bun test               # all tests, both packages
+bun run typecheck      # tsc --noEmit: every packages/* src, views and test, plus bench/
+bun test               # all TypeScript tests: core, tui, cli and bench
 (cd packages/casting && uv run --frozen pytest -q)   # the Python side's tests
 bun run pablo          # run the CLI from source (bun run packages/cli/src/cli.ts)
 ```
@@ -508,9 +575,10 @@ the security reviewer reads it. There is no `build` step yet — the package
 ships TypeScript that Bun runs directly. Add a `build` check to
 `.stamp/config.yml` the moment that stops being true.
 
-The published manifest is `packages/cli/package.json` (`@openthink/pablo`);
-the root `package.json` is a private workspace shell with no version. Nothing
-is published yet.
+The three TypeScript packages are published to npm (`@openthink/pablo-core`,
+`@openthink/pablo-tui`, `@openthink/pablo`, the bin) in lockstep at one
+version (0.2.x); `CONTRIBUTING.md`'s `Releasing` section is the procedure. The root
+`package.json` is a private workspace shell with no version.
 
 ## Conventions
 
@@ -518,7 +586,7 @@ is published yet.
   `git -C <dir> commit -m <msg> -- <paths>`, never `git add -A`. A git failure
   is a returned notice, never a thrown exception — a write to the vault that
   already landed on disk is never undone by git failing afterward.
-- **Never write into `~/writing` from tests or from this repo's own tooling.**
+- **Never write into the author's real vault from tests or from this repo's own tooling.**
   Tests exercise a synthetic fixture vault (`packages/core/test/fixtures/vault`,
   copied under `packages/cli/test/fixtures/`) with invented content — the real
   vault is private, this repo's GitHub mirror is public, and no manuscript
@@ -536,8 +604,8 @@ post-receive hook via `.stamp/mirror.yml`.
   `stamp push main`.
 - **Never `git push github`.** The mirror is push-only from the server, and a
   direct push diverges it from `origin`. The GitHub Ruleset rejects it anyway.
-- `.stamp/trusted-keys/` holds both of Matt's signing keys (personal and work),
-  so a merge signed from either account verifies.
+- `.stamp/trusted-keys/` holds the maintainer's signing keys (personal and
+  work), so a merge signed from either account verifies.
 
 See [`AGENTS.md`](./AGENTS.md) for the full flow and the recovery paths.
 
@@ -576,15 +644,19 @@ automatically. Every subsequent change goes through the stamp flow.
 
 # Iterative Learning
 
-Before non-trivial work in this repo, read what earlier agents left:
+If the `think` CLI is available (the maintainer's setup), read what earlier
+agents left before non-trivial work in this repo:
 
 ```
 think brief --cortex pablo
 ```
 
-When you discover a convention, invariant, prior decision, or gotcha worth
-knowing next time:
+and, when you discover a convention, invariant, prior decision, or gotcha
+worth knowing next time:
 
 ```
 think retro "<observation>" --cortex pablo
 ```
+
+Without `think`, skip both; put a durable lesson in a code comment or in
+`docs/` instead.
