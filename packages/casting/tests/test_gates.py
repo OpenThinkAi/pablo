@@ -12,7 +12,7 @@ from pablo_casting.gates import (
     evaluate,
     validate_gates,
 )
-from pablo_casting.words import TAIL_AIR, Heard, norm_words, words_check
+from pablo_casting.words import Heard, norm_words, sound_key, words_check
 
 
 def heard(text: str, start: float = 0.5, step: float = 0.35) -> list[Heard]:
@@ -22,28 +22,75 @@ def heard(text: str, start: float = 0.5, step: float = 0.35) -> list[Heard]:
 # --- words and tail -------------------------------------------------------------
 
 
-def test_norm_words_matches_the_prototype() -> None:
+def test_norm_words_drops_direction_splits_hyphens_and_spells_numbers_as_values() -> None:
     assert norm_words("(urgent) Not just for the Breweries -- twenty-two home-winemakers!") == [
-        "not", "just", "for", "the", "breweries", "home", "winemakers",
+        "not", "just", "for", "the", "breweries", "22", "home", "winemakers",
     ]
 
 
-def test_a_clean_read_has_no_errors_and_cuts_after_the_last_word() -> None:
+def test_a_clean_read_has_no_errors_and_ends_where_the_last_word_ends() -> None:
     line = "I'm worrying about the fact that the government is about to make our product illegal."
     words = heard(line)
     result = words_check(line, words)
     assert result["wer"] == 0.0
     assert result["inserted_span"] == 0
     assert result["tail_ok"] is True
-    assert result["cut"] == pytest.approx(words[-1].end + TAIL_AIR)
+    assert result["word_end"] == pytest.approx(words[-1].end)
 
 
-def test_a_clipped_ending_fails_the_tail_and_has_no_cut() -> None:
+def test_a_clipped_ending_fails_the_tail_and_has_no_word_end() -> None:
     line = "Not just for the breweries, but for the home winemakers too."
     result = words_check(line, heard("Not just for the breweries but for the home"))
     assert result["tail_ok"] is False
-    assert result["cut"] is None
+    assert result["word_end"] is None
     assert result["wer"] == pytest.approx(2 / 11, abs=1e-4)
+
+
+# AGT-1789: Whisper's spelling never fails the tail. Invented lines, each with the kind of spelling
+# Whisper was recorded giving on episode 1 (digits, a run-together word, a homophone name, a respelt place).
+
+
+@pytest.mark.parametrize(
+    ("line", "said"),
+    [
+        ("They poured three thousand barrels a piece.", "They poured 3 ,000 barrels apiece."),
+        ("They poured three thousand barrels a piece.", "They poured three thousand barrels apiece."),
+        ("A hundred and twenty steps down to the quay.", "120 steps down to the quay."),
+        ("You always were a dreamer, Mara.", "You always were a dreamer, Marra."),
+        ("You always were a dreamer, Cara.", "You always were a dreamer, Kara."),
+        ("Nobody forgets the Valbruna estate.", "Nobody forgets the Val Bruna estate."),
+        ("We will still sell Port Avellino.", "We will still sell Port Avelino."),
+        ("We will still sell Port Avellino.", "We will still sell Portavellino."),
+        ("The best vintage was nineteen twelve.", "The best vintage was 1912."),
+        ("The best vintage was 1912.", "The best vintage was nineteen twelve."),
+        ("The Quills kept their silver here.", "The Kwills kept their silver here."),
+    ],
+)
+def test_spelling_only_differences_pass_the_words_and_tail_gates(line: str, said: str) -> None:
+    result = words_check(line, heard(said))
+    assert result["tail_ok"] is True, result
+    assert result["wer"] == 0.0, result
+    assert result["word_end"] is not None
+
+
+def test_a_number_split_across_heard_words_ends_at_its_last_part() -> None:
+    words = [Heard("barrels", 0.0, 0.4), Heard(" 3", 0.5, 0.7), Heard(",000", 0.7, 1.1)]
+    result = words_check("barrels three thousand", words)
+    assert result["tail_ok"] is True and result["wer"] == 0.0
+    assert result["word_end"] == pytest.approx(1.1)
+
+
+def test_a_wrong_word_still_counts_and_a_name_needs_a_capital_to_be_fuzzy() -> None:
+    assert words_check("It is a promise, Mara.", heard("It is the promise, Mara."))["wer"] == pytest.approx(1 / 5)
+    # "cold" and "could" are close, but neither is a name: still an error.
+    assert words_check("the night was cold", heard("the night was could"))["tail_ok"] is False
+
+
+def test_sound_key_folds_spellings_that_sound_alike() -> None:
+    assert sound_key("cora") == sound_key("korra") == sound_key("quora")
+    assert sound_key("sienna") == sound_key("siena")
+    assert sound_key("apiece") == sound_key("a") + sound_key("piece")
+    assert sound_key("phil") == sound_key("fill")
 
 
 def test_inserted_words_are_measured_as_the_longest_run() -> None:
@@ -95,6 +142,7 @@ def test_a_good_take_passes_every_hard_gate() -> None:
         ({"wer": 0.08}, "words"),
         ({"inserted_span": 3}, "words"),
         ({"tail_ok": False}, "tail"),
+        ({"clipped": True}, "tail"),
         ({"sim_card": 0.55}, "identity"),
         ({"sim_role_centroid": 0.60}, "consistency"),
         ({"utmos": 3.5}, "naturalness"),

@@ -3,7 +3,8 @@
 It names the engines, the model weights to pull, the voice library's path,
 the pace defaults and the auto-casting thresholds (`matching`, AGT-1698: any
 of `bind`, `review`, `distinct` and `weights`, each defaulting to the design's
-starting value; `matching.py` validates them). No weights are configured by default, so a fresh machine
+starting value; `matching.py` validates them) and how a take ends (`ending`,
+AGT-1789: `{"air": 0.18}`, seconds kept after the voice, 0.05-0.6). No weights are configured by default, so a fresh machine
 downloads nothing until the author (or a later ticket) names some.
 """
 
@@ -14,6 +15,8 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from pablo_casting.ending import AIR_RANGE, DEFAULT_AIR
 
 
 class ConfigRefusal(Exception):
@@ -29,6 +32,8 @@ class CastingConfig:
     library: str | None = None
     pace: dict[str, float] = field(default_factory=lambda: {"default": 1.0})
     matching: dict[str, object] = field(default_factory=dict)
+    air: float = DEFAULT_AIR
+    """`ending.air`: seconds a take keeps after its voice ends (AGT-1789)."""
 
     def as_body(self) -> dict[str, object]:
         return {
@@ -39,6 +44,7 @@ class CastingConfig:
             "library": self.library,
             "pace": self.pace,
             "matching": self.matching,
+            "ending": {"air": self.air},
         }
 
 
@@ -77,6 +83,16 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
     matching = raw.get("matching", {})
     if not isinstance(matching, dict):
         raise ConfigRefusal(f"{path}: `matching` must be an object (bind, review, distinct, weights)")
+    ending = raw.get("ending", {})
+    air = ending.get("air", DEFAULT_AIR) if isinstance(ending, dict) else None
+    if (
+        not isinstance(ending, dict)
+        or set(ending) - {"air"}
+        or not isinstance(air, (int, float))
+        or isinstance(air, bool)
+        or not AIR_RANGE[0] <= air <= AIR_RANGE[1]
+    ):
+        raise ConfigRefusal(f"{path}: `ending` must be {{\"air\": seconds}} with air between {AIR_RANGE[0]} and {AIR_RANGE[1]}")
 
     return CastingConfig(
         path=path,
@@ -86,4 +102,5 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
         library=library,
         pace={k: float(v) for k, v in pace.items()},
         matching=dict(matching),
+        air=float(air),
     )

@@ -29,6 +29,8 @@ import wave
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from pablo_casting.audio import read_audio
+from pablo_casting.ending import last_word_end, measure_ending
 from pablo_casting.calibrate import CalibrationRefusal, calibrate, read_records, scores_of
 from pablo_casting.config import ConfigRefusal, load_config
 from pablo_casting.gates import Card, GateRefusal, derive, evaluate, load_card, target_wps, thresholds_for, validate_gates
@@ -208,6 +210,12 @@ def cmd_gate(
             )
         except Exception as failure:  # a scorer crashed: an error, with the scorer named when we know it
             return _error(f"scoring {audio} failed: {type(failure).__name__}: {failure}")
+        try:
+            samples, rate = read_audio(audio)
+        except Exception as failure:  # unreadable by soundfile: the scorers read it, so this is rare
+            return _refused(f"{audio} is not readable audio: {failure}")
+        # The tail gate's clipping detector (AGT-1789), on the file as given, judged at the last word.
+        scores.update(measure_ending(samples, rate, anchor=last_word_end(scores)))
         scores.update(derive(scores, line, seconds, target))
 
     verdict = evaluate(scores, thresholds, centroid_takes=centroid_takes, emotion=emotion)

@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import TextIO
 
 from pablo_casting.binding import read_episode
+from pablo_casting.config import ConfigRefusal, load_config
 from pablo_casting.engines import DEFAULT_ENGINE, ENGINE_SPECS, EngineFactory, EngineUnavailable, Pass, PassLine, normalise_reasons
 from pablo_casting.manifest import ManifestError, flags_path, read_version, versions, write_version
 from pablo_casting.perform import (
@@ -210,6 +211,10 @@ def fix(
     engine_block = parent.get("engine")
     engine_name = engine_block.get("name") if isinstance(engine_block, dict) else None
     spec = ENGINE_SPECS.get(str(engine_name)) or ENGINE_SPECS[DEFAULT_ENGINE]
+    try:
+        air = load_config(env).air
+    except ConfigRefusal as refusal:
+        return _refused(str(refusal))
 
     started = time.monotonic()
     engine = engine_factory(spec, {name: role.voice for name, role in roles.items()}, env)
@@ -223,7 +228,7 @@ def fix(
     _emit({"event": "start", "episode": episode, "engine": spec.name, "fix": True, "from": parent_version, "lines": len(flagged)}, err, stream_out)
     redone: dict[int, dict[str, object]] = {}
     with tempfile.TemporaryDirectory(prefix="pablo-fix-") as scratch:
-        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), totals=Totals())
+        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), totals=Totals(), air=air)
         try:
             for i in flagged:
                 before = parent_lines[i]

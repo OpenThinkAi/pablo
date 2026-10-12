@@ -82,7 +82,10 @@ class ToneEngine(RecordingEngine):
         silent = super().synthesize(inputs)
         frames = len(silent.audio.frames) // 2
         t = np.arange(frames) / self.sample_rate
-        wave = 0.3 * np.sin(2 * np.pi * (180 + 20 * (n % 5)) * t) * (t < frames / self.sample_rate - 0.18)
+        stop = frames / self.sample_rate - 0.18
+        # The tone dies away over its last 100 ms (60 dB), as a voice does, so the clipping detector passes it.
+        envelope = np.where(t < stop - 0.1, 1.0, 10 ** (-3 * np.clip((t - (stop - 0.1)) / 0.1, 0, 1)))
+        wave = 0.3 * np.sin(2 * np.pi * (180 + 20 * (n % 5)) * t) * envelope * (t < stop)
         pcm = (wave * 32767).astype("<i2").tobytes()
         return Synthesis(audio=Audio(frames=pcm, sample_rate=self.sample_rate), peak_memory_gb=1.5, ttfa=0.01)
 

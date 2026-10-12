@@ -46,7 +46,7 @@ def test_turbo_params_are_the_bake_off_defaults_with_no_emotion_mapping() -> Non
     one = Pass((PassLine(0, "MAVIS", "Mind the step."),))
     tender = adapt(TURBO, one, {"MAVIS": voice()}, "tender", 2)
     angry = adapt(TURBO, one, {"MAVIS": voice()}, "angry", 3)
-    assert tender == angry == {"adapter": "chatterbox-turbo/1", "temperature": 0.8}
+    assert tender == angry == {"adapter": "chatterbox-turbo/2", "temperature": 0.8}
 
 
 def test_turbo_pads_a_reference_under_five_seconds_and_says_so() -> None:
@@ -88,4 +88,4 @@ def test_real_cloners_get_one_line_per_pass() -> None:
 def test_dia_params_are_the_prototype_settings() -> None:
     two = Pass((PassLine(0, "MAVIS", "a"), PassLine(1, "OTTO", "b")))
     params = adapt(DIA, two, {"MAVIS": voice(), "OTTO": voice()}, None, None)
-    assert params == {"adapter": "dia/1", "temperature": 1.1, "top_p": 0.9, "ref_pad_s": 0.25, "throwaway": "Mm."}
+    assert params == {"adapter": "dia/2", "temperature": 1.1, "top_p": 0.9, "ref_pad_s": 0.25, "throwaway": "Mm."}

@@ -9,7 +9,7 @@ every hard gate passes; the emotion gate is soft (a flag, never a failure).
 | gate        | measures                    | default                      | hard |
 |-------------|-----------------------------|------------------------------|------|
 | words       | wer, inserted_span          | wer <= 0.05, span <= 2       | yes  |
-| tail        | tail_ok                     | required                     | yes  |
+| tail        | tail_ok, clipped            | required; not clipped        | yes  |
 | identity    | sim_card                    | >= 0.60                      | yes  |
 | consistency | sim_role_centroid           | >= 0.65                      | once >= 10 approved takes |
 | naturalness | utmos (and pq if pq_min)    | utmos >= 3.8                 | yes  |
@@ -197,10 +197,10 @@ def pace_stretch(wps: float, target: float, band: Sequence[float] | None = None)
 
 
 def derive(scores: Mapping[str, object], line: str | None, seconds: float | None, target: float, band: Sequence[float] | None = None) -> dict[str, object]:
-    """Pace and duration from the aligner's timings (or Whisper's cut), the line and the audio length.
+    """Pace and duration from the aligner's timings (or Whisper's last-word end), the line and the audio length.
 
     `wps` is script words over the spoken span (first aligned word's start to
-    the last one's end; without timings, Whisper's cut, else the whole take).
+    the last one's end; without timings, Whisper's word end, else the whole take).
     `stretch` is the tempo factor that brings `wps` to the role's target (below
     1 slows the take down); given the line's pace `band`, a `wps` inside it is
     left alone (1.0) and one outside goes to the nearest band edge. `duration_ratio` is audio seconds over the seconds
@@ -213,7 +213,9 @@ def derive(scores: Mapping[str, object], line: str | None, seconds: float | None
     spoken: float | None = None
     if isinstance(timings, list) and timings:
         spoken = float(timings[-1]["end"]) - float(timings[0]["start"])  # type: ignore[index]
-    elif isinstance(scores.get("cut"), (int, float)):
+    elif isinstance(scores.get("word_end"), (int, float)) and not isinstance(scores.get("word_end"), bool):
+        spoken = float(scores["word_end"])  # type: ignore[arg-type]
+    elif isinstance(scores.get("cut"), (int, float)):  # a record from before AGT-1789
         spoken = float(scores["cut"])  # type: ignore[arg-type]
     elif seconds is not None:
         spoken = seconds
@@ -273,7 +275,11 @@ def evaluate(
         ("inserted_span", _num(scores, "inserted_span"), "<=", thresholds["inserted_span_max"]),
     ])
     tail = scores.get("tail_ok")
-    gate("tail", True, [("tail_ok", tail if isinstance(tail, bool) else None, "is", True)])
+    tail_checks: list[tuple[str, float | bool | None, str, object]] = [("tail_ok", tail if isinstance(tail, bool) else None, "is", True)]
+    clipped = scores.get("clipped")
+    if isinstance(clipped, bool):  # the clipping detector (ending.py); a record from before it is judged on tail_ok alone
+        tail_checks.append(("clipped", clipped, "is", False))
+    gate("tail", True, tail_checks)
     gate("identity", True, [("sim_card", _num(scores, "sim_card"), ">=", thresholds["sim_min"])])
 
     centroid = _num(scores, "sim_role_centroid")

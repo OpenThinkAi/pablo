@@ -182,7 +182,7 @@ def test_tender_slow_reaches_the_engine_mapped_and_ends_in_its_pace_band(setup: 
     inputs = call["inputs"]
     assert (inputs.direction.emotion, inputs.direction.intensity, inputs.direction.pace) == ("tender", 2, "slow")
     # Turbo maps no emotion (bake-off decision): exactly its defaults reach it, and the slow pace is a stretch.
-    assert dict(inputs.params) == {"adapter": "chatterbox-turbo/1", "temperature": 0.8}
+    assert dict(inputs.params) == {"adapter": "chatterbox-turbo/2", "temperature": 0.8}
     assert call["text"] == "Mind the step, the boards are wet tonight."
     line = read_version(work, 1, 1)["lines"][1]
     assert line["pace"]["target_wps"] == round(2.8 * 0.85, 3)
@@ -359,3 +359,89 @@ def test_a_work_bound_before_outputs_radio_existed_keeps_its_cast(tmp_path: Path
     (work / "casting" / "cast.json").write_text('{"version": 1, "roles": {}}')
     (work / "outputs" / "radio" / "casting" / "takes").mkdir(parents=True)
     assert casting_dir(work) == work / "casting"
+
+
+# AGT-1789: how a take ends -----------------------------------------------------
+
+
+class EndingEngine(RecordingEngine):
+    """A tone for the spoken span, then a natural 100 ms decay (or an abrupt stop), then digital zero (Turbo's hard gate)."""
+
+    abrupt: bool = False
+
+    def synthesize(self, inputs):  # type: ignore[no-untyped-def]
+        import numpy as np
+
+        from pablo_casting.takes import Synthesis
+        from pablo_casting.wav import Audio
+
+        silent = super().synthesize(inputs)
+        frames = len(silent.audio.frames) // 2
+        t = np.arange(frames) / self.sample_rate
+        stop = frames / self.sample_rate - 0.18
+        envelope = np.ones_like(t) if self.abrupt else np.where(t < stop - 0.1, 1.0, 10 ** (-3 * np.clip((t - (stop - 0.1)) / 0.1, 0, 1)))
+        wave = 0.3 * np.sin(2 * np.pi * 170 * t) * envelope * (t < stop)
+        return Synthesis(audio=Audio(frames=(wave * 32767).astype("<i2").tobytes(), sample_rate=self.sample_rate), peak_memory_gb=1.5, ttfa=0.01)
+
+
+def _ending_go(work: Path, library: Path, abrupt: bool, env: Mapping[str, str] | None = None):  # type: ignore[no-untyped-def]
+    engines: list[EndingEngine] = []
+
+    def factory(spec: EngineSpec, voices: Mapping[str, VoiceRef], env: Mapping[str, str]) -> EndingEngine:
+        engine = EndingEngine(spec=spec, voices=voices, wps=(3.0,))
+        engine.abrupt = abrupt
+        engines.append(engine)
+        return engine
+
+    body, code = perform(
+        PerformRequest(work=work, episode=1, engine=TURBO.name, voices_dir=library / "voices"),
+        env=env or {},
+        engine_factory=factory,
+        scorer_factory=fake_scorers,
+        err=io.StringIO(),
+        out=io.StringIO(),
+    )
+    return body, code, engines
+
+
+def test_a_natural_ending_passes_the_tail_and_its_hard_gate_becomes_room_tone(setup: tuple[Path, Path]) -> None:
+    work, library = setup
+    body, code, _ = _ending_go(work, library, abrupt=False)
+    assert code == 0, body
+    for line in read_version(work, 1, 1)["lines"]:
+        assert line["status"] == "pass" and line["gates"]["clipped"] is False
+        scores = read_take(work, line["take"]).record["scores"]  # type: ignore[union-attr]
+        assert scores["hard_gate"] is True and scores["room_tone"] > 0
+        assert scores["cut"] >= scores["voice_end"] + 0.17  # never inside the voice: the air follows it
+        assert scores["cut"] >= scores["word_end"]
+
+
+def test_an_engine_that_stops_mid_voice_fails_the_tail_gate_on_clipping(setup: tuple[Path, Path]) -> None:
+    work, library = setup
+    body, code, _ = _ending_go(work, library, abrupt=True)
+    assert code == 0, body
+    lines = read_version(work, 1, 1)["lines"]
+    assert all(line["status"] == "best_of_failed" and "tail" in line["failing"] for line in lines)
+    assert all(line["gates"]["clipped"] is True and line["gates"]["tail_ok"] is True for line in lines)
+
+
+def test_the_air_comes_from_the_config_and_is_part_of_the_take_key(setup: tuple[Path, Path], tmp_path: Path) -> None:
+    work, library = setup
+    config = tmp_path / "config" / "pablo" / "casting.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"ending": {"air": 0.15}}), encoding="utf-8")
+    body, code, engines = _ending_go(work, library, abrupt=False, env={"XDG_CONFIG_HOME": str(tmp_path / "config")})
+    assert code == 0, body
+    assert all(dict(call["inputs"].params)["air"] == 0.15 for call in engines[0].calls)  # type: ignore[attr-defined]
+    take = read_take(work, read_version(work, 1, 1)["lines"][0]["take"])
+    scores = take.record["scores"]  # type: ignore[union-attr]
+    assert scores["cut"] == pytest.approx(max(scores["voice_end"], scores["word_end"]) + 0.15, abs=0.011)
+
+
+def test_a_bad_ending_config_is_a_refusal(setup: tuple[Path, Path], tmp_path: Path) -> None:
+    work, library = setup
+    config = tmp_path / "config" / "pablo" / "casting.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"ending": {"air": 2}}), encoding="utf-8")
+    body, code, _ = _ending_go(work, library, abrupt=False, env={"XDG_CONFIG_HOME": str(tmp_path / "config")})
+    assert code == 2 and "ending" in str(body["message"])

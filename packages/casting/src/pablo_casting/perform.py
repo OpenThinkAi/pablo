@@ -27,8 +27,12 @@ inside `PACE_RANGE` [0.75, 1.05]: the pace gate's `stretch_range` is held to it,
 so a take that would need more is a failed take and the line is retaken. A
 best-of take that still needs more is stretched only to the range's edge and
 says so (`stretch_needed`, and its auto flag). Takes themselves are never
-paced: `take.wav` is the engine's audio, trimmed at the last script word plus
-180 ms.
+paced: `take.wav` is the engine's audio, finished by `ending.py` (AGT-1789):
+cut at the end of its voice (never before the last word's end) plus the air
+(`casting.json` `ending.air`, 0.18 s by default), faded inside the air, and
+filled with room tone where the engine hard-gated to digital zero. The take's
+ending measures (`clipped`, `end_db`, `fall_ms`, `hard_gate`, `voice_end`,
+`cut`, `room_tone`) join its scores, and `clipped` is part of the tail gate.
 
 **Takes and resume**: a pass's attempts are written to the take store when the
 pass is decided: the kept take with `pass` or `best_of_failed`, the others
@@ -98,7 +102,9 @@ from pablo_casting.engines import (
 from pablo_casting.gate_command import run_scorers
 from pablo_casting.gates import Card, GateRefusal, derive, evaluate, load_card, pace_stretch, target_wps, thresholds_for
 from pablo_casting.library import card_hash
+from pablo_casting.config import ConfigRefusal, load_config
 from pablo_casting.cues import CueLibrary, CueUnavailable
+from pablo_casting.ending import DEFAULT_AIR, finish, last_word_end, measure_ending
 from pablo_casting.manifest import ManifestError, episode_dir, flags_path, versions, write_version
 from pablo_casting.mix import SR, MixRefusal, MixRequest, Seams, Timeline, sox_pacer
 from pablo_casting.mix import mix as mix_episode
@@ -128,7 +134,6 @@ EXIT_REFUSED = 2
 MAX_ATTEMPTS = 4
 PACE_RANGE = (0.75, 1.05)
 PACE_MULTIPLIER = {"slow": 0.85, "quick": 1.15}
-FADE_SECONDS = 0.04
 
 Body = dict[str, object]
 Result = tuple[Body, int]
@@ -315,18 +320,23 @@ def _emit(event: Mapping[str, object], err: TextIO, out: TextIO | None) -> None:
         print(line, file=out, flush=True)
 
 
-def _trim(samples: np.ndarray, rate: int, cut: object) -> np.ndarray:
-    """The take as stored: cut at the last script word plus the tail air, with a short fade."""
-    if not isinstance(cut, (int, float)) or isinstance(cut, bool) or cut <= 0:
-        return samples
-    end = int(round(float(cut) * rate))
-    if end >= len(samples):
-        return samples
-    trimmed = samples[:end].copy()
-    fade = min(len(trimmed), int(rate * FADE_SECONDS))
-    if fade:
-        trimmed[-fade:] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)
-    return trimmed
+def finish_take(samples: np.ndarray, rate: int, scores: Mapping[str, object], air: float = DEFAULT_AIR) -> tuple[np.ndarray, dict[str, object]]:
+    """The take as stored (`ending.finish`) and its ending measures, which join the take's scores.
+
+    The clipping detector judges the engine's own audio up to the cut (before
+    room tone and fade), anchored on the last word, so it sees what the engine
+    and the cut did, never pablo's padding.
+    """
+    word_end = last_word_end(scores)
+    finished, info = finish(samples, rate, word_end, air)
+    measured = measure_ending(info.pop("measured"), rate, anchor=word_end)  # type: ignore[arg-type]
+    return finished, {
+        "word_end": word_end,
+        "voice_end": info["voice_end"],
+        "cut": info["cut"],
+        "room_tone": info["room_tone"],
+        **measured,
+    }
 
 
 @dataclass
@@ -343,6 +353,8 @@ class Performer:
     totals: Totals = field(default_factory=Totals)
     receipt_tags: dict[str, object] = field(default_factory=dict)
     """Merged into every `take` and `gate` receipt (design on demand tags its trial passes, AGT-1699)."""
+    air: float = DEFAULT_AIR
+    """Seconds of air a take keeps after its voice ends (`casting.json` `ending.air`); a non-default value is in the take key."""
 
     def thresholds(self, card: Card) -> dict[str, object]:
         # The pace policy holds the stretch the gate allows to [0.75, 1.05], whatever a card calibrated.
@@ -353,6 +365,8 @@ class Performer:
         direction = _direction(first)
         voices = {line.speaker: self.roles[line.speaker].voice for line in take_pass.lines}
         params = adapt(self.spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, reasons)
+        if self.air != DEFAULT_AIR:
+            params["air"] = self.air  # the stored take's ending depends on it, so its key does too
         return TakeInputs(
             engine=self.engine.identity,
             voice="+".join(dict.fromkeys(self.roles[line.speaker].voice.card_hash for line in take_pass.lines)),
@@ -442,6 +456,8 @@ class Performer:
         )
         scores, score_wall = self._score(attempt_no, inputs, synthesis, card, target, band)
         self.totals.score_wall += score_wall
+        samples, ending = finish_take(from_audio(synthesis.audio), synthesis.audio.sample_rate, scores, self.air)
+        scores.update(ending)
         timings_words = scores.pop("timings", None)
         words = tuple(
             WordTiming(word=str(w["word"]), start=float(w["start"]), end=float(w["end"]))
@@ -449,7 +465,6 @@ class Performer:
             if isinstance(w, dict)
         )
         verdict = evaluate(scores, thresholds)
-        samples = _trim(from_audio(synthesis.audio), synthesis.audio.sample_rate, scores.get("cut"))
         kept = replace(synthesis, audio=to_audio(samples, synthesis.audio.sample_rate), words=words)
         return Attempt(
             attempt=attempt_no,
@@ -541,7 +556,7 @@ def _line_entry(
             "paced_wps": round(float(wps) * applied, 3) if isinstance(wps, (int, float)) and not isinstance(wps, bool) else None,
         },
         "seconds": round(kept.seconds, 3),
-        "gates": {key: scores.get(key) for key in ("wer", "inserted_span", "tail_ok", "sim_card", "utmos", "pq", "bak", "ovrl", "wps", "stretch", "duration_ratio")},
+        "gates": {key: scores.get(key) for key in ("wer", "inserted_span", "tail_ok", "clipped", "end_db", "sim_card", "utmos", "pq", "bak", "ovrl", "wps", "stretch", "duration_ratio")},
         "failing": list(kept.verdict.get("failing", [])),  # type: ignore[call-overload]
     }
     if abs(applied - needed_value) > 1e-9:
@@ -613,6 +628,10 @@ def perform(
     spec = ENGINE_SPECS.get(request.engine)
     if spec is None:
         return _refused(f'unknown engine "{request.engine}": one of {", ".join(ENGINE_SPECS)}')
+    try:
+        air = load_config(env).air
+    except ConfigRefusal as refusal:
+        return _refused(str(refusal))
     found = versions(work, episode)
     if found:
         return _refused(
@@ -655,7 +674,7 @@ def perform(
         timeline = Timeline(work, cue_positions(script), CueLibrary(request.cues_dir, mixer.generators), mixer.pacer, log=mixer.log)
         live = EpisodeStream(work, episode, timeline, lines_total=len(spoken), started=started, started_at=started_at)
     with tempfile.TemporaryDirectory(prefix="pablo-perform-") as scratch:
-        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch))
+        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), air=air)
         try:
             for take_pass in passes:
                 kept, attempts, target, band, _ = performer.perform_pass(take_pass, spoken)

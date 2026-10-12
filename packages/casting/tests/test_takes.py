@@ -77,7 +77,7 @@ def test_writing_the_same_take_twice_is_a_no_op_and_never_reaches_the_engine(wor
 @pytest.mark.parametrize(
     "change",
     [
-        {"take_version": 2},
+        {"take_version": 3},
         {"engine": EngineId(id="other", weights_sha256="0" * 64, mlx_audio="none", mlx="none")},
         {"engine": EngineId(id="fake", weights_sha256="1" * 64, mlx_audio="none", mlx="none")},
         {"engine": EngineId(id="fake", weights_sha256="0" * 64, mlx_audio="0.5.8", mlx="none")},
