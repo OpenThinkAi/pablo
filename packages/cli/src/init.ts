@@ -188,14 +188,34 @@ export function gitCommit(vault: string, message: string, absPaths: readonly str
 }
 
 /**
+ * The author a new marker records: git's `user.name` as the vault sees it,
+ * else `DEFAULT_AUTHOR`. Only the CLI calls this; `initNovel`/`initAdopt`
+ * take the result as `opts.author` so tests never read the machine's git
+ * identity.
+ */
+export function vaultAuthor(vault: string): string {
+  try {
+    const name = execFileSync("git", ["-C", vault, "config", "user.name"], { stdio: "pipe", encoding: "utf8" }).trim();
+    return name === "" ? DEFAULT_AUTHOR : name;
+  } catch {
+    return DEFAULT_AUTHOR;
+  }
+}
+
+/**
  * `pablo init novel <slug> "<Title>"`: copies `<vault>/templates/novel` to
  * `<vault>/novels/<slug>`, fills `{{TITLE}}`/`{{DATE}}`/`{{SLUG}}`, writes
  * `.brief.md` and `pablo.json`, adds the work's row to `<vault>/README.md`,
  * adds `.pablo/` to `<vault>/.gitignore` if absent, then commits every
  * created/changed path by pathspec. `now` is injectable for deterministic
- * tests.
+ * tests; `author` is the marker's author (`DEFAULT_AUTHOR` when absent).
  */
-export function initNovel(vault: string, slug: string, title: string, opts: { now?: () => Date } = {}): InitResult {
+export function initNovel(
+  vault: string,
+  slug: string,
+  title: string,
+  opts: { now?: () => Date; author?: string } = {},
+): InitResult {
   if (!SLUG_PATTERN.test(slug)) {
     return refuse(`pablo: init: invalid slug "${slug}" (only lowercase letters, digits, and hyphens are allowed)`, []);
   }
@@ -221,7 +241,7 @@ export function initNovel(vault: string, slug: string, title: string, opts: { no
   const marker: Marker = {
     title,
     slug,
-    author: DEFAULT_AUTHOR,
+    author: opts.author ?? DEFAULT_AUTHOR,
     voice: DEFAULT_VOICE,
     neverSend: DEFAULT_NEVER_SEND,
     publish: DEFAULT_PUBLISH,
@@ -253,7 +273,7 @@ export function initNovel(vault: string, slug: string, title: string, opts: { no
  * if absent — nothing else in the work changes, and this never git-commits
  * (the AC calls that the author's/agent's own decision).
  */
-export function initAdopt(vault: string, projectDir: string, slug: string): InitResult {
+export function initAdopt(vault: string, projectDir: string, slug: string, opts: { author?: string } = {}): InitResult {
   if (existsSync(markerPath(projectDir))) {
     return refuse(`pablo: init --adopt: ${projectDir} already has a pablo.json`, [markerPath(projectDir)]);
   }
@@ -271,7 +291,7 @@ export function initAdopt(vault: string, projectDir: string, slug: string): Init
   const marker: Marker = {
     title,
     slug,
-    author: DEFAULT_AUTHOR,
+    author: opts.author ?? DEFAULT_AUTHOR,
     voice: DEFAULT_VOICE,
     neverSend: DEFAULT_NEVER_SEND,
     publish: DEFAULT_PUBLISH,

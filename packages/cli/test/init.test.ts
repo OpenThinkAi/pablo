@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "bun:test";
-import { initAdopt, initNovel } from "../src/init";
+import { initAdopt, initNovel, vaultAuthor } from "../src/init";
 import { readMarker } from "../src/marker";
 
 /**
@@ -112,7 +112,7 @@ test("initNovel scaffolds every template file with placeholders replaced, writes
     expect(marker.marker).toEqual({
       title: "The Salt Road",
       slug: "salt-road",
-      author: "matt",
+      author: "author",
       voice: ["../../style", "QWEN.md"],
       neverSend: ["research/", "notes/"],
       publish: {},
@@ -166,6 +166,22 @@ test("initNovel into a non-git vault succeeds with a notice instead of throwing"
   expect(result.committed).toBe(false);
   expect(result.notice).toBeDefined();
   expect(existsSync(join(vault, "novels", "salt-road", "pablo.json"))).toBe(true);
+});
+
+test("init records the author it is given, and vaultAuthor reads the vault's own git user.name", () => {
+  const vault = initGitVault();
+  git(vault, "config", "user.name", "Ada Writer");
+  expect(vaultAuthor(vault)).toBe("Ada Writer");
+
+  const created = initNovel(vault, "salt-road", "The Salt Road", { author: vaultAuthor(vault) });
+  expect(created.ok).toBe(true);
+  const marker = readMarker(join(vault, "novels", "salt-road"));
+  expect(marker.ok && marker.marker.author).toBe("Ada Writer");
+
+  const adopted = initAdopt(vault, join(vault, "novels", "no-marker"), "no-marker", { author: "Ada Writer" });
+  expect(adopted.ok).toBe(true);
+  const adoptedMarker = readMarker(join(vault, "novels", "no-marker"));
+  expect(adoptedMarker.ok && adoptedMarker.marker.author).toBe("Ada Writer");
 });
 
 test("initNovel onto an existing slug refuses with exit code 2", () => {

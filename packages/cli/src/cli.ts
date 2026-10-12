@@ -25,7 +25,7 @@ import { reviewCommentsOf } from "./critique";
 import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
 import { mergeDraftInProject } from "./novel/merge";
-import { initAdopt, initNovel } from "./init";
+import { initAdopt, initNovel, vaultAuthor } from "./init";
 import type { InitResult } from "./init";
 import { outputsLabel, readMarker } from "./marker";
 import type { Composer } from "@openthink/pablo-tui";
@@ -806,7 +806,7 @@ function runInit(args: ParsedArgs, cwd: string): number {
       return resolved.code;
     }
 
-    return emitInitResult(initAdopt(vault, resolved.path, args.project), args.json);
+    return emitInitResult(initAdopt(vault, resolved.path, args.project, { author: vaultAuthor(vault) }), args.json);
   }
 
   const [format, slug, title] = args.rest;
@@ -822,7 +822,7 @@ function runInit(args: ParsedArgs, cwd: string): number {
     return EXIT_ERROR;
   }
 
-  return emitInitResult(initNovel(vault, slug, title), args.json);
+  return emitInitResult(initNovel(vault, slug, title, { author: vaultAuthor(vault) }), args.json);
 }
 
 /**
