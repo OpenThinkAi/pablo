@@ -15,7 +15,7 @@ Commands:
              stderr), with a receipt when `--work` is given.
 - `audition --dry-run`  a no-model command: proves the side is provisioned and
              runnable.
-- `audition --role R --describe "..." [--designer qwen3|voxcpm2] [-n 6]
+- `audition --role R --describe "..." [--designer qwen3|voxcpm2] [--language en|es] [-n 6]
              [--seed S] [--traits JSON] [--slug S]`  render N candidates of the
              shared audition passage into the library's `auditions/` (AGT-1679).
 - `cast --role R --candidate N [--recast] [--traits JSON] [--notes T] [--by B]`
@@ -194,6 +194,7 @@ def _parser() -> _Parser:
     parser.add_argument("--slug")
     parser.add_argument("--describe")
     parser.add_argument("--designer")
+    parser.add_argument("--language")
     parser.add_argument("-n", "--n", type=int, dest="n")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--traits")
@@ -340,9 +341,15 @@ def cmd_audition(env: Mapping[str, str], args: argparse.Namespace, work: Path | 
         return refused(f"-n must be between 1 and {MAX_CANDIDATES} (got {n})")
     if args.seed is not None and args.seed < 0:
         return refused(f"--seed must be a non-negative integer (got {args.seed})")
+    from pablo_casting.passage import DEFAULT_LANGUAGE, PASSAGES
+
+    language = args.language or DEFAULT_LANGUAGE
+    if language not in PASSAGES:
+        return refused(f'unknown language "{language}": one of {", ".join(PASSAGES)}')
     config = load_config(env)
     library = _library(config, args)
     request = AuditionRequest(
+        language=language,
         slug=_slug_for(args),
         role=args.role,
         description=args.describe.strip(),

@@ -27,7 +27,7 @@ import numpy as np
 from pablo_casting.audio import REFERENCE_RATE, file_sha256, read_audio, resample, write_flac
 from pablo_casting.audition import Trim, trim_for
 from pablo_casting.library import CARD_FILES, Library, LibraryRefusal, card_hash
-from pablo_casting.passage import PASSAGE, PASSAGE_SHA256
+from pablo_casting.passage import PASSAGE, passage_by_sha
 from pablo_casting.receipts import append_receipt
 from pablo_casting.toolkit import Aligner, Embedder, Toolkit
 from pablo_casting.traits import parse_traits, require_gender
@@ -80,8 +80,8 @@ def _candidate(library: Library, request: CastRequest) -> tuple[dict[str, object
             "a card's reference can only come from a designer, so audition again"
         )
     passage = record.get("passage")
-    if not isinstance(passage, dict) or passage.get("sha256") != PASSAGE_SHA256:
-        raise LibraryRefusal(f"candidate {request.candidate} read a different audition passage than this version's; audition again")
+    if not isinstance(passage, dict) or passage_by_sha(passage.get("sha256")) is None:
+        raise LibraryRefusal(f"candidate {request.candidate} read an audition passage this version does not know; audition again")
     return record, wav
 
 
@@ -115,11 +115,11 @@ class Frozen:
     embedder: Embedder
 
 
-def freeze_reference(wav: Path, toolkit: Toolkit) -> Frozen:
+def freeze_reference(wav: Path, toolkit: Toolkit, text: str = PASSAGE) -> Frozen:
     """The reference `cast` freezes from a candidate's audio; design on demand's trial clones the same one."""
     audio, rate = read_audio(wav)
     aligner = toolkit.aligner()
-    trim = trim_for(aligner, audio, rate, PASSAGE)
+    trim = trim_for(aligner, audio, rate, text)
     reference = resample(audio[int(trim.start * rate) : int(trim.end * rate)], rate, REFERENCE_RATE)
     embedder = toolkit.embedder()
     embedding = np.asarray(embedder.embed(reference, REFERENCE_RATE), dtype=np.float32)
@@ -149,7 +149,9 @@ def cast(
     traits = parse_traits(request.traits) if request.traits is not None else parse_traits(record.get("traits") or {})  # type: ignore[arg-type]
     require_gender(traits)
 
-    frozen = freeze_reference(wav, toolkit)
+    passage = passage_by_sha(record["passage"]["sha256"])  # type: ignore[index]
+    assert passage is not None  # _candidate refused an unknown one
+    frozen = freeze_reference(wav, toolkit, passage.text)
     if frozen.trim.problem is not None:
         raise LibraryRefusal(f"candidate {request.candidate} cannot be a reference: {frozen.trim.problem}")
     trim, reference, embedding, aligner, embedder = frozen.trim, frozen.reference, frozen.embedding, frozen.aligner, frozen.embedder
@@ -161,7 +163,7 @@ def cast(
         _discard_staging(staging)
     staging.mkdir(parents=True)
     write_flac(staging / "reference.flac", reference, REFERENCE_RATE)
-    (staging / "reference.txt").write_text(PASSAGE + "\n", encoding="utf-8")
+    (staging / "reference.txt").write_text(passage.text + "\n", encoding="utf-8")
     np.save(staging / "embedding.ecapa.npy", embedding)
 
     designer = record["designer"]
@@ -171,6 +173,7 @@ def cast(
     card: dict[str, object] = {
         "slug": request.slug,
         "description": record.get("description"),
+        "language": passage.language,
         "designed": {
             "engine": designer["engine"],  # type: ignore[index]
             "weights_sha256": designer["weights_sha256"],  # type: ignore[index]
