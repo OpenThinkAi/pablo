@@ -2,7 +2,7 @@
 
 A take is one engine pass for one line group, written once:
 
-    <work>/outputs/radio/casting/takes/<key>/take.wav    raw engine output, never paced
+    <work>/outputs/radio/casting/takes/<key>/take.wav    engine output finished by ending.py, never paced
     <work>/outputs/radio/casting/takes/<key>/take.json   inputs, seed, attempt, scores,
                                                          timings, status, receipt id
 
@@ -41,7 +41,7 @@ from pablo_casting.wav import Audio
 
 # Bump when the meaning of a take changes (trimming, the key's own shape):
 # every key changes with it, so old takes are never mistaken for new ones.
-TAKE_VERSION = 1
+TAKE_VERSION = 2  # 2: takes finished by ending.py (AGT-1789)
 
 KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 KEY_PREFIX_RE = re.compile(r"^[0-9a-f]{4,64}$")

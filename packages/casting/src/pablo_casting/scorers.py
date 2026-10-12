@@ -103,7 +103,7 @@ class ScorerUnavailable(Exception):
 WHISPER = ScorerInfo(
     name="whisper",
     gate="words, tail",
-    measures=("wer", "inserted_span", "tail_ok", "cut"),
+    measures=("wer", "inserted_span", "tail_ok", "word_end"),
     weights="mlx-community/whisper-large-v3-turbo",
     license_code="MIT",
     license_weights="Apache-2.0",
@@ -268,7 +268,7 @@ class WhisperScorer(_Lazy):
         )
         heard = [Heard(w["word"], float(w["start"]), float(w["end"])) for seg in result["segments"] for w in seg.get("words", [])]
         measured = words_check(take.line, heard)
-        return {k: measured[k] for k in ("wer", "inserted_span", "tail_ok", "cut")} | {"heard": " ".join(h.word.strip() for h in heard)}
+        return {k: measured[k] for k in ("wer", "inserted_span", "tail_ok", "word_end")} | {"heard": " ".join(h.word.strip() for h in heard)}
 
 
 class AlignerScorer(_Lazy):

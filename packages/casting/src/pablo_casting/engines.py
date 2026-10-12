@@ -29,6 +29,12 @@ text is never changed; only the engine input is. Evidence (AGT-1677, Matt
 2026-10-11): Turbo said "Shadow" right in 4 of 12 takes from caps and 12 of 12
 title-cased; ZONOS2 spelled caps letter by letter.
 
+**Numerals** reach every engine spelled out (`numerals.py`, AGT-1789): years
+as said ("1917" -> "nineteen seventeen"), other numbers as words. The script
+keeps its digits. Turbo needs no length cap of its own: mlx-audio already
+splits its input at sentence boundaries into chunks of at most 800 speech
+tokens (about 32 s), far beyond any script line.
+
 An adapter turns a pass's script lines (and their directions) into the params
 that change the audio, which go into the take key, and the text the engine
 reads, which is derived from the key's own lines, so the key always says
@@ -53,10 +59,11 @@ from typing import Protocol
 import numpy as np
 
 from pablo_casting.directions import NONVERBALS
+from pablo_casting.numerals import spell_numbers
 from pablo_casting.takes import EngineId, Synthesis, TakeInputs
 from pablo_casting.wav import Audio
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2  # 2: numerals spelled out for the engine (AGT-1789)
 
 # --- text: caps and non-verbals -------------------------------------------------
 
@@ -95,14 +102,14 @@ def turbo_text(text: str) -> str:
             return TURBO_TAGS[inner]
         return "" if inner in NONVERBALS else match.group(0)
 
-    return _SPACE.sub(" ", _PAREN.sub(tag, normalise_caps(text))).strip()
+    return _SPACE.sub(" ", _PAREN.sub(tag, spell_numbers(normalise_caps(text)))).strip()
 
 
 def dia_text(turns: Sequence[tuple[str, str]], tags: Mapping[str, str]) -> str:
     """Dia's pass text: `[S1] words [S2] words [other] Mm.` (the prototype's throwaway word, trimmed after)."""
     last = turns[-1][0]
     other = "[S2]" if tags[last] == "[S1]" else "[S1]"
-    body = " ".join(f"{tags[speaker]} {normalise_caps(words)}" for speaker, words in turns)
+    body = " ".join(f"{tags[speaker]} {spell_numbers(normalise_caps(words))}" for speaker, words in turns)
     return f"{body} {other} Mm."
 
 

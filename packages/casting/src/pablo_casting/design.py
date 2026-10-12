@@ -86,7 +86,7 @@ PITCH_HZ: dict[str, dict[str, tuple[float, float]]] = {
 GENDER_HZ: dict[str, tuple[float, float]] = {"f": (130.0, 330.0), "m": (65.0, 220.0)}
 ANY_HZ = (65.0, 330.0)
 
-TRIAL_GATES = ("wer", "inserted_span", "tail_ok", "sim_card", "utmos", "pq", "bak", "ovrl", "wps", "stretch", "duration_ratio")
+TRIAL_GATES = ("wer", "inserted_span", "tail_ok", "clipped", "sim_card", "utmos", "pq", "bak", "ovrl", "wps", "stretch", "duration_ratio")
 
 
 class DesignRefusal(Exception):
