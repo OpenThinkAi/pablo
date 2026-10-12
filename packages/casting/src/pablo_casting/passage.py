@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 
 PASSAGE_ID = "audition-v1"
 
@@ -26,6 +27,43 @@ PASSAGE = (
 )
 
 PASSAGE_SHA256 = hashlib.sha256(PASSAGE.encode("utf-8")).hexdigest()
+
+DEFAULT_LANGUAGE = "en"
+
+PASSAGE_ES = (
+    "El tren de la mañana salió del valle a las seis y cuarto, como todos los días. "
+    "Conté las cajas dos veces y los números seguían mal; casi siempre lo están. "
+    "Pase, salga del frío, siéntese junto a la estufa y cuénteme todo lo que pasó. "
+    "Escúcheme: el puente se está cayendo y tenemos cinco minutos para cruzar a todos. "
+    "Cuando terminó, el río volvió a quedarse quieto y se encendieron las lámparas del camino."
+)
+
+
+@dataclass(frozen=True)
+class Passage:
+    language: str
+    id: str
+    text: str
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
+
+
+PASSAGES: dict[str, Passage] = {
+    "en": Passage("en", PASSAGE_ID, PASSAGE),
+    "es": Passage("es", "audition-v1-es", PASSAGE_ES),
+}
+"""One audition passage per language; a voice designed reading its own language keeps that accent when cloned."""
+
+
+def passage_for(language: str) -> Passage:
+    return PASSAGES[language]
+
+
+def passage_by_sha(sha256: object) -> Passage | None:
+    """The known passage with this hash, or None (an unknown passage is never a card's reference)."""
+    return next((p for p in PASSAGES.values() if p.sha256 == sha256), None)
 
 
 def passage_words(text: str = PASSAGE) -> list[str]:

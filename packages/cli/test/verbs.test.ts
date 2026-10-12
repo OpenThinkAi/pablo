@@ -145,6 +145,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     role: { type: "string" }, // AGT-1680: bind --role; AGT-1679: audition/cast --role
     describe: { type: "string" }, // AGT-1679: audition --describe
     designer: { type: "string" }, // AGT-1679: audition --designer
+    language: { type: "string" }, // AGT-1814: audition --language
     n: { type: "string" }, // AGT-1679: audition -n (cli.ts adds the short form)
     traits: { type: "string" }, // AGT-1679: audition/cast --traits
     slug: { type: "string" }, // AGT-1679: audition/cast --slug

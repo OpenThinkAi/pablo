@@ -28,7 +28,7 @@ import numpy as np
 
 from pablo_casting.audio import REFERENCE_MAX_SECONDS, REFERENCE_MIN_SECONDS, cosine, estimate_pitch, file_sha256, write_wav
 from pablo_casting.library import Library
-from pablo_casting.passage import PASSAGE, PASSAGE_ID, PASSAGE_SHA256
+from pablo_casting.passage import DEFAULT_LANGUAGE, passage_for
 from pablo_casting.receipts import append_receipt
 from pablo_casting.toolkit import Aligner, Toolkit, Word
 
@@ -92,6 +92,7 @@ class AuditionRequest:
     n: int
     seed: int
     traits: Mapping[str, object]
+    language: str = DEFAULT_LANGUAGE
 
 
 def audition(
@@ -109,6 +110,7 @@ def audition(
     existing = library.audition_numbers(request.slug)
     first = (existing[-1] + 1) if existing else 1
 
+    passage = passage_for(request.language)
     designer = toolkit.designer(request.designer)
     embedder = toolkit.embedder()
     mos = toolkit.mos()
@@ -121,13 +123,13 @@ def audition(
         number = first + index
         seed = request.seed + index
         started = time.monotonic()
-        audio, rate = designer.render(request.description, PASSAGE, seed)
+        audio, rate = designer.render(request.description, passage.text, seed)
         wall = round(time.monotonic() - started, 3)
         wav = folder / f"{number}.wav"
         write_wav(wav, audio, rate)
         audio_seconds = round(len(audio) / float(rate), 3)
 
-        trim = trim_for(aligner, audio, rate, PASSAGE)
+        trim = trim_for(aligner, audio, rate, passage.text)
         spoken = audio[int(trim.start * rate) : int(trim.end * rate)]
         embedding = embedder.embed(spoken if len(spoken) else audio, rate)
         np.save(folder / f"{number}.ecapa.npy", np.asarray(embedding, dtype=np.float32))
@@ -140,7 +142,7 @@ def audition(
                     "intent": "audition",
                     "engine": designer.engine,
                     "weights_sha256": weights,
-                    "inputs_sha256": _inputs_hash(request.description, seed),
+                    "inputs_sha256": _inputs_hash(request.description, seed, passage.sha256),
                     "seed": seed,
                     "voice": request.slug,
                     "candidate": number,
@@ -161,7 +163,8 @@ def audition(
                 "designer": {"name": designer.name, "engine": designer.engine, "weights_sha256": weights},
                 "instruct": request.description,
                 "seed": seed,
-                "passage": {"id": PASSAGE_ID, "sha256": PASSAGE_SHA256},
+                "passage": {"id": passage.id, "sha256": passage.sha256},
+                "language": passage.language,
                 "audio": {"file": wav.name, "sha256": file_sha256(wav), "sample_rate": rate, "seconds": audio_seconds},
                 "trim": {
                     "start": trim.start,
@@ -227,7 +230,7 @@ def audition(
     }
 
 
-def _inputs_hash(description: str, seed: int) -> str:
+def _inputs_hash(description: str, seed: int, passage_sha256: str) -> str:
     import hashlib
 
-    return hashlib.sha256(f"{PASSAGE_SHA256}\0{description}\0{seed}".encode()).hexdigest()
+    return hashlib.sha256(f"{passage_sha256}\0{description}\0{seed}".encode()).hexdigest()

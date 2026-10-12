@@ -30,7 +30,7 @@ TRAITS = json.dumps({"gender": "f", "age": "30s", "pitch": "low-medium", "regist
 
 # The design's card.json, key for key (pm project pablo-casting, "The cast card and the voice library").
 CARD_KEYS = [
-    "slug", "description", "designed", "reference", "embedding", "traits", "pace",
+    "slug", "description", "language", "designed", "reference", "embedding", "traits", "pace",
     "admitted", "performance", "gates", "created", "by", "notes",
 ]  # fmt: skip
 DESIGNED_KEYS = ["engine", "weights_sha256", "instruct", "seed", "candidate"]
@@ -504,3 +504,43 @@ def test_real_designer_renders_the_passage(designer: str, tmp_path: Path) -> Non
     assert rate in (24_000, 48_000)
     assert 15.0 <= len(audio) / rate <= 40.0
     shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+# --- audition in another language ---------------------------------------------
+
+
+def test_a_spanish_audition_records_its_passage_and_casts_with_that_reference(vault: Path, env: dict[str, str]) -> None:
+    from pablo_casting.passage import PASSAGE_ES
+
+    designer = FakeDesigner(name="voxcpm2")
+    body, code = audition(vault, env, "-n", "1", "--language", "es", designer=designer)
+    assert code == 0, body
+    assert designer.calls[0][1] == PASSAGE_ES
+    record = json.loads((voice(vault) / "auditions" / "1.json").read_text())
+    assert record["language"] == "es"
+    assert record["passage"]["id"] == "audition-v1-es"
+    assert record["passage"]["sha256"] != PASSAGE_SHA256
+    cast_body, cast_code = cast(vault, env, 1, designer=designer)
+    assert cast_code == 0, cast_body
+    assert (voice(vault) / "reference.txt").read_text().strip() == PASSAGE_ES
+    assert json.loads((voice(vault) / "card.json").read_text())["language"] == "es"
+
+
+def test_english_stays_the_default_and_an_unknown_language_is_refused(vault: Path, env: dict[str, str]) -> None:
+    body, code = audition(vault, env, "-n", "1")
+    assert code == 0, body
+    assert json.loads((voice(vault) / "auditions" / "1.json").read_text())["language"] == "en"
+    refused_body, refused_code = audition(vault, env, "--language", "xx")
+    assert refused_code != 0
+    assert "unknown language" in json.dumps(refused_body)
+
+
+def test_cast_still_refuses_an_unknown_passage(vault: Path, env: dict[str, str]) -> None:
+    audition(vault, env, "-n", "1", "--language", "es")
+    path = voice(vault) / "auditions" / "1.json"
+    record = json.loads(path.read_text())
+    record["passage"] = {"id": "other", "sha256": "e" * 64}
+    path.write_text(json.dumps(record))
+    body, code = cast(vault, env, 1)
+    assert code != 0
+    assert "passage" in json.dumps(body)
