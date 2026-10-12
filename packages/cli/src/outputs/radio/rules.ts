@@ -53,9 +53,17 @@ em-dashes.
     [SFX: short description]         a one-shot sound made by the effects person
     [BED: short description]         ambience that runs under the lines that follow
     [BED: off]                       stops the ambience
+    [DRAMA]                          the lines that follow are a dramatic scene
+    [DRAMA: off]                     ends the scene
 
 A speech that runs long may continue on the next lines; it belongs to the
 speaker above.
+
+A dramatic scene is performed with a more emotional voice engine. Use it
+sparingly, for the story's turning points (an accident, a death, a fire), never
+for a whole episode. Each marker sits alone on its line and makes no sound;
+close every \`[DRAMA]\` with \`[DRAMA: off]\` (an unclosed one runs to the end of
+the episode), and never open one inside another.
 
 ## The shape of an episode
 
@@ -105,5 +113,6 @@ parenthesis, before the words:
   ${RADIO_NONVERBALS.map((n) => `(${n})`).join(" ")}. They are not directions.
 
 \`pablo check\` reports a direction outside the vocabulary, a line with more than
-one, and a role with no description, each with its line number.
+one, a role with no description, a \`[DRAMA: off]\` with no open scene and a
+\`[DRAMA]\` inside one, each with its line number.
 `;

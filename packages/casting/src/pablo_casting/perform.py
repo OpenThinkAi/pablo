@@ -5,6 +5,16 @@ Renders every spoken line of an episode script through the decided engine
 `gates.py`), runs the retake loop, writes the takes (`takes.py`) and the
 episode's `v1.json` (`manifest.py`), and streams each line's take as it lands.
 
+**Dramatic scenes** (AGT-1888): the lines of a `[DRAMA]` scene (`script.py`)
+render through `engines.DRAMA_ENGINE`, the original Chatterbox, and every other
+line through the episode's engine, in one run. The second engine is loaded
+only when the episode has a scene. Runs break at a scene's edges, so a pass is
+all dramatic or all not, and a dramatic pass is one line. The gate stack, the
+retake loop and the pace policy are the same for both. A dramatic line's
+manifest entry carries `drama: true` and its own `engine` block; a line without
+one was voiced by the manifest's `engine`. An episode without a scene performs
+exactly as before, with the same take keys.
+
 **Retake loop** (design, "Quality gates"): up to `MAX_ATTEMPTS` (4) attempts
 per pass with derived seeds (`takes.derive_seed`: `sha1(key_without_seed +
 attempt)`); the first take that passes every hard gate is kept. If none pass,
@@ -85,6 +95,7 @@ from pablo_casting.binding import BindingRefusal, library_dir, pin_state, read_c
 from pablo_casting.directions import Direction as ScriptDirection
 from pablo_casting.lexicon import PARAM as LEXICON_PARAM, Entry, load as load_lexicon, respelt_words
 from pablo_casting.engines import (
+    DRAMA_ENGINE,
     ENGINE_SPECS,
     EngineFactory,
     EngineSpec,
@@ -251,7 +262,7 @@ def resolve_roles(work: Path, script: Script, voices_dir: Path) -> dict[str, Rol
 
 
 def runs_between_cues(script: Script) -> tuple[list[list[PassLine]], list[SpokenLine]]:
-    """The spoken lines, numbered 0..n-1, in runs broken by cues (a pass never spans a cue)."""
+    """The spoken lines, numbered 0..n-1, in runs broken by cues and by a `[DRAMA]` scene's edges (a pass never spans either)."""
     runs: list[list[PassLine]] = [[]]
     spoken: list[SpokenLine] = []
     for item in script.items:
@@ -259,9 +270,19 @@ def runs_between_cues(script: Script) -> tuple[list[list[PassLine]], list[Spoken
             if runs[-1]:
                 runs.append([])
             continue
-        runs[-1].append(PassLine(len(spoken), item.speaker, item.text))
+        if runs[-1] and runs[-1][-1].drama != item.drama:
+            runs.append([])
+        runs[-1].append(PassLine(len(spoken), item.speaker, item.text, item.drama))
         spoken.append(item)
     return [run for run in runs if run], spoken
+
+
+def group_passes(runs: Sequence[Sequence[PassLine]], spec: EngineSpec) -> list[Pass]:
+    """The episode engine's grouping, run by run; a `[DRAMA]` run is one line per pass, the dramatic engine's grouping."""
+    passes: list[Pass] = []
+    for run in runs:
+        passes.extend(group_dia([run]) if spec.grouping == "dia" and not run[0].drama else group_lines([run]))
+    return passes
 
 
 def cue_positions(script: Script) -> list[dict[str, object]]:
@@ -358,10 +379,20 @@ class Performer:
     """Merged into every `take` and `gate` receipt (design on demand tags its trial passes, AGT-1699)."""
     air: float = DEFAULT_AIR
     """Seconds of air a take keeps after its voice ends (`casting.json` `ending.air`); a non-default value is in the take key."""
+    drama: PerformEngine | None = None
+    """The dramatic engine (`engines.DRAMA_ENGINE`), loaded only when the episode has a `[DRAMA]` scene (AGT-1888)."""
 
     def __post_init__(self) -> None:
         if self.lexicon is None:
             self.lexicon = load_lexicon(self.work)
+
+    def route(self, take_pass: Pass) -> tuple[EngineSpec, PerformEngine]:
+        """The engine a pass renders through: the dramatic one for a `[DRAMA]` line, else the episode's."""
+        if not take_pass.lines[0].drama:
+            return self.spec, self.engine
+        if self.drama is None:
+            raise RuntimeError(f"line {take_pass.lines[0].i} is in a [DRAMA] scene but no dramatic engine was loaded")
+        return self.drama.spec, self.drama
 
     def thresholds(self, card: Card) -> dict[str, object]:
         # The pace policy holds the stretch the gate allows to [0.75, 1.05], whatever a card calibrated.
@@ -371,11 +402,12 @@ class Performer:
         first = spoken[take_pass.lines[0].i]
         direction = _direction(first)
         voices = {line.speaker: self.roles[line.speaker].voice for line in take_pass.lines}
-        params = adapt(self.spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, reasons, self.lexicon or ())
+        spec, engine = self.route(take_pass)
+        params = adapt(spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, reasons, self.lexicon or ())
         if self.air != DEFAULT_AIR:
             params["air"] = self.air  # the stored take's ending depends on it, so its key does too
         return TakeInputs(
-            engine=self.engine.identity,
+            engine=engine.identity,
             voice="+".join(dict.fromkeys(self.roles[line.speaker].voice.card_hash for line in take_pass.lines)),
             lines=tuple(Line(speaker=line.speaker, text=line.text) for line in take_pass.lines),
             seed=0,
@@ -434,7 +466,7 @@ class Performer:
             )
 
         started = time.monotonic()
-        synthesis = self.engine.synthesize(inputs)
+        synthesis = self.route(take_pass)[1].synthesize(inputs)
         wall = round(time.monotonic() - started, 6)
         seconds = synthesis.audio.duration
         self.totals.engine_wall += wall
@@ -531,6 +563,14 @@ class Performer:
         return kept, attempts, target, band, thresholds
 
 
+def load_engine(work: Path, spec: EngineSpec, roles: Mapping[str, Role], env: Mapping[str, str], engine_factory: EngineFactory) -> tuple[PerformEngine, dict[str, object]]:
+    """Makes and loads one engine, with its `load` receipt. Raises `EngineUnavailable`."""
+    engine = engine_factory(spec, {name: role.voice for name, role in roles.items()}, env)
+    loaded = engine.load()
+    append_receipt(work, {"intent": "load", "engine": engine.identity.id, "revision": spec.revision, "weights_sha256": engine.identity.weights_sha256, **loaded})
+    return engine, loaded
+
+
 def _line_entry(
     line: SpokenLine,
     i: int,
@@ -567,6 +607,11 @@ def _line_entry(
         "gates": {key: scores.get(key) for key in ("wer", "inserted_span", "tail_ok", "clipped", "end_db", "sim_card", "utmos", "pq", "bak", "ovrl", "wps", "stretch", "duration_ratio")},
         "failing": list(kept.verdict.get("failing", [])),  # type: ignore[call-overload]
     }
+    if line.drama:
+        # A dramatic take's engine is not the manifest's: the line names its own (a line without one is the manifest's engine's).
+        identity = kept.inputs.engine
+        entry["drama"] = True
+        entry["engine"] = {"id": identity.id, "weights_sha256": identity.weights_sha256, "mlx_audio": identity.mlx_audio, "mlx": identity.mlx, **DRAMA_ENGINE.as_body()}
     if abs(applied - needed_value) > 1e-9:
         entry["stretch_needed"] = round(needed_value, 3)
     if segment is not None:
@@ -658,7 +703,7 @@ def perform(
         return _refused(str(refusal), **refusal.extra)
 
     runs, spoken = runs_between_cues(script)
-    passes = group_dia(runs) if spec.grouping == "dia" else group_lines(runs)
+    passes = group_passes(runs, spec)
     if request.stream and mixer is not None and mixer.pacer is sox_pacer:
         try:
             require_sox()
@@ -667,22 +712,25 @@ def perform(
 
     started = time.monotonic()
     started_at = now()
-    engine = engine_factory(spec, {name: role.voice for name, role in roles.items()}, env)
     try:
-        loaded = engine.load()
+        engine, loaded = load_engine(work, spec, roles, env, engine_factory)
+        drama = load_engine(work, DRAMA_ENGINE, roles, env, engine_factory)[0] if any(line.drama for line in spoken) else None
     except EngineUnavailable as missing:
         return _refused(str(missing))
-    append_receipt(work, {"intent": "load", "engine": engine.identity.id, "revision": spec.revision, "weights_sha256": engine.identity.weights_sha256, **loaded})
     scorers = list(scorer_factory())
 
-    _emit({"event": "start", "episode": episode, "engine": spec.name, "lines": len(spoken), "passes": len(passes), "stream": request.stream}, err, stream_out)
+    _emit(
+        {"event": "start", "episode": episode, "engine": spec.name, **({"drama_engine": DRAMA_ENGINE.name} if drama is not None else {}), "lines": len(spoken), "passes": len(passes), "stream": request.stream},
+        err,
+        stream_out,
+    )
     lines: list[dict[str, object]] = [{} for _ in spoken]
     live: EpisodeStream | None = None
     if request.stream and mixer is not None and request.cues_dir is not None:
         timeline = Timeline(work, cue_positions(script), mixer.cue_library(request.cues_dir), mixer.pacer, log=mixer.log)
         live = EpisodeStream(work, episode, timeline, lines_total=len(spoken), started=started, started_at=started_at)
     with tempfile.TemporaryDirectory(prefix="pablo-perform-") as scratch:
-        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), air=air)
+        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), air=air, drama=drama)
         try:
             for take_pass in passes:
                 kept, attempts, target, band, _ = performer.perform_pass(take_pass, spoken)
