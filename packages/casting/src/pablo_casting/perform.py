@@ -83,6 +83,7 @@ import numpy as np
 
 from pablo_casting.binding import BindingRefusal, library_dir, pin_state, read_cast, read_episode
 from pablo_casting.directions import Direction as ScriptDirection
+from pablo_casting.lexicon import PARAM as LEXICON_PARAM, Entry, load as load_lexicon, respelt_words
 from pablo_casting.engines import (
     ENGINE_SPECS,
     EngineFactory,
@@ -351,10 +352,16 @@ class Performer:
     out: TextIO | None
     scratch: Path
     totals: Totals = field(default_factory=Totals)
+    lexicon: list[Entry] | None = None
+    """The work's pronunciation lexicon; loaded from `outputs/radio/pronounce.md` when not given (AGT-1798)."""
     receipt_tags: dict[str, object] = field(default_factory=dict)
     """Merged into every `take` and `gate` receipt (design on demand tags its trial passes, AGT-1699)."""
     air: float = DEFAULT_AIR
     """Seconds of air a take keeps after its voice ends (`casting.json` `ending.air`); a non-default value is in the take key."""
+
+    def __post_init__(self) -> None:
+        if self.lexicon is None:
+            self.lexicon = load_lexicon(self.work)
 
     def thresholds(self, card: Card) -> dict[str, object]:
         # The pace policy holds the stretch the gate allows to [0.75, 1.05], whatever a card calibrated.
@@ -364,7 +371,7 @@ class Performer:
         first = spoken[take_pass.lines[0].i]
         direction = _direction(first)
         voices = {line.speaker: self.roles[line.speaker].voice for line in take_pass.lines}
-        params = adapt(self.spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, reasons)
+        params = adapt(self.spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, reasons, self.lexicon or ())
         if self.air != DEFAULT_AIR:
             params["air"] = self.air  # the stored take's ending depends on it, so its key does too
         return TakeInputs(
@@ -381,13 +388,14 @@ class Performer:
         )
 
     def _score(self, attempt_no: int, inputs: TakeInputs, synthesis: Synthesis, card: Card, target: float, band: Sequence[float]) -> tuple[dict[str, object], float]:
+        # The gate judges against the script's own words (numerals and respellings are the engine's input only).
         text = " ".join(line.text for line in inputs.lines)
         path = self.scratch / f"attempt-{uuid.uuid4().hex[:8]}.wav"
         path.write_bytes(synthesis.audio.to_wav())
         started = time.monotonic()
         # The scratch copy goes when the run's temporary directory does.
         scores, ran = run_scorers(
-            ScoredTake(audio=path, line=text, seconds=synthesis.audio.duration, card_embedding=card.embedding, card_reference=card.reference),
+            ScoredTake(audio=path, line=text, seconds=synthesis.audio.duration, card_embedding=card.embedding, card_reference=card.reference, respelt=respelt_words(inputs.params.get(LEXICON_PARAM))),
             self.scorers,
         )
         wall = round(time.monotonic() - started, 6)

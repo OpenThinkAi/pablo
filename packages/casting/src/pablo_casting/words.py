@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 UNITS = {
@@ -227,7 +227,7 @@ def _join_digit_groups(heard: Sequence[Heard]) -> list[Heard]:
     return out
 
 
-def words_check(line: str, heard: Sequence[Heard]) -> dict[str, object]:
+def words_check(line: str, heard: Sequence[Heard], respelt: Collection[str] = ()) -> dict[str, object]:
     """Measures `heard` against the script `line`.
 
     Returns `wer` (0.0 is perfect; can exceed 1.0 on a runaway take),
@@ -235,6 +235,12 @@ def words_check(line: str, heard: Sequence[Heard]) -> dict[str, object]:
     `tail_ok` (the last two script words were heard), `word_end` (seconds:
     where the last script word ends, or `None` when it was not heard) and
     `ratio` (`SequenceMatcher` over the normalised words, for comparison).
+
+    `respelt` is the lower-case script words the engine read respelt (AGT-1798, the
+    work's pronunciation lexicon). A respelling is read differently on purpose
+    (`Zinfandel` as `zinfan-DELL`), so Whisper writes it however it hears it; where
+    the alignment pairs one such script word with a run of heard words, that run is
+    the word. The rest of the line is judged as ever.
     """
     expected = tokens(line)
     # Heard words are tokenised as one run, so a number Whisper wrote as words across several is one value.
@@ -255,6 +261,8 @@ def words_check(line: str, heard: Sequence[Heard]) -> dict[str, object]:
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             groups.extend(([i1 + k], [j1 + k]) for k in range(i2 - i1))
+        elif tag == "replace" and i2 - i1 == 1 and expected[i1].text in respelt:
+            groups.append(([i1], list(range(j1, j2))))
         elif tag == "replace":
             for es, ss in _resolve(expected[i1:i2], said[j1:j2]):
                 groups.append(([i1 + e for e in es], [j1 + s for s in ss]))

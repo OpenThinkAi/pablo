@@ -349,7 +349,13 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 no emotion mapping, `[laugh]`/`[cough]`/`[chuckle]`, short
                 references padded to 5.2 s), Dia with the prototype's pass
                 grouping for A/B only, and ALL-CAPS words capitalised in the
-                engine input (never in the script). `perform.py` runs the
+                engine input (never in the script). AGT-1798: with numerals
+                spoken (`numerals.py`), the work's
+                `outputs/radio/pronounce.md` (`lexicon.py`, `word -> respelling`,
+                optional `SPEAKER:` scope) respells words, both in the engine
+                input only; matching entries are the `lexicon` take-key param,
+                and the words gate accepts whatever Whisper heard for a
+                respelt word. `perform.py` runs the
                 retake loop (4 derived seeds, first pass kept, else best-of
                 with an auto flag in `flags.json`), the pace policy (role
                 `pace.wps` x 0.85/1.15 for slow/quick; stretch measured and
