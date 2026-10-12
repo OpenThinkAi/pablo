@@ -55,7 +55,8 @@ The three npm packages release together at one version.
    `pablo --version`, the MCP server's version and the agent's client id all read
    `packages/cli/package.json`. The casting package has its own version and is not
    bumped.
-2. Land the bump on `main`.
+2. Land the bump on `main` through the stamp flow (`stamp review`, `stamp merge`,
+   `stamp push`; see `AGENTS.md`).
 3. Run the `release` workflow from the GitHub Actions tab (manual, `main` only). It
    typechecks and tests, then publishes core, tui and cli in that order with npm
    Trusted Publishing (OIDC, with provenance, no token), skipping any package whose

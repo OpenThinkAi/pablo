@@ -77,7 +77,7 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 
 ## The tools
 
-`pablo mcp` serves 31 tools. The ones a writing session uses:
+`pablo mcp` serves about thirty tools; your agent's tool list shows the current set. The ones a writing session uses:
 
 | Tool | Does |
 |---|---|
