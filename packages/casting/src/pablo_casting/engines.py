@@ -29,11 +29,15 @@ text is never changed; only the engine input is. Evidence (AGT-1677, Matt
 2026-10-11): Turbo said "Shadow" right in 4 of 12 takes from caps and 12 of 12
 title-cased; ZONOS2 spelled caps letter by letter.
 
-**Numerals** reach every engine spelled out (`numerals.py`, AGT-1789): years
-as said ("1917" -> "nineteen seventeen"), other numbers as words. The script
-keeps its digits. Turbo needs no length cap of its own: mlx-audio already
-splits its input at sentence boundaries into chunks of at most 800 speech
-tokens (about 32 s), far beyond any script line.
+**Numerals and respellings.** Numerals reach every engine spelled out
+(`numerals.py`, AGT-1789): years as said ("1917" -> "nineteen seventeen"),
+other numbers as words; the script keeps its digits. AGT-1798 adds the work's
+pronunciation lexicon (`outputs/radio/pronounce.md`, `lexicon.py`), which
+respells words in the engine input only; the entries a pass uses are its
+`lexicon` param, so they are in the take key and an unused entry changes no
+key. Turbo needs no length cap of its own: mlx-audio already splits its input
+at sentence boundaries into chunks of at most 800 speech tokens (about 32 s),
+far beyond any script line.
 
 An adapter turns a pass's script lines (and their directions) into the params
 that change the audio, which go into the take key, and the text the engine
@@ -59,6 +63,7 @@ from typing import Protocol
 import numpy as np
 
 from pablo_casting.directions import NONVERBALS
+from pablo_casting.lexicon import PARAM as LEXICON_PARAM, Entry, apply as apply_lexicon, params_for as lexicon_params
 from pablo_casting.numerals import spell_numbers
 from pablo_casting.takes import EngineId, Synthesis, TakeInputs
 from pablo_casting.wav import Audio
@@ -93,8 +98,13 @@ _SPACE = re.compile(r"\s+")
 TURBO_TAGS: dict[str, str] = {"laughs": "[laugh]", "coughs": "[cough]", "chuckles": "[chuckle]", "chuckle": "[chuckle]"}
 
 
-def turbo_text(text: str) -> str:
-    """What Turbo reads for a script line: caps normalised, its three tags, other non-verbals left out."""
+def read_text(text: str, speaker: str = "", lexicon: object = None) -> str:
+    """Numerals spoken, caps normalised, then the work's respellings (after caps, so `zin-fan-DELL` keeps its capitals)."""
+    return apply_lexicon(lexicon, speaker, normalise_caps(spell_numbers(text)))
+
+
+def turbo_text(text: str, speaker: str = "", lexicon: object = None) -> str:
+    """What Turbo reads for a script line: numerals spoken, caps normalised, respelt, its three tags, other non-verbals left out."""
 
     def tag(match: re.Match[str]) -> str:
         inner = _SPACE.sub(" ", match.group(1).strip().lower())
@@ -102,14 +112,14 @@ def turbo_text(text: str) -> str:
             return TURBO_TAGS[inner]
         return "" if inner in NONVERBALS else match.group(0)
 
-    return _SPACE.sub(" ", _PAREN.sub(tag, spell_numbers(normalise_caps(text)))).strip()
+    return _SPACE.sub(" ", _PAREN.sub(tag, read_text(text, speaker, lexicon))).strip()
 
 
-def dia_text(turns: Sequence[tuple[str, str]], tags: Mapping[str, str]) -> str:
+def dia_text(turns: Sequence[tuple[str, str]], tags: Mapping[str, str], lexicon: object = None) -> str:
     """Dia's pass text: `[S1] words [S2] words [other] Mm.` (the prototype's throwaway word, trimmed after)."""
     last = turns[-1][0]
     other = "[S2]" if tags[last] == "[S1]" else "[S1]"
-    body = " ".join(f"{tags[speaker]} {spell_numbers(normalise_caps(words))}" for speaker, words in turns)
+    body = " ".join(f"{tags[speaker]} {read_text(words, speaker, lexicon)}" for speaker, words in turns)
     return f"{body} {other} Mm."
 
 
@@ -298,8 +308,11 @@ def adapt(
     emotion: str | None,
     intensity: int | None,
     reasons: Sequence[str] = (),
+    lexicon: Sequence[Entry] = (),
 ) -> dict[str, object]:
     """The params that change a pass's audio (the take key's `params`).
+
+    `lexicon` is the work's pronunciation entries: those matching the pass go in as `lexicon`.
 
     `reasons` are a flag's normalised reasons (`normalise_reasons`); with none the
     params are exactly what `perform` has always sent, so existing takes keep their keys.
@@ -321,17 +334,18 @@ def adapt(
             break
     if reasons:
         params["retake"] = "+".join(reasons)
+    params.update(lexicon_params(lexicon, [(line.speaker, line.text) for line in take_pass.lines]))
     return params
 
 
 def engine_text(spec: EngineSpec, inputs: TakeInputs) -> str:
     """The text the engine reads, derived from the take key's own lines."""
     if spec.name == TURBO.name:
-        return " ".join(turbo_text(line.text) for line in inputs.lines)
+        return " ".join(turbo_text(line.text, line.speaker, inputs.params.get(LEXICON_PARAM)) for line in inputs.lines)
     if spec.name == DIA.name:
         turns = Pass(tuple(PassLine(k, line.speaker, line.text) for k, line in enumerate(inputs.lines))).turns()
         speakers = list(dict.fromkeys(speaker for speaker, _ in turns))
-        return dia_text(turns, dict(zip(speakers, ("[S1]", "[S2]"))))
+        return dia_text(turns, dict(zip(speakers, ("[S1]", "[S2]"))), inputs.params.get(LEXICON_PARAM))
     raise KeyError(spec.name)
 
 

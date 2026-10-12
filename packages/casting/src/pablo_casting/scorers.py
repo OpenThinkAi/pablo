@@ -82,6 +82,8 @@ class Take:
     card_embedding: Path | None = None
     card_reference: Path | None = None
     centroid: Sequence[float] | None = None
+    # Lower-case script words the engine read respelt (AGT-1798): the words gate accepts whatever Whisper heard in their place.
+    respelt: tuple[str, ...] = ()
     # Filled by earlier scorers in the stack (the aligner reads the line; nothing reads these yet).
     context: dict[str, object] = field(default_factory=dict)
 
@@ -267,7 +269,7 @@ class WhisperScorer(_Lazy):
             condition_on_previous_text=False,
         )
         heard = [Heard(w["word"], float(w["start"]), float(w["end"])) for seg in result["segments"] for w in seg.get("words", [])]
-        measured = words_check(take.line, heard)
+        measured = words_check(take.line, heard, take.respelt)
         return {k: measured[k] for k in ("wer", "inserted_span", "tail_ok", "word_end")} | {"heard": " ".join(h.word.strip() for h in heard)}
 
 

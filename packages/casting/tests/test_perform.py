@@ -445,3 +445,38 @@ def test_a_bad_ending_config_is_a_refusal(setup: tuple[Path, Path], tmp_path: Pa
     config.write_text(json.dumps({"ending": {"air": 2}}), encoding="utf-8")
     body, code, _ = _ending_go(work, library, abrupt=False, env={"XDG_CONFIG_HOME": str(tmp_path / "config")})
     assert code == 2 and "ending" in str(body["message"])
+
+# AGT-1798: the pronunciation lexicon and numerals ---------------------------------
+
+
+class LineSpy(FakeScorer):
+    seen: list[str] = []
+    respelt: list[tuple[str, ...]] = []
+
+    def score(self, take: Take) -> Mapping[str, object]:
+        if self.info is WHISPER:
+            LineSpy.seen.append(take.line)
+            LineSpy.respelt.append(take.respelt)
+        return super().score(take)
+
+
+def test_lexicon_and_numerals_reach_the_engine_only_and_the_gate_sees_no_respelling(setup: tuple[Path, Path]) -> None:
+    work, library = setup
+    script = work / "outputs" / "radio" / "episodes" / "01-the-harbour-light.md"
+    script.write_text(SCRIPT.replace("Mind the step", "Mind the Zinfandel in 1917"), encoding="utf-8")
+    (work / "outputs" / "radio" / "pronounce.md").write_text("Zinfandel -> zin-fan-DELL\n", encoding="utf-8")
+    LineSpy.seen = []
+    LineSpy.respelt = []
+    factory = Factory(wps=(3.0,))
+    scorers = [LineSpy(s.info, s.answer) for s in fake_scorers()]
+    body, code, _, _ = go(work, library, factory, scorers=scorers)
+    assert code == 0, body
+    assert factory.engine is not None
+    call = factory.engine.calls[1]
+    assert call["text"] == "Mind the zin-fan-DELL in nineteen seventeen, the boards are wet tonight."
+    assert call["inputs"].lines[0].text.startswith("Mind the Zinfandel in 1917")
+    assert "zin-fan-DELL" in call["inputs"].params["lexicon"]
+    assert "lexicon" not in factory.engine.calls[0]["inputs"].params
+    assert any("Zinfandel in 1917" in line and "zin-fan" not in line for line in LineSpy.seen)
+    assert ("zinfandel",) in LineSpy.respelt and LineSpy.respelt.count(()) == 3
+    assert "1917" in read_version(work, 1, 1)["lines"][1]["text"]
