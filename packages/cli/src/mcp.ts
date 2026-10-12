@@ -35,6 +35,24 @@ const SERVER_NAME = "pablo";
 const SERVER_VERSION = VERSION;
 
 /**
+ * Sent to every MCP client at initialize (AGT-1873): how an outside agent is
+ * meant to drive pablo, so it works the way pablo's own harness does without
+ * having read the docs. The same rules, for people, are docs/agents.md's "How
+ * to drive it"; the harness's own role text is `harness/prompt.ts`.
+ */
+export const MCP_INSTRUCTIONS = [
+  "pablo manages a writing project (a novel or story) in the author's vault. You plan with the author; pablo writes the prose.",
+  "",
+  "- Start every session with `resume` (pass `project`, the work's slug). It returns where the work stands and `next`.",
+  "- Never write the book's prose yourself. Every sentence of prose comes from `write` / `draft_unit` (or `revise_passage`), which send one prompt to the author's configured writer model. Do not put prose into `save`.",
+  "- Save planning through pablo: when you and the author agree on a premise, acts, beats or a bible file, call `save` so it lands where the framework reads it and is committed.",
+  "- A result of `{ok: false, missing: [...]}` is a direction, not an error: it names what the plan still needs. Steer the author there; do not work around it.",
+  "- Every manuscript change lands on a branch (`draft/`, `revise/`, `plan/`). Tell the author what is waiting; they accept it themselves (`pablo merge`, or the screen). There is deliberately no merge tool.",
+  "- Ask the author about their calls (plot direction, a character's fate or motive, any open `[pick]`); proceed with a stated assumption on everything else, and batch questions.",
+  "- When you record a fact, say whether it was researched (with the source), invented, or decided by the author.",
+].join("\n");
+
+/**
  * Every tool `pablo mcp` serves, flattened from `verb.mcpTools ?? [verb]`. The
  * harness (AGT-1552, `harness/tools.ts`) reads the same list, so a tool added
  * to `VERBS` reaches Claude Code and pablo's own agent at once.
@@ -54,7 +72,7 @@ export function mcpTools(): readonly McpToolSpec[] {
  * list, built from the same specs.
  */
 export function buildMcpServer(ctx: VerbContext, tools: readonly McpToolSpec[] = mcpTools()): McpServer {
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: MCP_INSTRUCTIONS });
 
   for (const tool of tools) {
     server.registerTool(

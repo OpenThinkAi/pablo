@@ -41,8 +41,9 @@ error. That is the whole contract.
 
 ## How to drive it
 
-These are the rules pablo gives its own built-in agent; follow them and you will work
-the way the tool expects.
+These are the rules pablo gives its own built-in agent. `pablo mcp` also sends them
+to your agent as the server's instructions when it connects, so an MCP client gets
+them without reading this page.
 
 1. **Start with `resume`.** It returns where the work stands: the core's stages,
    each output's progress, branches waiting for review, open decisions, and `next`.
