@@ -27,7 +27,12 @@ dramatic line (no direction mapping, like Turbo). It takes the same reference
 handling as Turbo (resampled to the model's rate, padded to 5.2 s when short)
 and the same treatment of non-verbals: the ones in `CHATTERBOX_TAGS` become its
 tags, the rest are left out of the engine input (today that is all of them, so
-"(gasps)" is never read aloud; the script keeps them). Its own adapter id and params
+"(gasps)" is never read aloud; the script keeps them). Unlike Turbo it copies the
+loudness of the reference it clones, so a hot cast reference (peak 1.00, RMS 0.23)
+came out clipped inside the model (AGT-1900): its reference is levelled to
+`CHATTERBOX_REF_RMS` with its peak capped at `CHATTERBOX_REF_PEAK` before
+conditioning (`level_reference`, before the pad), and both are recorded params.
+Turbo and Dia references are never levelled. Its own adapter id and params
 are in the take key, so a dramatic take never collides with a Turbo one, and
 an episode without a scene keeps every key it had. It is not an `--engine`
 choice: it voices scenes inside an episode performed by another.
@@ -299,6 +304,9 @@ TURBO_TEMPERATURE = 0.8
 TURBO_MIN_REF_S = 5.2
 DIA_TEMPERATURE, DIA_TOP_P, DIA_SR, DIA_REF_PAD_S = 1.1, 0.9, 44_100, 0.25
 CHATTERBOX_EXAGGERATION, CHATTERBOX_CFG_WEIGHT, CHATTERBOX_TEMPERATURE = 0.5, 0.5, 0.8
+# The level the original Chatterbox's reference is scaled to (AGT-1900): RMS 0.05 gave clean takes
+# from a reference that clipped at 0.23; the peak cap keeps a spiky reference below full scale.
+CHATTERBOX_REF_RMS, CHATTERBOX_REF_PEAK = 0.05, 0.9
 
 # Direction -> engine parameters, per engine (design: "Per-line direction in the
 # script"). Turbo maps none (text only, the bake-off's decision); neither does Dia,
@@ -370,7 +378,7 @@ def adapt(
     elif spec.name == DIA.name:
         params.update({"temperature": DIA_TEMPERATURE, "top_p": DIA_TOP_P, "ref_pad_s": DIA_REF_PAD_S, "throwaway": "Mm."})
     elif spec.name == CHATTERBOX.name:
-        params.update({"temperature": CHATTERBOX_TEMPERATURE, "exaggeration": CHATTERBOX_EXAGGERATION, "cfg_weight": CHATTERBOX_CFG_WEIGHT})
+        params.update({"temperature": CHATTERBOX_TEMPERATURE, "exaggeration": CHATTERBOX_EXAGGERATION, "cfg_weight": CHATTERBOX_CFG_WEIGHT, "ref_rms": CHATTERBOX_REF_RMS, "ref_peak_cap": CHATTERBOX_REF_PEAK})
         voice = voices[take_pass.lines[0].speaker]
         if voice.seconds < TURBO_MIN_REF_S:
             params["ref_pad_to_s"] = TURBO_MIN_REF_S
@@ -398,6 +406,16 @@ def engine_text(spec: EngineSpec, inputs: TakeInputs) -> str:
         speakers = list(dict.fromkeys(speaker for speaker, _ in turns))
         return dia_text(turns, dict(zip(speakers, ("[S1]", "[S2]"))), inputs.params.get(LEXICON_PARAM))
     raise KeyError(spec.name)
+
+
+def level_reference(ref: np.ndarray, rms: float, peak_cap: float) -> np.ndarray:
+    """Scale a reference to `rms`, scaled back if that would put its peak over `peak_cap`; silence is left alone."""
+    ref = np.asarray(ref, dtype=np.float32)
+    level = float(np.sqrt(np.mean(np.square(ref, dtype=np.float64)))) if ref.size else 0.0
+    peak = float(np.max(np.abs(ref))) if ref.size else 0.0
+    if level <= 0.0 or peak <= 0.0:
+        return ref
+    return (ref * np.float32(min(rms / level, peak_cap / peak))).astype(np.float32)
 
 
 def to_audio(samples: np.ndarray, rate: int) -> Audio:
@@ -543,6 +561,8 @@ class MlxEngine:
         if self.spec.name in (TURBO.name, CHATTERBOX.name):
             rate = int(model.sample_rate)  # type: ignore[attr-defined]
             ref = self._reference(self.voices[inputs.lines[0].speaker], rate)
+            if self.spec.name == CHATTERBOX.name:  # it copies the reference's loudness: level it, before any pad
+                ref = level_reference(ref, float(params["ref_rms"]), float(params["ref_peak_cap"]))  # type: ignore[arg-type]
             pad_to = params.get("ref_pad_to_s")
             if isinstance(pad_to, (int, float)) and ref.size < int(pad_to * rate):
                 ref = np.concatenate([ref, np.zeros(int(pad_to * rate) - ref.size, np.float32)])
