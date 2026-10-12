@@ -22,7 +22,7 @@ import { EndpointHung, NoToolCallError, ProviderResponseError } from "./errors";
 import { readFacts } from "./facts";
 import type { Gate } from "./queue";
 import type { RateMeter } from "./rates";
-import { countOf, dataOf, frameSse, measure, truncate, waitFor } from "./stream";
+import { countOf, dataOf, frameSse, measure, reaching, truncate, waitFor } from "./stream";
 import type {
   Adapter,
   CompletionEvent,
@@ -123,7 +123,7 @@ const EXTRACT_FACTS_TOOL = {
 
 export function createOpenAiAdapter(options: OpenAiAdapterOptions): Adapter {
   const { provider, meter } = options;
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = reaching(options.fetch ?? globalThis.fetch, provider.endpoint, provider.local);
   const now = options.now ?? (() => Date.now());
   const url = `${provider.endpoint}/chat/completions`;
 

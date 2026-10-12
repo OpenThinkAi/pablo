@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { EndpointHung, NoToolCallError, PREFERRED_OUTPUT, ProviderResponseError, createProviders, parseConfig } from "../src/index";
+import { EndpointHung, EndpointUnreachable, NoToolCallError, PREFERRED_OUTPUT, ProviderResponseError, createProviders, parseConfig } from "../src/index";
 import type { CompletionStats, Document, Intent, Providers } from "../src/index";
 import { startFakeEndpoint } from "./fake-endpoint";
 import type { FakeEndpoint, FakeEndpointOptions } from "./fake-endpoint";
@@ -79,6 +79,24 @@ test("an endpoint that sends nothing becomes a named error, not a wait", async (
   expect(error.elapsedMs).toBeGreaterThanOrEqual(110);
   expect(error.message).toContain(fake.url);
   expect(error.message).toMatch(/is the server running\?/);
+});
+
+test("an endpoint nobody is listening on becomes a named error, not a crash", async () => {
+  // A port that was just free: bind one, note it, close it.
+  const server = Bun.serve({ port: 0, fetch: () => new Response("") });
+  const url = `http://127.0.0.1:${server.port}/v1`;
+  server.stop(true);
+  const adapter = providersAt(url).adapter("local");
+
+  const failed = await drain(adapter.complete({ prompt: "anyone there?" })).catch((error: unknown) => error);
+
+  expect(failed).toBeInstanceOf(EndpointUnreachable);
+  expect(failed).toBeInstanceOf(ProviderResponseError);
+  const error = failed as EndpointUnreachable;
+  expect(error.endpoint).toBe(url);
+  expect(error.message).toContain(url);
+  expect(error.message).toMatch(/is the server running\?/);
+  expect(error.message).toContain('"intents"');
 });
 
 test("a request may raise the timeout above the provider's", async () => {

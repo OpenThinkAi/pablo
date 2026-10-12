@@ -47,6 +47,26 @@ export class ProviderResponseError extends Error {
 }
 
 /**
+ * The endpoint could not be reached at all: the connection was refused, the
+ * host did not resolve, or the network failed before a response arrived. A
+ * subclass of `ProviderResponseError`, so every caller that already turns a
+ * bad response into a refusal does the same here instead of crashing. For a
+ * local provider the message also names the usual cause on a new setup: no
+ * local model, with the writing intents still routed to it.
+ */
+export class EndpointUnreachable extends ProviderResponseError {
+  override readonly name = "EndpointUnreachable";
+  constructor(endpoint: string, cause: string, local: boolean) {
+    super(endpoint, cause);
+    this.message =
+      `pablo: could not reach the model at ${endpoint} (${cause}) — is the server running? ` +
+      (local
+        ? `If you have no local model, route the writing intents to another provider with "intents" in the config (see docs/configuration.md).`
+        : `Check the endpoint and your network, or point at another provider.`);
+  }
+}
+
+/**
  * The endpoint answered a forced tool call with no tool call at all. It keeps
  * the raw `finish_reason` and the answer it did give, so a caller can fall back
  * to plain text and a failure report can say what the server actually sent

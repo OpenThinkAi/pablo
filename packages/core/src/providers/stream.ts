@@ -10,9 +10,29 @@
  * that carries several `data:` lines — became the framing both of them use.
  */
 
+import { EndpointUnreachable } from "./errors";
 import type { CompletionStats } from "./types";
 
 const TIMED_OUT = Symbol("timed out");
+
+/**
+ * `doFetch` with a connection failure turned into `EndpointUnreachable`. An
+ * abort passes through untouched: it is how `waitFor`'s timeout stops a
+ * request, and that path already throws `EndpointHung`.
+ */
+export function reaching(doFetch: typeof fetch, endpoint: string, local: boolean): typeof fetch {
+  const wrapped = async (...args: Parameters<typeof fetch>): Promise<Response> => {
+    try {
+      return await doFetch(...args);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      const code = (error as { code?: unknown } | null)?.code;
+      const cause = typeof code === "string" && code !== "" ? code : error instanceof Error ? error.message : String(error);
+      throw new EndpointUnreachable(endpoint, cause, local);
+    }
+  };
+  return wrapped as typeof fetch;
+}
 
 /** Resolves `work`, or runs `onTimeout` (which throws) after `ms` of silence. */
 export async function waitFor<T>(work: Promise<T>, ms: number, onTimeout: () => never): Promise<T> {
