@@ -159,7 +159,7 @@ class _NoGeneration:
 
 
 def _source_audio(work: Path, cues_dir: Path, seams: Seams, kind: str, key: str, stretch: float) -> np.ndarray | Result:
-    sources = Sources(work, CueLibrary(cues_dir, lambda _kind: _NoGeneration()), seams.pacer, seams.log)
+    sources = Sources(work, CueLibrary(cues_dir, lambda _kind: _NoGeneration(), seams.sounds, seams.loudness), seams.pacer, seams.log)
     if kind == "take":
         if read_take(work, key) is None:
             return _refused(f"no take {key[:12]}... in the store", missing=[key])

@@ -104,7 +104,7 @@ from pablo_casting.gate_command import run_scorers
 from pablo_casting.gates import Card, GateRefusal, derive, evaluate, load_card, pace_stretch, target_wps, thresholds_for
 from pablo_casting.library import card_hash
 from pablo_casting.config import ConfigRefusal, load_config
-from pablo_casting.cues import CueLibrary, CueUnavailable
+from pablo_casting.cues import CueUnavailable
 from pablo_casting.ending import DEFAULT_AIR, finish, last_word_end, measure_ending
 from pablo_casting.manifest import ManifestError, episode_dir, flags_path, versions, write_version
 from pablo_casting.mix import SR, MixRefusal, MixRequest, Seams, Timeline, sox_pacer
@@ -679,7 +679,7 @@ def perform(
     lines: list[dict[str, object]] = [{} for _ in spoken]
     live: EpisodeStream | None = None
     if request.stream and mixer is not None and request.cues_dir is not None:
-        timeline = Timeline(work, cue_positions(script), CueLibrary(request.cues_dir, mixer.generators), mixer.pacer, log=mixer.log)
+        timeline = Timeline(work, cue_positions(script), mixer.cue_library(request.cues_dir), mixer.pacer, log=mixer.log)
         live = EpisodeStream(work, episode, timeline, lines_total=len(spoken), started=started, started_at=started_at)
     with tempfile.TemporaryDirectory(prefix="pablo-perform-") as scratch:
         performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), air=air)

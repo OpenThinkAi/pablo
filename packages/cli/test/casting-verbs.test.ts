@@ -580,6 +580,15 @@ describe("mix (AGT-1684)", () => {
     expect(lastPython(calls)).toEqual(["mix", "--episode=2", "--version=3", `--vault=${vault}`, "--work", work(vault), "--json"]);
   });
 
+  test("passes --auto and --sounds through when given (AGT-1799)", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    performed(vault, 2);
+    const result = await verbsOver(deps)["mix"]!.run({ project: "ice-house", episode: 2, auto: true, sounds: "/lib/sounds" }, ctxIn(vault));
+    expect(result.exitCode).toBe(0);
+    expect(lastPython(calls)).toEqual(["mix", "--episode=2", "--auto", "--sounds=/lib/sounds", `--vault=${vault}`, "--work", work(vault), "--json"]);
+  });
+
   test("the version is optional, and a project and an episode are required", async () => {
     const mix = VERBS.find((v) => v.name === "mix")!;
     expect(mix.args.safeParse({ project: "ice-house", episode: 1 }).success).toBe(true);
@@ -609,10 +618,10 @@ describe("mix (AGT-1684)", () => {
       const parsed = parseCliArgs(argv);
       expect(parsed.version).toBe(false);
       const built = verbArgsFromCli(VERBS.find((v) => v.name === "mix")!, parsed.values, parsed.rest);
-      expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, version: 2 } });
+      expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, version: 2, auto: false } });
     }
     const bare = parseCliArgs(["mix", "--project", "ice-house", "--episode", "3"]);
-    expect(verbArgsFromCli(VERBS.find((v) => v.name === "mix")!, bare.values, bare.rest)).toEqual({ ok: true, args: { project: "ice-house", episode: 3 } });
+    expect(verbArgsFromCli(VERBS.find((v) => v.name === "mix")!, bare.values, bare.rest)).toEqual({ ok: true, args: { project: "ice-house", episode: 3, auto: false } });
     expect(parseCliArgs(["--version"]).version).toBe(true);
     expect(parseCliArgs(["perform", "-v"]).version).toBe(true);
   });

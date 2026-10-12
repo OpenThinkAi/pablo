@@ -31,7 +31,13 @@ Valley's Shadow sandbox), expressed as clips:
   gain with 1.5 s fades (a quarter of its span at most); `[BED: off]` ends it with
   nothing in its place. It is not a loop: it is segments of its asset at varied
   offsets, each crossfading into the next (`BedPlan`, seeded by the cue key), so
-  nothing in a 20 s clip comes back on a fixed period (AGT-1767);
+  nothing in a 20 s clip comes back on a fixed period (AGT-1767) - except a
+  rhythmic bed (a clock), whose asset carries a loop of whole tick cycles and is
+  that loop back to back (`LoopPlan`, AGT-1799), so it ticks on its period;
+- every cue is at its kind's loudness target before these gains (`cues.py`,
+  `loudness.py`), and SFX and BED cues are real CC0 recordings when the sound
+  library has a match (`sounds.py`); `--auto` writes a fresh auto mix even when
+  the newest document still fits (after the library changed);
 - a MUSIC cue sounding over an open bed ducks the beds track (volume automation:
   out over 0.5 s before the cue, -96 dB through it, back over 0.5 s after, or by
   the time a new bed starts); the last MUSIC cue, when it follows a spoken line
@@ -101,6 +107,7 @@ from pablo_casting.mixmath import apply_fade, automation_gain_at, db_to_gain, eq
 from pablo_casting.library import LibraryRefusal, resolve_root
 from pablo_casting.organ import SoxUnavailable, require_sox
 from pablo_casting.receipts import append_receipt
+from pablo_casting.sounds import SoundLibrary
 from pablo_casting.takes import casting_dir, read_take
 from pablo_casting.words import script_word_count
 
@@ -309,9 +316,9 @@ class Sources:
             self._paced[(key, stretch)] = _Paced(take=take, paced=paced, audio=resample(paced, take.rate, SR))
         return self._paced[(key, stretch)]
 
-    def ensure(self, kind: str, desc: str) -> tuple[CueAsset, np.ndarray]:
-        """A cue by description, generated once into the library and counted per ask (the auto mix's path)."""
-        asset = self.library.ensure(kind, desc)
+    def ensure(self, kind: str, desc: str, *, sound: str | None = None, generated: bool = False) -> tuple[CueAsset, np.ndarray]:
+        """A cue by description, made once into the library (from a recording when one matches) and counted per ask (the auto mix's path)."""
+        asset = self.library.ensure(kind, desc, sound=sound, generated=generated)
         if asset.generated:
             self.generated += 1
         else:
@@ -322,16 +329,20 @@ class Sources:
         return asset, self._cues[asset.key]
 
     def cue(self, key: str, hint: tuple[str, str] | None) -> np.ndarray | None:
-        """A cue by key. A missing asset is generated only from `hint` (the manifest cue the clip places) when its key matches."""
+        """A cue by key, at its kind's loudness target. A missing asset is made only from `hint` (the manifest cue the clip places) when the key is one of its own: generated, or built from one of its candidate recordings."""
         if key in self._cues:
             return self._cues[key]
-        if self.library.path(key).is_file():
-            audio, rate = read_audio(self.library.path(key))
-            self._cues[key] = resample(audio, rate, SR)
+        audio = self.library.load_key(key)
+        if audio is not None:
+            self._cues[key] = audio
             self.reused += 1
-            return self._cues[key]
-        if hint is not None and hint[0] in CUE_TRACK and cue_key(*hint) == key:
-            return self.ensure(*hint)[1]
+            return audio
+        if hint is not None and hint[0] in CUE_TRACK:
+            if cue_key(*hint) == key:
+                return self.ensure(*hint, generated=True)[1]
+            for match in self.library.matches(*hint):
+                if cue_key(*hint, match.sound.id) == key:
+                    return self.ensure(*hint, sound=match.sound.id)[1]
         return None
 
 
@@ -579,6 +590,34 @@ class BedPlan:
         return [s for s in self.segments if s[0] < span]
 
 
+class LoopPlan:
+    """A rhythmic bed's segments (AGT-1799): its loop back to back, so it repeats at its natural period.
+
+    A clock chopped into `BedPlan`'s random segments ticks unevenly at every
+    join. A rhythmic asset's sidecar holds a loop (`sounds.Loop`: `start`,
+    `length` a whole number of tick cycles, `xfade` samples of quiet before
+    `start`), and the bed is that loop again and again: segment 0 is
+    `(0, start, length)` and segment `k` is `(k*length - xfade, start - xfade,
+    length + xfade)`, so its own sample `start` lands exactly at `k*length` and
+    the lane's equal-power crossfade runs over the quiet before a tick. Every
+    tick is then `length` after the same tick one loop earlier.
+    """
+
+    def __init__(self, start: int, length: int, xfade: int) -> None:
+        if length <= 0 or xfade < 0 or start < xfade:
+            raise ValueError(f"not a loop: start {start}, length {length}, xfade {xfade}")
+        self.start, self.length, self.xfade = start, length, min(xfade, int(SR * BED_XFADE_SECONDS))
+
+    def upto(self, span: int) -> list[tuple[int, int, int]]:
+        """Every segment that starts before `span` samples."""
+        out = [(0, self.start, self.length)]
+        k = 1
+        while k * self.length - self.xfade < span:
+            out.append((k * self.length - self.xfade, self.start - self.xfade, self.length + self.xfade))
+            k += 1
+        return [s for s in out if s[0] < span]
+
+
 @dataclass
 class _Bed:
     cue: int
@@ -586,7 +625,7 @@ class _Bed:
     start: int
     loop: np.ndarray
     base: tuple[int, int] | None  # the anchor reference when it opened
-    plan: BedPlan
+    plan: BedPlan | LoopPlan
 
 
 @dataclass
@@ -777,7 +816,8 @@ class Timeline:
             if is_stop(str(cue["desc"])) or self._ended:
                 return
             asset, audio = self.sources.ensure(kind, str(cue["desc"]))
-            self._bed = _Bed(k, asset.key, self.t, audio, self._ref, BedPlan(asset.key, len(audio)))
+            plan = LoopPlan(*asset.loop) if asset.loop is not None and asset.loop[0] + asset.loop[1] <= len(audio) else BedPlan(asset.key, len(audio))
+            self._bed = _Bed(k, asset.key, self.t, audio, self._ref, plan)
             return
         if k == self.closing:
             self._close_bed(self.t)
@@ -992,6 +1032,8 @@ class MixRequest:
     version: int | None = None
     document: Mapping[str, object] | None = None
     """A hand-made mix document (`--from`): rendered, then written as the next mix version, `by: "human"`."""
+    auto: bool = False
+    """`--auto`: a fresh auto mix even when the newest document fits (after the sound library or the rules changed)."""
 
 
 @dataclass
@@ -1000,6 +1042,13 @@ class Seams:
     pacer: Pacer = sox_pacer
     encoder: Encoder = aac_encoder
     log: Callable[[str], None] = field(default=lambda message: None)
+    sounds: SoundLibrary | None = None
+    """The CC0 sound library cues are built from before any generator runs (AGT-1799); None: every cue is generated."""
+    loudness: Mapping[str, float] | None = None
+    """Per-kind cue loudness targets (LUFS); None: `loudness.DEFAULT_TARGETS`."""
+
+    def cue_library(self, root: Path) -> CueLibrary:
+        return CueLibrary(root, self.generators, self.sounds, self.loudness)
 
 
 def _refused(message: str, **extra: object) -> Result:
@@ -1037,7 +1086,7 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
             latest=found[-1],
         )
     started = time.monotonic()
-    sources = timeline.sources if timeline is not None else Sources(work, CueLibrary(request.cues_dir, seams.generators), seams.pacer, seams.log)
+    sources = timeline.sources if timeline is not None else Sources(work, seams.cue_library(request.cues_dir), seams.pacer, seams.log)
     existing = mix_versions(work, episode)
     superseded: int | None = None
     new_doc: tuple[Mapping[str, object], str] | None = None  # (proposal, by) to write once the mix succeeds
@@ -1062,7 +1111,7 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
                     raise MixDocError(problems, where=f"mix.v{existing[-1]}.json")
             # An invalid newest document is refused above (a broken hand edit is never silently replaced); a valid
             # one that no longer fits the manifest (its takes, or a line it anchors to) gives way to the auto mix.
-            if newest is not None and compatible(newest, manifest):
+            if newest is not None and compatible(newest, manifest) and not request.auto:
                 doc, doc_name = newest, f"mix.v{existing[-1]}.json"
             else:
                 if newest is not None and newest.get("by") == "human":
@@ -1132,6 +1181,7 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
     out_version = int(written.manifest["version"])  # type: ignore[call-overload]
     append_receipt(work, {"intent": "mix", "episode": episode, "version": out_version, "from_version": version, **info})
     audio_name = written.audio.name if written.audio else None
+    set_aside = "was set aside by --auto" if request.auto else "does not fit this version's takes and was not used"
     return {
         "ok": True,
         "episode": episode,
@@ -1152,11 +1202,13 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
         "mixBy": new_doc[1] if new_doc is not None else doc.get("by"),
         "mixWritten": written_doc is not None,
         "supersededMix": superseded,
+        "cueSources": _cue_sources(rendered.cues, sources.library),
+
         "wall": info["wall"],
         "message": (
             f"episode {episode} v{out_version}: {duration:.1f} s, {len(rendered.lines)} lines, {len(rendered.cues)} cues "
             f"({rendered.cues_generated} generated, {rendered.cues_reused} reused) from {doc_name} -> {audio_name}"
-            + (f"; mix.v{superseded}.json (by: human) does not fit this version's takes and was not used" if superseded else "")
+            + (f"; mix.v{superseded}.json (by: human) {set_aside}" if superseded else "")
         ),
     }, EXIT_OK
 
@@ -1240,6 +1292,24 @@ def cues_dir_for(work: Path, explicit: str | None, library: str | None, vault: s
         return casting_dir(work) / "cues"
 
 
+def _cue_sources(placed: Sequence[Mapping[str, object]], library: CueLibrary) -> list[dict[str, object]]:
+    """Where each placed cue's audio came from: a recording (its id, source URL, licence, author) or a generator."""
+    out: list[dict[str, object]] = []
+    for cue in placed:
+        key = cue.get("key")
+        if not isinstance(key, str):
+            continue
+        sidecar = library.sidecar(key)
+        sound = sidecar.get("sound")
+        entry: dict[str, object] = {"kind": cue.get("kind"), "desc": cue.get("desc"), "key": key, "generator": sidecar.get("generator", "unknown")}
+        if isinstance(sound, Mapping):
+            entry["sound"] = {name: sound.get(name) for name in ("id", "title", "source_url", "licence", "author")}
+            if isinstance(sidecar.get("loop"), Mapping):
+                entry["loop"] = sidecar["loop"]
+        out.append(entry)
+    return out
+
+
 def cmd_mix(
     work: Path | None,
     episode: str | None,
@@ -1249,6 +1319,7 @@ def cmd_mix(
     vault: str | None,
     seams: Seams,
     document: str | None = None,
+    auto: bool = False,
 ) -> Result:
     if work is None:
         return _refused("mix needs --work <dir> (the work whose episode to mix)")
@@ -1276,7 +1347,9 @@ def cmd_mix(
             return _refused(str(invalid), **invalid.extra)
         doc = loaded
     root = cues_dir_for(work, cues, library, vault)
-    return mix(MixRequest(work=work, episode=number, cues_dir=root, version=version, document=doc), seams)
+    if auto and doc is not None:
+        return _refused("--auto writes a fresh auto mix; --from renders a given document: pass one or the other")
+    return mix(MixRequest(work=work, episode=number, cues_dir=root, version=version, document=doc, auto=auto), seams)
 
 
 __all__ = ["MixRequest", "Seams", "Sources", "Timeline", "auto_document", "auto_timeline", "check_timings", "cmd_mix", "master", "mix", "render_document"]
