@@ -12,7 +12,7 @@
  * | `title`     | yes      | —                                |
  * | `slug`      | yes      | —                                |
  * | `outputs`   | no       | `{}` (a core with nothing derived yet) |
- * | `author`    | no       | `"matt"`                         |
+ * | `author`    | no       | `"author"` (init writes git user.name) |
  * | `voice`     | no       | `["../../style", "QWEN.md"]`     |
  * | `neverSend` | no       | `["research/", "notes/"]`        |
  * | `publish`   | no       | `{}`                              |
@@ -60,7 +60,7 @@ export { NOVEL_DIR };
 /** The only value the deprecated `format` key may hold. */
 const LEGACY_FORMATS = ["novel"] as const;
 
-export const DEFAULT_AUTHOR = "matt";
+export const DEFAULT_AUTHOR = "author";
 export const DEFAULT_VOICE: readonly string[] = ["../../style", "QWEN.md"];
 export const DEFAULT_NEVER_SEND: readonly string[] = ["research/", "notes/"];
 export const DEFAULT_PUBLISH: Readonly<Record<string, unknown>> = {};

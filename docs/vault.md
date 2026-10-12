@@ -83,7 +83,7 @@ before writing, and commits only that file.
 {
   "title": "The Lighthouse",
   "slug": "lighthouse",
-  "author": "your-name",
+  "author": "Your Name",
   "voice": ["../../style", "QWEN.md"],
   "neverSend": ["research/", "notes/"],
   "publish": {},
@@ -95,7 +95,7 @@ before writing, and commits only that file.
 |---|---|---|---|
 | `title`, `slug` | yes | | |
 | `outputs` | no | `{}` | The work's outputs: `novel`, `story` or `radio`. Each entry has `added` (YYYY-MM-DD); the novel's `dir` is always `"chapters"` |
-| `author` | no | `"matt"` | Free text. `init` currently writes the default; change it to yours |
+| `author` | no | `"author"` | Free text. `init` writes your git `user.name` |
 | `voice` | no | `["../../style", "QWEN.md"]` | Which voice the screen's voice tools edit. The writer always gets `style/` then the work's `QWEN.md` |
 | `neverSend` | no | `["research/", "notes/"]` | Paths that must never reach a model. A prompt that would include one is refused, not silently trimmed |
 | `publish` | no | `{}` | Per-target publish settings |

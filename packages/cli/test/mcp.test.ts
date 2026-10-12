@@ -146,6 +146,13 @@ test("there is no review tool: branches replace the review queue (AGT-1541)", as
   expect(tools.some((t) => t.name === "review")).toBe(false);
 });
 
+test("the server sends its usage instructions at initialize (AGT-1873)", () => {
+  const instructions = client.getInstructions() ?? "";
+  expect(instructions).toContain("`resume`");
+  expect(instructions).toMatch(/Never write the book's prose yourself/);
+  expect(instructions).toMatch(/no merge tool/);
+});
+
 test('callTool("status", {project: "ice-house", for: "chapter 3"}) is a normal result carrying ready:false, not a tool error', async () => {
   const result = await client.callTool({ name: "status", arguments: { project: "ice-house", for: "chapter 3" } });
 

@@ -74,7 +74,7 @@ test("readMarker fills in defaults for optional keys", () => {
 
   expect(result.ok).toBe(true);
   if (result.ok) {
-    expect(result.marker.author).toBe("matt");
+    expect(result.marker.author).toBe("author");
     expect(result.marker.voice).toEqual(["../../style", "QWEN.md"]);
     expect(result.marker.neverSend).toEqual(["research/", "notes/"]);
     expect(result.marker.publish).toEqual({});
