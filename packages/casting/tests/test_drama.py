@@ -11,6 +11,7 @@ import io
 from collections.abc import Mapping
 from pathlib import Path
 
+import numpy as np
 import pytest
 from test_fix import flag
 from test_mix import seams
@@ -22,6 +23,8 @@ from pablo_casting.engines import (
     CHATTERBOX,
     CHATTERBOX_CFG_WEIGHT,
     CHATTERBOX_EXAGGERATION,
+    CHATTERBOX_REF_PEAK,
+    CHATTERBOX_REF_RMS,
     CHATTERBOX_TEMPERATURE,
     DIA,
     DRAMA_ENGINE,
@@ -29,17 +32,19 @@ from pablo_casting.engines import (
     TURBO,
     TURBO_MIN_REF_S,
     EngineSpec,
+    MlxEngine,
     Pass,
     PassLine,
     RecordingEngine,
     VoiceRef,
     adapt,
     chatterbox_text,
+    level_reference,
 )
 from pablo_casting.fix import FixRequest, fix
 from pablo_casting.manifest import read_version
 from pablo_casting.script import parse_script
-from pablo_casting.takes import read_take
+from pablo_casting.takes import EngineId, Line, TakeInputs, read_take
 
 DRAMA_SCRIPT = """CAST: MAVIS=f "forties, warm, quick", OTTO=m "sixties, gruff"
 [MUSIC: a brass sting]
@@ -144,9 +149,102 @@ def test_chatterbox_params_carry_its_controls_and_turbos_reference_padding() -> 
     long = {"OTTO": VoiceRef("c" * 64, "otto", Path("ref.flac"), "", 24.0)}
     short = {"OTTO": VoiceRef("c" * 64, "otto", Path("ref.flac"), "", 3.0)}
     params = adapt(CHATTERBOX, take_pass, long, "afraid", 3)
-    assert params == {"adapter": "chatterbox/2", "temperature": 0.8, "exaggeration": 0.5, "cfg_weight": 0.5}
+    assert params == {"adapter": "chatterbox/2", "temperature": 0.8, "exaggeration": 0.5, "cfg_weight": 0.5, "ref_rms": 0.05, "ref_peak_cap": 0.9}
     assert adapt(CHATTERBOX, take_pass, short, None, None)["ref_pad_to_s"] == TURBO_MIN_REF_S
     assert adapt(CHATTERBOX, take_pass, long, None, None, ("flat",))["temperature"] == 0.95
+
+
+def test_only_chatterbox_params_carry_the_reference_levelling() -> None:
+    take_pass = Pass((PassLine(0, "OTTO", "Help me.", True),))
+    voices = {"OTTO": VoiceRef("c" * 64, "otto", Path("ref.flac"), "", 24.0)}
+    assert {"ref_rms", "ref_peak_cap"} <= set(adapt(CHATTERBOX, take_pass, voices, None, None))
+    for spec in ENGINE_SPECS.values():
+        assert not {"ref_rms", "ref_peak_cap"} & set(adapt(spec, take_pass, voices, None, None))
+    assert (CHATTERBOX_REF_RMS, CHATTERBOX_REF_PEAK) == (0.05, 0.9)
+
+
+def _tone(amp: float, n: int = 24_000) -> np.ndarray:
+    return (amp * np.sin(np.linspace(0, 400 * np.pi, n))).astype(np.float32)
+
+
+def _rms(x: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(np.square(x, dtype=np.float64))))
+
+
+def test_level_reference_brings_a_hot_reference_down_to_the_target_rms() -> None:
+    hot = _tone(1.0) * 1.0
+    out = level_reference(hot, 0.05, 0.9)
+    assert _rms(out) == pytest.approx(0.05, rel=1e-3)
+    assert float(np.abs(out).max()) < 0.9
+
+
+def test_level_reference_caps_the_peak_of_a_spiky_reference() -> None:
+    spiky = _tone(0.02)
+    spiky[100] = 1.0
+    out = level_reference(spiky, 0.05, 0.9)
+    assert float(np.abs(out).max()) == pytest.approx(0.9, rel=1e-4)
+    assert _rms(out) <= 0.05
+
+
+def test_level_reference_leaves_silence_alone() -> None:
+    assert not level_reference(np.zeros(100, np.float32), 0.05, 0.9).any()
+    assert level_reference(np.zeros(0, np.float32), 0.05, 0.9).size == 0
+
+
+class _Result:
+    def __init__(self, audio: np.ndarray) -> None:
+        self.audio, self.sample_rate = audio, 24_000
+
+
+class _FakeModel:
+    sample_rate = 24_000
+
+    def __init__(self) -> None:
+        self.refs: list[np.ndarray] = []
+
+    def generate(self, *, text: str, temperature: float, ref_audio: np.ndarray, **controls: object):  # type: ignore[no-untyped-def]
+        self.refs.append(np.asarray(ref_audio))
+        yield _Result(np.zeros(2400, np.float32))
+
+
+def _synthesize(monkeypatch: pytest.MonkeyPatch, spec: EngineSpec, seconds: float, amp: float) -> np.ndarray:
+    import sys
+    import types
+
+    import pablo_casting.audio as audio
+
+    core = types.SimpleNamespace(
+        array=np.asarray, reset_peak_memory=lambda: None, get_peak_memory=lambda: 0,
+        random=types.SimpleNamespace(seed=lambda _s: None),
+    )
+    mlx = types.ModuleType("mlx")
+    mlx.core = core  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlx", mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", core)  # type: ignore[arg-type]
+    monkeypatch.setattr(audio, "read_audio", lambda _path: (_tone(amp, int(24_000 * seconds)), 24_000))
+    voices = {"OTTO": VoiceRef("c" * 64, "otto", Path("ref.flac"), "", seconds)}
+    take_pass = Pass((PassLine(0, "OTTO", "Help me.", True),))
+    engine = MlxEngine(spec, voices, {})
+    model = _FakeModel()
+    engine._model = model
+    params = adapt(spec, take_pass, voices, None, None)
+    engine.synthesize(TakeInputs(EngineId("x", "y", "z", "w"), "c" * 64, (Line("OTTO", "Help me."),), 1, params=params))
+    return model.refs[0]
+
+
+def test_a_hot_reference_reaches_chatterbox_levelled_and_turbo_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    drama = _synthesize(monkeypatch, CHATTERBOX, 6.0, 1.0)
+    assert _rms(drama) == pytest.approx(0.05, rel=1e-3)
+    assert float(np.abs(drama).max()) <= 0.9
+    turbo = _synthesize(monkeypatch, TURBO, 6.0, 1.0)
+    assert float(np.abs(turbo).max()) == pytest.approx(1.0, rel=1e-3)
+
+
+def test_chatterbox_levels_before_it_pads_a_short_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    ref = _synthesize(monkeypatch, CHATTERBOX, 3.0, 1.0)
+    assert ref.size == int(TURBO_MIN_REF_S * 24_000)
+    assert _rms(ref[: 3 * 24_000]) == pytest.approx(0.05, rel=1e-3)
+    assert not ref[3 * 24_000 :].any()
 
 
 # --- perform ------------------------------------------------------------------------
