@@ -16,7 +16,9 @@ pace), so a key never repeats the old take's.
 
 A flagged line is always re-recorded alone, one line to a take, whatever the
 engine's usual grouping: a Dia pass voicing three lines would otherwise drag two
-unflagged lines along.
+unflagged lines along. A line in a `[DRAMA]` scene is retaken with the dramatic
+engine (`engines.DRAMA_ENGINE`, AGT-1888), loaded only when a flagged line
+needs it.
 
 **Reasons** (`clipped`, `wrong voice`, `flat`, `rushed`, `other`, or an
 automatic flag's free text) are recorded in the manifest's `flags_applied`
@@ -54,7 +56,7 @@ from typing import TextIO
 
 from pablo_casting.binding import read_episode
 from pablo_casting.config import ConfigRefusal, load_config
-from pablo_casting.engines import DEFAULT_ENGINE, ENGINE_SPECS, EngineFactory, EngineUnavailable, Pass, PassLine, normalise_reasons
+from pablo_casting.engines import DEFAULT_ENGINE, DRAMA_ENGINE, ENGINE_SPECS, EngineFactory, EngineUnavailable, Pass, PassLine, normalise_reasons
 from pablo_casting.manifest import ManifestError, flags_path, read_version, versions, write_version
 from pablo_casting.perform import (
     EXIT_ERROR,
@@ -73,6 +75,7 @@ from pablo_casting.perform import (
     _sha256_text,
     _write_auto_flags,
     cue_positions,
+    load_engine,
     resolve_roles,
     runs_between_cues,
 )
@@ -217,18 +220,17 @@ def fix(
         return _refused(str(refusal))
 
     started = time.monotonic()
-    engine = engine_factory(spec, {name: role.voice for name, role in roles.items()}, env)
     try:
-        loaded = engine.load()
+        engine, loaded = load_engine(work, spec, roles, env, engine_factory)
+        drama = load_engine(work, DRAMA_ENGINE, roles, env, engine_factory)[0] if any(spoken[i].drama for i in flagged) else None
     except EngineUnavailable as missing:
         return _refused(str(missing))
-    append_receipt(work, {"intent": "load", "engine": engine.identity.id, "revision": spec.revision, "weights_sha256": engine.identity.weights_sha256, **loaded})
     scorers = list(scorer_factory())
 
     _emit({"event": "start", "episode": episode, "engine": spec.name, "fix": True, "from": parent_version, "lines": len(flagged)}, err, stream_out)
     redone: dict[int, dict[str, object]] = {}
     with tempfile.TemporaryDirectory(prefix="pablo-fix-") as scratch:
-        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), totals=Totals(), air=air)
+        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), totals=Totals(), air=air, drama=drama)
         try:
             for i in flagged:
                 before = parent_lines[i]
@@ -236,7 +238,7 @@ def fix(
                 reasons = normalise_reasons([flag.get("reason") for flag in flags])
                 made = before.get("attempts")
                 used = int(made) if isinstance(made, int) and not isinstance(made, bool) else int(before.get("attempt", 0)) + 1  # type: ignore[call-overload]
-                take_pass = Pass((PassLine(i, spoken[i].speaker, spoken[i].text),))
+                take_pass = Pass((PassLine(i, spoken[i].speaker, spoken[i].text, spoken[i].drama),))
                 kept, attempts, target, band, _ = performer.perform_pass(take_pass, spoken, first_attempt=used, reasons=reasons)
                 entry = _line_entry(spoken[i], i, kept, attempts, target, band, None)
                 entry["attempts"] = used + len(attempts)

@@ -18,6 +18,20 @@ at revision `b2d0a13aa7cf`, MIT/MIT, one line per take, no batching:
 - pace is not an engine control: the take is rendered at the voice's own pace
   and the needed stretch is measured and applied after (`perform.py`).
 
+**Dramatic scenes** (AGT-1888): the lines inside a script's `[DRAMA]` ...
+`[DRAMA: off]` scene render through the original Chatterbox
+(`mlx-community/Chatterbox-TTS-fp16`), `DRAMA_ENGINE`, which Turbo lacks an
+emotion control for. Matt A/B'd an accident scene by ear (2026-10-12) and
+picked it at exaggeration 0.5, cfg_weight 0.5, temperature 0.8, fixed for every
+dramatic line (no direction mapping, like Turbo). It takes the same reference
+handling as Turbo (resampled to the model's rate, padded to 5.2 s when short)
+and the same treatment of non-verbals: the ones in `CHATTERBOX_TAGS` become its
+tags, the rest are left out of the engine input (today that is all of them, so
+"(gasps)" is never read aloud; the script keeps them). Its own adapter id and params
+are in the take key, so a dramatic take never collides with a Turbo one, and
+an episode without a scene keeps every key it had. It is not an `--engine`
+choice: it voices scenes inside an episode performed by another.
+
 Dia stays selectable (`--engine dia`) with the radio prototype's settings and
 its pass grouping (`radio/produce.py`: up to two alternating speakers and about
 40 words per pass, a throwaway `Mm.` from the other voice on the end), for A/B
@@ -96,6 +110,10 @@ _PAREN = re.compile(r"\(([^)]*)\)")
 _SPACE = re.compile(r"\s+")
 
 TURBO_TAGS: dict[str, str] = {"laughs": "[laugh]", "coughs": "[cough]", "chuckles": "[chuckle]", "chuckle": "[chuckle]"}
+# The original Chatterbox documents no tags. Its tokenizer lists some (`[sigh]`, `[gasp]`,
+# `[laughter]`), but a probe (AGT-1888, cora card, two seeds each) heard them as a stray word
+# ("Shull", "She") in 2 of 6 takes, so every non-verbal is left out of its input.
+CHATTERBOX_TAGS: dict[str, str] = {}
 
 
 def read_text(text: str, speaker: str = "", lexicon: object = None) -> str:
@@ -103,16 +121,26 @@ def read_text(text: str, speaker: str = "", lexicon: object = None) -> str:
     return apply_lexicon(lexicon, speaker, normalise_caps(spell_numbers(text)))
 
 
-def turbo_text(text: str, speaker: str = "", lexicon: object = None) -> str:
-    """What Turbo reads for a script line: numerals spoken, caps normalised, respelt, its three tags, other non-verbals left out."""
+def tagged_text(text: str, tags: Mapping[str, str], speaker: str = "", lexicon: object = None) -> str:
+    """A script line as a tag-reading engine takes it: numerals spoken, caps normalised, respelt, the non-verbals in `tags` as tags, the others left out."""
 
     def tag(match: re.Match[str]) -> str:
         inner = _SPACE.sub(" ", match.group(1).strip().lower())
-        if inner in TURBO_TAGS:
-            return TURBO_TAGS[inner]
+        if inner in tags:
+            return tags[inner]
         return "" if inner in NONVERBALS else match.group(0)
 
     return _SPACE.sub(" ", _PAREN.sub(tag, read_text(text, speaker, lexicon))).strip()
+
+
+def turbo_text(text: str, speaker: str = "", lexicon: object = None) -> str:
+    """What Turbo reads for a script line: numerals spoken, caps normalised, respelt, its three tags, other non-verbals left out."""
+    return tagged_text(text, TURBO_TAGS, speaker, lexicon)
+
+
+def chatterbox_text(text: str, speaker: str = "", lexicon: object = None) -> str:
+    """What the original Chatterbox reads for a script line: as Turbo, with `CHATTERBOX_TAGS`."""
+    return tagged_text(text, CHATTERBOX_TAGS, speaker, lexicon)
 
 
 def dia_text(turns: Sequence[tuple[str, str]], tags: Mapping[str, str], lexicon: object = None) -> str:
@@ -128,11 +156,12 @@ def dia_text(turns: Sequence[tuple[str, str]], tags: Mapping[str, str], lexicon:
 
 @dataclass(frozen=True)
 class PassLine:
-    """One script line inside a pass: its index among the episode's spoken lines, speaker, text."""
+    """One script line inside a pass: its index among the episode's spoken lines, speaker, text, and whether it is in a `[DRAMA]` scene."""
 
     i: int
     speaker: str
     text: str
+    drama: bool = False
 
 
 @dataclass(frozen=True)
@@ -253,25 +282,39 @@ DIA = EngineSpec(
     pace="stretch",
     notes="the radio prototype's engine, for A/B against old renders only",
 )
+CHATTERBOX = EngineSpec(
+    name="chatterbox",
+    repo="mlx-community/Chatterbox-TTS-fp16",
+    revision="77c7c8f9307beb5dc6c03cebc7942c4de9d617c9",
+    license="MIT / MIT",
+    grouping="line",
+    pace="stretch",
+    notes="dramatic scenes, [DRAMA] markers (AGT-1888)",
+)
 ENGINE_SPECS: dict[str, EngineSpec] = {TURBO.name: TURBO, DIA.name: DIA}
 DEFAULT_ENGINE = TURBO.name
+DRAMA_ENGINE = CHATTERBOX
 
 TURBO_TEMPERATURE = 0.8
 TURBO_MIN_REF_S = 5.2
 DIA_TEMPERATURE, DIA_TOP_P, DIA_SR, DIA_REF_PAD_S = 1.1, 0.9, 44_100, 0.25
+CHATTERBOX_EXAGGERATION, CHATTERBOX_CFG_WEIGHT, CHATTERBOX_TEMPERATURE = 0.5, 0.5, 0.8
 
 # Direction -> engine parameters, per engine (design: "Per-line direction in the
-# script"). Turbo maps none (text only, the bake-off's decision); neither does Dia.
-# Both are paced by a stretch after the take.
+# script"). Turbo maps none (text only, the bake-off's decision); neither does Dia,
+# and Chatterbox holds its exaggeration fixed for every dramatic line (Matt's A/B).
+# All three are paced by a stretch after the take.
 DIRECTION_PARAMS: dict[str, Callable[[str | None, int | None], dict[str, object]]] = {
     TURBO.name: lambda emotion, intensity: {},
     DIA.name: lambda emotion, intensity: {},
+    CHATTERBOX.name: lambda emotion, intensity: {},
 }
 
 
-# What a flag's reason does to a retake (`pablo fix`, AGT-1685). Neither engine has an
-# emotion or intensity control, so the only levers are the sampling temperature and the
-# line's pace (a stretch, applied by the mix):
+# What a flag's reason does to a retake (`pablo fix`, AGT-1685). No engine maps a
+# direction to a control, so the only levers are the sampling temperature and the
+# line's pace (a stretch, applied by the mix); Chatterbox, sampling at Turbo's 0.8,
+# takes Turbo's bumps:
 #
 # - `wrong voice`: the clone drifted from the card, so sample colder (more faithful).
 # - `flat`: the read had no life, so sample hotter (more varied).
@@ -286,6 +329,7 @@ RETAKE_REASONS = ("clipped", "wrong voice", "flat", "rushed", "other")
 RETAKE_TEMPERATURE: dict[str, dict[str, float]] = {
     TURBO.name: {"wrong voice": 0.65, "flat": 0.95},
     DIA.name: {"wrong voice": 0.95, "flat": 1.25},
+    CHATTERBOX.name: {"wrong voice": 0.65, "flat": 0.95},
 }
 SLOWER = {None: "slow", "quick": None, "slow": "slow"}
 
@@ -325,6 +369,11 @@ def adapt(
             params["ref_pad_to_s"] = TURBO_MIN_REF_S
     elif spec.name == DIA.name:
         params.update({"temperature": DIA_TEMPERATURE, "top_p": DIA_TOP_P, "ref_pad_s": DIA_REF_PAD_S, "throwaway": "Mm."})
+    elif spec.name == CHATTERBOX.name:
+        params.update({"temperature": CHATTERBOX_TEMPERATURE, "exaggeration": CHATTERBOX_EXAGGERATION, "cfg_weight": CHATTERBOX_CFG_WEIGHT})
+        voice = voices[take_pass.lines[0].speaker]
+        if voice.seconds < TURBO_MIN_REF_S:
+            params["ref_pad_to_s"] = TURBO_MIN_REF_S
     else:
         raise KeyError(spec.name)
     params.update(DIRECTION_PARAMS[spec.name](emotion, intensity))
@@ -342,6 +391,8 @@ def engine_text(spec: EngineSpec, inputs: TakeInputs) -> str:
     """The text the engine reads, derived from the take key's own lines."""
     if spec.name == TURBO.name:
         return " ".join(turbo_text(line.text, line.speaker, inputs.params.get(LEXICON_PARAM)) for line in inputs.lines)
+    if spec.name == CHATTERBOX.name:
+        return " ".join(chatterbox_text(line.text, line.speaker, inputs.params.get(LEXICON_PARAM)) for line in inputs.lines)
     if spec.name == DIA.name:
         turns = Pass(tuple(PassLine(k, line.speaker, line.text) for k, line in enumerate(inputs.lines))).turns()
         speakers = list(dict.fromkeys(speaker for speaker, _ in turns))
@@ -489,14 +540,19 @@ class MlxEngine:
         params = dict(inputs.params)
         mx.reset_peak_memory()
         started = time.perf_counter()
-        if self.spec.name == TURBO.name:
+        if self.spec.name in (TURBO.name, CHATTERBOX.name):
             rate = int(model.sample_rate)  # type: ignore[attr-defined]
             ref = self._reference(self.voices[inputs.lines[0].speaker], rate)
             pad_to = params.get("ref_pad_to_s")
             if isinstance(pad_to, (int, float)) and ref.size < int(pad_to * rate):
                 ref = np.concatenate([ref, np.zeros(int(pad_to * rate) - ref.size, np.float32)])
+            if self.spec.name == TURBO.name:
+                controls: dict[str, object] = {"sample_rate": rate}
+            else:
+                # The original takes its reference at the model's rate and recomputes its conditionals per take.
+                controls = {"exaggeration": float(params["exaggeration"]), "cfg_weight": float(params["cfg_weight"]), "verbose": False}  # type: ignore[arg-type]
             chunks, ttfa = [], None
-            for result in model.generate(text=text, temperature=float(params["temperature"]), ref_audio=mx.array(ref), sample_rate=rate):  # type: ignore[attr-defined]
+            for result in model.generate(text=text, temperature=float(params["temperature"]), ref_audio=mx.array(ref), **controls):  # type: ignore[attr-defined]
                 if ttfa is None:
                     ttfa = time.perf_counter() - started
                 chunks.append(np.asarray(result.audio, dtype=np.float32).reshape(-1))

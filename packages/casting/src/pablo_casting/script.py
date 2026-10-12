@@ -7,6 +7,14 @@ line:
     [SFX: ice rattling in a glass]                 a cue: SFX, BED or MUSIC
     CORA: (dryly) Words (laughs) more words.       a speaker line, with a direction
     A speech that runs on goes on the next lines.  a continuation of the line above
+    [DRAMA] ... [DRAMA: off]                       a dramatic scene (AGT-1888)
+
+The scene markers, each alone on its line, are not sounds: they make no item,
+so the mix never sees them. They mark every speaker line between them `drama`,
+which `perform` renders through the dramatic engine (`engines.DRAMA_ENGINE`)
+instead of the episode's. A `[DRAMA]` with no `[DRAMA: off]` runs to the end
+of the episode; a `[DRAMA: off]` with no open scene and a `[DRAMA]` inside an
+open one are reported (`Script.drama_markers`) and otherwise change nothing.
 
 The line and cue records match the prototype's `produce.py` `parse` item for
 item (a test holds them to it); what this adds is the direction grammar
@@ -24,6 +32,7 @@ from pablo_casting.traits import normalise
 
 LINE = re.compile(r"^([A-Z][A-Z .'\-]{0,30}):\s*(.+)$")
 CUE = re.compile(r"^\[(SFX|BED|MUSIC):\s*(.+?)\]\s*$", re.I)
+DRAMA = re.compile(r"^\[DRAMA(:\s*off)?\]\s*$", re.I)
 _PAREN = re.compile(r"\(([^)]*)\)")
 _SPACE = re.compile(r"\s+")
 _QUOTES = '"“”'
@@ -67,9 +76,10 @@ class SpokenLine:
     direction: Direction | None
     nonverbals: tuple[str, ...]
     continued: tuple[int, ...] = ()  # file line numbers of its continuation lines
+    drama: bool = False  # inside a `[DRAMA]` scene
 
     def as_body(self) -> dict[str, object]:
-        return {
+        body: dict[str, object] = {
             "type": "line",
             "line": self.line,
             "speaker": self.speaker,
@@ -78,6 +88,9 @@ class SpokenLine:
             "nonverbals": list(self.nonverbals),
             "continued": list(self.continued),
         }
+        if self.drama:
+            body["drama"] = True
+        return body
 
 
 @dataclass(frozen=True)
@@ -94,6 +107,15 @@ class Issue:
         return {"line": self.line, "speaker": self.speaker, "text": self.text, "kind": self.kind, "unknown": list(self.unknown)}
 
 
+@dataclass(frozen=True)
+class DramaMark:
+    """A scene marker: `[DRAMA]` (`on`) or `[DRAMA: off]`, with its file line."""
+
+    line: int
+    on: bool
+    text: str  # as written
+
+
 @dataclass
 class Script:
     meta: dict[str, str] = field(default_factory=dict)
@@ -101,6 +123,7 @@ class Script:
     items: list[Cue | SpokenLine] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
     has_cast: bool = False
+    marks: list[DramaMark] = field(default_factory=list)
 
     @property
     def lines(self) -> list[SpokenLine]:
@@ -156,6 +179,21 @@ class Script:
                 texts.extend(strays.get(number, []))
             if len(texts) > 1:
                 found.append({"line": spoken.line, "speaker": spoken.speaker, "directions": texts})
+        return found
+
+    def drama_markers(self) -> list[dict[str, object]]:
+        """Scene markers that do not pair: a `[DRAMA: off]` with no open `[DRAMA]`, and a `[DRAMA]` inside an open one."""
+        found: list[dict[str, object]] = []
+        opened: int | None = None
+        for mark in self.marks:
+            if mark.on and opened is not None:
+                found.append({"line": mark.line, "text": mark.text, "problem": "nested", "open": opened})
+            elif mark.on:
+                opened = mark.line
+            elif opened is None:
+                found.append({"line": mark.line, "text": mark.text, "problem": "unopened"})
+            else:
+                opened = None
         return found
 
     def role_names(self) -> list[str]:
@@ -263,6 +301,7 @@ def parse_script(text: str) -> Script:
     script.meta, offset = split_frontmatter(text)
     body = text.split("\n")[offset:]
     last: int | None = None  # index into script.items of the last item, when it is a spoken line
+    drama = False  # inside a `[DRAMA]` scene
 
     for index, raw_line in enumerate(body):
         line_no = offset + index + 1
@@ -280,12 +319,19 @@ def parse_script(text: str) -> Script:
             script.items.append(Cue(line_no, cue.group(1).upper(), cue.group(2).strip()))
             last = None
             continue
+        marker = DRAMA.match(raw)
+        if marker:
+            on = marker.group(1) is None
+            script.marks.append(DramaMark(line_no, on, raw))
+            drama = on  # a nested `[DRAMA]` keeps the scene open; a stray `off` leaves it closed
+            last = None
+            continue
         spoken = LINE.match(raw)
         if spoken:
             speaker = spoken.group(1).strip()
             words, direction, nonverbals = _words(spoken.group(2), line_no, speaker, script.issues, lead=True)
             if _PAREN.sub("", words).strip():
-                script.items.append(SpokenLine(line_no, speaker, words, direction, nonverbals))
+                script.items.append(SpokenLine(line_no, speaker, words, direction, nonverbals, drama=drama))
                 last = len(script.items) - 1
             else:
                 last = None  # a line of only non-verbals is dropped, as the prototype does
@@ -304,5 +350,6 @@ def parse_script(text: str) -> Script:
                 above.direction,
                 (*above.nonverbals, *extra),
                 (*above.continued, line_no),
+                above.drama,
             )
     return script

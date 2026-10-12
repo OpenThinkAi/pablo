@@ -111,12 +111,14 @@ export function radioCheckLines(body: unknown): string[] {
     unknownDirections = [],
     offVocabulary = [],
     multipleDirections = [],
+    dramaMarkers = [],
     undescribedRoles = [],
     unboundRoles = [],
   } = body as {
     unknownDirections?: { file: string; line: number; text: string; speaker: string; unknown: string[] }[];
     offVocabulary?: { file: string; line: number; text: string; speaker: string; mapped: Record<string, string>; ignored: string[] }[];
     multipleDirections?: { file: string; line: number; speaker: string; directions: string[] }[];
+    dramaMarkers?: { file: string; line: number; text: string; problem: "unopened" | "nested"; open?: number }[];
     undescribedRoles?: { file: string; episode: number; role: string }[];
     unboundRoles?: { file: string; episode: number; role: string }[];
   };
@@ -127,6 +129,11 @@ export function radioCheckLines(body: unknown): string[] {
       return `${d.file}:${d.line} direction outside the vocabulary ${d.text} (${d.speaker}: ${[...fix, ...d.ignored.map((w) => `${w} is a sound, not a direction`)].join(", ")})`;
     }),
     ...multipleDirections.map((d) => `${d.file}:${d.line} more than one direction ${d.directions.join(" ")} (${d.speaker})`),
+    ...dramaMarkers.map((m) =>
+      m.problem === "nested"
+        ? `${m.file}:${m.line} ${m.text} inside the scene opened at line ${m.open} (close it with [DRAMA: off] first)`
+        : `${m.file}:${m.line} ${m.text} with no open [DRAMA]`,
+    ),
     ...undescribedRoles.map((r) => `${r.file} undescribed role: ${r.role} (add a description on the CAST: line)`),
     ...unboundRoles.map((r) => `${r.file} unbound role: ${r.role}`),
   ];

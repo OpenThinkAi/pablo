@@ -149,6 +149,27 @@ test("AC2: check's radio lines list each offending line: two bad directions, a s
   ]);
 });
 
+test("AGT-1888: the template documents the [DRAMA] scene markers, to be used sparingly", () => {
+  const text = RADIO_RULES_TEMPLATE;
+  expect(text).toContain("[DRAMA]");
+  expect(text).toContain("[DRAMA: off]");
+  expect(text).toContain("sparingly, for the story's turning points");
+});
+
+test("AGT-1888: check's radio lines report an unopened [DRAMA: off] and a nested [DRAMA]", () => {
+  const file = "outputs/radio/episodes/01-invented.md";
+  const lines = radioCheckLines({
+    dramaMarkers: [
+      { file, line: 4, text: "[DRAMA: off]", problem: "unopened" },
+      { file, line: 9, text: "[DRAMA]", problem: "nested", open: 6 },
+    ],
+  });
+  expect(lines).toEqual([
+    `${file}:4 [DRAMA: off] with no open [DRAMA]`,
+    `${file}:9 [DRAMA] inside the scene opened at line 6 (close it with [DRAMA: off] first)`,
+  ]);
+});
+
 test("a body from a Python side that predates these checks still renders", () => {
   expect(radioCheckLines({ unknownDirections: [], unboundRoles: [] })).toEqual([]);
 });
