@@ -1,19 +1,16 @@
 /**
- * `pablo mcp` (AGT-1235; `voice` added AGT-1240; `prose` AGT-1241; voice
- * split into four tools AGT-1245) — a stdio MCP server exposing `resume`,
- * `status`, `write`, `save`, `check`, `prose`, `voice_list`, `voice_show`,
- * `voice_flag` and `voice_exemplar` as MCP tools, with input schemas
- * generated straight from the same zod shapes `cli.ts` derives its
- * `parseArgs` option table from — see `verbs.ts`'s header for the
- * single-source-of-truth design this implements (AC1).
+ * `pablo mcp` (AGT-1235) — a stdio MCP server exposing `VERBS`' MCP surface
+ * (`mcpTools()`) as MCP tools, with input schemas generated straight from the
+ * same zod shapes `cli.ts` derives its `parseArgs` option table from — see
+ * `verbs.ts`'s header for the single-source-of-truth design this implements
+ * (AC1). The tool list is whatever `VERBS` offers; this file hardcodes none.
  *
- * Each `VERBS` entry contributes `verb.mcpTools ?? [verb]`: six of the seven
- * verbs have no `mcpTools` override and register themselves, one tool each,
- * exactly as every verb always did; `voice` sets `mcpTools` to its four
- * narrow tools instead of registering a `voice` tool with a `sub`
- * discriminator (AGT-1245 — see `verbs.ts`'s file header for why). This file
- * never branches on verb *names* to do that — it just reads whichever tool
- * list each entry offers.
+ * Each `VERBS` entry contributes `verb.mcpTools ?? [verb]`: most verbs
+ * register themselves, one tool each; a verb that sets `mcpTools` (e.g.
+ * `voice`, AGT-1245, with its narrow `voice_*` tools) contributes those
+ * instead, and a CLI-only verb (`mcpTools: []`) contributes none. This file never branches on
+ * verb *names* to do that — it just reads whichever tool list each entry
+ * offers.
  *
  * Every tool result is the exact `--json` body its own `run` returns (AC3): a
  * framework refusal (`ok:false, code, message, missing[]/tried[]`) comes back

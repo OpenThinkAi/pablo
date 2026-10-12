@@ -1,9 +1,10 @@
 # @openthink/pablo-tui
 
 pablo's full-terminal screen, on Ink: a third front end on `packages/cli/src/verbs.ts` beside the CLI and MCP. Bare
-`pablo` in a project opens it. The design is the pm project `ai-terminal`'s `screen` doc
-(`pm project show ai-terminal --doc screen`); the layout, keys and panel machinery are copied and adapted from
-prview, never shared with it.
+`pablo` in a project opens it. The design is the `screen` doc of the `ai-terminal` project in the maintainer's
+private tracker (`pm project show ai-terminal --doc screen`, if you have `pm` access; otherwise this README, the code
+and its tests are the reference). The layout, keys and panel machinery are copied and adapted from prview, never
+shared with it.
 
 ```
 src/state.ts     the state model: modes, focus, cursors, scroll, the pending prefix; `reduce(state, action)`
@@ -11,7 +12,7 @@ src/keys.ts      the key rows (data): states, primary and secondary keys, prefix
 src/chord.ts     a keypress, in a state with a prefix pending, to actions; Ink's keys to tokens
 src/panel.ts     the key panel's entries and layout, from the rows
 src/key-panel.tsx  the key panel as a component the layout places
-src/key-config.ts  `keys` in ~/.config/pablo/config.json, laid over the defaults
+src/key-config.ts  `keys` in $XDG_CONFIG_HOME/pablo/config.json (default ~/.config/pablo/config.json), laid over the defaults
 src/settings.ts  the settings screen's rules (`\`): capture a key, refuse a conflict, type the editor command, save the config
 src/settings-view.tsx  the settings screen as a component
 src/revise.ts    `a r`: the `Reviser` seam the cli passes in, and a keypress while a revise is open as an action
@@ -25,6 +26,17 @@ src/resize.ts    the terminal size as state (below the model: plumbing, not wher
 src/sanitize.ts  strips control characters from text that did not come from the keyboard
 src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
 src/source.ts    reads the file behind a rail row id from the project (the loader `App` is given as `load`)
+src/index.ts     the package's public surface (`runScreen`); the CLI imports it lazily, only for bare `pablo`
+src/book.ts      book mode's table of contents: the CLI's stage results as rail rows (plain data, no CLI import)
+src/selection.ts the sentence selection as highlight pieces and the stored lines `a r` / `a v` act on
+src/hits.ts      `check` hits in the main pane: each hit's box under its line, and the `g f` / `g F` walk
+src/comment-box.ts  a comment as a three-row box under its line (check hits and review comments share it)
+src/comment-input.ts  `c` in a review: a keypress while a comment is being typed, as an action
+src/voice-input.ts  `a v r`: a keypress while a voice rule is being typed, as an action
+src/activity.ts  a tool call and a duration as short phrases for the busy line and the compose view
+src/review.ts    review mode's data: a branch's diff (handed over by the CLI) as rail rows and pane lines
+src/reviews.ts   book mode's Reviews group: reading rounds still with a reader or with a review in
+src/stitch.ts    re-exports core's stitcher (`packages/core/src/diff/stitch.ts`) so review mode has one import path
 ```
 
 ## The layout
@@ -97,7 +109,7 @@ gained no action. `comment-box.ts` knows nothing about checks: review mode shows
 
 ## The compose view
 
-`a c` opens the compose view (AGT-1566, the harness's front end: `pm project show ai-terminal --doc harness`): the
+`a c` opens the compose view (AGT-1566, the harness's front end; design in the maintainer's `pm project show ai-terminal --doc harness`, if you have `pm` access): the
 whole screen under the status area is the conversation with pablo, an activity line and an input box. Typing fills the
 input (`q` and the prefixes are text here), Enter sends, the arrows and PgUp/PgDn scroll back, Esc returns to the mode
 it was opened from. The conversation is state (`compose` in `state.ts`: entries, input, busy, activity, session id), so
@@ -242,7 +254,7 @@ prefix's second key, and the key panel shows the second keys while the prefix is
 always the model's `escape`. `Tab` is fixed. The panel lists exactly the rows that act in the state, because it reads
 the same rows the key handler resolves through (`chord.ts`).
 
-Overrides live in `~/.config/pablo/config.json` as `"keys": { "rail.down": "n", "main.page_down": { "primary": "pgdn",
+Overrides live in `$XDG_CONFIG_HOME/pablo/config.json` (default `~/.config/pablo/config.json`) as `"keys": { "rail.down": "n", "main.page_down": { "primary": "pgdn",
 "secondary": "" } }`. A conflict in one state, an unknown or fixed action, or Esc/Tab as a binding is refused when the
 screen opens, with the reason on stderr; the screen does not start on a bad config.
 
@@ -254,7 +266,7 @@ also run it. Every action's keys are listed; Enter on one captures the next key 
 secondary, Backspace clears a secondary), and a key that clashes in one of the action's states is refused on the spot,
 with the same check that refuses a bad `keys` at startup. The last line is the editor command (`"editor"` in the config,
 what `v e` will run; empty means `$EDITOR`, else `hx`). Esc with changes asks to save: `y` writes `keys` and `editor`
-into `~/.config/pablo/config.json` (every other entry is kept, a default key's entry is removed), and the new keys act
+into `$XDG_CONFIG_HOME/pablo/config.json` (default `~/.config/pablo/config.json`; every other entry is kept, a default key's entry is removed), and the new keys act
 at once; `n` discards. The file is re-parsed before it is written, and a save that would not read back writes nothing.
 
 The model is data in `state.ts` (`SettingsModel`) and reaches it as whole values (`settings.set`); the rules that

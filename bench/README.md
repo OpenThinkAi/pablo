@@ -1,5 +1,10 @@
 # bench — the structured-output bake-off (AGT-1202)
 
+> **Historical.** This is a 2026-09-02 study from pablo's first design, which edited
+> manuscripts with CriticMarkup and a `propose_edit` tool. That design was retired;
+> the bench stays because it is typechecked and tested and its results informed the
+> provider adapters. Paths under `~/writing-lab` refer to the author's own machine.
+
 Which structured path an adapter should take is a property of the model behind
 the endpoint, not a design preference. This bench measures it.
 

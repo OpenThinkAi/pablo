@@ -1,435 +1,75 @@
 # pablo
 
-**pablo is a CLI that writes.** It is not an app and has no screen. The conversation
-about a book happens in whatever agent you already like (Claude Code, Codex, pi);
-that agent drives pablo over the shell or `pablo mcp`. pablo is the *manager* of the
-writing project: it knows the vault, the framework a format follows, the author's
-voice, version control, and publishing, and hands any agent a structured way in and
-out so it is competent on the project in one call.
+**pablo is a CLI that writes.** It manages a writing project (a novel, a short story)
+the way a build tool manages code: it knows the plan, your style guide, what has been
+written and what comes next, and it refuses to draft anything whose plan is missing.
+You talk about the book with whatever agent you already use (Claude Code, Codex, or
+pablo's own); the agent drives pablo; pablo sends one carefully assembled prompt per
+chapter to a model you choose, usually one running on your own machine.
 
-Two invariants:
+```
+$ pablo status --project lighthouse --for "chapter 1"
+chapter 1: not ready
+  bible/timeline.md has no row dated 1911 or earlier
 
-1. **Prose is produced only through `pablo write`, on the configured local model.**
-   The agent plans and decides; it never drafts prose itself.
-2. **pablo enforces the framework.** A chapter needs a beat, a beat needs acts, acts
-   need a bible. Ask for something whose preconditions are unmet and pablo says
-   exactly which one is missing.
+$ pablo write --project lighthouse --chapter 1
+wrote chapters/01-the-fall.md (333 words) on branch draft/ch01
+```
 
-No markup, ever — a chapter file is plain prose with frontmatter; edits are a view,
-not a notation.
+Two rules shape everything:
 
-Canonical design doc (session model, project layout, stage machines, voice model,
-binding decisions): the `ai-terminal` project's design doc in pm
-(`pm project show ai-terminal`).
+1. **Prose comes only from `pablo write`.** The agent plans, researches and asks; it
+   never drafts the book itself. pablo assembles the prompt from your style guide, the
+   work's rules, the beat, the timeline and the continuity ledger, and you can see
+   every slice of it with `--dry-run` before anything is sent.
+2. **pablo enforces the plan.** A chapter needs a beat, a beat needs acts, acts need a
+   premise, and the timeline must say what exists by the chapter's date. Ask for
+   something whose plan is missing and pablo says exactly what is missing.
+
+Your work stays yours: a vault of plain markdown in git. Every change pablo makes to
+the manuscript lands on a branch you read and accept. No markup ever goes into a
+chapter.
 
 ## Status
 
-P0 in progress: the repo reshape and CLI skeleton landed 2026-09-06; `init` and the
-`pablo.json` marker landed 2026-09-06; the novel stage machine and `status` landed
-2026-09-06. `packages/tui` (the earlier terminal-renderer design) is retired; see
-`CLAUDE.md`'s `Layout` section and the design doc's `History` for what carried over.
+Early. pablo is built and used daily by one author on macOS, and is now open for
+others to try. The novel workflow (plan, write, review, check, publish) is the solid
+part. Expect rough edges, and please [open an issue](https://github.com/OpenThinkAi/pablo/issues)
+when you hit one.
+
+Also in the box, less mature: one-shot short stories (`pablo story`), a full-terminal
+screen with review mode, reader rounds over GitHub (currently tied to one GitHub
+organization), and an experimental radio-drama pipeline that needs Apple Silicon.
 
 ## Install
 
-pablo runs on [Bun](https://bun.sh) (>= 1.1):
-
 ```sh
-bun add -g @openthink/pablo      # or: npm install -g @openthink/pablo
-pablo --help
+bun add -g @openthink/pablo         # needs Bun 1.1+ (https://bun.sh)
+bun pm -g trust @openthink/ui-leaf  # lets the window helper install
 ```
 
-Upgrade with `bun add -g @openthink/pablo@latest`. The cli pulls in
-`@openthink/pablo-core` and `@openthink/pablo-tui` as ordinary dependencies.
+You also need git and a model: any OpenAI-compatible server (LM Studio, Ollama,
+llama.cpp, MLX) or an Anthropic API key.
 
-## For readers
+## Documentation
 
-If you read chapters for an author and are not a developer, this is all you need. Open the
-Terminal app, paste this one line, and press Return:
+- **[Getting started](docs/getting-started.md):** install, a model, a vault, and a
+  first chapter in about fifteen minutes.
+- **[Using pablo from an agent](docs/agents.md):** connect Claude Code or Codex over
+  MCP, and the rules an agent should follow.
+- **[The vault](docs/vault.md):** every file, the `pablo.json` marker, and what pablo
+  checks before it drafts.
+- **[Configuration](docs/configuration.md):** models, keys, routing, readers.
+- **[Command reference](docs/commands.md):** every command and flag.
+- **[Sharing with readers](docs/readers.md):** reading rounds, the reader's installer
+  and tray.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/OpenThinkAi/pablo/main/install-reader.sh | sh
-```
-
-It says what it is doing at each step, installs what your Mac is missing (Bun and the GitHub CLI,
-`gh`), installs pablo, asks you to sign in to GitHub in your web browser, and starts pablo's
-menu-bar tray, which tells you when a chapter is ready. It also needs two things it will check for:
-Apple's developer tools (if they are missing it opens Apple's installer; run the line again when
-that finishes) and [Google Chrome](https://www.google.com/chrome/), where chapters open (it points
-you to the download but does not install Chrome). Running it again is safe: it skips what is
-installed and upgrades pablo. You also need a GitHub account with access to the book's reading
-repo; whoever shares the book with you sets that up.
-
-After that you never run the installer again: the tray keeps pablo up to date by itself (AGT-1598).
-On start and every six hours it asks the npm registry (a conditional request) for the latest
-`@openthink/pablo`. A newer version is installed only while no reader window is open (it waits
-otherwise), with the installer's own steps: `bun add -g`, `bun pm -g trust @openthink/ui-leaf`, a check
-that the ui-leaf program arrived, and a check that the newly installed `pablo --version` prints the new
-version; only then does the tray exit and launchd (`KeepAlive`) restart it on the new code, and its menu
-says "Updated to <version>". Any failing step reinstalls the previous version and that version is not
-tried again for 24 hours. It only acts when the tray was started by its launchd agent and is the global
-install. To opt out, set `{"tray": {"autoUpdate": false}}` in `~/.config/pablo/config.json`.
-
-## Develop
-
-```sh
-bun install
-bun run typecheck
-bun test
-bun run pablo --help          # or: bun run packages/cli/src/cli.ts --help
-```
-
-`pablo` is `packages/cli` (`@openthink/pablo`), which depends on
-`packages/core` (`@openthink/pablo-core`) — a TTY-free, dependency-free library:
-the document model, the markup module the provider adapters use for
-normalization, the context-pack assembler, and the OpenAI-compatible and
-Anthropic adapters.
-
-### Releasing
-
-The three packages (`@openthink/pablo-core`, `@openthink/pablo-tui`, `@openthink/pablo`)
-release in lockstep at one version. To cut a release:
-
-1. Bump `version` in all three `packages/*/package.json`. Run `bun install` so
-   `bun.lock` records the new workspace versions. (`pablo --version`, the MCP
-   server version and the harness client id all read `packages/cli/package.json`
-   at runtime, so there are no other places to bump.)
-2. Land it on `main` through the stamp flow.
-3. Run the `release` workflow from the GitHub Actions tab (workflow_dispatch,
-   `main` only). It typechecks and tests, then publishes core, tui, cli in that
-   order via npm Trusted Publishing (OIDC, with provenance; no `NPM_TOKEN`),
-   skipping any package whose version is already on npm. A `v<version>` tag
-   triggers it too, if tags are mirrored (see `.stamp/mirror.yml`).
-
-Each package must have this repo's `release.yml` configured as its Trusted
-Publisher on npmjs.com before its first automated publish.
-
-## Commands
-
-Every verb accepts `--project <slug>` and `--json`. `--project` resolves to
-`<vault>/<kind>/<slug>` (kind: `novels`, `stories`, `essays`); the vault is
-`PABLO_VAULT` if set, else the nearest ancestor of the current directory holding a
-`style/` directory. Exit codes: `0` ok, `2` refused (a framework precondition,
-including an unresolvable project), `1` error.
-
-| Command | Does | Returns |
-|---|---|---|
-| `pablo init <format> <slug> "<Title>"` | scaffold from `<vault>/templates/<format>`, write the marker, commit | `{ok, path, format, slug, title, committed, notice?}` |
-| `pablo init --adopt --project <slug>` | write only the marker into a work that already exists, touching nothing else; never commits | same shape, `committed: false` |
-| `pablo resume --project <slug>` | the structured summary: the core's stages, each output's units, last event, open decisions, next step (AGT-1667) | `{format, title, core, outputs, waiting[], last, open, next, brief?, notices?}` |
-| `pablo status --project <slug>` | the work in two layers (AGT-1667): the story core's stages (premise, research, bible, acts, beats, facts), then each output the marker names with its units | `{core: {stages[], premise, research[], bible, acts, beats, outlineFile}, outputs: {<type>: {noun, plural, dir, units[], drafted, total, next?}}, waiting[], next}`; exit 0 |
-| `pablo status --project <slug> --for "chapter N"` | that chapter's preconditions — exit carries readiness | `{ready, missing[]}`; exit `0` if ready, `2` if not |
-| `pablo write --project <slug> --chapter N [--words W] [--scenes S] [--temperature T] [--seed N] [--direction "..."] [--force]` | check, pack; `--dry-run` renders the pack and sends nothing (AGT-1230); without it, sends the pack once, normalizes the answer, writes `chapters/NN-<slug>.md` with provenance frontmatter, appends a receipt, runs the post-write check (AGT-1237), then commits the chapter on `draft/chNN` in a worktree (AGT-1536); the after-write rituals (AGT-1231) run when that branch is merged. Sends a sampling temperature (`--temperature`, else the provider's `temperature` in config, else 0.8; AGT-1272) so a re-run differs; temperature and seed are in the receipt, never in `prompt_hash`. `--direction` (AGT-1562) is a steer for the chapter beyond its beat row ("slower, stay on Cora"): its own pack slice after the chapter slice, recorded in the chapter's frontmatter as `direction:`. The harness's `draft_chapter(n, direction?)` tool (MCP and harness only) runs this and returns the branch, path and receipt, never the prose | `{ok, path, branch, worktree, commit, receipt, check[]}` / `{ok: false, code, message, missing?}`, or the dry-run body below |
-| `pablo save --project <slug> --stage acts\|beats\|premise\|bible/<file> [--file F]` | the agent's planning output (stdin or `--file`) saved through pablo so the framework sees it | `{ok, path, stage, committed, notice?}` |
-| `pablo check --project <slug> [--file F]` | the tells check and provenance check on prose | `{ok, hits[], unprovenanced[]}` |
-| `pablo voice rule <name> "<text>" [--example "<sentences>"] [--target voice\|work --project <slug>]` | add a rule the author typed or dictated (AGT-1594): `- <text>` as the last bullet of the target's `## Rules` section (created at EOF if missing), committed by pathspec like `voice flag`. Targets: `voice` (default) is the voice's own rules file: `style/prose.md` for `fiction`, `voice.md` for a named voice; `work` is the work's `QWEN.md` (needs `--project`; it joins an existing `## Ground rules…` section, else creates `## Rules`; refused when the work has no `QWEN.md`). `--example` adds `Flagged: "<sentences>"` under the bullet, which `check` and `write` read from `style/prose.md` (and `prose` from a named voice's rules) but not from `QWEN.md`. The same function backs the `voice_rule` MCP tool (`name`, `text`, `example?`, `target?`, `project?`) and the screen's `a v r`; the other voice subcommands (`new\|list\|show\|flag\|exemplar`) are `voice_*` tools too | `{ok, path, target, committed, notice?}` |
-| `pablo migrate lines --project <slug> [--dry-run]` | one-time split of `chapters/*.md` to one sentence per line (frontmatter untouched), committed as its own commit holding only those files; a second run changes nothing; `--dry-run` lists the files it would change (AGT-1533) | `{ok, dryRun, changed[], committed, notice?}` |
-| `pablo migrate outputs --project <slug> [--dry-run]` | one-time move of a `format: "novel"` work to a story core plus a `novel` output (AGT-1666, pm project `pablo-story-core`): `pablo.json`'s `format` becomes `outputs.novel = {dir: "chapters", added}`, `outputs/novel/plan.md` (one unit per beat) and `outputs/novel/RULES.md` (the novel-only `QWEN.md` sections, copied) are created, `continuity.md` moves to `outputs/novel/continuity.md`, `outline/chapters.md` moves to `outline/beats.md`, and an empty `facts.md` is created; one commit of exactly those paths. `chapters/`, `bible/`, `research/`, `notes/` and `QWEN.md` are never written. Each step runs only if still needed, so a second run changes nothing; old and new paths both present is a refusal. Readers resolve both shapes | `{ok, dryRun, changes[{op, path, from?}], paths[], committed, notice?}` |
-| `pablo publish --project <slug> --target draft` | the compiler (AGT-1534): every `chapters/NN-*.md` in order into one markdown file at `<work>/.pablo/out/<slug>-draft.md` — frontmatter stripped, sentence lines joined into paragraphs, straight quotes and apostrophes curled. `review`/`final` are refused (not implemented); pandoc formats are deferred | `{ok, target, where, chapters, words}`; `{ok: false, code: 2, message}` on refusal |
-| `revise_passage(file, passage, instruction)` (MCP and harness only, AGT-1563) | `revise` on the local model, then the candidate is committed on a `revise/<id>` branch authored as the model (what `a r` does when the author takes it); `main` is untouched. Returns the branch, file and receipt, never the prose | `{ok, branch, path, receipt}` / `{ok: false, code, message}` |
-| `pablo write --dry-run` (also `prose`/`revise --dry-run`) | any write or revise, assembled and priced, nothing sent; a standalone `pablo dry-run` verb is not implemented | the pack, slice by slice |
-| `pablo mcp` | serve all of the above as MCP tools, same schemas | |
-| `pablo agent --project <slug> [--new] "<message>"` | one headless harness session (AGT-1552): Claude through the Agent SDK with pablo's system prompt (role, the work's `policy`, its `QWEN.md`), WebSearch/WebFetch and pablo's MCP tools only; Matt's subscription unless an Anthropic key resolves from pablo's config; prints the transcript as it arrives; the conversation is saved under the work's `.pablo/sessions/` and resumed on the next run, `--new` starts a fresh one and keeps the old (AGT-1565); the agent's `ask_author(question, options?, why)` prints a question card and reads the answer from stdin (a number picks an option) | transcript lines; `--json` gives `{ok, route, session:{id,resumed}, entries[], result}`; exit `0` on a success result, `2` refused, `1` failed |
-| `pablo share --project <slug> --reader <name> --chapters N\|N-M` | open a reading round (AGT-1582): every chapter must be on `main` (else exit `2`, naming it) and the reader must be in pablo's config `readers` (`{"readers": {"atara": {"github": "<login>", "name": "...", "email": "..."}}}`). Creates the private repo `OpenThinkAi/<slug>-reading` with `gh` on first use, pushes `round/<reader>-<date>-base` (without the chapters) and `round/<reader>-<date>` (the chapters exactly as stored at `main`'s commit, same paths; only `chapters/` files ever reach that repo), opens the PR, invites the reader (`github` must be a valid GitHub username) to the reading repo with read access (`PUT /repos/OpenThinkAi/<slug>-reading/collaborators/<login>`, `permission=pull`; a pending invitation is reported: they accept it once per book before the round shows in their tray), requests them as reviewer (if that fails, the notice gives the re-request command `gh pr edit <pr> --repo OpenThinkAi/<slug>-reading --add-reviewer <login>`), and records the round at `<vault>/.pablo/rounds/<reader>-<date>.json`. `pablo share --list --project <slug>` (AGT-1588) lists the work's rounds instead: `open` (the reader has not submitted), `submitted` (waiting for `notes pull`), `pulled`. CLI only: no MCP tool | `{ok, id, reader, vaultCommit, chapters[], repo, pr, prUrl, base, head, state, record, notices[]}`; `--list`: `{ok, rounds[{id, reader, chapters[], pr, prUrl, status, closed?, createdAt}], notices[]}`; `{ok: false, code: 2, message}` on refusal |
-| `pablo read --list` / `pablo read <slug>-reading#<pr>` | the reader's side (AGT-1583), for a Mac with no vault or project: `--list` shows open PRs in `OpenThinkAi/*-reading` repos with the signed-in `gh` user as requested reviewer (repo, chapters, sender, date) plus rounds this machine already sent (`sent`); `read <round>` fetches the round's chapter files at the PR head commit into `$XDG_STATE_HOME/pablo/rounds/OpenThinkAi/<slug>-reading/<pr>/` (default `~/.local/state/pablo/...`) and records that commit in `round.json`. Every call goes through `gh`. With `--project` and a path, `read` is still the author's file reader. CLI only | `--list --json`: `{ok, rounds[{repo, pr, ref, title, url, sender, date, chapters[], status}], notices[]}`; fetch: `{ok, reused, dir, repo, pr, commit, chapters[], ...}` |
-| `pablo notes pull --project <slug>` | pull readers' reviews (AGT-1587): for each of the work's rounds not yet pulled whose PR has a submitted review from the reader, builds `reader/<round id>` in the vault from the round's recorded vault commit, one commit per suggestion authored as the reader (name/email from pablo's config `readers`, never from GitHub) replacing exactly the lines it covered, and writes every comment (line, multi-line, file, the summary) to the branch's comment store with `source: reader`. Refuses a round whose review names any file that is not one of its recorded chapters, or whose reading-repo text differs from the vault's. A review with no suggestion to take still gets one empty commit authored as the reader (`notes from <name> on <chapters>`), so the branch is reviewable. After a pull the round is closed (AGT-1588): its PR is closed (not merged) with a comment, both `round/` branches are deleted from the reading repo, and the record's state becomes `pulled`; a close that fails is a notice and the next pull retries it. A pulled round is marked in its record and never pulled again. CLI only: no MCP tool | `{ok, code, pulled[{round, branch, commits[], comments}], skipped[{round, reason: pulled\|waiting\|refused\|error, message}], notices[]}`; exit `1` if a round errored, `2` if one was refused |
-
-`check` scans `chapters/*.md` (or one `--file`, work-relative or absolute inside the
-work — outside it is a refusal, exit `2`) for two things: chapters whose frontmatter
-lacks `model` or `prompt_hash` (`unprovenanced[]`), and lines that trip a mechanical
-rule — em-dashes, curly quotes, dash year ranges, foreshadowing phrases, the banned
-stock names from `style/prose.md` and `anti-tells.md`, and every `Flagged:` line from
-`style/prose.md` found verbatim (`hits[]`, each `{path, line, rule, excerpt}`). A hit
-is data, not a failure: exit is `0` whether or not there are hits. `check.ts` exports
-`checkFile` and `checkWork` standalone, and `write` (AGT-1237) calls `checkFile`
-directly on the normalized body right after writing, putting the hits in its own
-`check[]` rather than re-reading the file through `checkWork`. Voice-pattern scoring
-beyond verbatim flagged lines is P1, out of scope.
-
-Everything past the skeleton (parsing, `--help`, `--project` resolution, `init`) is a
-stub today: each other verb prints "not implemented yet" and exits 1. See the design
-doc's `Commands` table for the full return shapes and the `Build order` section for
-what ships next.
-
-`pablo resume` is how an agent gets competent on a project in one call instead of
-reading ten files: `format`/`title` come from the marker, `core` and `outputs` are
-the same two layers `pablo status` reports, `last` is the newest `notes/` file plus
-the last commit touching the work, `open` is every `[pick]` row and every bullet
-under a "Decisions"/"Open questions" heading in `bible/` and the beats file, and
-`next` names the layer that is short: `core: <action>` while the core lacks a
-premise, bible, acts or beats; `add an output` when the core is ready and the work
-derives nothing from it yet; else `<type>: <action>` for the first output with a unit
-still to draft (`novel: write chapter 2 (pablo write --chapter 2)`). The prose form
-lists the core's stages first, then one line per output (`novel: 2 of 24 chapters
-drafted`). A `think brief` for the project's cortex runs off the
-critical path with a 20s timeout and lands as `brief` when it's ready in time; a
-missing `think`, a timeout, or a non-zero exit is a one-line entry in `notices`,
-never a failure. The prose form is under 30 lines and always ends with `next: ...`.
-
-`init` is the one verb that runs without a marker — its job is to write one. Every
-other verb refuses (exit 2) when the resolved project has no valid `pablo.json`,
-naming the missing file or key and pointing at `pablo init --adopt --project <slug>`.
-
-Only `novel` is implemented as an `init` format today; `story`/`essay` scaffolds land
-when their format machines do.
-
-`pablo init novel <slug> "<Title>"` copies `<vault>/templates/novel` to
-`<vault>/novels/<slug>`, fills `{{TITLE}}`/`{{DATE}}`/`{{SLUG}}` in every `.md` file,
-writes `.brief.md`, adds the work's row to `<vault>/README.md`'s works table, writes
-`pablo.json`, adds `.pablo/` to `<vault>/.gitignore` if it's not already there, and
-commits everything it just created or changed by pathspec (never `git add -A`). A
-destination that already exists, or a missing template directory, is a refusal
-naming the path. A git failure (the vault isn't a repo, say) never aborts the
-scaffold — the files are already on disk; the result just carries a `notice` instead
-of `committed: true`.
-
-`pablo init --adopt --project <slug>` is for a work that already exists without a
-marker: it writes only `pablo.json` (title taken from the work's `README.md` first
-`# ` heading, minus a trailing "(working title)") and, if absent, the `.gitignore`
-line — nothing else in the work changes, and it never commits. Refuses (exit 2) if
-the work already has a `pablo.json`.
-
-`pablo status --project <slug>` reports the work in two layers (AGT-1667; pm project
-`pablo-story-core`). `core` is the story core's state (`core/machine.ts`): `premise`
-(`bible/overview.md` has a `## Logline` with text), `research` (the files under
-`research/`; optional, never what makes the core short), `bible` (`{file, exists}`
-for each `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`, plus every
-`[pick]` placeholder found in a bible file's table rows), `acts` (the first
-`| Act | ... |` table in the beats file, `outline/beats.md` or `outline/chapters.md`
-unmigrated), `beats` (every numbered row of that file's beat table), and `stages`,
-one `{id, done, summary, missing[]}` per core stage (`premise`, `research`, `bible`,
-`acts`, `beats`, `facts`; facts are checked per unit, so an open `[pick]` blocks only
-the units whose beat names it). `outputs` has one entry per output the marker names:
-the novel's `units` are its beats and `chapters/NN-*.md` files (`status` is the
-file's frontmatter status, or `beat` when only the beat exists), with `drafted`,
-`total` and the output's `next`. A core with no outputs reports `outputs: {}` and
-`next: "add an output"`. `waiting` is the change branches (`draft/`, `revise/`,
-`edit/`, `reader/`, `plan/`) with commits `main` does not have yet; `pablo resume`
-reports the same list. With no `--json` it prints the core's stages, then one line
-per output, then `waiting` and `next`.
-
-`pablo status --project <slug> --for "chapter N"` (also accepts `chapter-N`, `ch N`,
-or a bare `N`; anything else is a refusal naming the expected form) checks one
-chapter's preconditions and returns `{ready, missing[]}` — a plain body, not the
-`{ok, code, message}` refusal shape, because an unmet precondition here is the
-answer, not a framework-resolution failure. The exit code still carries the
-framework-precondition contract: `0` when ready, `2` when not. Checks, in order:
-beat row N exists (if not, that is the *only* entry in `missing` — everything else
-needs the beat); chapter N-1 is written, unless N is 1; `bible/timeline.md` has a row
-dated at or before the beat's story-date year; and no `[pick]` row's name appears, as
-a whole word or phrase, in beat N's own text.
-
-`pablo save --project <slug> --stage <stage> [--file <path>]` (AGT-1233) reads
-stdin, or `--file` when given, and writes the file that `--stage` names:
-`premise` replaces `bible/overview.md` whole; `acts` and `beats` replace their
-table in `outline/chapters.md` (the acts table or the chapter table) and leave
-the rest of the file byte-for-byte intact — the input may be a full table or
-rows only, either way it's normalised to the canonical header before writing;
-`bible/<file>` replaces that file whole and must stay under `bible/` (`.md`
-only). Table input is validated before anything is written — a beat row needs
-six columns with a four-digit year in its story date, an act row needs three
-— and a malformed row is refused (exit 2) naming the row and column, with
-nothing written. The touched file is committed by pathspec, same as `init`.
-
-`pablo write --project <slug> --chapter N [--words W] [--scenes S]` (AGT-1230) first
-runs chapter N's preconditions (same checks as `status --for`) and refuses, exit 2,
-naming `missing[]`, if any fail. Then it assembles the drafting pack from
-`@openthink/pablo-core`'s `readDraftingInputs` + `assemblePack` — the voice
-(`style/*.md`'s prose sections only; any `## ` heading matching `/repl(y|ies)|agent/i`
-is dropped before assembly, never sent), the work's rules (`QWEN.md`'s rule sections, after `style/`), period facts, cast and
-places, the timeline gated by the beat's story date, `continuity.md`, the tail of
-chapter N-1, and the beat row itself, at `--words` (default 1800) and `--scenes`
-(default 3). Any slice sourced under one of the marker's `neverSend` prefixes is a
-refusal naming the slice and the prefix, not a silent drop. `--dry-run` renders the
-pack (a slice table with token counts, and an estimated wait when the target endpoint
-has been measured) and sends nothing, exit 0; `--json --dry-run` returns
-`{ok, dryRun: true, slices[], totalTokens, expectedOutputTokens, prompt_hash,
-adjustments}` — the same inputs produce the same `prompt_hash` on two runs.
-
-Without `--dry-run` (AGT-1237), the filename is fixed first (`NN-<slug>.md`, slug
-from the beat's title) so an existing file is a refusal, exit 2, before anything is
-sent — pass `--force` to overwrite it. The pack is then sent once to the intent's
-routed provider (local by default; `createProviders`' per-endpoint `Gate` already
-serializes concurrent calls to the same local endpoint, so `write` adds no
-serialization of its own). A hung endpoint, a bad response, or a config error is a
-refusal, exit 2, naming the endpoint where relevant — nothing is written on any
-error, including an empty or whitespace-only answer. While the model streams,
-progress goes to stderr (`waiting for first token…`, `first token after Xs`, then
-`N tokens, R tok/s` every ~2s) so a human sees the wait; `--json` output on stdout
-is unaffected. The answer is normalized (em-dashes to commas, en-dashes to "to",
-curly quotes to straight — `@openthink/pablo-core`'s `normalizeOutput`) and written
-with frontmatter in this exact key order: `chapter`, `title`, `pov`, `story_date`,
-`status: draft`, `words`, `model`, `generated` (ISO 8601), `prompt_hash`. A receipt
-(prompt hash, model, tokens read/written, time to first token, wall) is appended to
-`<work>/.pablo/receipts.jsonl` (`withReceipts` + `fileReceiptSink`, rooted at the
-work directory, not the vault) and returned as `{path, receipt}`; the prose form
-adds one line, `read N tokens in Xs, wrote M in Ys`. The post-write mechanical-tells
-check (`check.ts`'s `checkFile`) runs over the normalized body and its hits are
-returned as `check[]` — a hit never changes the exit code, which is `0` throughout
-this whole path once the file is written.
-
-The chapter is written into a worktree and committed on its own branch,
-`draft/chNN` (`draft/chNN-v2`, `-v3`, ... for a re-draft while an earlier one is
-unmerged), authored as the model with the `prompt_hash` as its `Receipt:` line;
-`main` is never touched and the receipt names the branch (`branch`, `worktree`,
-`commit` in the JSON; "on branch draft/chNN" in prose). The project must be in a
-git repository. There is no after-write step at write time and no review
-queue: the branch is what waits for review (`pablo status` and `pablo resume`
-list the branches waiting, AGT-1541).
-
-The after-write steps (AGT-1231, `novel/rituals.ts`'s `runAfterMerge`) run when the draft is
-merged to `main` (`novel/merge.ts`'s `mergeDraft`) — six rituals in order:
-outline tick (the chapter's row in
-`outline/chapters.md` moves to `draft`), a dated note under `notes/`, a bullet
-under the work's `README.md` "Where things stand", continuity extraction
-(AGT-1232), a git commit of exactly those touched paths (never `git add -A`),
-and `think -C writing sync` — each independently wrapped so a failure (no git
-repo, `think` missing, a malformed outline row, extraction failing or timing
-out) is a notice on the returned `rituals[]`, never an exception, and never
-undoes the merge. A conflicting merge runs none of them and leaves `main` as it was.
-
-Continuity extraction (`novel/continuity.ts`'s `runContinuity`) sends the new
-chapter's body to the routed extraction adapter's `extractFactsWithAnchors`
-(core's `Adapter` interface; a provider without it, or no adapter at all, is a
-`"skipped"` ritual, not a failure) with a 120s ceiling, then files each fact
-under the matching heading of `continuity.md` — names and ages, dates, objects
-and places, or who knows what, decided from the fact's entities, `storyTime`,
-and text — as `- <fact> [chNN]`, citing the sentence the model anchored it to
-after whitespace-insensitive matching against the chapter. A fact whose anchor
-can't be found in the chapter is filed under `## Check` instead of dropped. A
-bullet that already exists verbatim is never duplicated, so a re-run is
-idempotent. The call is receipted with `intent: "continuity"`, same as any
-other model call; `continuity.md` is added to the after-write git commit only
-when it actually changed.
-
-## MCP (`pablo mcp`)
-
-`pablo mcp` is a stdio MCP server exposing five of the verbs above as MCP
-tools — `resume`, `status`, `write`, `save`, `check` (`init` is P1 for MCP).
-Every tool's input schema and every tool's result come straight from
-`packages/cli/src/verbs.ts`'s `VERBS` — the same zod shapes `cli.ts` derives
-its own `--project`/`--for`/`--chapter`/... argv options from — so the CLI
-and the MCP surface cannot drift apart. A tool's result is the verb's exact
-`--json` body: a refused precondition comes back as a normal result carrying
-`{ok: false, code, message, missing[]}` or `{..., tried[]}`, never a thrown
-tool error (only a genuine crash does that).
-
-| Tool | One line |
-|---|---|
-| `resume` | The structured session summary: stage per part, last event, open decisions, next step. |
-| `status` | The core's stages then each output's units, or (with `for`) one chapter's draft preconditions. |
-| `write` | Draft one chapter on the configured local model: check, pack, send, write, receipt. |
-| `save` | Save the agent's planning output (acts, beats, bible facts, premise) into the vault. |
-| `check` | Scan a work's chapters for mechanical tells and provenance gaps. |
-| `publish` | Compile the chapters into one publishable markdown file under `.pablo/out/` (draft target only). |
-
-`save` requires `file` over MCP (unlike the CLI, which falls back to stdin) —
-a tool call has no stdin of its own to read without colliding with the
-protocol's own stdio transport.
-
-### Claude Code
-
-Add this to `~/writing/.mcp.json` so a Claude Code session opened in the
-writing vault sees pablo's tools:
-
-```json
-{"mcpServers": {"pablo": {"command": "bun", "args": ["run", "/Users/mattpardini/Development/pablo/packages/cli/src/cli.ts", "mcp"]}}}
-```
-
-This repo does not write that file itself — the orchestrator/author installs
-it at `~/writing/.mcp.json` by hand (or via whatever installs `.mcp.json`
-files today); nothing under `packages/cli` ever writes outside a project's
-own vault directory or a test's own temp directory.
-
-## Project layout
-
-A project is a vault directory:
-
-```
-<vault>/
-  style/               the shared voice: prose.md, anti-tells.md
-  novels/<slug>/
-    pablo.json         the project marker
-    bible/, outline/, chapters/, continuity.md, notes/, research/, feedback/
-  stories/<slug>/
-  essays/<slug>/
-```
-
-Full layout is in the design doc's `The project` section. pablo state that is not a
-document (receipts, share links) lives in `<work>/.pablo/`, gitignored — everything
-an author would want to read is markdown in the vault, tracked by git.
-
-### `pablo.json`
-
-The marker that makes a directory a pablo project. `packages/cli/src/marker.ts` is
-the loader; it rejects a missing required key, an unknown output type, or a marker
-carrying both `format` and `outputs`, naming the key.
-
-```json
-{
-  "title": "The Valley's Shadow",
-  "slug": "valleys-shadow",
-  "author": "matt",
-  "voice": ["../../style", "QWEN.md"],
-  "neverSend": ["research/", "notes/"],
-  "publish": { "review": "artifact", "final": null },
-  "outputs": { "novel": { "dir": "chapters", "added": "2026-09-01" } }
-}
-```
-
-| key | required | default |
-|---|---|---|
-| `title` | yes | — |
-| `slug` | yes | — |
-| `outputs` | no | `{}` (a story core with nothing derived yet). Each entry is `{dir?, added, ...}`: `added` is YYYY-MM-DD; the novel's `dir` is always `"chapters"`; other keys belong to the type. `novel` is the only type until the output registry lands; any other is refused by name |
-| `format` | deprecated | `"novel"` is read as `outputs.novel = {dir: "chapters"}` for one release, with a stderr notice naming `pablo migrate outputs`; any other value is refused |
-| `author` | no | `"matt"` |
-| `voice` | no | `["../../style", "QWEN.md"]` |
-| `neverSend` | no | `["research/", "notes/"]` |
-| `publish` | no | `{}` |
-| `policy` | no | — (a minimal default judgement policy) |
-
-`voice` is the list of rule sources a work writes under, in order: the shared
-`<vault>/style/*.md` first, then the work's own `QWEN.md`. pablo sends them in that
-order, each labelled by path. The writer's drafting pack carries `style/` then the
-work's `QWEN.md` rule sections (its ground rules, point of view and voice, and any
-rule section a work adds); `revise` and span edits carry the same two layers, and
-`critique` checks tells against them. The setting and period facts section is sent in
-the pack's own period slice instead. The work's rules add to the shared ones and
-never remove them. A work with no `QWEN.md` gets `style/` alone. Sections of
-`QWEN.md` that instruct the agent (the memory brief and commands, per-session order,
-the file map and everything after it, any `## ` heading matching
-`/repl(y|ies)|agent/i`) are not rules for the writer and are never sent to it. The
-`voice` key itself is read only by the screen's voice view (`projectVoiceName()`);
-the packs always read `style/` and `QWEN.md`. A work-specific `voices/<name>/` is not
-a thing: the work's voice is its `QWEN.md`.
-
-`policy` names the judgement policy the harness (`pablo agent`) loads into its system
-prompt: when to research, invent, ask the author or proceed. pablo ships
-`historical-fiction` (`packages/cli/policies/historical-fiction.md`); a name it does
-not ship is refused. The harness's prompt is pablo's role, then that policy, then the
-work's `QWEN.md`; a section of `QWEN.md` fenced `<!-- writer-only -->` …
-`<!-- /writer-only -->` is left out of it (it stays in the writer's pack).
-
-A directory with no `pablo.json` at all is a refusal naming
-`pablo init --adopt --project <slug>` as the fix.
-
-## Removing the old menu-bar tray
-
-`pablo tray` (the menu-bar daemon and its `pablo tray install` launchd agent) was
-removed 2026-10-01; `pablo tray` is now an unknown verb. If you installed the agent
-earlier, remove it by hand:
-
-```sh
-launchctl bootout gui/$(id -u)/ai.openthink.pablo.tray
-rm ~/Library/LaunchAgents/ai.openthink.pablo.tray.plist
-rm -rf ~/Library/Logs/pablo ~/Library/Application\ Support/pablo
-```
-
-The last line deletes the tray's logs (`tray.log`, `tray.err`) and the helper bundle
-it built; skip it if you keep other files there.
+A starter vault to copy is in [`examples/starter-vault`](examples/starter-vault).
 
 ## Contributing
 
-Read `CLAUDE.md` and `AGENTS.md` before any change — this repo is stamp-governed
-(`stamp review` → `stamp merge` → `stamp push`), and `CLAUDE.md`'s conventions
-section covers the git-from-code rule and the fixture-vault-only rule for tests.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development, tests, and how changes land.
+
+## License
+
+MIT

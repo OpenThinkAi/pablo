@@ -7,15 +7,16 @@ branches:
     # required_checks run at `stamp merge` time against the merged tree (post-
     # merge) and roll the merge back if any non-zero. The set covers:
     #   typecheck — `tsc --noEmit` across the workspace (root tsconfig.json
-    #               references packages/core and packages/tui)
+    #               includes every packages/* src, views and test tree, plus
+    #               bench/)
     #   test      — `bun test` across all workspaces, including the guard in
     #               packages/core that asserts core imports no terminal library
     #   casting-test — `pytest` for the Python side (packages/casting,
     #               AGT-1678), from its frozen uv.lock. The default run is
     #               model-free: tests that load weights are marked `models`
     #               and excluded by pyproject's addopts.
-    # There is deliberately no `build` check yet: nothing is bundled, and both
-    # packages ship TypeScript sources consumed by Bun. Add one here the moment
+    # There is deliberately no `build` check yet: nothing is bundled, and the
+    # TypeScript packages ship their sources, consumed by Bun. Add one here the moment
     # a build script exists.
     required_checks:
       - name: typecheck
