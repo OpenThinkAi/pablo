@@ -10,9 +10,12 @@ FFT, no scipy); the gating is the standard's: 400 ms blocks every 100 ms, an
 absolute gate at -70 LUFS and a relative one 10 LU under the gated mean. A
 signal shorter than one block is one block.
 
-The gain is capped so the normalised peak stays at or under `PEAK_CEILING`: a
-quiet asset with one loud transient is not pushed into clipping (the cap is
-recorded as `limited`).
+The gain is capped so the normalised peak stays at or under its kind's
+`PEAK_CEILINGS`: a quiet asset with one loud transient is not pushed past full
+scale once the auto mix's own gain (SFX 0.75, BED 0.16, MUSIC 0.9) is on it,
+and so never dominates the master's peak normalisation (the cap is recorded as
+`limited`). A bed's ceiling is high because its mix gain is -16 dB: a field
+recording's gust would otherwise hold the whole bed far under its target.
 """
 
 from __future__ import annotations
@@ -33,6 +36,8 @@ accepted; AGT-1786's -32 and -20 would have pulled every bed and every organ
 cue several dB down against the dialogue.
 """
 PEAK_CEILING = 0.98
+PEAK_CEILINGS: dict[str, float] = {"SFX": PEAK_CEILING / 0.75, "BED": PEAK_CEILING / 0.16, "MUSIC": PEAK_CEILING / 0.9}
+"""The normalised peak each kind may reach: full scale (less 0.2 dB) through the auto mix's gain for that kind."""
 SILENT = -70.0
 """The absolute gate: anything at or under it is silence and is never amplified."""
 
@@ -111,14 +116,14 @@ class Normalisation:
         return {"lufs": self.lufs, "target": self.target, "gain_db": self.gain_db, "limited": self.limited}
 
 
-def normalisation(lufs: float, peak: float, target: float) -> Normalisation:
-    """The gain that puts an asset measured at `lufs` on `target`, capped so its `peak` stays under `PEAK_CEILING`."""
+def normalisation(lufs: float, peak: float, target: float, ceiling: float = PEAK_CEILING) -> Normalisation:
+    """The gain that puts an asset measured at `lufs` on `target`, capped so its `peak` stays under `ceiling`."""
     if not math.isfinite(lufs) or lufs <= SILENT:
         return Normalisation(lufs=lufs if math.isfinite(lufs) else SILENT, target=target, gain_db=0.0, limited=False)
     gain_db = target - lufs
     limited = False
     if peak > 0:
-        ceiling_db = 20 * math.log10(PEAK_CEILING / peak)
+        ceiling_db = 20 * math.log10(ceiling / peak)
         if gain_db > ceiling_db:
             gain_db, limited = ceiling_db, True
     return Normalisation(lufs=lufs, target=target, gain_db=round(gain_db, 4), limited=limited)

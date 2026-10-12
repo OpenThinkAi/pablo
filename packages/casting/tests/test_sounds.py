@@ -20,7 +20,7 @@ from test_mix_beds import BedCues, beds_only, cue, episode
 
 from pablo_casting.cli import run
 from pablo_casting.cues import CUE_RATE, CueLibrary, cue_key
-from pablo_casting.loudness import DEFAULT_TARGETS, PEAK_CEILING, integrated_lufs, normalisation, targets_from
+from pablo_casting.loudness import DEFAULT_TARGETS, PEAK_CEILING, PEAK_CEILINGS, integrated_lufs, normalisation, targets_from
 from pablo_casting.mix import SR, LoopPlan, Sources, Timeline, _group_lines, _lines, auto_timeline, render_document
 from pablo_casting.mixdoc import clips
 from pablo_casting.sounds import SoundLibrary, SoundRefusal, record_problems, rhythm_loop, stem, terms, tick_jitter
@@ -338,6 +338,10 @@ def test_normalisation_is_capped_under_the_peak_ceiling() -> None:
     capped = normalisation(-40.0, 0.5, -24.0)
     assert capped.limited and 0.5 * 10 ** (capped.gain_db / 20) == pytest.approx(PEAK_CEILING, rel=1e-4)
     assert normalisation(float("-inf"), 0.0, -24.0).gain_db == 0.0
+    # a bed plays at -16 dB, so a gust may peak well over full scale before that gain without holding the bed down
+    bed = normalisation(-40.0, 0.5, -30.0, PEAK_CEILINGS["BED"])
+    assert not bed.limited and bed.gain_db == pytest.approx(10.0)
+    assert 0.5 * 10 ** (bed.gain_db / 20) * 0.16 < 1.0
 
 
 def test_every_cue_is_loaded_at_its_kinds_target_and_a_legacy_sidecar_learns_its_loudness(cues_dir: Path, library: SoundLibrary) -> None:

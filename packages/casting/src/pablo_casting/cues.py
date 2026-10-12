@@ -62,7 +62,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from pablo_casting.audio import file_sha256, read_audio, resample, write_wav
-from pablo_casting.loudness import DEFAULT_TARGETS, integrated_lufs, normalisation
+from pablo_casting.loudness import DEFAULT_TARGETS, PEAK_CEILING, PEAK_CEILINGS, integrated_lufs, normalisation
 from pablo_casting.receipts import now
 from pablo_casting.sounds import Match, SoundLibrary, rhythm_loop
 from pablo_casting.takes import canonical_json
@@ -383,7 +383,8 @@ class CueLibrary:
         if target is None:
             return audio
         measured = self._loudness(key, sidecar, audio)
-        gain = normalisation(float(measured["lufs"]), float(measured["peak"]), target)
+        kind = str(sidecar.get("kind", ""))
+        gain = normalisation(float(measured["lufs"]), float(measured["peak"]), target, PEAK_CEILINGS.get(kind, PEAK_CEILING))
         return (audio * np.float32(10 ** (gain.gain_db / 20))).astype(np.float32)
 
     def load(self, asset: CueAsset) -> np.ndarray:
