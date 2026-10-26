@@ -81,7 +81,10 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 provider's `"tools": false` refuses a turn that offers tools;
                 `anthropic.ts`'s `chat()` (AGT-2118) honours the same flag and
                 replays a tool-calling turn's thinking blocks verbatim by
-                tool-call id),
+                tool-call id; `prices.ts` (AGT-2120) is the per-model price
+                table behind the agent loop's `costUsd` — local and unknown
+                models cost 0; `pack/receipts.ts`'s `withReceipts` forwards
+                `chat()` and writes one receipt per turn),
                 `diff/` (the diff parser, move detection and the stitcher that
                 review mode and accept/reject share), `facts.ts` (the fact
                 provenance tag), `work-paths.ts` (migration-aware paths to a
@@ -126,6 +129,17 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 (`a c`, AGT-1566) talks to the harness through a `Composer`
                 seam the cli passes to `runScreen` (`harness/compose.ts`, a
                 streaming-prompt session); the tui never imports the SDK.
+                `harness/loop.ts` (AGT-2120, D-12) is pablo's own agent loop
+                on any provider's `chat()`: model -> tool calls -> results ->
+                model to a final answer or the turn cap, emitting the same
+                `TranscriptEntry` stream; it offers exactly the `McpToolSpec`s
+                it is handed (no built-ins, nothing that writes prose into the
+                book), checks every call's name and arguments
+                (`tool-schema.ts`) before `run()`, re-prompts once with a text
+                protocol when a required call did not come, and prices the
+                turns with core's `costUsd`. `runHarness` and the composer
+                move onto it in AGT-2121; tests drive it with the scripted
+                fake adapter.
                 The reader's window (`pablo read <round>`, AGT-1586): a ui-leaf
                 view, `packages/cli/views/reader.tsx`, mounted by
                 `src/reader-host.ts`. The view is dumb: it renders what the

@@ -20,10 +20,20 @@
  * The way to a fully measured proposal receipt is to assemble the pack, send
  * `pack.prompt` through `complete()`, and parse the result — which is what the
  * span verbs will do once they own the CriticMarkup round trip.
+ *
+ * - `chat()` (AGT-2120) is forwarded when the wrapped adapter has it, one
+ *   receipt per turn: `measurement: "stream"`, the token counts the endpoint
+ *   reported in `done` (null when it reported none), a measured `ttft_ms`, and
+ *   `prompt_hash` over the system prompt and the history sent. A wrapper over
+ *   an adapter with no `chat()` has none either, so the agent loop's "this
+ *   provider cannot chat" check still holds through the wrapper.
  */
 
 import type {
   Adapter,
+  ChatEvent,
+  ChatRequest,
+  ChatUsage,
   CompletionEvent,
   CompletionRequest,
   CompletionStats,
@@ -150,10 +160,48 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
     };
   }
 
+  const innerChat = adapter.chat?.bind(adapter);
+
+  function chatWithReceipts(inner: (request: ChatRequest) => AsyncIterable<ChatEvent>) {
+    return async function* chat(request: ChatRequest): AsyncIterable<ChatEvent> {
+      const started = now();
+      const promptHash = pack?.hash ?? hashPrompt([request.system, JSON.stringify(request.messages)].join("\n\n"));
+      let firstAt: number | undefined;
+      let usage: ChatUsage | undefined;
+      try {
+        for await (const event of inner(request)) {
+          if (event.type === "done") usage = event.usage;
+          else if (firstAt === undefined) firstAt = now();
+          yield event;
+        }
+      } catch (error) {
+        await write({
+          ...base(promptHash, now() - started, request.model),
+          intent: options.intent ?? "chat",
+          params: numericParams(request),
+          measurement: "wall",
+          error: messageOf(error),
+        });
+        throw error;
+      }
+
+      await write({
+        ...base(promptHash, now() - started, request.model),
+        intent: options.intent ?? "chat",
+        params: numericParams(request),
+        measurement: "stream",
+        tokens_read: usage?.inputTokens ?? null,
+        tokens_written: usage?.outputTokens ?? null,
+        ttft_ms: firstAt === undefined ? null : Math.round(firstAt - started),
+      });
+    };
+  }
+
   return {
     id: adapter.id,
     model: adapter.model,
     preferredOutput: adapter.preferredOutput,
+    ...(innerChat === undefined ? {} : { chat: chatWithReceipts(innerChat) }),
 
     async *complete(request: CompletionRequest): AsyncIterable<CompletionEvent> {
       const started = now();
