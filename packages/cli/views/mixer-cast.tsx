@@ -34,6 +34,8 @@ export interface CastPanelProps {
   readonly onClose: () => void;
   /** After a re-perform wrote a new manifest version: the mixer reloads its mix (it is now behind that version). */
   readonly onReperformed?: () => void;
+  /** The mix has unsaved edits: a re-perform remixes and reloads the window, so it waits until they are saved. */
+  readonly locked?: boolean;
   /** Tests (static markup) hand the first answers in; the window asks the host. */
   readonly preloaded?: { readonly roles: CastRolesPayload; readonly voices: readonly LibraryVoice[] };
 }
@@ -43,7 +45,7 @@ interface Status {
   readonly kind: "ok" | "busy" | "warn";
 }
 
-export function CastPanel({ mutate, episode, onClose, onReperformed, preloaded }: CastPanelProps) {
+export function CastPanel({ mutate, episode, onClose, onReperformed, locked = false, preloaded }: CastPanelProps) {
   const [roles, setRoles] = useState<CastRolesPayload | null>(preloaded?.roles ?? null);
   const [voices, setVoices] = useState<readonly LibraryVoice[]>(preloaded?.voices ?? []);
   const [status, setStatus] = useState<Status | null>(null);
@@ -91,6 +93,7 @@ export function CastPanel({ mutate, episode, onClose, onReperformed, preloaded }
 
   const api: RoleApi = {
     busy,
+    locked,
     voices: bindableVoices(voices),
     preview: (role, line, voice) =>
       void run(`Reading line ${line + 1} of ${role} in ${voice}`, () => mutate<PreviewPayload>("previewVoice", { episode, line, voice }), (p) => {
@@ -149,6 +152,7 @@ export function CastPanel({ mutate, episode, onClose, onReperformed, preloaded }
 
 interface RoleApi {
   readonly busy: string | null;
+  readonly locked: boolean;
   readonly voices: readonly LibraryVoice[];
   preview(role: string, line: number, voice: string): void;
   bind(role: string, voice: string): void;
@@ -182,7 +186,17 @@ function RoleCard({ role, api }: { role: CastRole; api: RoleApi }) {
       {offer !== null && (
         <div className="cast-offer">
           <span>{offer}</span>
-          <button type="button" className="accent" disabled={!idle} onClick={() => api.reperform(role.role)} title="Flag these lines and run pablo fix on them: they are re-recorded in the bound voice and the episode is remixed">
+          <button
+            type="button"
+            className="accent"
+            disabled={!idle || api.locked}
+            onClick={() => api.reperform(role.role)}
+            title={
+              api.locked
+                ? "Save your mix edits first: re-performing remixes the episode and reloads the window"
+                : "Flag these lines and run pablo fix on them: they are re-recorded in the bound voice and the episode is remixed"
+            }
+          >
             Re-perform {role.stale.length}
           </button>
         </div>

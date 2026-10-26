@@ -45,7 +45,7 @@ import type {
 import { SCORERS_EXTRA, ensureProvisioned, runCasting, runPythonStreaming } from "./casting";
 import type { CastingDeps } from "./casting";
 import { auditionArgv, castArgv, castingVerbs } from "./casting-verbs";
-import { defaultSlug } from "../views/mixer-cast-logic";
+import { defaultSlug, plural } from "../views/mixer-cast-logic";
 import { readFlagsFile, writeFlagsFile } from "./review-host";
 import { VERBS } from "./verbs";
 import type { Verb, VerbContext, VerbResult } from "./verbs";
@@ -287,7 +287,7 @@ export function createCastHost(options: CastHostOptions): CastHost {
         role,
         lines,
         version: typeof body["version"] === "number" ? body["version"] : null,
-        message: `re-performed ${lines.length} line(s) of ${role} in ${entry.voice.slug}${typeof body["version"] === "number" ? ` (manifest v${body["version"]})` : ""} and remixed the episode`,
+        message: `re-performed ${plural(lines.length, "line")} of ${role} in ${entry.voice.slug}${typeof body["version"] === "number" ? ` (manifest v${body["version"]})` : ""} and remixed the episode`,
       };
     },
   };

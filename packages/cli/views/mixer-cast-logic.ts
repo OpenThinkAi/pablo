@@ -22,7 +22,7 @@ export function defaultSlug(role: string): string {
   return role.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "voice";
 }
 
-const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
+export const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 /** What the panel offers once a role's lines were performed in another voice than its binding: null for nothing. */
 export function reperformOffer(role: CastRole): string | null {

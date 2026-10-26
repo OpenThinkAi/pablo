@@ -192,7 +192,7 @@ describe("rebinding (AC1, AC2)", () => {
     };
     const done = await hostOver(s).reperformRole({ episode: 1, role: "NED" });
     expect(done).toMatchObject({ episode: 1, role: "NED", lines: [1], version: 2 });
-    expect(done.message).toBe("re-performed 1 line(s) of NED in fenn (manifest v2) and remixed the episode");
+    expect(done.message).toBe("re-performed 1 line of NED in fenn (manifest v2) and remixed the episode");
     const fix = s.m.calls.find((c) => c[0] === "fix") ?? [];
     expect(fix).toContain("--episode=1");
     expect(fix).toContain("--json-lines");
@@ -255,6 +255,11 @@ describe("the panel", () => {
     expect(html).toContain("1 line of NED was performed in another voice than fenn. Re-perform it?");
     expect(html).toContain(">Re-perform 1<");
     expect((html.match(/Re-perform 1/g) ?? []).length).toBe(1);
+  });
+
+  test("with unsaved mix edits the re-perform waits for a save", () => {
+    const html = renderToStaticMarkup(<CastPanel mutate={noMutate} episode={1} onClose={() => undefined} locked preloaded={{ roles: ROLES, voices: VOICES }} />);
+    expect(html).toMatch(/<button[^>]*disabled[^>]*title="Save your mix edits first[^"]*"[^>]*>Re-perform 1<\/button>/);
   });
 
   test("before the host answers it says it is reading the cast", () => {

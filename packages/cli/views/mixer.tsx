@@ -816,7 +816,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
         <MarkersPanel api={markers} onJump={(t) => void seek(t)} />
         <PunchPanel api={punch} lines={payload.manifest.lines} locked={unsaved} onJump={(t) => void seek(t)} />
       </div>
-      {castOpen && <CastPanel mutate={mutate} episode={data.episode} onClose={() => setCastOpen(false)} onReperformed={reload} />}
+      {castOpen && <CastPanel mutate={mutate} episode={data.episode} onClose={() => setCastOpen(false)} onReperformed={reload} locked={unsaved} />}
     </div>
   );
 }
