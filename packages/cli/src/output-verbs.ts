@@ -268,6 +268,7 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   const added = localDate((opts.now ?? (() => new Date()))());
   const entry = id === OUTPUTS.novel.id ? { dir: def.def.artifactDir, added } : from !== undefined ? { added, from } : { added };
   const markerText = rewriteOutputs(workDir, (outputs) => ({ ...outputs, [id]: entry }));
+  // pablo.json first: a derived output's plan reads its source from the entry just written.
   writeFileSync(markerPath(workDir), markerText, "utf8");
   for (const w of writes) {
     mkdirSync(dirname(join(workDir, w.rel)), { recursive: true });

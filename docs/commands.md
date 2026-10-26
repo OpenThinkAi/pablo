@@ -303,8 +303,8 @@ The `story` output has a single unit, so `write --output story` needs no `--unit
 `write --output narrated --unit N` makes reading N from the source output's unit N
 with **no model**: a `CAST:` line, then a `NARRATOR:` line per paragraph, the words
 the source's, unchanged. With `--voices characters`, a paragraph whose quoted
-dialogue names its speaker in its narration (a character from `bible/characters/`)
-is split at the quotes: each quote, without its quotation marks, becomes that
+dialogue names its speaker in its narration (exactly one character from
+`bible/characters/`; a paragraph naming two stays the narrator's) is split at the quotes: each quote, without its quotation marks, becomes that
 character's line (`WILFRED: Four thousand ton,`), the narration stays the
 narrator's, and the character joins the `CAST:` line. A paragraph whose speaker
 cannot be named stays the narrator's, whole. It is refused (exit `2`) when the

@@ -250,3 +250,10 @@ test("check flags a reading whose words differ from its source unit's prose", as
     expect(hit).toMatchObject({ path: "outputs/narrated/readings/01-the-last-full-cut.md", detail: '"sang" where the source has "rang"' });
   }
 });
+
+test("character voices: a paragraph naming two characters stays the narrator's; a full name is one person", () => {
+  const two = '"Go," said Ines. "No," said Wilfred.';
+  expect(narrateProse(two, "characters", new Set(["Ines", "Wilfred"]))).toContain(`NARRATOR: ${two}`);
+  const full = '"Go," said Ines Varga.';
+  expect(narrateProse(full, "characters", new Set(["Ines", "Varga"]))).toContain("INES: Go,");
+});

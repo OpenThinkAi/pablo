@@ -6,8 +6,8 @@
  * paragraphs split by a blank line) into a `lines` script the radio side
  * reads (`script.py`): a `CAST:` line, then one `NARRATOR:` line per
  * paragraph. With `characters`, a paragraph whose quoted dialogue names its
- * speaker (a character the bible knows, named in the paragraph's narration)
- * is split at the quotes: the narration stays `NARRATOR:`, each quote becomes
+ * speaker (the one character the bible knows that the paragraph's narration
+ * names; a paragraph naming two stays the narrator's) is split at the quotes: the narration stays `NARRATOR:`, each quote becomes
  * a `<SPEAKER>:` line without its quotation marks. A paragraph whose speaker
  * cannot be named stays the narrator's, whole. Either way the words are the
  * source's, in order, unchanged: only line breaks, speaker labels and the
@@ -61,13 +61,17 @@ function segments(paragraph: string): Segment[] {
 
 /** The first known character named in the paragraph's narration, as its role name (upper case), or undefined. */
 function speakerOf(parts: readonly Segment[], names: ReadonlySet<string>): string | undefined {
-  // The narration after the first quote ("...," said Ines) names the speaker more often than the narration before it.
-  const first = parts.findIndex((s) => s.quote);
-  const order = [...parts.slice(first + 1), ...parts.slice(0, first)].filter((s) => !s.quote);
-  for (const part of order) {
-    for (const word of part.text.match(/[A-Z][a-z]+/g) ?? []) if (names.has(word)) return word.toUpperCase();
+  // Each run of capitalised words ("Odile Nadeau") is one person, named by its first known word.
+  const people = new Set<string>();
+  for (const part of parts) {
+    if (part.quote) continue;
+    for (const run of part.text.match(/[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/g) ?? []) {
+      const known = run.split(/\s+/).find((word) => names.has(word));
+      if (known !== undefined) people.add(known.toUpperCase());
+    }
   }
-  return undefined;
+  // Two people named in one paragraph: which quote is whose is a guess, so the narrator keeps the paragraph.
+  return people.size === 1 ? [...people][0] : undefined;
 }
 
 /** The script lines for one paragraph. */

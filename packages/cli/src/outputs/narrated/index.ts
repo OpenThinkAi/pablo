@@ -1,7 +1,7 @@
 /**
  * The `narrated` output type (AGT-2137, pm project `pablo-platform`, D-7,
  * text side): a straight audiobook-style reading of another output's prose.
- * `pablo output add narrated --from <novel|story|essay>` records the source
+ * `pablo output add narrated --from <output>` (a prose output: `novel`, `story`) records the source
  * in `pablo.json` (`outputs.narrated.from`); the narrated units mirror the
  * source's units one for one, and `pablo write --output narrated --unit N`
  * turns the source unit's prose into a `lines` script (`./narrate.ts`) with
@@ -205,7 +205,7 @@ function narratedPack(_vaultRoot: string, workDir: string, unit: number, options
 /**
  * The narration check (AC3): each reading's words against its source unit's
  * prose. A reading whose source cannot be read is a drift too: it can no
- * longer be held to anything. `files` are absolute reading paths.
+ * longer be held to anything. `file` is a reading's absolute path.
  */
 export function narratedDrift(workDir: string, file: string): Drift | undefined {
   const unit = narratedUnitOfPath(file.split(sep).join("/"));
