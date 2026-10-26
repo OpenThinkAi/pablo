@@ -19,8 +19,11 @@ export const SCREENPLAY_DIR = "outputs/screenplay/scenes";
 /** A unit file's extension: Fountain, the plain-text screenplay format. */
 export const FOUNTAIN_EXT = ".fountain";
 
-/** The screenplay's publish targets: `fountain`, every scene in order as one Fountain file with a title page. */
-export const SCREENPLAY_PUBLISH_TARGETS = ["fountain"] as const;
+/**
+ * The screenplay's publish targets (AGT-2133): `draft` and `final` each write the compiled Fountain file and a
+ * standard-format PDF; `fountain` writes the Fountain file alone.
+ */
+export const SCREENPLAY_PUBLISH_TARGETS = ["draft", "final", "fountain"] as const;
 
 /** A scene file's name, `NN-*.fountain`; group 1 is the number. */
 export const SCREENPLAY_UNIT_FILE = /^(\d{2,})-.*\.fountain$/;
