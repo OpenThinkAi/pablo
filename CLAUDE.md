@@ -72,7 +72,10 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 `queue.ts` keeps one request in flight per local endpoint,
                 `rates.ts` the measured endpoint rates for wait estimates,
                 `keys.ts` API keys from the environment or the Keychain,
-                `config.ts` the `$XDG_CONFIG_HOME/pablo/config.json` loader),
+                `config.ts` the `$XDG_CONFIG_HOME/pablo/config.json` loader;
+                `types.ts` also holds the neutral multi-turn `chat()` vocabulary
+                (`ChatRequest`, `ChatEvent`, `JsonSchemaTool`, AGT-2116, D-12)
+                and `scripted.ts` the fake `chat()` adapter tests drive),
                 `diff/` (the diff parser, move detection and the stitcher that
                 review mode and accept/reject share), `facts.ts` (the fact
                 provenance tag), `work-paths.ts` (migration-aware paths to a
