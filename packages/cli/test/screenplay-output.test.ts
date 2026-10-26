@@ -26,6 +26,7 @@ import { OUTPUTS } from "../src/outputs/registry";
 import { fountainElements, lintFountain } from "../src/outputs/screenplay/fountain";
 import { buildScreenplayPack, previousSceneSummary, screenplayDefaultPlan, screenplayPreconditions } from "../src/outputs/screenplay/pack";
 import { compileScreenplay, publishScreenplay } from "../src/outputs/screenplay/publish";
+import { buildScreenplayPdf, layoutScreenplay } from "../src/screenplay-pdf";
 import { TRACKS } from "../src/tracks/registry";
 import { runWrite } from "../src/write";
 import type { WriteArgs } from "../src/write";
@@ -275,6 +276,62 @@ test("publish --target fountain compiles every scene in order under a title page
   expect(text).toContain("CUT TO:\n\nEXT. POND - DAY\n\nIce.\n");
   expect(text).not.toContain("status: draft");
   expect(publishScreenplay(work, "ice-house", "T", "pdf")).toMatchObject({ ok: false, code: 2 });
+});
+
+// AGT-2133 -------------------------------------------------------------------
+
+test("publish --target draft|final writes the compiled .fountain and a PDF", () => {
+  const { work } = screenplayVault();
+  writeScene(work, 2, "EXT. POND - DAY\n\nIce.");
+  writeScene(work, 1);
+  for (const target of ["draft", "final"]) {
+    const out = publishScreenplay(work, "ice-house", "The Ice House", target);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.files).toEqual(["ice-house-screenplay.fountain", "ice-house-screenplay.pdf"]);
+    expect(readFileSync(out.where, "utf8")).toBe(compileScreenplay("The Ice House", [scene(1), scene(2, "EXT. POND - DAY\n\nIce.")]));
+    const pdf = readFileSync(join(dirname(out.where), "ice-house-screenplay.pdf"), "latin1");
+    expect(pdf.startsWith("%PDF-1.4\n")).toBe(true);
+    expect(pdf.trimEnd().endsWith("%%EOF")).toBe(true);
+    expect(pdf).toContain("/BaseFont /Courier");
+    expect(pdf).toContain("(THE ICE HOUSE) Tj");
+    expect(pdf).toContain("(INT. ICE HOUSE - NIGHT) Tj");
+  }
+  // The fountain target stays Fountain-only.
+  const only = publishScreenplay(work, "ice-house", "The Ice House", "fountain");
+  expect(only).toMatchObject({ ok: true, files: ["ice-house-screenplay.fountain"] });
+});
+
+test("the PDF is standard format: Courier 12, Letter, margins, dialogue indents, page numbers", () => {
+  const text = compileScreenplay("The Ice House", [scene(1)]);
+  const { pages, titled } = layoutScreenplay(text);
+  expect(titled).toBe(true);
+  const script = pages[1] ?? [];
+  const at = (needle: string) => script.find((l) => l.text.startsWith(needle));
+  expect(at("INT. ICE HOUSE")).toMatchObject({ x: 108, bold: true });
+  expect(at("CORA")).toMatchObject({ x: 266.4 });
+  expect(at("It held.")).toMatchObject({ x: 180 });
+  const cut = script.find((l) => l.text === "CUT TO:");
+  expect((cut?.x ?? 0) + 7.2 * 7).toBeCloseTo(540, 5);
+  // Action wraps at 60 columns; no line is over its width.
+  expect(script.filter((l) => l.x === 108).every((l) => l.text.length <= 60)).toBe(true);
+
+  const long = Array.from({ length: 40 }, (_, i) => `A CHAIR ${i}\n\nCORA\nLine ${i}.`).join("\n\n");
+  const big = layoutScreenplay(compileScreenplay("Long", [`INT. ROOM - DAY\n\n${long}`]));
+  expect(big.pages.length).toBeGreaterThan(3);
+  expect(big.pages.every((p) => p.length <= 54)).toBe(true);
+  const bytes = buildScreenplayPdf(compileScreenplay("Long", [`INT. ROOM - DAY\n\n${long}`]), "Long");
+  const pdf = Buffer.from(bytes).toString("latin1");
+  expect(pdf).toContain(`/Count ${big.pages.length}`);
+  expect(pdf).toContain("(2.) Tj");
+  expect(pdf).toContain("(3.) Tj");
+  expect(pdf).toContain("/MediaBox [0 0 612 792]");
+  expect(pdf).toContain("12 Tf");
+  // The xref offsets point at their objects.
+  const xref = Number(/startxref\n(\d+)/.exec(pdf)?.[1]);
+  const rows = pdf.slice(xref).split("\n").slice(3).filter((r) => r.endsWith(" n "));
+  rows.forEach((row, i) => expect(pdf.slice(Number(row.slice(0, 10))).startsWith(`${i + 1} 0 obj`)).toBe(true));
+  // Deterministic.
+  expect(Buffer.from(buildScreenplayPdf(compileScreenplay("Long", [`INT. ROOM - DAY\n\n${long}`]), "Long")).equals(Buffer.from(bytes))).toBe(true);
 });
 
 // AC4 ------------------------------------------------------------------------
