@@ -36,7 +36,7 @@ import type { ChapterRow, GateValue, ReviewData, ReviewFlag, ReviewLine, Segment
 import { radioScriptDir } from "./radio";
 import { readLiveStream, readSegment, renderedEpisodes, streamedEpisodes } from "./radio-stream";
 import type { LiveStream } from "./radio-stream";
-import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./reader-host";
+import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./ui-leaf-host";
 
 type Env = Record<string, string | undefined>;
 
