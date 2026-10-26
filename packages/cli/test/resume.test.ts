@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmodSync, cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -165,4 +165,28 @@ test("resume reports the branches waiting for review, in the result and the pros
   expect(formatResumeProse(waiting)).toContain("waiting for review: draft/ch02");
 
   rmSync(work, { recursive: true, force: true });
+});
+
+test("resume reports the shut track gate and the open research items first (AGT-2145)", async () => {
+  const work = tempWork();
+  try {
+    const marker = join(work, "pablo.json");
+    writeFileSync(marker, JSON.stringify({ ...JSON.parse(readFileSync(marker, "utf8")), track: "historical-fiction" }));
+    mkdirSync(join(work, "research"), { recursive: true });
+    writeFileSync(join(work, "research", "checklist.md"), "| # | Category | Item | Status | Sources | Waived |\n|---|---|---|---|---|---|\n| 1 | people | Who ran the ice trade | open | | |\n");
+
+    const result = await buildResume(work, "ice-house", { env: { PATH: NO_THINK_PATH } });
+    expect(result.gate?.message).toStartWith("historical-fiction:");
+    expect(result.gate?.missing.length).toBeGreaterThan(0);
+    expect(result.open[0]?.source).toBe("research/checklist.md");
+    expect(formatResumeProse(result)).toContain(`gate: ${result.gate?.message}`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("resume omits gate on fiction, whose research is optional", async () => {
+  const result = await buildResume(WORK, "ice-house", { env: { PATH: NO_THINK_PATH } });
+  expect(result.gate).toBeUndefined();
+  expect(formatResumeProse(result)).not.toContain("gate:");
 });

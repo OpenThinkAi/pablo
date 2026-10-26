@@ -45,6 +45,7 @@ export const MCP_INSTRUCTIONS = [
   "",
   "- Call `guide` first. With no arguments it lists the tracks and outputs; with `track` and `output` it returns the step-by-step path from creating the work to publishing it, as pablo commands (the tool is the verb's name, or its narrow form: `research save` is `save_research`, `research plan` is `plan_research`).",
   "- Then start every session on a work with `resume` (pass `project`, the work's slug). It returns where the work stands and `next`.",
+  "- Works have a track (fiction, historical-fiction, nonfiction). On historical-fiction and nonfiction research is gated: `resume` reports the shut `gate` and the open research checklist items, and `write` refuses until every item is sourced or waived. `pablo story \"<prompt>\"` starts a work on a track; plan research with `plan_research`, save sources with `save_research`; `guide` with `track` shows each track's path.",
   "- Never write the book's prose yourself. Every sentence of prose comes from `write` (or `revise` with `branch`), which send one prompt to the author's configured writer model. Do not put prose into `save`.",
   "- Save planning through pablo: when you and the author agree on a premise, acts, beats or a bible file, call `save` so it lands where the framework reads it and is committed.",
   "- A result of `{ok: false, missing: [...]}` is a direction, not an error: it names what the plan still needs. Steer the author there; do not work around it.",
