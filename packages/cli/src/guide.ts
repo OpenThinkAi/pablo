@@ -56,7 +56,7 @@ export type GuideOutcome =
 /** `guide` with no pair: what there is to choose from. */
 export interface GuideIndex {
   readonly ok: true;
-  readonly tracks: readonly { readonly id: TrackId; readonly coreStages: readonly string[]; readonly outputs: readonly string[]; readonly planned: readonly string[] }[];
+  readonly tracks: readonly { readonly id: TrackId; readonly coreStages: readonly string[]; readonly outputs: readonly string[]; readonly waiting: readonly string[]; readonly planned: readonly string[] }[];
   readonly outputs: readonly { readonly id: string; readonly noun: string; readonly tracks: readonly TrackId[]; readonly stages: readonly string[]; readonly targets: readonly string[] }[];
   readonly next: string;
 }
@@ -188,7 +188,7 @@ function outputStageSteps(def: OutputDefinition, stage: string): GuideStep[] | u
           stage,
           title: `draft ${each} on the local model`,
           command: writeCommand(def),
-          detail: `the draft lands on a draft/ branch; read it, then accept it: pablo merge ${P} <branch>`,
+          detail: `the draft lands on a draft/ branch; the author reads and accepts it (pablo merge ${P} <branch>, or the screen)`,
         },
       ];
     case "narrate":
@@ -198,7 +198,7 @@ function outputStageSteps(def: OutputDefinition, stage: string): GuideStep[] | u
           stage,
           title: `make ${each} from the source's unit (no model)`,
           command: writeCommand(def),
-          detail: `add --voices characters to give characters their own lines; accept it: pablo merge ${P} <branch>`,
+          detail: `add --voices characters to give characters their own lines; the author accepts it (pablo merge ${P} <branch>, or the screen)`,
         },
       ];
     case "revise":
@@ -234,25 +234,33 @@ function outputStageSteps(def: OutputDefinition, stage: string): GuideStep[] | u
   }
 }
 
+/** The built outputs on `track` a derived output (narrated) can read: prose drafted from the core. */
+function proseSources(track: TrackId): string[] {
+  return outputsOnTrack(track).filter((id) => {
+    const src = outputDefinition(id);
+    return src !== undefined && isNarratableSource(src);
+  });
+}
+
+/** Why `def` cannot be finished on `track` yet, or undefined: a derived output with no prose output on the track to read. */
+function waitingOn(def: OutputDefinition, track: TrackId): string | undefined {
+  if (def.derive === undefined || proseSources(track).length > 0) return undefined;
+  const planned = (trackDefinition(track).outputs as readonly string[]).filter((o) => outputDefinition(o) === undefined);
+  return `the ${def.id} output reads a prose output, and the ${track} track has none built yet${planned.length === 0 ? "" : ` (planned: ${planned.join(", ")})`}`;
+}
+
 /** The steps that add `def` to a work on `track`; a derived output (narrated) first needs a written prose output to read. */
 function addSteps(def: OutputDefinition, track: TrackId): GuideStep[] {
   if (def.derive === undefined) {
     return [{ phase: "output", title: `add the ${def.id} output (once the core is in)`, command: `pablo output add ${def.id} ${P}`, detail: `scaffolds outputs/${def.id}/ (plan.md: which units tell which beats; RULES.md)` }];
   }
-  const sources = outputsOnTrack(track).filter((id) => {
-    const src = outputDefinition(id);
-    return src !== undefined && isNarratableSource(src);
-  });
-  const from = sources.length === 0 ? "<output>" : sources.join("|");
+  const from = `<${proseSources(track).join("|")}>`;
   return [
     {
       phase: "output",
       title: `add and write a prose output for the ${def.id} output to read`,
       command: `pablo output add ${from} ${P}`,
-      detail:
-        sources.length === 0
-          ? `the ${track} track has no prose output to read yet`
-          : `then draft and merge its units (pablo write ${P} --output <${from}> ...)`,
+      detail: `then draft its units (pablo write ${P} --output ${from} ...), each accepted by the author`,
     },
     { phase: "output", title: `add the ${def.id} output over it`, command: `pablo output add ${def.id} --from ${from} ${P}` },
   ];
@@ -282,6 +290,12 @@ export function buildGuide(track: string, output: string): GuideOutcome {
   }
   if (!def.tracks.includes(track)) {
     return refuse(`the ${output} output is not allowed on the ${track} track (allowed: ${allowed.length === 0 ? "none" : allowed.join(", ")})`, [`--output: ${allowed.join(" | ")}`]);
+  }
+
+  const waiting = waitingOn(def, track);
+  if (waiting !== undefined) {
+    const usable = allowed.filter((id) => waitingOn(outputDefinition(id) as OutputDefinition, track) === undefined);
+    return refuse(waiting, [`--output: ${usable.length === 0 ? "none on this track yet" : usable.join(" | ")}`]);
   }
 
   const steps: GuideStep[] = [
@@ -322,10 +336,12 @@ export function guideIndex(track?: TrackId): GuideIndex {
     ok: true,
     tracks: ids.map((id) => {
       const built = outputsOnTrack(id);
+      const waiting = built.filter((o) => waitingOn(outputDefinition(o) as OutputDefinition, id) !== undefined);
       return {
         id,
         coreStages: trackDefinition(id).coreStages,
-        outputs: built,
+        outputs: built.filter((o) => !waiting.includes(o)),
+        waiting,
         planned: (trackDefinition(id).outputs as readonly string[]).filter((o) => !built.includes(o)),
       };
     }),
@@ -374,7 +390,8 @@ export function guideText(body: unknown): string {
   const lines = ["Tracks:"];
   for (const t of index.tracks) {
     lines.push(`  ${t.id.padEnd(20)}core: ${t.coreStages.join(", ")}`);
-    lines.push(`  ${"".padEnd(20)}outputs: ${t.outputs.join(", ")}${t.planned.length === 0 ? "" : ` (planned: ${t.planned.join(", ")})`}`);
+    const extra = [t.waiting.length === 0 ? "" : `waiting on a prose output: ${t.waiting.join(", ")}`, t.planned.length === 0 ? "" : `planned: ${t.planned.join(", ")}`].filter((x) => x !== "");
+    lines.push(`  ${"".padEnd(20)}outputs: ${t.outputs.length === 0 ? "none yet" : t.outputs.join(", ")}${extra.length === 0 ? "" : ` (${extra.join("; ")})`}`);
   }
   lines.push("", "Outputs:");
   for (const o of index.outputs) lines.push(`  ${o.id.padEnd(12)}${o.stages.join(" > ")}  (tracks: ${o.tracks.join(", ")}; targets: ${o.targets.join(", ")})`);

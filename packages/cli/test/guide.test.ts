@@ -15,10 +15,17 @@ function ok(track: string, output: string): Guide {
   return outcome;
 }
 
-test("every registered track x allowed output produces a guide", () => {
+test("every registered track x allowed output produces a guide, or a refusal naming what it waits on", () => {
   let pairs = 0;
   for (const track of trackIds()) {
+    const usable = guideIndex(track).tracks[0]!.outputs;
     for (const output of outputsOnTrack(track)) {
+      if (!usable.includes(output)) {
+        const refused = buildGuide(track, output);
+        expect(refused.ok).toBe(false);
+        if (!refused.ok) expect(refused.message).toMatch(/has none built yet/);
+        continue;
+      }
       const g = ok(track, output);
       pairs++;
       expect(g.track).toBe(track);
@@ -45,13 +52,13 @@ test("every registered track x allowed output produces a guide", () => {
       expect(ORDER.includes(g.steps[firstWrite]!.phase)).toBe(true);
     }
   }
-  expect(pairs).toBeGreaterThanOrEqual(9);
+  expect(pairs).toBeGreaterThanOrEqual(10);
 });
 
 test("research is a gated checklist on historical-fiction and nonfiction, optional on fiction", () => {
   const research = (t: string, o: string) => ok(t, o).steps.filter((s) => s.stage === "research");
   expect(research("fiction", "novel").every((s) => s.optional === true && s.gate === undefined)).toBe(true);
-  for (const [t, o] of [["historical-fiction", "novel"], ["nonfiction", "narrated"]] as const) {
+  for (const [t, o] of [["historical-fiction", "novel"], ["historical-fiction", "narrated"]] as const) {
     const steps = research(t, o);
     expect(steps.every((s) => s.gate === true)).toBe(true);
     expect(steps.map((s) => s.command).join("\n")).toContain("pablo research plan");
@@ -66,7 +73,20 @@ test("output-specific verbs: story has no --unit, radio casts and mixes by episo
   expect(radio).toContain("pablo cast --auto --project <slug> --episode N");
   expect(radio).toContain("pablo mix --project <slug> --episode N");
   const narrated = ok("fiction", "narrated").steps.filter((s) => s.phase === "output").map((s) => s.command);
-  expect(narrated).toEqual(["pablo output add novel|story --project <slug>", "pablo output add narrated --from novel|story --project <slug>"]);
+  expect(narrated).toEqual(["pablo output add <novel|story> --project <slug>", "pablo output add narrated --from <novel|story> --project <slug>"]);
+});
+
+test("narrated on nonfiction is refused until a prose output is built, and the index lists it as waiting", () => {
+  const outcome = buildGuide("nonfiction", "narrated");
+  expect(outcome.ok).toBe(false);
+  if (!outcome.ok) {
+    expect(outcome.code).toBe(2);
+    expect(outcome.message).toContain("the nonfiction track has none built yet (planned: essay)");
+  }
+  const t = guideIndex("nonfiction").tracks[0]!;
+  expect(t.outputs).not.toContain("narrated");
+  expect(t.waiting).toEqual(["narrated"]);
+  expect(guideText(guideIndex("nonfiction"))).toContain("waiting on a prose output: narrated");
 });
 
 test("refusals name what to pick: unknown track, unknown output, a disallowed output, a planned one not built", () => {
@@ -93,6 +113,7 @@ test("no flags lists every track and output; --track alone scopes it; --output a
   expect(index.tracks.find((t) => t.id === "nonfiction")!.planned).toContain("essay");
   const scoped = guide({ track: "nonfiction" });
   expect(scoped.ok && "tracks" in scoped ? scoped.outputs.map((o) => o.id) : []).toEqual(outputsOnTrack("nonfiction"));
+  expect(scoped.ok && "tracks" in scoped ? scoped.tracks[0]!.outputs : ["x"]).toEqual([]);
   const novel = guide({ output: "novel" });
   expect(novel.ok && "steps" in novel ? novel.track : undefined).toBe("fiction");
   expect(guideText(guideIndex())).toContain("Tracks:");
@@ -108,9 +129,9 @@ test("pablo guide runs with no vault: the list, a path, --json, and a refusal ex
   const list = runCli(["guide"]);
   expect(list.exitCode).toBe(0);
   expect(list.stdout).toContain("Outputs:");
-  const json = runCli(["guide", "--track", "nonfiction", "--output", "narrated", "--json"]);
+  const json = runCli(["guide", "--track", "historical-fiction", "--output", "narrated", "--json"]);
   expect(json.exitCode).toBe(0);
-  expect(JSON.parse(json.stdout)).toEqual(JSON.parse(JSON.stringify(buildGuide("nonfiction", "narrated"))));
+  expect(JSON.parse(json.stdout)).toEqual(JSON.parse(JSON.stringify(buildGuide("historical-fiction", "narrated"))));
   const refused = runCli(["guide", "--track", "nonfiction", "--output", "radio"]);
   expect(refused.exitCode).toBe(2);
   expect(refused.stderr).toContain("not allowed on the nonfiction track");

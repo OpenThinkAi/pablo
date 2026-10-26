@@ -43,7 +43,7 @@ the work (`init --track`), each of the track's core stages in order (`save
 gated checklist: `research plan`, then `research save --item` or `research waive`
 for every item, and `research distill` for the period facts; on `fiction` an
 optional note), `output add` (for `narrated`, first a prose output to read and then
-`output add narrated --from`), each of the output's own stages (`write`, `revise`,
+`output add narrated --from <novel|story>`), each of the output's own stages (`write`, `revise`,
 and for performed outputs `cast --auto`, `perform`, `mix`, `fix`), `check`, and
 `publish` with the output's targets. A step the track gates is marked `(gate)`;
 `write` refuses until it is met. Commands carry placeholders (`<slug>`, `N`) for
@@ -55,12 +55,14 @@ flags, `guide` lists every track (its core stages, the outputs it allows, and th
 planned but not built) and every output (its stages, tracks and publish targets);
 `--track` alone lists that track's. `--output` alone reads the `fiction` track when
 it allows the output, else the first track that does. An unknown track or output,
-an output the track does not allow, or a planned one not built yet (`essay`) is
-refused (exit 2) naming the choices. `guide` reads no vault and needs no project.
+an output the track does not allow, a planned one not built yet (`essay`), or one
+that cannot be finished yet is refused (exit 2) naming the choices. `narrated` reads
+a prose output, so on `nonfiction`, which has no prose output built yet, it is refused
+and listed under the track's `waiting`, not its `outputs`. `guide` reads no vault and needs no project.
 
 ```
 {ok: true, track, output, steps: [{phase, stage?, title, command, detail?, gate?, optional?}]}
-{ok: true, tracks: [{id, coreStages, outputs, planned}], outputs: [{id, noun, tracks, stages, targets}], next}    with no output
+{ok: true, tracks: [{id, coreStages, outputs, waiting, planned}], outputs: [{id, noun, tracks, stages, targets}], next}    with no output
 ```
 
 `phase` is one of `create`, `core`, `research`, `output`, `write`, `check`,
