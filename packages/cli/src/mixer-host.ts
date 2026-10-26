@@ -32,7 +32,7 @@ import { mount } from "@openthink/ui-leaf";
 import type { MountOptions, MutationHandler, View } from "@openthink/ui-leaf";
 import type { MixerData } from "../views/mixer";
 import { MUTATIONS } from "../views/mixer-protocol";
-import type { ClipAudioPayload, ManifestCue, ManifestLine, MixDiff, MixPayload, MixSource, MixVersionInfo, PeaksPayload, RenderedFrom, RenderedMixPayload, SavedMixPayload } from "../views/mixer-protocol";
+import type { ClipAudioPayload, ManifestCue, ManifestLine, MixDiff, MixPayload, MixSource, MixVersionInfo, PeaksPayload, RenderedFrom, RenderedMixPayload, SavedMixPayload, CueOptionsPayload, RegeneratedCuePayload } from "../views/mixer-protocol";
 import { MIX_EXTRA, ensureProvisioned, runCasting, runPythonStreaming } from "./casting";
 import type { CastingDeps } from "./casting";
 import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./ui-leaf-host";
@@ -64,6 +64,8 @@ export interface MixerHost extends NotesHost {
   clipAudio(args: unknown): ClipAudioPayload;
   saveMix(args: unknown): SavedMixPayload;
   renderMix(args: unknown): Promise<RenderedMixPayload>;
+  cueOptions(args: unknown): CueOptionsPayload;
+  regenerateCue(args: unknown): Promise<RegeneratedCuePayload>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -90,6 +92,25 @@ function sourceArg(args: unknown): MixSource {
     if (kind === "cue" && stretch !== 1) throw new Error("only a take is paced: a cue takes no stretch");
   }
   return kind === "take" ? { kind, key, stretch: stretch ?? 1 } : { kind, key };
+}
+
+/** `{clip: "<id>"}` and, when given, `{describe}`, `{sound}`, `{generated}` for the cue ops. */
+function cueFlags(args: unknown): string[] {
+  const clip = isRecord(args) ? args["clip"] : undefined;
+  if (typeof clip !== "string" || clip === "" || clip.length > 200) throw new Error("clip must be the id of a cue clip");
+  const out = ["--clip", clip];
+  const describe = isRecord(args) ? args["describe"] : undefined;
+  if (describe !== undefined) {
+    if (typeof describe !== "string" || describe.length > 500) throw new Error("describe must be text of 500 characters or fewer");
+    if (describe.trim() !== "") out.push("--describe", describe);
+  }
+  const sound = isRecord(args) ? args["sound"] : undefined;
+  if (sound !== undefined && sound !== null) {
+    if (typeof sound !== "string" || !/^[a-z0-9-]+$/.test(sound)) throw new Error("sound must be a sound-library id");
+    out.push("--sound", sound);
+  }
+  if (isRecord(args) && args["generated"] === true) out.push("--generated");
+  return out;
 }
 
 const sourceFlag = (source: MixSource): string[] => ["--source", `${source.kind}:${source.key}`, ...(source.kind === "take" ? ["--stretch", String(source.stretch ?? 1)] : [])];
@@ -134,6 +155,42 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
 
   return {
     ...notes,
+    cueOptions(args) {
+      const episode = positiveInt(args, "episode", true);
+      const body = call("cue-options", ["--episode", String(episode), ...cueFlags(args)]);
+      return {
+        episode,
+        version: body["version"] as number,
+        clip: body["clip"] as string,
+        kind: body["kind"] as CueOptionsPayload["kind"],
+        desc: body["desc"] as string,
+        key: body["key"] as string,
+        options: body["options"] as CueOptionsPayload["options"],
+      };
+    },
+
+    /** Makes the asset (a generator may run for a while, so the child is async) and writes the next mix version. */
+    async regenerateCue(args) {
+      const episode = positiveInt(args, "episode", true);
+      const base = positiveInt(args, "base", true);
+      const body = await callAsync("cue", ["--episode", String(episode), "--base", String(base), ...cueFlags(args)]);
+      return {
+        episode,
+        version: body["version"] as number,
+        parent: body["parent"] as number,
+        by: "human",
+        clip: body["clip"] as string,
+        desc: body["desc"] as string,
+        key: body["key"] as string,
+        made: body["made"] === true,
+        trimmed: body["trimmed"] === true,
+        summary: body["summary"] as MixDiff,
+        document: body["document"] as RegeneratedCuePayload["document"],
+        versions: versionRows(body["versions"]),
+        message: typeof body["message"] === "string" ? body["message"] : "",
+      };
+    },
+
     loadMix(args) {
       const episode = positiveInt(args, "episode", true);
       const version = positiveInt(args, "version", false);
@@ -219,6 +276,8 @@ export function mixerMutations(host: MixerHost): Record<string, MutationHandler>
     clipAudio: async (args) => host.clipAudio(args),
     saveMix: async (args) => host.saveMix(args),
     renderMix: async (args) => host.renderMix(args),
+    cueOptions: async (args) => host.cueOptions(args),
+    regenerateCue: async (args) => host.regenerateCue(args),
     listNotes: async (args) => host.listNotes(args),
     saveNote: async (args) => host.saveNote(args),
     deleteNote: async (args) => host.deleteNote(args),
