@@ -14,7 +14,7 @@ work has no valid `pablo.json` marker, and points you at `pablo init --adopt`. P
 | `2` | refused: a precondition is unmet (no project, no marker, a missing beat, a file that already exists...). The message names what is missing. |
 | `1` | error: something broke, or the verb is not implemented |
 
-`config` takes `--project` only to pick a work's `pablo.json` instead of the global file. These verbs take no `--project`: `prose`, `doctor`, `read --list` and
+`config` takes `--project` only to pick a work's `pablo.json` instead of the global file. These verbs take no `--project`: `guide`, `prose`, `doctor`, `read --list` and
 `read <round>`. `init` and `story` take a slug in other ways, described below.
 `pablo --version` (or `-v`) prints the installed version. `pablo --help` lists
 the verbs; a verb has no help page of its own, so `pablo <verb> --help` prints
@@ -27,6 +27,45 @@ read it. See [Reviewing and accepting](#reviewing-and-accepting).
 ---
 
 ## Setting up a work
+
+### guide
+
+```
+pablo guide
+pablo guide --track <t>
+pablo guide --track <t> --output <type>
+```
+
+Start here. With a track and an output, `guide` prints the path from nothing to a
+finished piece, one numbered step per line with the command that does it: create
+the work (`init --track`), each of the track's core stages in order (`save
+--stage ...`), the research stage (on `historical-fiction` and `nonfiction` the
+gated checklist: `research plan`, then `research save --item` or `research waive`
+for every item, and `research distill` for the period facts; on `fiction` an
+optional note), `output add` (for `narrated`, first a prose output to read and then
+`output add narrated --from`), each of the output's own stages (`write`, `revise`,
+and for performed outputs `cast --auto`, `perform`, `mix`, `fix`), `check`, and
+`publish` with the output's targets. A step the track gates is marked `(gate)`;
+`write` refuses until it is met. Commands carry placeholders (`<slug>`, `N`) for
+you to fill.
+
+The path is composed from the track and output registries, not written per pair,
+so it follows them (a stage with no step fails the guide test). With no
+flags, `guide` lists every track (its core stages, the outputs it allows, and those
+planned but not built) and every output (its stages, tracks and publish targets);
+`--track` alone lists that track's. `--output` alone reads the `fiction` track when
+it allows the output, else the first track that does. An unknown track or output,
+an output the track does not allow, or a planned one not built yet (`essay`) is
+refused (exit 2) naming the choices. `guide` reads no vault and needs no project.
+
+```
+{ok: true, track, output, steps: [{phase, stage?, title, command, detail?, gate?, optional?}]}
+{ok: true, tracks: [{id, coreStages, outputs, planned}], outputs: [{id, noun, tracks, stages, targets}], next}    with no output
+```
+
+`phase` is one of `create`, `core`, `research`, `output`, `write`, `check`,
+`publish`, in that order. Over MCP it is the `guide` tool (`track`, `output`), and
+the server's instructions tell an agent to call it first.
 
 ### init
 
