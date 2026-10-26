@@ -8,11 +8,13 @@
  * `retake`, `lineTakes`, `chooseTake`) and the cue regeneration's (AGT-2156: `cueOptions`, `regenerateCue`).
  */
 
+import { CAST_MUTATIONS } from "./mixer-cast-protocol";
+
 /** The punch list's mutations (AGT-2155): open flags, flag/unflag a line, re-take it, compare its takes and choose one. */
 export const PUNCH_MUTATIONS = ["listFlags", "flag", "unflag", "retake", "lineTakes", "chooseTake"] as const;
 
-/** The mutation names the host registers (and ui-leaf declares); anything else is a 404 from ui-leaf. */
-export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags", "cueOptions", "regenerateCue", ...PUNCH_MUTATIONS] as const;
+/** The mutation names the host registers (the Cast panel's are `mixer-cast-protocol.ts`'s, AGT-2157) (and ui-leaf declares); anything else is a 404 from ui-leaf. */
+export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags", "cueOptions", "regenerateCue", ...PUNCH_MUTATIONS, ...CAST_MUTATIONS] as const;
 
 export type TrackName = "dialogue" | "sfx" | "beds" | "music";
 export type FadeCurve = "linear" | "scurve" | "log" | "exp";

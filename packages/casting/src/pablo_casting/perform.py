@@ -206,7 +206,7 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _transcript(card: Card) -> str:
+def card_transcript(card: Card) -> str:
     reference = card.data.get("reference")
     name = reference.get("transcript") if isinstance(reference, dict) else None
     if isinstance(name, str):
@@ -254,7 +254,7 @@ def resolve_roles(work: Path, script: Script, voices_dir: Path) -> dict[str, Rol
             card_hash=card_hash(card.data),
             slug=slug,
             reference=card.reference,
-            transcript=_transcript(card),
+            transcript=card_transcript(card),
             seconds=float(seconds) if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) else 0.0,
         )
         roles[name] = Role(name=name, slug=slug, card=card, voice=voice)

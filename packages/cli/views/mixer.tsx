@@ -31,6 +31,7 @@ import type { GestureKind } from "./mixer-edit";
 import { INSPECTOR_CSS, Inspector } from "./mixer-inspector";
 import { CUE_CSS, CuePanel, isCueClip } from "./mixer-cue";
 import type { RegeneratedCuePayload } from "./mixer-protocol";
+import { CAST_CSS, CastPanel } from "./mixer-cast";
 
 /**
  * The mixer view (AGT-1768, `pm project show pablo-mixer`, "The mixer view"): an episode's mix document drawn
@@ -210,6 +211,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [castOpen, setCastOpen] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error" | "stale"; text: string } | null>(null);
   const [cueFor, setCueFor] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
@@ -647,7 +649,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
 
   return (
     <div className="mixer">
-      <style>{CSS + MARKERS_CSS + INSPECTOR_CSS + CUE_CSS + PUNCH_CSS}</style>
+      <style>{CSS + MARKERS_CSS + INSPECTOR_CSS + CUE_CSS + PUNCH_CSS + CAST_CSS}</style>
       <header className="top">
         <div className="titles">
           <span className="work">{data.title}</span>
@@ -684,6 +686,9 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
           </button>
           <button type="button" className="render" onClick={() => void render()} disabled={saving || rendering} title="Save (if edited), run pablo mix on this mix and reload its audio">
             {rendering ? "Rendering…" : "Render"}
+          </button>
+          <button type="button" className={`cast-toggle${castOpen ? " on" : ""}`} onClick={() => setCastOpen((o) => !o)} title="Roles and voices: audition, bind, design a voice">
+            Cast
           </button>
         </div>
         <div className="version">
@@ -811,6 +816,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
         <MarkersPanel api={markers} onJump={(t) => void seek(t)} />
         <PunchPanel api={punch} lines={payload.manifest.lines} locked={unsaved} onJump={(t) => void seek(t)} />
       </div>
+      {castOpen && <CastPanel mutate={mutate} episode={data.episode} onClose={() => setCastOpen(false)} onReperformed={reload} />}
     </div>
   );
 }

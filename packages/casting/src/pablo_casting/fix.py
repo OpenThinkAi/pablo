@@ -34,13 +34,15 @@ left alone.
 
 **One line** (`--line I`, AGT-2155: the mixer's re-take): only the open flags
 on that line are applied and moved; the episode's other flags stay open. A line
-with no open flag is a refusal.
+with no open flag is a refusal, and so is one line of a rebound role with more
+lines (the recast rule below counts only the flags being applied).
 
 Refusals (exit 2, nothing written): the episode has no manifest, **no open
 flags** (it names the episode), a flag with no id or pointing at a line the
 version does not have, no script, an unbound or changed role, a role cast
-differently from `v<k>` (rebinding a role changes every one of its lines, which
-is a new performance, not a fix), or an unflagged line whose speaker or words no
+differently from `v<k>` with any of its lines unflagged (rebinding a role changes
+every one of its lines; flagging them all, as the mixer's Cast panel does after a
+rebind, AGT-2157, re-performs exactly those lines in the new voice), or an unflagged line whose speaker or words no
 longer match the script. If the remix fails after the version was written, the
 result says so and names `pablo mix`; the flags are already moved.
 """
@@ -85,7 +87,7 @@ from pablo_casting.perform import (
 )
 from pablo_casting.receipts import append_receipt, now
 from pablo_casting.scorers import Scorer, ScorerUnavailable
-from pablo_casting.takes import take_path
+from pablo_casting.takes import KEY_RE, read_take, take_path
 
 Mixer = Callable[[int], Result]
 
@@ -136,6 +138,25 @@ def move_flags_done(work: Path, episode: int, applied: Sequence[Mapping[str, obj
     open_raw = _read_flags(flags_path(work))
     kept = [flag for flag in open_raw.get("flags", []) if not (isinstance(flag, dict) and flag.get("episode") == episode and flag.get("id") in ids)]  # type: ignore[union-attr]
     _write_atomic(flags_path(work), {**open_raw, "flags": kept})
+
+
+def recast_lines(work: Path, lines: Sequence[Mapping[str, object]], pins: Mapping[str, str]) -> list[int] | None:
+    """The lines whose take was made in another voice than the one their role is pinned to now (`pins`: role -> card
+    hash), i.e. a rebound role's lines. None when a line's take or its role's pin cannot be read, so the cast change
+    cannot be pinned to whole roles. The one rule: `fix` refuses a recast unless every such line is flagged, and the
+    mixer's Cast panel (`cast_panel.py`, AGT-2157) offers to re-perform exactly these lines."""
+    out: list[int] = []
+    for line in lines:
+        pin = pins.get(str(line.get("speaker")))
+        key, i = line.get("take"), line.get("i")
+        take = read_take(work, key) if isinstance(key, str) and KEY_RE.match(key) else None
+        inputs = take.record.get("inputs") if take is not None else None
+        voice = inputs.get("voice") if isinstance(inputs, dict) else None
+        if pin is None or not isinstance(voice, str) or not isinstance(i, int) or isinstance(i, bool):
+            return None
+        if pin not in voice.split("+"):  # a pass that voiced two roles keys its take on both card hashes
+            out.append(i)
+    return out
 
 
 def fix(
@@ -224,9 +245,17 @@ def fix(
     cast_pins = {name: role.voice.card_hash for name, role in sorted(roles.items())}
     cast_hash = _sha256_text(json.dumps(cast_pins, sort_keys=True, separators=(",", ":")))
     if parent.get("cast_hash") != cast_hash:
-        return _refused(
-            f"the cast changed since v{parent_version} (a role is bound to a different voice or card); rebinding changes every line of that role, which is a new performance, not a fix"
-        )
+        # A rebound role (AGT-2157, the mixer's Cast panel): every one of its lines changes voice, so the fix is allowed
+        # only when every line performed in another voice than the one bound now is flagged; anything less would leave
+        # the episode in two voices for one role.
+        recast = recast_lines(work, parent_lines, cast_pins)
+        unflagged = [] if recast is None else [i for i in recast if i not in by_line]
+        if recast is None or unflagged:
+            detail = "" if recast is None else f"; flag every line of the rebound role(s) to re-perform them (unflagged: {', '.join(map(str, unflagged))})"
+            return _refused(
+                f"the cast changed since v{parent_version} (a role is bound to a different voice or card); rebinding changes every line of that role, which is a new performance, not a fix{detail}",
+                **({} if recast is None else {"lines": unflagged}),
+            )
     engine_block = parent.get("engine")
     engine_name = engine_block.get("name") if isinstance(engine_block, dict) else None
     spec = ENGINE_SPECS.get(str(engine_name)) or ENGINE_SPECS[DEFAULT_ENGINE]
