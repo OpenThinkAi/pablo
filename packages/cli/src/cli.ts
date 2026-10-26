@@ -17,6 +17,7 @@ import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { workBookStages } from "./book";
+import { configSet, configShow, configTest, realConfigTestDeps } from "./config-verb";
 import { doctorText, gateText, realCastingDeps, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
 import { parseForEpisode, radioBind, radioStatus } from "./radio";
 import { branchDiff, fileAt, repoRoot, waitingBranches } from "./branch";
@@ -107,6 +108,7 @@ const P0_VERBS = [
   "review",
   "mixer",
   "fix",
+  "config",
 ] as const;
 
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
@@ -255,6 +257,14 @@ function helpText(): string {
     "                                            tag every untagged bible and continuity fact",
     "                                            (researched/invented/author) on a plan/ branch;",
     "                                            chapters are never touched",
+    "  pablo config show [--project <slug>] [--json]",
+    "                                            the merged providers and which provider each intent",
+    "                                            routes to; keys shown as their reference, never a value",
+    "  pablo config set <path> <value> [--project <slug>]",
+    "                                            edit config.json (or the work's pablo.json):",
+    "                                            default, intents.<intent>, providers.<id>.<field>",
+    "  pablo config test [--project <slug>] [--json]",
+    "                                            one tiny request per mapped intent; ok/error per provider",
     "  pablo doctor [--json]                    the casting side's state (not provisioned,",
     "                                            stale, provisioned), uv, and its config;",
     "                                            never provisions or downloads",
@@ -1478,6 +1488,24 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return markerRefusal.code;
     }
     projectPath = resolved.path;
+  }
+
+  // `config` (AGT-2130) edits and checks the model config: the global file, or --project's pablo.json.
+  if (args.verb === "config") {
+    const scope = { env: process.env, ...(projectPath === undefined ? {} : { projectDir: projectPath }) };
+    const sub = args.rest[0];
+    const result =
+      sub === "show"
+        ? configShow(scope)
+        : sub === "set"
+          ? configSet(scope, args.rest[1], args.rest[2])
+          : sub === "test"
+            ? await configTest(scope, realConfigTestDeps())
+            : { exitCode: EXIT_REFUSED, body: { ok: false, message: "pablo config: expected show, set or test" }, text: "pablo config: expected show, set or test" };
+    if (args.json) console.log(JSON.stringify(result.body));
+    else if (result.exitCode === EXIT_REFUSED) console.error(result.text);
+    else console.log(result.text);
+    return result.exitCode;
   }
 
   // `review` (AGT-1693): the radio work's review player. Holds the process until the window closes.

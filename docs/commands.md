@@ -14,7 +14,7 @@ work has no valid `pablo.json` marker, and points you at `pablo init --adopt`. P
 | `2` | refused: a precondition is unmet (no project, no marker, a missing beat, a file that already exists...). The message names what is missing. |
 | `1` | error: something broke, or the verb is not implemented |
 
-These verbs take no `--project`: `prose`, `doctor`, `tray`, `read --list` and
+`config` takes `--project` only to pick a work's `pablo.json` instead of the global file. These verbs take no `--project`: `prose`, `doctor`, `tray`, `read --list` and
 `read <round>`. `init` and `story` take a slug in other ways, described below.
 `pablo --version` (or `-v`) prints the installed version. `pablo --help` lists
 the verbs; a verb has no help page of its own, so `pablo <verb> --help` prints
@@ -113,6 +113,28 @@ changes nothing. `--dry-run` lists what would change.
   track, or uncommitted changes to `pablo.json`, is a refusal.
 
 Every reader handles both the old and the new layout, so migrating is optional.
+
+---
+
+### config
+
+`pablo config show|set|test [--project <slug>]` finds, edits and checks the model
+config (see [configuration](configuration.md)). It needs no vault unless `--project`
+is given, and `--json` prints one JSON object.
+
+- `config show` prints the merged providers (kind, endpoint, model, `local`, timeout)
+  and which provider each intent routes to. A key is shown as its reference
+  (`env:NAME`, `keychain:service/account`), never its value. With `--project <slug>`
+  the work's `pablo.json` `providers` and `intents` are merged over the global file.
+- `config set <path> <value>` edits `$XDG_CONFIG_HOME/pablo/config.json`, or with
+  `--project` the work's `pablo.json`. Paths: `default` (global only),
+  `intents.<intent>`, and `providers.<id>.<field>` with field one of `kind`,
+  `endpoint`, `model`, `local`, `key`, `timeoutMs`, `temperature`, `thinking`. The
+  result is validated like a normal load first, so an inline key, an intent naming
+  no provider, or a work repointing a remote provider is a refusal and nothing is
+  written. Other keys in the file are kept.
+- `config test` sends one tiny request per mapped intent (the default route when none
+  is mapped) and prints ok or the error per provider. Exit `1` if any failed.
 
 ---
 
