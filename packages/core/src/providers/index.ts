@@ -1,5 +1,12 @@
 export type {
   Adapter,
+  ChatAssistantMessage,
+  ChatEvent,
+  ChatMessage,
+  ChatRequest,
+  ChatToolResultMessage,
+  ChatUsage,
+  ChatUserMessage,
   CompletionEvent,
   CompletionRequest,
   CompletionStats,
@@ -8,8 +15,11 @@ export type {
   ExtractRequest,
   Intent,
   IntentKind,
+  JsonSchemaTool,
   OutputMode,
   Proposal,
+  ToolCall,
+  ToolChoice,
 } from "./types";
 export { EndpointHung, EndpointUnreachable, NoToolCallError, ProviderConfigError, ProviderResponseError } from "./errors";
 export type { AdapterKind, LoadConfigOptions, PabloConfig, ProviderConfig, ReaderConfig } from "./config";
@@ -40,3 +50,5 @@ export type { ClaudeCliAdapterOptions, ClaudeRun, ClaudeRunResult, ClaudeRunner 
 export { CLAUDE_CLI_ID, claudeArgs, createClaudeCliAdapter, spawnClaude, subscriptionEnv } from "./claude-cli";
 export type { ClaudeCredential, Planner, PlannerOptions, PlannerRoute } from "./planner";
 export { claudeCredential, createPlanner, PLAN_INTENT } from "./planner";
+export type { ScriptedChatAdapter, ScriptedChatAdapterOptions, ScriptedTurn } from "./scripted";
+export { createScriptedChatAdapter } from "./scripted";

@@ -137,6 +137,102 @@ export interface ExtractRequest {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * A tool the model may call in a `chat()` turn, described in plain JSON Schema
+ * so no vendor's tool format leaks past an adapter. `parameters` is the schema
+ * of the call's `arguments` object (`{ type: "object", properties, required }`).
+ */
+export interface JsonSchemaTool {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Whether the model may, must, or must not call a tool this turn, or must call
+ * one named tool. An adapter maps this to its vendor's own field.
+ */
+export type ToolChoice = "auto" | "required" | "none" | { readonly name: string };
+
+/**
+ * One tool call the model made. `id` is the adapter-assigned or vendor id that
+ * the matching `ChatToolResultMessage.toolCallId` echoes back; `arguments` is
+ * the call's argument object, already parsed from whatever the wire carried
+ * (OpenAI sends a JSON string, Anthropic an object) — an adapter that cannot
+ * parse it throws `ProviderResponseError` rather than passing text along. It is
+ * unvalidated: the caller checks it against the tool's own schema.
+ */
+export interface ToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: Readonly<Record<string, unknown>>;
+}
+
+/** A turn from the author or the harness. */
+export interface ChatUserMessage {
+  readonly role: "user";
+  readonly content: string;
+}
+
+/**
+ * A turn the model produced, replayed as history. `content` is its text (may be
+ * empty when it only called tools); `toolCalls` is every call it made, in order.
+ */
+export interface ChatAssistantMessage {
+  readonly role: "assistant";
+  readonly content: string;
+  readonly toolCalls?: readonly ToolCall[];
+}
+
+/**
+ * The result of one tool call, sent back on the next turn. `isError` marks a
+ * tool that threw or refused, so the model sees a failure as a failure.
+ */
+export interface ChatToolResultMessage {
+  readonly role: "tool";
+  readonly toolCallId: string;
+  readonly content: string;
+  readonly isError?: boolean;
+}
+
+export type ChatMessage = ChatUserMessage | ChatAssistantMessage | ChatToolResultMessage;
+
+/**
+ * One multi-turn, tool-calling request (D-12): the history so far and the
+ * tools on offer. The system prompt is its own field rather than a message
+ * because the two vendors place it differently.
+ */
+export interface ChatRequest {
+  readonly system: string;
+  readonly messages: readonly ChatMessage[];
+  /** Empty when the turn offers no tools. */
+  readonly tools: readonly JsonSchemaTool[];
+  /** Defaults to `auto` when tools are offered. */
+  readonly toolChoice?: ToolChoice;
+  /** Overrides the provider's configured model. */
+  readonly model?: string;
+  readonly maxTokens?: number;
+  readonly temperature?: number;
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+}
+
+/** Tokens a `chat()` turn consumed; either count is undefined when the endpoint does not report it. */
+export interface ChatUsage {
+  readonly inputTokens: number | undefined;
+  readonly outputTokens: number | undefined;
+}
+
+/**
+ * A streamed `chat()` turn: text as it arrives and each tool call once it is
+ * complete (an adapter assembles incremental argument deltas before emitting),
+ * in the order the model produced them, then exactly one `done`.
+ */
+export type ChatEvent =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "tool_call"; readonly call: ToolCall }
+  | { readonly type: "done"; readonly usage: ChatUsage };
+
 export interface Adapter {
   /** The configured provider id this adapter serves (`local`, `anthropic`). */
   readonly id: string;
@@ -168,4 +264,13 @@ export interface Adapter {
    * `extractFacts`, whose lines carry no anchor.
    */
   extractFactsWithAnchors?(request: ExtractRequest): Promise<readonly ExtractedFact[]>;
+  /**
+   * One turn of a multi-turn, tool-calling conversation (D-12): the agent
+   * loop's only way to talk to a model, on any provider.
+   *
+   * Optional while the adapters gain it one at a time, so a caller checks for
+   * it before driving a provider. Like `complete`, it throws `EndpointHung` on
+   * an idle endpoint.
+   */
+  chat?(request: ChatRequest): AsyncIterable<ChatEvent>;
 }
