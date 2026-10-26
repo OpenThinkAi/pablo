@@ -1546,6 +1546,13 @@ const REVISE_ARGS = z.object({
     .optional()
     .default(false)
     .describe("Assemble and render the pack (slice by slice, with its prompt hash); send nothing to the model."),
+  branch: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Land the revision on a `revise/<id>` branch for the author instead of returning the candidate; the result names the branch, file and receipt and never carries the prose. Needs `passage` (not start+end).",
+    ),
 });
 
 /**
@@ -1557,6 +1564,17 @@ const REVISE_ARGS = z.object({
 async function runReviseVerb(args: z.infer<typeof REVISE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
+
+  // AGT-2144: `branch` is what `revise_passage` (now a deprecated alias) did.
+  if (args.branch) {
+    if (args.passage === undefined || args["dry-run"]) {
+      return {
+        body: { ok: false, code: 2, message: "pablo: revise with `branch` needs `passage` and cannot be a dry run" },
+        exitCode: 2,
+      };
+    }
+    return runRevisePassageVerb({ project: args.project, file: args.file, passage: args.passage, instruction: args.instruction }, ctx);
+  }
 
   const bound = boundedPath(
     resolved.projectPath,
@@ -1736,14 +1754,14 @@ export const VERBS: readonly Verb[] = [
   {
     name: "write",
     description:
-      "Draft one unit of an output (`output` and `unit`; `chapter` is the novel's spelling) on the configured local model: check preconditions, assemble the pack, send, write, receipt (naming output and unit). A work with several outputs needs `output`.",
+      "Canonical drafting tool. Draft one unit of an output (`output` and `unit`; `chapter` is the novel's spelling) on the configured local model: check preconditions, assemble the pack, send, write, receipt (naming output and unit). A work with several outputs needs `output`.",
     args: WRITE_ARGS,
     run: runWriteVerb,
   },
   {
     name: "draft_unit",
     description:
-      "Draft unit n of an output (e.g. output \"novel\", n 3 is chapter 3) on the local model (Gemma) from its beat, steered by an optional direction. The draft lands on the output's draft branch for the author to review. Returns the branch, path and receipt (naming output and unit), never the prose; read the unit to see it.",
+      "Deprecated alias of `write` (kept for one release; use `write` with `output` and `unit`). Draft unit n of an output (e.g. output \"novel\", n 3 is chapter 3) on the local model (Gemma) from its beat, steered by an optional direction. The draft lands on the output's draft branch for the author to review. Returns the branch, path and receipt (naming output and unit), never the prose; read the unit to see it.",
     args: DRAFT_UNIT_ARGS,
     run: runDraftUnitVerb,
   },
@@ -1770,7 +1788,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "draft_chapter",
     description:
-      "Draft chapter n on the local model (Gemma) from its beat, steered by an optional direction such as \"slower, stay on Cora\". The draft lands on a draft/chNN branch for the author to review. Returns the branch, path and receipt, never the prose; read the chapter to see it.",
+      "Deprecated alias of `write` (kept for one release; use `write` with `chapter`). Draft chapter n on the local model (Gemma) from its beat, steered by an optional direction such as \"slower, stay on Cora\". The draft lands on a draft/chNN branch for the author to review. Returns the branch, path and receipt, never the prose; read the chapter to see it.",
     args: DRAFT_CHAPTER_ARGS,
     run: runDraftChapterVerb,
   },
@@ -1894,14 +1912,14 @@ export const VERBS: readonly Verb[] = [
   {
     name: "revise",
     description:
-      "Send one located passage of a manuscript to the local model and return a candidate: locate it (by quoted text or a start/end offset pair), assemble the pack with the project's own style and work rules, send once, and return {candidate, span, receipt} — never writes the file.",
+      "Canonical revision tool (`branch: true` lands the result on a revise/ branch instead of returning it). Send one located passage of a manuscript to the local model and return a candidate: locate it (by quoted text or a start/end offset pair), assemble the pack with the project's own style and work rules, send once, and return {candidate, span, receipt} — never writes the file.",
     args: REVISE_ARGS,
     run: runReviseVerb,
   },
   {
     name: "revise_passage",
     description:
-      "Revise one passage of a chapter on the local model (Gemma) following an instruction such as \"tighten, keep the dread\". The revision lands on a revise/<id> branch for the author to review. Returns the branch, file and receipt, never the prose; read the branch to see it.",
+      "Deprecated alias of `revise` with `branch: true` (kept for one release). Revise one passage of a chapter on the local model (Gemma) following an instruction such as \"tighten, keep the dread\". The revision lands on a revise/<id> branch for the author to review. Returns the branch, file and receipt, never the prose; read the branch to see it.",
     args: REVISE_PASSAGE_ARGS,
     run: runRevisePassageVerb,
   },
