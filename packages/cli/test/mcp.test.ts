@@ -121,6 +121,19 @@ test("the write tool's schema carries output and unit; draft_unit carries output
   expect(propsOf("publish")).toContain("output");
 });
 
+// AGT-2144: the duplicate tools are listed once each, marked as deprecated aliases of the canonical tool.
+test("tools/list marks draft_unit, draft_chapter and revise_passage as deprecated aliases, once each", async () => {
+  const { tools } = await client.listTools();
+  const aliases: Record<string, string> = { draft_unit: "write", draft_chapter: "write", revise_passage: "revise" };
+  for (const [alias, canonical] of Object.entries(aliases)) {
+    const matches = tools.filter((t) => t.name === alias);
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.description).toContain(`Deprecated alias of \`${canonical}\``);
+    expect(tools.filter((t) => t.name === canonical)).toHaveLength(1);
+    expect(tools.find((t) => t.name === canonical)?.description).not.toContain("Deprecated alias");
+  }
+});
+
 // AC1: each voice_* tool's schema carries ONLY its own arguments — not a
 // union of every sub's fields the way the single `voice` verb's schema does.
 test("each voice_* tool's input schema carries only its own arguments", async () => {

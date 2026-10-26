@@ -553,7 +553,7 @@ It serves:
 | Area | Tools |
 |---|---|
 | Where things stand | `resume`, `status`, `timeline` |
-| Writing | `write`, `draft_unit`, `draft_chapter`, `prose`, `revise`, `revise_passage` |
+| Writing | `write`, `prose`, `revise` (deprecated aliases, removed next release: `draft_unit`, `draft_chapter` for `write`; `revise_passage` for `revise`) |
 | Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `record_fact` |
 | Setup and publishing | `output`, `migrate`, `publish` |
 | Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule` |

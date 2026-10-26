@@ -44,7 +44,7 @@ export const MCP_INSTRUCTIONS = [
   "pablo manages a writing project (a novel or story) in the author's vault. You plan with the author; pablo writes the prose.",
   "",
   "- Start every session with `resume` (pass `project`, the work's slug). It returns where the work stands and `next`.",
-  "- Never write the book's prose yourself. Every sentence of prose comes from `write` / `draft_unit` (or `revise_passage`), which send one prompt to the author's configured writer model. Do not put prose into `save`.",
+  "- Never write the book's prose yourself. Every sentence of prose comes from `write` (or `revise`), which send one prompt to the author's configured writer model. Do not put prose into `save`.",
   "- Save planning through pablo: when you and the author agree on a premise, acts, beats or a bible file, call `save` so it lands where the framework reads it and is committed.",
   "- A result of `{ok: false, missing: [...]}` is a direction, not an error: it names what the plan still needs. Steer the author there; do not work around it.",
   "- Every manuscript change lands on a branch (`draft/`, `revise/`, `plan/`). Tell the author what is waiting; they accept it themselves (`pablo merge`, or the screen). There is deliberately no merge tool.",
