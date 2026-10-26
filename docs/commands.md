@@ -834,7 +834,7 @@ By default every branch is accepted as soon as it lands. The agent's questions a
 answered by stated assumptions, which are kept with the run. With `--review`, the run
 stops on each branch for you to accept; `pablo story --project <slug>` then picks the
 run up again. Progress is kept in `<work>/.pablo/story.json`, so a stopped or failed
-run resumes where it was. Needs the same Claude access as `agent`.
+run resumes where it was. Runs on the same provider as `agent`.
 
 ---
 
@@ -871,19 +871,21 @@ pablo agent --project <slug> [--new] "<message>"
 pablo agent --project <slug> --tag-facts
 ```
 
-Runs one session of pablo's own agent: Claude, through the Agent SDK. Its system
-prompt carries the work's policy and `STYLE.md`. Its tools are web search, web fetch
-and pablo's MCP tools. It uses your Claude subscription unless an Anthropic API key
-is set in pablo's config.
+Runs one session of pablo's own agent loop on the provider the config's `agent`
+intent goes to (see `docs/configuration.md`): Claude through an `anthropic` provider,
+or any OpenAI-compatible model with tool calls. Its system prompt carries the work's
+policy and `STYLE.md`. Its tools are pablo's MCP tools and nothing else.
 
-The transcript prints as it arrives. The conversation is saved under the work's
-`.pablo/sessions/`, and the next run resumes it; `--new` starts fresh and keeps the
-old one. When the agent asks you a question, it prints the choices and reads your
-answer from stdin (type a number to pick one).
+The transcript prints as it arrives, ending with the turns, time and cost (a model
+pablo has no price for is named rather than counted as free). Each run is a fresh
+conversation for now: saved sessions are coming back in a new format, and `--new` is
+accepted and changes nothing until then. When the agent asks you a question, it
+prints the choices and reads your answer from stdin (type a number to pick one).
 
 `--tag-facts` tags every untagged bible and continuity fact as researched, invented
 or author on a `plan/` branch. Chapters are never touched. With `--json` it returns
-`{ok, route, session: {id, resumed}, entries[], result}`. Exit `0` on success, `2`
+`{ok, provider: {id, model, credential}, entries[], result}`; `credential` is where the
+key comes from (`env:ANTHROPIC_API_KEY`, `keychain:…`, `none`), never the key. Exit `0` on success, `2`
 refused, `1` failed.
 
 ---

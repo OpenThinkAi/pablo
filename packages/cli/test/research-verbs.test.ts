@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "bun:test";
 import { mcpTools } from "../src/mcp";
 import { main } from "../src/cli";
-import { harnessAuth } from "../src/harness/auth";
-import { harnessOptions } from "../src/harness/session";
-import { defaultConfig } from "@openthink/pablo-core";
+import { adapterProvider } from "../src/harness/provider";
+import { sessionToolList } from "../src/harness/session";
+import { createScriptedChatAdapter } from "@openthink/pablo-core";
 import type { VerbContext } from "../src/verbs";
 import { VERBS } from "../src/verbs";
 
@@ -149,13 +149,13 @@ test("the harness's session tools replace the same-named pablo mcp tools, so eac
   const stub = (name: string) => ({ name, description: "session", args: verb("research").args, run: async () => ({ body: {}, exitCode: 0 }) });
   const spec = {
     work: { title: "The Ice House", format: "novel", slug: "ice-house" },
-    projectPath: join(vault, "novels", "ice-house"),
-    auth: harnessAuth(defaultConfig(), ctx.env, { env: {} }),
+    provider: adapterProvider(createScriptedChatAdapter({ turns: [] })),
     ctx,
   };
-  const count = (allowed: readonly string[] | undefined, name: string) => (allowed ?? []).filter((t) => t === name).length;
-  expect(count(harnessOptions(spec).allowedTools, "mcp__pablo__save_research")).toBe(1);
-  const withSession = harnessOptions({ ...spec, sessionTools: [stub("save_research"), stub("record_fact")] }).allowedTools;
-  expect(count(withSession, "mcp__pablo__save_research")).toBe(1);
-  expect(count(withSession, "mcp__pablo__record_fact")).toBe(1);
+  const names = (s: typeof spec & { sessionTools?: ReturnType<typeof stub>[] }) => sessionToolList(s).map((tool) => tool.name);
+  const count = (offered: readonly string[], name: string) => offered.filter((t) => t === name).length;
+  expect(count(names(spec), "save_research")).toBe(1);
+  const withSession = names({ ...spec, sessionTools: [stub("save_research"), stub("record_fact")] });
+  expect(count(withSession, "save_research")).toBe(1);
+  expect(count(withSession, "record_fact")).toBe(1);
 });

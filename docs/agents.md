@@ -103,13 +103,13 @@ The rest (`promote`, `migrate`, `bind`, and the radio tools `audition`, `cast`,
 
 ## The built-in agent
 
-pablo also ships its own agent, Claude configured as pablo: its system prompt is the
-rules above, the work's judgement policy and the work's `STYLE.md`, and its only tools
-are pablo's plus web search. It uses your Claude Code login, or an Anthropic key from
-your config (see [configuration.md](configuration.md#claude-for-pablo-agent-and-pablo-story)).
+pablo also ships its own agent: its own tool loop on the model the `agent` intent goes
+to (Claude, or any OpenAI-compatible model with tool calls), configured as pablo. Its
+system prompt is the rules above, the work's judgement policy and the work's
+`STYLE.md`, and its only tools are pablo's (see
+[configuration.md](configuration.md#the-model-behind-pablo-agent-and-pablo-story)).
 
-- `pablo agent --project <slug> "<message>"` runs one turn in the terminal and keeps
-  the conversation for the next run (`--new` starts over).
+- `pablo agent --project <slug> "<message>"` runs one conversation in the terminal.
 - `a c` in the screen (bare `pablo`) opens the same conversation as a view.
 - `pablo story "<prompt>"` runs the whole pipeline unattended, from premise to a
   published draft, accepting each step as it goes; `--review` stops at each branch

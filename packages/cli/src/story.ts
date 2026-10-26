@@ -67,14 +67,13 @@ import type { OutputDefinition } from "./outputs/types";
 import { startPlanSession } from "./plan";
 import { findVault, resolveProject } from "./project";
 import type { AskAuthor } from "./harness/ask-author";
-import { harnessAuth } from "./harness/auth";
-import type { HarnessAuth } from "./harness/auth";
+import { harnessProvider } from "./harness/provider";
+import type { HarnessProvider } from "./harness/provider";
 import { planTools } from "./harness/plan-tools";
 import { loadPromptWork } from "./harness/prompt";
-import { runHarness, sdkQuery } from "./harness/session";
+import { loopQuery, runHarness } from "./harness/session";
 import type { HarnessQuery } from "./harness/session";
 import { harnessTools } from "./harness/tools";
-import { transcriptEntries } from "./harness/transcript";
 import { explicitTrack, inferTrack } from "./tracks/infer";
 import type { TrackChoice } from "./tracks/infer";
 import { isTrackId, trackIds } from "./tracks/registry";
@@ -175,14 +174,14 @@ export interface StoryArgs {
 
 /** What a test injects so no model runs: the harness, the writer, the extractor, the author. */
 export interface StoryDeps {
-  /** The harness session (the Agent SDK's `query`); a fake in tests. */
+  /** The harness session (pablo's agent loop); a fake in tests that do not drive the loop. */
   readonly query?: HarnessQuery;
   /** The writer units are drafted with; absent, the routed drafting provider (`write`). */
   readonly writer?: Adapter;
   /** The continuity extractor the merge rituals run; absent, the routed extraction provider. */
   readonly extractor?: Adapter;
-  /** The harness's credentials; absent, read from pablo's config the way `pablo agent` does. */
-  readonly auth?: HarnessAuth;
+  /** The provider the harness runs on; absent, the config's `agent` intent decides, as for `pablo agent`. Tests pass a scripted adapter. */
+  readonly agent?: HarnessProvider;
   readonly keys?: Partial<KeyLookup>;
   readonly readConfig?: LoadConfigOptions["readFile"];
   /** `--review`'s `ask_author`: the front end's question card. Absent, review runs answer by assumption too. */
@@ -488,11 +487,11 @@ function retitleFromPremise(run: Run): void {
   run.title = title;
 }
 
-function harnessAuthFor(run: Run): HarnessAuth | VerbResult {
-  if (run.deps.auth !== undefined) return run.deps.auth;
+function agentProviderFor(run: Run): HarnessProvider | VerbResult {
+  if (run.deps.agent !== undefined) return run.deps.agent;
   try {
     const config = loadConfig({ env: run.ctx.env, readFile: run.deps.readConfig, projectDir: run.work });
-    return harnessAuth(config, run.ctx.env, run.deps.keys ?? { env: run.ctx.env });
+    return harnessProvider(config, { keys: run.deps.keys ?? { env: run.ctx.env } });
   } catch (error) {
     return fail((error as Error).message);
   }
@@ -504,23 +503,22 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
   if (!marker.ok) return { ok: false, result: refuse(marker.message) };
   const prompt = loadPromptWork(run.work, marker.marker, run.slug);
   if (!prompt.ok) return { ok: false, result: refuse(prompt.message) };
-  const auth = harnessAuthFor(run);
-  if ("body" in auth) return { ok: false, result: auth };
+  const provider = agentProviderFor(run);
+  if ("body" in provider) return { ok: false, result: provider };
 
   const session = startPlanSession(run.vault, run.slug, { env: run.ctx.env });
   const ask = run.state.review && run.deps.ask !== undefined ? run.deps.ask : assumingAsk(stage, run.state.assumptions);
   const spec = {
     work: prompt.work,
-    projectPath: run.work,
-    auth,
+    provider,
     ctx: { ...run.ctx, caller: "mcp" as const },
     tools: harnessTools(ask),
     sessionTools: planTools(session, run.work),
   };
   let finished: { ok: boolean; text: string; errors: readonly string[] } | undefined;
   try {
-    for await (const message of runHarness(stageMessage(stage, run.state, run.title, run.slug), spec, run.deps.query ?? sdkQuery)) {
-      for (const entry of transcriptEntries(message)) if (entry.kind === "result") finished = entry;
+    for await (const entry of runHarness(stageMessage(stage, run.state, run.title, run.slug), spec, run.deps.query ?? loopQuery)) {
+      if (entry.kind === "result") finished = entry;
     }
   } catch (error) {
     return { ok: false, result: fail(`pablo: story: the harness failed in the ${stage} stage (${(error as Error).message})`, { stage }) };

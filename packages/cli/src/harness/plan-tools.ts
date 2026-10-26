@@ -2,7 +2,7 @@
  * Harness tools that act on the session's plan branch (AGT-1561): built per
  * session, because the `PlanSession` (the `plan/<date>-<id>` branch and its
  * worktree) is harness state, not a CLI verb's. They are `McpToolSpec`s like
- * every other tool, so `allowedTools` and `pabloServer` treat them the same,
+ * every other tool, so the agent loop offers and checks them the same way,
  * but they never enter `VERBS`: `pablo mcp` has no session to write to.
  */
 

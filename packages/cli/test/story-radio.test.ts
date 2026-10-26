@@ -1,7 +1,7 @@
 /**
  * AGT-1700 (pm project `pablo-casting`, C22): the radio output in `pablo story` and in `pablo perform
  * --output radio --all` on a work whose radio output was added later. Every run is on a temp git copy of the
- * synthetic fixture vault; the harness is a fake `HarnessQuery` calling pablo's own tools, the writer a fake
+ * synthetic fixture vault; the harness is pablo's own agent loop on a scripted model calling pablo's own tools, the writer a fake
  * adapter that writes radio scripts (or prose), and the casting side a fake `CastingDeps` that writes what
  * the Python side writes (cast.json, manifests, the stream) without uv, Python or a model. Never ~/writing.
  */
@@ -11,16 +11,12 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { continuityFile, defaultConfig } from "@openthink/pablo-core";
+import { continuityFile } from "@openthink/pablo-core";
 import type { Adapter, CompletionEvent, CompletionRequest } from "@openthink/pablo-core";
 import { venvPython } from "../src/casting";
 import type { CastingDeps, CastingLayout } from "../src/casting";
-import { harnessAuth } from "../src/harness/auth";
-import type { HarnessQuery } from "../src/harness/session";
+import type { HarnessProvider } from "../src/harness/provider";
+import { scriptedAgent } from "./scripted-agent";
 import { mergeChanges, mergeDraftInProject } from "../src/novel/merge";
 import { radioMachine } from "../src/outputs/radio/casting-side";
 import { scriptRoles } from "../src/outputs/radio/script";
@@ -87,9 +83,6 @@ function tempVault(): { root: string; vault: string; env: Record<string, string>
 // The fake harness: the core through pablo's own tools
 // ---------------------------------------------------------------------------
 
-const success = (result: string) =>
-  ({ type: "result", subtype: "success", is_error: false, result, num_turns: 2, duration_ms: 10, total_cost_usd: 0 }) as unknown as SDKMessage;
-
 type Call = readonly [string, Record<string, unknown>];
 
 const BEATS = [
@@ -131,28 +124,16 @@ const STAGE_CALLS: Readonly<Record<string, readonly Call[]>> = {
   beats: [["propose", { stage: "beats", content: BEATS }]],
 };
 
-function fakeHarness(): { query: HarnessQuery; stages: string[] } {
+const stageOf = (message: string) => /Stage \d of 5, (\w+)\./.exec(message)?.[1] ?? "unknown";
+
+function fakeHarness(): { agent: HarnessProvider; stages: string[] } {
   const stages: string[] = [];
-  const query: HarnessQuery = async function* (params) {
-    const stage = /Stage \d of 5, (\w+)\./.exec(params.prompt)?.[1] ?? "unknown";
+  const { provider } = scriptedAgent((message) => {
+    const stage = stageOf(message);
     stages.push(stage);
-    const instance = (params.options.mcpServers?.["pablo"] as { instance: McpServer }).instance;
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await instance.connect(serverSide);
-    const client = new Client({ name: "fake-sdk", version: "0.0.0" });
-    await client.connect(clientSide);
-    try {
-      for (const [name, args] of STAGE_CALLS[stage] ?? []) {
-        const called = await client.callTool({ name, arguments: args });
-        const body = JSON.parse((called.content as { text: string }[])[0]!.text) as { ok: boolean; message?: string };
-        if (body.ok !== true) throw new Error(`${name} refused: ${body.message}`);
-      }
-    } finally {
-      await client.close();
-    }
-    yield success(`${stage} done`);
-  };
-  return { query, stages };
+    return STAGE_CALLS[stage] ?? [];
+  });
+  return { agent: provider, stages };
 }
 
 // ---------------------------------------------------------------------------
@@ -381,8 +362,8 @@ function ensureSeam(uv: boolean): { looks: () => number; restore: () => void } {
   };
 }
 
-function depsFor(env: Record<string, string>, query: HarnessQuery, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
-  return { query, writer, auth: harnessAuth(defaultConfig(), env, { env: {} }), planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
+function depsFor(_env: Record<string, string>, agent: HarnessProvider, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
+  return { agent, writer, planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
 function streamIndex(work: string): { episode: number; audio: string }[] {
@@ -422,7 +403,7 @@ test("AC1: the written default (no --output radio) with no uv and no venv never 
     now: () => (spied.push("now"), machine.deps.now()),
   };
   try {
-    const result = await runStory({ prompt: SPEC }, { ...ctx, casting: spy }, depsFor(env, fakeHarness().query, proseWriter(), { casting: spy }));
+    const result = await runStory({ prompt: SPEC }, { ...ctx, casting: spy }, depsFor(env, fakeHarness().agent, proseWriter(), { casting: spy }));
     const body = result.body as Record<string, any>;
     expect(result.exitCode).toBe(0);
     expect(body.outputs).toEqual(["story"]);
@@ -470,7 +451,7 @@ test("AC2: --output radio builds the core, writes, casts, performs, mixes and pu
     const result = await runStory(
       { prompt: SPEC, output: ["radio"] },
       { ...ctx, stderr: { write: (t: string) => void lines.push(t) } },
-      depsFor(env, fakeHarness().query, writer, { casting: machine.deps }),
+      depsFor(env, fakeHarness().agent, writer, { casting: machine.deps }),
     );
     const body = result.body as Record<string, any>;
     expect(body.message).toBeUndefined();
@@ -515,7 +496,7 @@ test("AC2: --output radio builds the core, writes, casts, performs, mixes and pu
     for (const prompt of writer.prompts) expect(prompt).not.toContain(CANARY);
 
     // A finished run resumes as finished: nothing runs again.
-    const again = await runStory({ project: body.project }, ctx, depsFor(env, fakeHarness().query, writer, { casting: machine.deps }));
+    const again = await runStory({ project: body.project }, ctx, depsFor(env, fakeHarness().agent, writer, { casting: machine.deps }));
     expect(again.exitCode).toBe(0);
     expect(writer.calls).toBe(4);
     expect(machine.calls.filter((c) => c.startsWith("perform"))).toHaveLength(4);
@@ -533,7 +514,7 @@ test("AC3: output add radio then perform --output radio --all renders every epis
   const seam = ensureSeam(true);
   try {
     // A finished novel, from the same pipeline (no radio: the casting side is never asked).
-    const novel = await runStory({ prompt: SPEC, output: ["novel"] }, ctx, depsFor(env, fakeHarness().query, proseWriter()));
+    const novel = await runStory({ prompt: SPEC, output: ["novel"] }, ctx, depsFor(env, fakeHarness().agent, proseWriter()));
     expect(novel.exitCode).toBe(0);
     const slug = (novel.body as { project: string }).project;
     const work = join(vault, "novels", slug);
@@ -596,7 +577,7 @@ test("AC4: --review stops on each episode's script, bindings and render (open fl
   const machine = fakeMachine({ autoFlag: [2] });
   const harness = fakeHarness();
   const writer = scriptWriter();
-  const deps = depsFor(env, harness.query, writer, { casting: machine.deps });
+  const deps = depsFor(env, harness.agent, writer, { casting: machine.deps });
   try {
     let result = await runStory({ prompt: SPEC, output: ["radio"], review: true }, ctx, deps);
     let body = result.body as Record<string, any>;
@@ -679,7 +660,7 @@ test("AC5: an uncastable role in episode 2 stops the pipeline with the refusal b
     },
   });
   try {
-    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().query, writer, { casting: machine.deps }));
+    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().agent, writer, { casting: machine.deps }));
     const body = result.body as Record<string, any>;
     expect(result.exitCode).toBe(2);
     expect(body).toMatchObject({ ok: false, code: 2, output: "radio", unit: 2, queue: "engine", missing: ["role GHOST"] });
@@ -704,7 +685,7 @@ test("AC5: a casting side that fails to provision stops the pipeline before any 
   const seam = ensureSeam(true);
   const machine = fakeMachine({ syncFails: true });
   try {
-    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().query, scriptWriter(), { casting: machine.deps }));
+    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().agent, scriptWriter(), { casting: machine.deps }));
     const body = result.body as Record<string, any>;
     expect(result.exitCode).toBe(1);
     expect(body).toMatchObject({ ok: false, output: "radio", unit: 1 });
@@ -723,7 +704,7 @@ test("AC5: --output radio on a machine that cannot provision the Python side (no
   const seam = ensureSeam(false);
   const machine = fakeMachine({ uv: false });
   try {
-    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().query, scriptWriter(), { casting: machine.deps }));
+    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().agent, scriptWriter(), { casting: machine.deps }));
     expect(result.exitCode).toBe(2);
     expect((result.body as { message: string }).message).toContain("the radio output cannot run on this machine");
     expect((result.body as { missing: string[] }).missing).toEqual(["uv (brew install uv)"]);

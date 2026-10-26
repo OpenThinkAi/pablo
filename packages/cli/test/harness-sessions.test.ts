@@ -1,20 +1,21 @@
 /**
- * Saved harness sessions (AGT-1565). A fake `HarnessQuery` stands in for the
- * SDK and plays its part in the store contract (mirrors entries in, loads on
- * resume); nothing starts Claude. Sessions land under a temp copy of the
- * fixture vault, never ~/.cache/pablo or ~/.config/pablo.
+ * Saved harness sessions (AGT-1565): the store and the index. The store is the
+ * Agent SDK's format, which pablo's own loop does not write; `pablo agent`
+ * runs one fresh conversation per run until sessions return as neutral JSONL
+ * (AGT-2122), and the last test holds it to leaving `.pablo/sessions/` alone.
+ * Sessions land under a temp copy of the fixture vault, never ~/.cache/pablo
+ * or ~/.config/pablo.
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { createScriptedChatAdapter } from "@openthink/pablo-core";
 import { runAgent } from "../src/harness/agent";
-import type { AgentContext } from "../src/harness/agent";
+import { adapterProvider } from "../src/harness/provider";
 import { chooseSession, fileSessionStore, readSessionIndex, sessionsDir } from "../src/harness/sessions";
-import type { HarnessQuery } from "../src/harness/session";
 import { parseCliArgs } from "../src/cli";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
@@ -25,94 +26,15 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const work = join(vault, "novels", "ice-house");
 const ENV = { PABLO_VAULT: vault, PATH: "/usr/bin:/bin", HOME: root, XDG_CONFIG_HOME: join(root, "config"), XDG_STATE_HOME: join(root, "state") };
-const noConfig = () => undefined;
 
-function io(): { ctx: AgentContext; err: () => string } {
-  let err = "";
-  return {
-    ctx: { cwd: vault, env: ENV, stdout: { write: () => {} }, stderr: { write: (t) => void (err += t) } },
-    err: () => err,
-  };
-}
-
-let n = 0;
-
-/** Plays the SDK's side of the store: loads on resume, mirrors the turn's entries in. */
-function fakeSession(): { query: HarnessQuery; calls: Options[]; loaded: unknown[] } {
-  const calls: Options[] = [];
-  const loaded: unknown[] = [];
-  const query: HarnessQuery = async function* (params) {
-    const { options } = params;
-    calls.push(options);
-    const id = (options.resume ?? options.sessionId) as string;
-    const key = { projectKey: "k", sessionId: id };
-    if (options.resume !== undefined) loaded.push(await options.sessionStore!.load(key));
-    n += 1;
-    await options.sessionStore!.append(key, [
-      { type: "user", uuid: `u${n}-${id}`, message: params.prompt },
-      { type: "assistant", uuid: `a${n}-${id}`, message: "ok" },
-    ]);
-    yield { type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, duration_ms: 1, total_cost_usd: 0 } as unknown as SDKMessage;
-  };
-  return { query, calls, loaded };
-}
-
-const run = (message: string, query: HarnessQuery, fresh = false) =>
-  runAgent({ project: "ice-house", message, json: false, new: fresh }, io().ctx, { query, readConfig: noConfig });
-
-// ---------------------------------------------------------------------------
-// AC 1: stored under the work's .pablo/ and resumed on the next open
-// ---------------------------------------------------------------------------
-
-test("the first open starts a session and stores it under the work's .pablo/sessions", async () => {
-  const fake = fakeSession();
-  expect(await run("Where are we?", fake.query)).toBe(0);
-
-  const options = fake.calls[0]!;
-  expect(options.resume).toBeUndefined();
-  expect(options.persistSession).toBe(true);
-  const index = readSessionIndex(work);
-  expect(index.sessions).toHaveLength(1);
-  expect(options.sessionId).toBe(index.current as string);
-  expect(existsSync(join(sessionsDir(work), `${index.current}.jsonl`))).toBe(true);
-  expect(sessionsDir(work)).toBe(join(work, ".pablo", "sessions"));
-});
-
-test("the next open resumes the same session with its stored conversation", async () => {
-  const before = readSessionIndex(work).current as string;
-  const fake = fakeSession();
-  expect(await run("Continue.", fake.query)).toBe(0);
-
-  expect(fake.calls[0]!.resume).toBe(before);
-  expect(fake.calls[0]!.sessionId).toBeUndefined();
-  expect((fake.loaded[0] as unknown[]).length).toBe(2);
-  expect(readSessionIndex(work).sessions).toHaveLength(1);
-  const lines = readFileSync(join(sessionsDir(work), `${before}.jsonl`), "utf8").trim().split("\n");
-  expect(lines).toHaveLength(4);
-});
-
-// ---------------------------------------------------------------------------
-// AC 2: --new starts a fresh session; the old one stays on disk
-// ---------------------------------------------------------------------------
-
-test("--new starts a fresh session and leaves the old one on disk", async () => {
-  const old = readSessionIndex(work).current as string;
-  const oldBytes = readFileSync(join(sessionsDir(work), `${old}.jsonl`), "utf8");
-  const fake = fakeSession();
-  expect(await run("Start over.", fake.query, true)).toBe(0);
-
-  const index = readSessionIndex(work);
-  expect(index.current).not.toBe(old);
-  expect(index.sessions.map((s) => s.id)).toEqual([old, index.current as string]);
-  expect(fake.calls[0]!.resume).toBeUndefined();
-  expect(fake.calls[0]!.sessionId).toBe(index.current as string);
-  expect(readFileSync(join(sessionsDir(work), `${old}.jsonl`), "utf8")).toBe(oldBytes);
-  expect(readdirSync(sessionsDir(work)).filter((name) => name.endsWith(".jsonl"))).toHaveLength(2);
-
-  // And the open after that resumes the new one, not the old.
-  const next = fakeSession();
-  await run("More.", next.query);
-  expect(next.calls[0]!.resume).toBe(index.current as string);
+test("pablo agent on the loop runs a fresh conversation and writes no SDK session, with or without --new", async () => {
+  for (const fresh of [false, true]) {
+    const model = createScriptedChatAdapter({ turns: [[{ type: "text", text: "ok" }]] });
+    const ctx = { cwd: vault, env: ENV, stdout: { write: () => {} }, stderr: { write: () => {} } };
+    expect(await runAgent({ project: "ice-house", message: "Where are we?", json: false, new: fresh }, ctx, { provider: adapterProvider(model), readConfig: () => undefined })).toBe(0);
+    expect(model.requests[0]!.messages).toEqual([{ role: "user", content: "Where are we?" }]);
+  }
+  expect(existsSync(sessionsDir(work))).toBe(false);
 });
 
 test("a current session with no transcript yet is started under its id, not resumed", () => {

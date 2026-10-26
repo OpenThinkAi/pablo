@@ -7,7 +7,7 @@ import { afterEach, expect, test } from "bun:test";
 import type { Adapter } from "@openthink/pablo-core";
 import { adapterAsk, applyRefute, critiqueBranch, critiqueModel, critiquePath, loadCritique, styleReference } from "../src/critique";
 import type { Ask } from "../src/critique";
-import { allowedTools, harnessTools } from "../src/harness/tools";
+import { harnessTools } from "../src/harness/tools";
 import { VERBS } from "../src/verbs";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
@@ -234,7 +234,6 @@ test("critique is a verb, reaches the harness's tools, and runs through the inje
   const verb = VERBS.find((v) => v.name === "critique")!;
   expect(verb.args.safeParse({ project: "ice-house" }).success).toBe(false);
   expect(harnessTools().map((t) => t.name)).toContain("critique");
-  expect(allowedTools(harnessTools())).toContain("mcp__pablo__critique");
 
   critiqueModel.ask = fake([{ kind: "tells", line: 12, claim: "stock praise", evidence: "style" }], {}).ask;
   const ctx = { cwd: repo, env: { PABLO_VAULT: repo, PATH: "/usr/bin:/bin" }, stderr: { write: () => {} } };

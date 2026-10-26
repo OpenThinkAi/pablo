@@ -3,8 +3,8 @@
  * built through the harness, then each requested output drafted, merged and
  * published. Every run is on a temp git copy of the synthetic fixture vault
  * (`PABLO_VAULT`, `PABLO_HOME` and `HOME` all under a temp dir), the harness
- * is a fake `HarnessQuery` that calls pablo's own in-process tools, and the
- * writer is a fake adapter: no model, no network, no `think`, never
+ * is pablo's real agent loop on a scripted model (`scripted-agent.ts`) that
+ * calls pablo's own in-process tools, and the writer is a fake adapter: no model, no network, no `think`, never
  * `~/writing`.
  */
 
@@ -13,16 +13,11 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSyn
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { defaultConfig } from "@openthink/pablo-core";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { deleteBranch } from "../src/branch";
 import { main, repeatedFlag } from "../src/cli";
-import { harnessAuth } from "../src/harness/auth";
-import type { HarnessQuery } from "../src/harness/session";
+import type { HarnessProvider } from "../src/harness/provider";
+import { scriptedAgent } from "./scripted-agent";
 import { mergeChanges, mergeDraftInProject } from "../src/novel/merge";
 import { radioMachine } from "../src/outputs/radio/casting-side";
 import { OUTPUTS, registerOutput } from "../src/outputs/registry";
@@ -73,9 +68,6 @@ function tempVault(): { vault: string; env: Record<string, string>; ctx: VerbCon
   return { vault, env, ctx: { cwd: vault, env, stderr: { write: () => {} } } };
 }
 
-const success = (result: string) =>
-  ({ type: "result", subtype: "success", is_error: false, result, num_turns: 2, duration_ms: 10, total_cost_usd: 0 }) as unknown as SDKMessage;
-
 type Call = readonly [string, Record<string, unknown>];
 
 const BEATS = [
@@ -119,31 +111,17 @@ const STAGE_CALLS: Readonly<Record<string, readonly Call[]>> = {
   beats: [["propose", { stage: "beats", content: BEATS }]],
 };
 
-/** A fake harness: reads the stage off the message, calls that stage's tools on the attached server, ends in success. */
-function fakeHarness(): { query: HarnessQuery; stages: string[]; prompts: string[] } {
+const stageOf = (message: string) => /Stage \d of 5, (\w+)\./.exec(message)?.[1] ?? "unknown";
+
+/** pablo's own agent loop on a scripted model: reads the stage off the message, calls that stage's tools, then answers. */
+function fakeHarness(): { agent: HarnessProvider; stages: string[]; prompts: string[] } {
   const stages: string[] = [];
-  const prompts: string[] = [];
-  const query: HarnessQuery = async function* (params) {
-    const stage = /Stage \d of 5, (\w+)\./.exec(params.prompt)?.[1] ?? "unknown";
+  const { provider, messages } = scriptedAgent((message) => {
+    const stage = stageOf(message);
     stages.push(stage);
-    prompts.push(params.prompt);
-    const instance = (params.options.mcpServers?.["pablo"] as { instance: McpServer }).instance;
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await instance.connect(serverSide);
-    const client = new Client({ name: "fake-sdk", version: "0.0.0" });
-    await client.connect(clientSide);
-    try {
-      for (const [name, args] of STAGE_CALLS[stage] ?? []) {
-        const called = await client.callTool({ name, arguments: args });
-        const body = JSON.parse((called.content as { text: string }[])[0]!.text) as { ok: boolean; message?: string };
-        if (body.ok !== true) throw new Error(`${name} refused: ${body.message}`);
-      }
-    } finally {
-      await client.close();
-    }
-    yield success(`${stage} done`);
-  };
-  return { query, stages, prompts };
+    return STAGE_CALLS[stage] ?? [];
+  });
+  return { agent: provider, stages, prompts: messages };
 }
 
 const PROSE = ["Rosa read the letter twice at the kitchen table.", "The boat came back light again.", "On the quay the wind came off the sea."].join("\n");
@@ -174,8 +152,8 @@ function fakeWriter(): Adapter & { drafts: number; extractions: number } {
   return writer as unknown as Adapter & { drafts: number; extractions: number };
 }
 
-function depsFor(env: Record<string, string>, query: HarnessQuery, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
-  return { query, writer, auth: harnessAuth(defaultConfig(), env, { env: {} }), planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
+function depsFor(_env: Record<string, string>, agent: HarnessProvider, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
+  return { agent, writer, planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
 function receipts(work: string): Record<string, unknown>[] {
@@ -229,7 +207,7 @@ test("AC1: the spec example leaves research, a bible, an outline, a drafted and 
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
   const writer = fakeWriter();
-  const result = await runStory({ prompt: SPEC }, ctx, depsFor(env, harness.query, writer));
+  const result = await runStory({ prompt: SPEC }, ctx, depsFor(env, harness.agent, writer));
   const body = result.body as Record<string, any>;
   expect(body.message).toBeUndefined();
   expect(result.exitCode).toBe(0);
@@ -285,7 +263,7 @@ test("AC2: --output novel --output story builds one core and both outputs", asyn
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
   const writer = fakeWriter();
-  const result = await runStory({ prompt: SPEC, output: ["novel", "story", "novel"] }, ctx, depsFor(env, harness.query, writer));
+  const result = await runStory({ prompt: SPEC, output: ["novel", "story", "novel"] }, ctx, depsFor(env, harness.agent, writer));
   const body = result.body as Record<string, any>;
   expect(body.message).toBeUndefined();
   expect(result.exitCode).toBe(0);
@@ -375,7 +353,7 @@ test("AC3: a run that names no podcast output never calls the podcast type's ens
   const machine = fakeRadioMachine(false);
   try {
     const { env, ctx } = tempVault();
-    const result = await runStory({ prompt: SPEC }, ctx, depsFor(env, fakeHarness().query, fakeWriter()));
+    const result = await runStory({ prompt: SPEC }, ctx, depsFor(env, fakeHarness().agent, fakeWriter()));
     expect(result.exitCode).toBe(0);
     expect(podcast.calls()).toBe(0);
     expect(machine.looks()).toBe(0);
@@ -392,7 +370,7 @@ test("AC3: --output podcast on a machine without it is refused by name before an
     const head = git(vault, "rev-parse", "main");
     const harness = fakeHarness();
     const writer = fakeWriter();
-    const result = await runStory({ prompt: SPEC, output: ["story", "podcast"] }, ctx, depsFor(env, harness.query, writer));
+    const result = await runStory({ prompt: SPEC, output: ["story", "podcast"] }, ctx, depsFor(env, harness.agent, writer));
     expect(result.exitCode).toBe(2);
     const body = result.body as Record<string, any>;
     expect(body.message).toContain("the podcast output cannot run on this machine");
@@ -413,7 +391,7 @@ test("AC3: --output podcast on a machine without it is refused by name before an
 test("AC3: an output type pablo does not have is refused by name, nothing written", async () => {
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
-  const result = await runStory({ prompt: SPEC, output: ["podcast"] }, ctx, depsFor(env, harness.query, fakeWriter()));
+  const result = await runStory({ prompt: SPEC, output: ["podcast"] }, ctx, depsFor(env, harness.agent, fakeWriter()));
   expect(result.exitCode).toBe(2);
   expect((result.body as { message: string }).message).toContain("there is no podcast output on this machine");
   expect((result.body as { missing: string[] }).missing).toEqual(["output podcast"]);
@@ -427,7 +405,7 @@ test("AGT-1686: the real radio type's ensure() refuses --output radio by name wh
   try {
     const { vault, env, ctx } = tempVault();
     const harness = fakeHarness();
-    const result = await runStory({ prompt: SPEC, output: ["story", "radio"] }, ctx, depsFor(env, harness.query, fakeWriter()));
+    const result = await runStory({ prompt: SPEC, output: ["story", "radio"] }, ctx, depsFor(env, harness.agent, fakeWriter()));
     expect(result.exitCode).toBe(2);
     const body = result.body as Record<string, any>;
     expect(body.message).toContain("the radio output cannot run on this machine");
@@ -478,7 +456,7 @@ test("AC4: --review stops on every stage's branch, waits until it is accepted, r
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
   const writer = fakeWriter();
-  const deps = depsFor(env, harness.query, writer);
+  const deps = depsFor(env, harness.agent, writer);
 
   let result = await runStory({ prompt: SPEC, review: true }, ctx, deps);
   let body = result.body as Record<string, any>;
@@ -538,7 +516,7 @@ test("AC4: --review stops on every stage's branch, waits until it is accepted, r
 
 test("a resume names what is missing: no run recorded, or a prompt and a project together", async () => {
   const { ctx, env } = tempVault();
-  const deps = depsFor(env, fakeHarness().query, fakeWriter());
+  const deps = depsFor(env, fakeHarness().agent, fakeWriter());
   const none = await runStory({ project: "ice-house" }, ctx, deps);
   expect(none.exitCode).toBe(2);
   expect((none.body as { message: string }).message).toContain("no pablo story run is recorded");
@@ -563,7 +541,7 @@ test("AGT-2103: a prompt naming a period is inferred historical-fiction by one p
   const { vault, env, ctx } = tempVault();
   const lines: string[] = [];
   const planner = fakeTrackPlanner(HISTORICAL_ANSWER);
-  const result = await runStory({ prompt: SPEC, review: true }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const result = await runStory({ prompt: SPEC, review: true }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
   expect(planner.asked).toHaveLength(1);
@@ -582,7 +560,7 @@ test("AGT-2103: a prompt naming a period is inferred historical-fiction by one p
 test("AGT-2103: a plain fiction prompt is inferred fiction, with no period files", async () => {
   const { vault, env, ctx } = tempVault();
   const planner = fakeTrackPlanner('{"track": "fiction", "why": "an invented lighthouse, no period named"}');
-  const result = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const result = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
   expect(planner.asked).toHaveLength(1);
@@ -597,7 +575,7 @@ test("AGT-2103: --track always wins: the planner is never asked", async () => {
   const { vault, env, ctx } = tempVault();
   const planner = fakeTrackPlanner(HISTORICAL_ANSWER);
   const lines: string[] = [];
-  const result = await runStory({ prompt: SPEC, review: true, track: "fiction" }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const result = await runStory({ prompt: SPEC, review: true, track: "fiction" }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
   expect(lines[0]).toBe("pablo story: track fiction (--track)\n");
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
@@ -608,7 +586,7 @@ test("AGT-2103: --track always wins: the planner is never asked", async () => {
   expect(existsSync(join(work, "bible", "period.md"))).toBe(false);
 
   // And the other way: a plain prompt put on historical-fiction by hand.
-  const forced = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true, track: "historical-fiction" }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const forced = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true, track: "historical-fiction" }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
   const forcedBody = forced.body as Record<string, any>;
   expect(planner.asked).toEqual([]);
   expect(forcedBody.track.track).toBe("historical-fiction");
@@ -620,18 +598,18 @@ test("AGT-2103: an unknown track, or a track no requested output allows, is refu
   const planner = fakeTrackPlanner();
   const before = git(vault, "rev-parse", "main");
 
-  const unknown = await runStory({ prompt: SPEC, track: "memoir" }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const unknown = await runStory({ prompt: SPEC, track: "memoir" }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
   expect(unknown.exitCode).toBe(2);
   expect((unknown.body as { message: string }).message).toContain('unknown track "memoir"');
 
-  const nonfiction = await runStory({ prompt: SPEC, track: "nonfiction" }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const nonfiction = await runStory({ prompt: SPEC, track: "nonfiction" }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
   expect(nonfiction.exitCode).toBe(2);
   expect((nonfiction.body as { message: string }).message).toContain("pablo init --track nonfiction");
 
   // A requested output the track does not allow (D-7): a test type that only nonfiction allows.
   const off = registerOutput({ ...STORY, id: "nf-only", tracks: ["nonfiction"] });
   try {
-    const refused = await runStory({ prompt: SPEC, track: "fiction", output: ["nf-only"] }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+    const refused = await runStory({ prompt: SPEC, track: "fiction", output: ["nf-only"] }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
     expect(refused.exitCode).toBe(2);
     expect((refused.body as { message: string }).message).toContain("the nf-only output is not allowed on the fiction track");
   } finally {
@@ -645,7 +623,7 @@ test("AGT-2103: an unknown track, or a track no requested output allows, is refu
 
 test("AGT-2103: a planner that cannot answer leaves the run on fiction and says why", async () => {
   const { env, ctx } = tempVault();
-  const result = await runStory({ prompt: SPEC, review: true }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner: fakeTrackPlanner("I think it is probably historical.") }));
+  const result = await runStory({ prompt: SPEC, review: true }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner: fakeTrackPlanner("I think it is probably historical.") }));
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
   expect(body.track).toEqual({ track: "fiction", inferred: false, why: "the planner's answer could not be read; fiction by default" });

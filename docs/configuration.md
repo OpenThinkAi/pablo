@@ -88,7 +88,7 @@ places:
 
 ## `default` and `intents`
 
-pablo sends six kinds of request. Each is an *intent*:
+pablo sends seven kinds of request. Each is an *intent*:
 
 | Intent | Used by | Goes to, unless mapped |
 |---|---|---|
@@ -97,6 +97,7 @@ pablo sends six kinds of request. Each is an *intent*:
 | `prose` | `prose` | the first local provider |
 | `continuity` | the fact extraction `merge` runs | the first local provider |
 | `plan` | the critic (`critique`, `check --across`) and the built-in agent's helpers | the first non-local provider |
+| `agent` | the built-in agent (`pablo agent`, `pablo story`, the screen's compose view) | the first non-local provider |
 | `research` | `research distill` (`distill_facts`): research notes, raw, to period facts; `research plan` (`plan_research`): the period brief or thesis to a research checklist | the first non-local provider (map it to a local one to keep notes on this machine) |
 
 If no provider of the wanted sort exists, the request goes to `default` (which is
@@ -167,11 +168,14 @@ research name in a distilled fact for the bible's invented one, mapped in
 names, while any research name the agent lists has no mapping. A real name the agent
 fails to list is not detected: review the `plan/` branch it writes. See `docs/commands.md`, `research`.
 
-### Claude for `pablo agent` and `pablo story`
+### The model behind `pablo agent` and `pablo story`
 
-The built-in agent (`pablo agent`, `pablo story`) runs Claude through the Claude Agent
-SDK. It uses your Claude Code login by default. If an `anthropic` provider has a key
-that resolves, it uses that key instead. These commands need one or the other.
+The built-in agent (`pablo agent`, `pablo story`, the screen's compose view) is pablo's
+own tool loop, and it runs on whichever provider the `agent` intent goes to: Claude
+through an `anthropic` provider, or any OpenAI-compatible model with tool calls
+(Gemma 4 behind `mlx_lm` included). It needs that provider's key, the same as any
+other request; your Claude Code login is not used. With no non-local provider
+configured, the agent runs on the local model.
 
 ## `readers`
 

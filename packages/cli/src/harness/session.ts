@@ -1,97 +1,92 @@
 /**
- * A harness session (AGT-1552): one run of the Claude Agent SDK configured as
- * pablo, not as a coding agent (`pm project show ai-terminal --doc harness`,
- * "Runtime").
+ * A harness session (AGT-1552, on pablo's own loop since AGT-2121, D-12): one
+ * message through `runLoop` (`loop.ts`) configured as pablo, not as a coding
+ * agent.
  *
- * `harnessOptions` is the whole configuration, built as data so a test can pin
- * it: pablo's system prompt in place of Claude Code's (role, the work's
- * judgement policy and its `STYLE.md` rules, `prompt.ts`), WebSearch and WebFetch
- * the only built-ins, pablo's tools attached in-process as the `pablo` MCP
- * server, no settings, CLAUDE.md, user MCP servers or plugins loaded from disk,
- * and `dontAsk` so a tool off the allowed list is refused rather than prompted
- * for (there is nobody to prompt in a headless run).
+ * `loopSpec` is the whole configuration, built as data so a test can pin it:
+ * pablo's system prompt (role, the work's judgement policy and its `STYLE.md`
+ * rules, `prompt.ts`), pablo's tools and nothing else (the loop has no
+ * built-ins: no shell, no file read or write), and the provider the `agent`
+ * intent routes to (`provider.ts`).
  *
- * `runHarness` sends one message through a `HarnessQuery`. The real one is the
- * SDK's `query`, imported lazily so the CLI does not load the SDK for every
- * verb; every test passes a fake, and nothing in `bun test` starts Claude.
- * The compose view (AGT-1566) and `ask_author` (AGT-1560) build on the same
- * two functions; a multi-turn session will pass an `AsyncIterable` prompt
- * through the same seam.
+ * `runHarness` sends one message through a `HarnessQuery`. The real one is
+ * `runLoop`; a test passes a fake query, or keeps the real loop and gives the
+ * spec a scripted adapter (core's `createScriptedChatAdapter`), so nothing in
+ * `bun test` reaches a model. The compose view (AGT-1566) and `ask_author`
+ * (AGT-1560) build on the same functions; a multi-message conversation passes
+ * the previous message's returned history back in.
  */
 
-import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { ChatMessage } from "@openthink/pablo-core";
 import type { McpToolSpec, VerbContext } from "../verbs";
 import type { AskAuthor } from "./ask-author";
-import type { HarnessAuth } from "./auth";
-import type { SessionChoice } from "./sessions";
+import { runLoop } from "./loop";
+import type { LoopSpec } from "./loop";
 import { harnessSystemPrompt } from "./prompt";
 import type { PromptWork } from "./prompt";
-import { allowedTools, BUILTIN_TOOLS, harnessTools, PABLO_SERVER, pabloServer } from "./tools";
+import type { HarnessProvider } from "./provider";
+import { harnessTools } from "./tools";
+import type { TranscriptEntry } from "./transcript";
 
-/** The SDK's `query`, narrowed to what the harness uses; a test fake implements this. */
-export type HarnessQuery = (params: { readonly prompt: string; readonly options: Options }) => AsyncIterable<SDKMessage>;
+/**
+ * One message through a session: its transcript entries as they happen, and
+ * the conversation after it (`void` when a fake keeps none). The real one is
+ * `loopQuery`; a test fake implements this.
+ */
+export type HarnessQuery = (params: {
+  readonly prompt: string;
+  readonly spec: LoopSpec;
+  readonly history: readonly ChatMessage[];
+}) => AsyncGenerator<TranscriptEntry, readonly ChatMessage[] | void, undefined>;
 
-/** The real session: the Agent SDK's `query`. */
-export const sdkQuery: HarnessQuery = async function* (params) {
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  yield* query({ prompt: params.prompt, options: params.options });
-};
+/** The real session: pablo's agent loop. */
+export const loopQuery: HarnessQuery = (params) => runLoop(params.prompt, params.spec, params.history);
 
 export interface HarnessSpec {
   /** The work, with its policy and rules: `loadPromptWork` reads them. */
   readonly work: PromptWork;
-  /** The work's directory; the session's cwd. */
-  readonly projectPath: string;
-  readonly auth: HarnessAuth;
+  /** The provider the session runs on: `harnessProvider` routes the `agent` intent. */
+  readonly provider: HarnessProvider;
   /** What pablo's tools resolve projects against (vault, env, progress sink). */
   readonly ctx: VerbContext;
-  /** pablo's tools to attach; defaults to `harnessTools()`. */
+  /** pablo's tools to offer; defaults to `harnessTools(ask)`. */
   readonly tools?: readonly McpToolSpec[];
   /**
    * The front end's way to put a question to the author (AGT-1560). Present,
    * the session gets the `ask_author` tool; absent, it has none.
    */
   readonly ask?: AskAuthor;
-  /**
-   * The saved session to run in (AGT-1565, `sessions.ts`): resumed when it has
-   * a transcript, otherwise started under its id, and mirrored into the work's
-   * `.pablo/sessions/`. Absent, the session is ephemeral and nothing is kept.
-   */
-  readonly session?: SessionChoice;
-  /** Tools built for this session (plan-branch tools), attached after `tools`. */
+  /** Tools built for this session (plan-branch tools), offered after `tools`. */
   readonly sessionTools?: readonly McpToolSpec[];
 }
 
-export function harnessOptions(spec: HarnessSpec): Options {
+/** The tools a session offers: `tools` (or every `pablo mcp` tool), then the session's own. */
+export function sessionToolList(spec: HarnessSpec): readonly McpToolSpec[] {
   // A session tool replaces a same-named `pablo mcp` tool (`save_research`, `record_fact`, AGT-2106): the session's is
   // bound to its plan branch, the verb's starts a branch per call.
   const sessionTools = spec.sessionTools ?? [];
   const taken = new Set(sessionTools.map((tool) => tool.name));
-  const tools = [...(spec.tools ?? harnessTools(spec.ask)).filter((tool) => !taken.has(tool.name)), ...sessionTools];
-  const options: Options = {
-    systemPrompt: harnessSystemPrompt(spec.work),
-    tools: [...BUILTIN_TOOLS],
-    allowedTools: allowedTools(tools),
-    permissionMode: "dontAsk",
-    mcpServers: { [PABLO_SERVER]: { type: "sdk", name: PABLO_SERVER, instance: pabloServer(spec.ctx, tools) } },
-    strictMcpConfig: true,
-    settingSources: [],
-    persistSession: false,
-    cwd: spec.projectPath,
-    env: spec.auth.env,
-  };
-  const withModel = spec.auth.model === undefined ? options : { ...options, model: spec.auth.model };
-  if (spec.session === undefined) return withModel;
-  const { id, resume, store } = spec.session;
+  return [...(spec.tools ?? harnessTools(spec.ask)).filter((tool) => !taken.has(tool.name)), ...sessionTools];
+}
+
+export function loopSpec(spec: HarnessSpec): LoopSpec {
   return {
-    ...withModel,
-    persistSession: true,
-    sessionStore: store,
-    ...(resume ? { resume: id } : { sessionId: id }),
+    adapter: spec.provider.adapter,
+    system: harnessSystemPrompt(spec.work),
+    tools: sessionToolList(spec),
+    ctx: spec.ctx,
+    local: spec.provider.local,
+    credential: spec.provider.credential,
+    forcedToolChoice: spec.provider.forcedToolChoice,
   };
 }
 
-/** One message, one session: the SDK's message stream, as it arrives. */
-export function runHarness(message: string, spec: HarnessSpec, query: HarnessQuery = sdkQuery): AsyncIterable<SDKMessage> {
-  return query({ prompt: message, options: harnessOptions(spec) });
+/** One message, one session (or the next message of one, given its `history`): the transcript, as it arrives. */
+export function runHarness(
+  message: string,
+  spec: HarnessSpec,
+  query: HarnessQuery = loopQuery,
+  history: readonly ChatMessage[] = [],
+): AsyncGenerator<TranscriptEntry, readonly ChatMessage[] | void, undefined> {
+  return query({ prompt: message, spec: loopSpec(spec), history });
 }

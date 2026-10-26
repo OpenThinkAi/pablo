@@ -3,15 +3,15 @@
  * results -> model, until the model answers with no tool call or the turn
  * cap is reached, on any provider with `chat()` — the local Gemma behind
  * mlx_lm, any OpenAI-compatible endpoint, or Claude through the native
- * adapter. It replaces the Claude Agent SDK's `query()` as the thing a
- * session runs on; `runHarness` and the composer move onto it in AGT-2121.
+ * adapter. It is what every harness session runs on: `runHarness`
+ * (`session.ts`) and the compose view's composer (`compose.ts`) both call it
+ * (AGT-2121).
  *
  * What it emits is the existing `TranscriptEntry` stream (`transcript.ts`):
  * `session` first, then `assistant` text, `tool_call` and `tool_result` per
  * call, and exactly one `result`, so `formatEntry`, `composeEvents` and
- * `story`'s result check read a loop session the way they read an SDK one.
- * Tool names are plain (`resume`, not `mcp__pablo__resume`); `displayToolName`
- * leaves them alone.
+ * `story`'s result check read every session the same way. Tool names are
+ * plain (`resume`), exactly as the model calls them.
  *
  * The loop has no built-in tools and never adds one: the only tools the model
  * can call are the `McpToolSpec`s it was handed, each of which writes through
@@ -34,15 +34,22 @@
  * run like a native call. A reply that still names no tool ends the session as
  * a failed result naming what the model said.
  *
+ * Forced tool choice: Anthropic's newest models answer a forced `tool_choice`
+ * (`required` or a named tool) with HTTP 400. A spec with `forcedToolChoice:
+ * false` (the harness sets it for an Anthropic provider) sends `auto` on the
+ * wire and steers from the prompt instead, with one line in the first turn's
+ * system prompt; the text-protocol re-prompt still backs it up.
+ *
  * Cost (`result.costUsd`) is the turns' reported usage times core's per-model
- * price table (`costUsd`); a local provider costs 0, as does a model the table
- * does not know. Provider failures (an endpoint that hangs, `tools: false`, a
+ * price table (`costUsd`); a local provider costs 0. A model the table does not
+ * know costs 0 too, but the result names it (`unpricedModel`) so the transcript
+ * says the cost is incomplete rather than reading as free. Provider failures (an endpoint that hangs, `tools: false`, a
  * provider with no `chat()`) end the session as a failed result rather than a
  * throw, so a caller sees them in the transcript with the turns and cost so far.
  */
 
-import { costUsd } from "@openthink/pablo-core";
-import type { Adapter, ChatMessage, ChatRequest, ChatUsage, JsonSchemaTool, PriceTable, ToolCall, ToolChoice } from "@openthink/pablo-core";
+import { costUsd, priceFor } from "@openthink/pablo-core";
+import type { Adapter, ChatEvent, ChatMessage, ChatRequest, ChatUsage, JsonSchemaTool, PriceTable, ToolCall, ToolChoice } from "@openthink/pablo-core";
 import type { McpToolSpec, VerbContext } from "../verbs";
 import { parseToolArguments, toJsonSchemaTools } from "./tool-schema";
 import type { TranscriptEntry } from "./transcript";
@@ -66,11 +73,17 @@ export interface LoopSpec {
    * text-protocol re-prompt when none comes.
    */
   readonly toolChoice?: ToolChoice;
+  /**
+   * Whether the provider honours a forced `toolChoice`; default true. False
+   * sends `auto` and asks for the call in the system prompt instead
+   * (Anthropic's newest models refuse a forced choice with HTTP 400).
+   */
+  readonly forcedToolChoice?: boolean;
   /** A local provider: the session costs nothing. */
   readonly local?: boolean;
   /** Overrides the default per-model price table. */
   readonly prices?: PriceTable;
-  /** Shown in the `session` entry as the credential (`none` on a local provider). */
+  /** Shown in the `session` entry as the credential: a source label (`env:ANTHROPIC_API_KEY`, `none`), never the key. */
   readonly credential?: string;
   /** Overrides the adapter's configured model. */
   readonly model?: string;
@@ -157,6 +170,13 @@ export function parseTextToolCalls(text: string): readonly TextToolCall[] {
   return [];
 }
 
+/** The system-prompt line that asks for a tool call when the wire cannot force one. */
+function steerLine(choice: ToolChoice): string {
+  return typeof choice === "object"
+    ? `This step needs a tool call: answer by calling \`${choice.name}\`.`
+    : "This step needs a tool call: answer by calling one of your tools, not with text.";
+}
+
 interface Turn {
   readonly text: string;
   readonly calls: readonly ToolCall[];
@@ -164,7 +184,7 @@ interface Turn {
 }
 
 /** One `chat()` turn drained: its text, its calls in order, and what it cost. */
-async function drainTurn(chat: (request: ChatRequest) => AsyncIterable<import("@openthink/pablo-core").ChatEvent>, request: ChatRequest): Promise<Turn> {
+async function drainTurn(chat: (request: ChatRequest) => AsyncIterable<ChatEvent>, request: ChatRequest): Promise<Turn> {
   let text = "";
   const calls: ToolCall[] = [];
   let usage: ChatUsage = { inputTokens: undefined, outputTokens: undefined };
@@ -208,9 +228,14 @@ export async function* runLoop(
   const model = spec.model ?? spec.adapter.model;
   const chat = spec.adapter.chat?.bind(spec.adapter);
   const needsCall = spec.toolChoice !== undefined && spec.toolChoice !== "auto" && spec.toolChoice !== "none";
+  // A provider that refuses a forced choice gets `auto` on the wire and the requirement in the prompt.
+  const steer = needsCall && spec.forcedToolChoice === false;
+  const firstChoice: ToolChoice = steer ? "auto" : (spec.toolChoice ?? "auto");
+  const firstSystem = steer ? `${spec.system}\n\n${steerLine(spec.toolChoice!)}` : spec.system;
 
   let turns = 0;
   let cost = 0;
+  let unpriced: string | undefined;
   const result = (ok: boolean, text: string, errors: readonly string[]): ResultEntry => ({
     kind: "result",
     ok,
@@ -218,14 +243,15 @@ export async function* runLoop(
     turns,
     durationMs: now() - started,
     costUsd: cost,
+    ...(unpriced === undefined ? {} : { unpricedModel: unpriced }),
     errors,
   });
 
-  yield { kind: "session", model, apiKeySource: spec.credential ?? "none", tools: offered, mcpServers: [] };
+  yield { kind: "session", model, apiKeySource: spec.credential ?? "none", tools: offered };
 
   const messages: ChatMessage[] = [...history, { role: "user", content: message }];
   if (chat === undefined) {
-    yield result(false, "", [`pablo: provider "${spec.adapter.id}" has no chat(); route the agent intent to a provider that does`]);
+    yield result(false, "", [`pablo: provider "${spec.adapter.id}" cannot run an agent session (it has no chat()). Map the "agent" intent to an openai-compatible or anthropic provider in pablo's config; \`pablo config show\` lists them.`]);
     return messages;
   }
 
@@ -244,17 +270,16 @@ export async function* runLoop(
     }
   }
 
-  let retried = false;
   let textProtocol = false;
   while (turns < maxTurns) {
     turns += 1;
     const first = turns === 1;
     // A snapshot: the history keeps growing after this request is sent, and an adapter (or a test) may hold onto it.
     const request: ChatRequest = {
-      system: spec.system,
+      system: first ? firstSystem : spec.system,
       messages: [...messages],
       tools: textProtocol ? [] : jsonTools,
-      ...(textProtocol || jsonTools.length === 0 ? {} : { toolChoice: first ? (spec.toolChoice ?? "auto") : "auto" }),
+      ...(textProtocol || jsonTools.length === 0 ? {} : { toolChoice: first ? firstChoice : "auto" }),
       ...(spec.model === undefined ? {} : { model: spec.model }),
       ...(spec.maxTokens === undefined ? {} : { maxTokens: spec.maxTokens }),
       ...(spec.temperature === undefined ? {} : { temperature: spec.temperature }),
@@ -270,6 +295,8 @@ export async function* runLoop(
       return messages;
     }
     cost += costUsd(turn.usage, model, { local: spec.local, prices: spec.prices });
+    const reported = (turn.usage.inputTokens ?? 0) + (turn.usage.outputTokens ?? 0) > 0;
+    if (spec.local !== true && reported && priceFor(model, spec.prices) === undefined) unpriced = model;
 
     let calls: readonly ToolCall[] = turn.calls;
     if (textProtocol) {
@@ -277,7 +304,7 @@ export async function* runLoop(
       calls = parseTextToolCalls(turn.text).map((call, i) => ({ id: `text-${turns}-${i + 1}`, name: call.name, arguments: call.arguments }));
       if (calls.length === 0) {
         messages.push({ role: "assistant", content: turn.text });
-        yield result(false, "", [`the model made no tool call, and after a text re-prompt still named none — it answered with ${preview(turn.text)}`]);
+        yield result(false, "", [`the model made no tool call, and after a text re-prompt still named none — it answered with ${preview(turn.text)}. Route the "agent" intent to a model that supports tool calls (\`pablo config show\` lists the providers), or rephrase the request.`]);
         return messages;
       }
       textProtocol = false;
@@ -287,8 +314,7 @@ export async function* runLoop(
     messages.push({ role: "assistant", content: turn.text, ...(calls.length === 0 ? {} : { toolCalls: calls }) });
 
     if (calls.length === 0) {
-      if (first && needsCall && !retried) {
-        retried = true;
+      if (first && needsCall) {
         textProtocol = true;
         messages.push({ role: "user", content: textProtocolPrompt(jsonTools, spec.toolChoice) });
         continue;
@@ -305,6 +331,6 @@ export async function* runLoop(
     }
   }
 
-  yield result(false, "", [`the session reached its turn cap (${maxTurns} turns) without a final answer`]);
+  yield result(false, "", [`the session reached its turn cap (${maxTurns} turns) without a final answer. Send a follow-up message to let it carry on, or narrow the request to one step.`]);
   return messages;
 }

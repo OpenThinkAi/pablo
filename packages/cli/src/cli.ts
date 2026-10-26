@@ -36,7 +36,7 @@ import type { Composer } from "@openthink/pablo-tui";
 import { loadConfig } from "@openthink/pablo-core";
 import { runAgent } from "./harness/agent";
 import { lineReader, stdinAskAuthor } from "./harness/ask-author";
-import { harnessAuth } from "./harness/auth";
+import { harnessProvider } from "./harness/provider";
 import { createComposer } from "./harness/compose";
 import { loadPromptWork } from "./harness/prompt";
 import type { HarnessSpec } from "./harness/session";
@@ -278,10 +278,10 @@ function helpText(): string {
     "                                            returns {candidate, span, receipt} and writes",
     "                                            nothing — the file is never touched",
     '  pablo agent --project <slug> [--new] "<message>"',
-    "                                            one headless harness session (Claude on",
-    "                                            the subscription, or the config's key);",
-    "                                            prints the transcript; resumes the work's",
-    "                                            saved session, --new starts a fresh one",
+    "                                            one headless session of pablo's agent loop",
+    "                                            on the provider the agent intent routes to;",
+    "                                            prints the transcript (--new: accepted, every",
+    "                                            run is a fresh conversation for now)",
     "  pablo agent --project <slug> --tag-facts",
     "                                            tag every untagged bible and continuity fact",
     "                                            (researched/invented/author) on a plan/ branch;",
@@ -1385,8 +1385,7 @@ export function composeSpec(dir: string, cwd: string, env: Record<string, string
   if (!work.ok) throw new Error(work.message);
   return {
     work: work.work,
-    projectPath: dir,
-    auth: harnessAuth(loadConfig({ env, projectDir: dir }), env),
+    provider: harnessProvider(loadConfig({ env, projectDir: dir }), { keys: { env } }),
     ctx: { cwd, env, stderr: { write: () => {} }, caller: "mcp" },
   };
 }

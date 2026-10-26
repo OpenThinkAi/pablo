@@ -1,7 +1,8 @@
 /**
- * The harness on the Claude Agent SDK (AGT-1552). Every session here is a fake
- * `HarnessQuery`: no test starts Claude, reaches the network, reads the
- * Keychain or reads the real config file. The fixture vault is a temp copy.
+ * The harness (AGT-1552) on pablo's own agent loop (AGT-2121, D-12). Every
+ * session here is the real loop on a scripted model, or a fake
+ * `HarnessQuery`: no test reaches a model or the network, reads the Keychain
+ * or reads the real config file. The fixture vault is a temp copy.
  */
 
 import { afterAll, expect, test } from "bun:test";
@@ -9,19 +10,16 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { defaultConfig, parseConfig } from "@openthink/pablo-core";
+import { createScriptedChatAdapter, defaultConfig, parseConfig } from "@openthink/pablo-core";
+import type { ScriptedChatAdapter } from "@openthink/pablo-core";
 import { main } from "../src/cli";
 import { runAgent } from "../src/harness/agent";
 import type { AgentContext } from "../src/harness/agent";
-import { harnessAuth } from "../src/harness/auth";
-import { harnessOptions } from "../src/harness/session";
+import { adapterProvider, AGENT_INTENT, harnessProvider } from "../src/harness/provider";
+import { loopSpec } from "../src/harness/session";
 import type { HarnessQuery, HarnessSpec } from "../src/harness/session";
-import { allowedTools, harnessTools } from "../src/harness/tools";
-import { formatEntry, transcriptEntries } from "../src/harness/transcript";
+import { harnessTools } from "../src/harness/tools";
+import { formatEntry } from "../src/harness/transcript";
 import { mcpTools } from "../src/mcp";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
@@ -36,162 +34,86 @@ const noConfig = () => undefined;
 function spec(over: Partial<HarnessSpec> = {}): HarnessSpec {
   return {
     work: { title: "The Ice House", format: "novel", slug: "ice-house" },
-    projectPath: join(vault, "novels", "ice-house"),
-    auth: harnessAuth(defaultConfig(), BASE_ENV, { env: {} }),
+    provider: adapterProvider(createScriptedChatAdapter({ turns: [] })),
     ctx: { cwd: vault, env: BASE_ENV, stderr: { write: () => {} }, caller: "mcp" },
     ...over,
   };
 }
 
 // ---------------------------------------------------------------------------
-// AC 2 + AC 4: the session's configuration
+// The session's configuration
 // ---------------------------------------------------------------------------
 
-/** Claude Code's built-ins that must never reach the harness: no shell, no file read/write, no subagents. */
+/** Coding tools that must never reach the harness: no shell, no file read/write, no subagents. */
 const CODING_TOOLS = ["Bash", "Read", "Edit", "Write", "MultiEdit", "Glob", "Grep", "NotebookEdit", "Task", "Agent", "TodoWrite", "Skill"];
 
-test("the allowed-tool list is WebSearch, WebFetch and pablo's MCP tools, nothing else", () => {
-  const options = harnessOptions(spec());
-  const pablo = mcpTools().map((tool) => `mcp__pablo__${tool.name}`);
-
-  expect(options.tools).toEqual(["WebSearch", "WebFetch"]);
-  expect(options.allowedTools).toEqual(["WebSearch", "WebFetch", ...pablo]);
-  expect(options.allowedTools).toContain("mcp__pablo__resume");
-  expect(options.allowedTools).toContain("mcp__pablo__status");
-  for (const tool of CODING_TOOLS) expect(options.allowedTools).not.toContain(tool);
-  expect(options.disallowedTools).toBeUndefined();
-  // Anything off the list is refused, never prompted for.
-  expect(options.permissionMode).toBe("dontAsk");
-  expect(options.allowDangerouslySkipPermissions).toBeUndefined();
+test("the session offers pablo's tools by their plain names, and nothing else", () => {
+  const tools = loopSpec(spec()).tools.map((tool) => tool.name);
+  expect(tools).toEqual(mcpTools().map((tool) => tool.name));
+  expect(tools).toContain("resume");
+  expect(tools).toContain("status");
+  for (const tool of CODING_TOOLS) expect(tools).not.toContain(tool);
+  for (const tool of tools) expect(tool).not.toStartWith("mcp__");
 });
 
-test("the default system prompt is replaced by pablo's", () => {
-  const options = harnessOptions(spec());
-  // A plain string replaces Claude Code's prompt; the preset object (or an append) would keep it.
-  expect(typeof options.systemPrompt).toBe("string");
-  const prompt = options.systemPrompt as string;
+test("the system prompt is pablo's", () => {
+  const prompt = loopSpec(spec()).system;
   expect(prompt).toStartWith("You are pablo");
   expect(prompt).toContain('"The Ice House"');
   expect(prompt).not.toContain("Claude Code");
 });
 
-test("nothing is loaded from disk: no settings, no CLAUDE.md, no user MCP servers, no saved session", () => {
-  const options = harnessOptions(spec());
-  expect(options.settingSources).toEqual([]);
-  expect(options.strictMcpConfig).toBe(true);
-  expect(options.persistSession).toBe(false);
-  expect(Object.keys(options.mcpServers ?? {})).toEqual(["pablo"]);
-  expect(options.cwd).toBe(join(vault, "novels", "ice-house"));
-});
-
-test("pablo's MCP tools are attached in-process and callable", async () => {
-  const server = harnessOptions(spec()).mcpServers?.["pablo"];
-  expect(server?.type).toBe("sdk");
-  const instance = (server as { instance: McpServer }).instance;
-
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await instance.connect(serverSide);
-  const client = new Client({ name: "harness-test", version: "0.0.0" });
-  await client.connect(clientSide);
-  try {
-    const listed = (await client.listTools()).tools.map((tool) => tool.name);
-    expect(listed).toEqual(mcpTools().map((tool) => tool.name));
-    const called = await client.callTool({ name: "status", arguments: { project: "ice-house" } });
-    const text = (called.content as { type: string; text: string }[])[0]!.text;
-    expect(JSON.parse(text)).toMatchObject({ core: { premise: true } });
-  } finally {
-    await client.close();
-  }
-});
-
-test("a narrower tool list narrows both the allowed list and the attached server", () => {
+test("a narrower tool list narrows what is offered", () => {
   const only = harnessTools().filter((tool) => tool.name === "resume");
-  const options = harnessOptions(spec({ tools: only }));
-  expect(options.allowedTools).toEqual(["WebSearch", "WebFetch", "mcp__pablo__resume"]);
-  expect(allowedTools([])).toEqual(["WebSearch", "WebFetch"]);
+  expect(loopSpec(spec({ tools: only })).tools.map((tool) => tool.name)).toEqual(["resume"]);
 });
 
 // ---------------------------------------------------------------------------
-// AC 3 (unit level; the live proof is a manual smoke): which credential
+// Which provider: the agent intent, routed through pablo's config
 // ---------------------------------------------------------------------------
 
-test("with no key configured the session runs on the subscription, and a shell API key is stripped", () => {
-  const auth = harnessAuth(defaultConfig(), { ...BASE_ENV, ANTHROPIC_API_KEY: "sk-shell", CLAUDE_CODE_USE_BEDROCK: "1" }, { env: {} });
-  expect(auth.route).toBe("subscription");
-  expect(auth.env["ANTHROPIC_API_KEY"]).toBeUndefined();
-  expect(auth.env["CLAUDE_CODE_USE_BEDROCK"]).toBeUndefined();
-  expect(auth.env["HOME"]).toBe(root);
-  expect(auth.env["CLAUDE_AGENT_SDK_CLIENT_APP"]).toStartWith("pablo/");
-  expect(auth.model).toBeUndefined();
-  expect(harnessOptions(spec({ auth })).model).toBeUndefined();
+test("with only the default config the session runs on the local writer, with no key and no cost", () => {
+  const provider = harnessProvider(defaultConfig(), { keys: { env: {} } });
+  expect(provider.adapter.id).toBe("local");
+  expect(provider).toMatchObject({ local: true, credential: "none", forcedToolChoice: true });
+  expect(loopSpec(spec({ provider }))).toMatchObject({ local: true, credential: "none" });
 });
 
-test("an anthropic provider with no resolvable key still runs on the subscription", () => {
-  const config = parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } } }));
-  expect(harnessAuth(config, BASE_ENV, { env: {} }).route).toBe("subscription");
-});
-
-test("an Anthropic key in pablo's config overrides the subscription", () => {
+test("an anthropic provider takes the agent intent; its credential is the key's source, never the key", () => {
   const config = parseConfig(
     JSON.stringify({ providers: { anthropic: { kind: "anthropic", key: "keychain:pablo-test/me", model: "claude-test-1" } } }),
   );
   const keychain = (service: string, account: string | undefined) => (service === "pablo-test" && account === "me" ? "sk-config" : "");
-  const auth = harnessAuth(config, { ...BASE_ENV, ANTHROPIC_API_KEY: "sk-shell" }, { env: {}, keychain });
+  const provider = harnessProvider(config, { keys: { env: {}, keychain } });
+  expect(provider.adapter.id).toBe("anthropic");
+  expect(provider.adapter.model).toBe("claude-test-1");
+  expect(provider.credential).toBe("keychain:pablo-test/me");
+  expect(JSON.stringify(provider)).not.toContain("sk-config");
+  // Anthropic's newest models refuse a forced tool_choice; the loop steers from the prompt there.
+  expect(provider.forcedToolChoice).toBe(false);
+});
 
-  expect(auth.route).toBe("api-key");
-  expect(auth.env["ANTHROPIC_API_KEY"]).toBe("sk-config");
-  expect(auth.model).toBe("claude-test-1");
-  const options = harnessOptions(spec({ auth }));
-  expect(options.env?.["ANTHROPIC_API_KEY"]).toBe("sk-config");
-  expect(options.model).toBe("claude-test-1");
+test("an explicit agent intent wins over the default route", () => {
+  const config = parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, intents: { [AGENT_INTENT.name]: "local" } }));
+  expect(harnessProvider(config, { keys: { env: {} } }).adapter.id).toBe("local");
 });
 
 // ---------------------------------------------------------------------------
-// AC 1: `pablo agent` runs one session headless and prints the transcript
+// `pablo agent` runs one session headless and prints the transcript
 // ---------------------------------------------------------------------------
 
-const init = (apiKeySource = "none") =>
-  ({
-    type: "system",
-    subtype: "init",
+/** A scripted model that checks the book with pablo's `status` tool (run for real by the loop), then answers. */
+function statusModel(): ScriptedChatAdapter {
+  return createScriptedChatAdapter({
     model: "claude-test-1",
-    apiKeySource,
-    tools: ["WebSearch", "WebFetch", "mcp__pablo__status"],
-    mcp_servers: [{ name: "pablo", status: "connected" }],
-  }) as unknown as SDKMessage;
-const assistant = (content: unknown[]) =>
-  ({ type: "assistant", parent_tool_use_id: null, message: { content } }) as unknown as SDKMessage;
-const toolResult = (id: string, text: string) =>
-  ({
-    type: "user",
-    parent_tool_use_id: null,
-    message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: [{ type: "text", text }] }] },
-  }) as unknown as SDKMessage;
-const success = (result: string) =>
-  ({ type: "result", subtype: "success", is_error: false, result, num_turns: 2, duration_ms: 1500, total_cost_usd: 0.01 }) as unknown as SDKMessage;
-
-/** A fake session that runs pablo's `status` tool for real, through the attached server. */
-function fakeQuery(): { query: HarnessQuery; calls: { prompt: string; options: Options }[] } {
-  const calls: { prompt: string; options: Options }[] = [];
-  const query: HarnessQuery = async function* (params) {
-    calls.push({ prompt: params.prompt, options: params.options });
-    yield init();
-    yield assistant([
-      { type: "text", text: "Checking where the book stands." },
-      { type: "tool_use", id: "t1", name: "mcp__pablo__status", input: { project: "ice-house" } },
-    ]);
-    const instance = (params.options.mcpServers?.["pablo"] as { instance: McpServer }).instance;
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await instance.connect(serverSide);
-    const client = new Client({ name: "fake-sdk", version: "0.0.0" });
-    await client.connect(clientSide);
-    const called = await client.callTool({ name: "status", arguments: { project: "ice-house" } });
-    await client.close();
-    yield toolResult("t1", (called.content as { text: string }[])[0]!.text);
-    yield assistant([{ type: "text", text: "The bible is in; acts come next." }]);
-    yield success("The bible is in; acts come next.");
-  };
-  return { query, calls };
+    turns: [
+      [
+        { type: "text", text: "Checking where the book stands." },
+        { type: "tool_call", call: { id: "t1", name: "status", arguments: { project: "ice-house" } } },
+      ],
+      [{ type: "text", text: "The bible is in; acts come next." }],
+    ],
+  });
 }
 
 function capture(): { ctx: AgentContext; out: () => string; err: () => string } {
@@ -204,16 +126,14 @@ function capture(): { ctx: AgentContext; out: () => string; err: () => string } 
   };
 }
 
-test("pablo agent runs one session and prints the transcript", async () => {
-  const { query, calls } = fakeQuery();
+test("pablo agent runs one session on the loop and prints the transcript", async () => {
+  const model = statusModel();
   const io = capture();
-  const code = await runAgent({ project: "ice-house", message: "Where are we?", json: false }, io.ctx, { query, readConfig: noConfig });
+  const code = await runAgent({ project: "ice-house", message: "Where are we?", json: false }, io.ctx, { provider: adapterProvider(model), readConfig: noConfig });
 
   expect(code).toBe(0);
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.prompt).toBe("Where are we?");
-  expect(calls[0]!.options.cwd).toBe(join(vault, "novels", "ice-house"));
-  expect(calls[0]!.options.env?.["ANTHROPIC_API_KEY"]).toBeUndefined();
+  expect(model.requests).toHaveLength(2);
+  expect(model.requests[0]!.messages).toEqual([{ role: "user", content: "Where are we?" }]);
 
   const lines = io.out().split("\n");
   expect(lines[0]).toBe("› Where are we?");
@@ -222,38 +142,32 @@ test("pablo agent runs one session and prints the transcript", async () => {
   expect(io.out()).toContain('  → status {"project":"ice-house"}');
   expect(io.out()).toContain('  ← {"core":{"premise":true');
   expect(io.out()).toContain("pablo: The bible is in; acts come next.");
-  expect(io.out()).toContain("— done: 2 turn(s), 1.5s");
+  expect(io.out()).toContain("— done: 2 turn(s)");
 });
 
-test("--json prints one object with the route, entries and result", async () => {
-  const { query } = fakeQuery();
+test("--json prints one object with the provider, entries and result", async () => {
   const io = capture();
-  const code = await runAgent({ project: "ice-house", message: "Where are we?", json: true }, io.ctx, { query, readConfig: noConfig });
+  const code = await runAgent({ project: "ice-house", message: "Where are we?", json: true }, io.ctx, { provider: adapterProvider(statusModel()), readConfig: noConfig });
 
   expect(code).toBe(0);
-  const body = JSON.parse(io.out()) as { ok: boolean; route: string; entries: { kind: string }[]; result: { ok: boolean } };
+  const body = JSON.parse(io.out()) as { ok: boolean; provider: unknown; entries: { kind: string }[]; result: { ok: boolean } };
   expect(body.ok).toBe(true);
-  expect(body.route).toBe("subscription");
+  expect(body.provider).toEqual({ id: "scripted", model: "claude-test-1", credential: "none" });
   expect(body.entries.map((entry) => entry.kind)).toEqual(["session", "assistant", "tool_call", "tool_result", "assistant", "result"]);
   expect(body.result.ok).toBe(true);
 });
 
-test("a key in the config reaches the session's environment", async () => {
-  const { query, calls } = fakeQuery();
+test("the config's agent provider is the one the session runs on; a missing key fails the session naming where to put it", async () => {
   const io = capture();
   const readConfig = () => JSON.stringify({ providers: { anthropic: { kind: "anthropic" } } });
-  const code = await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, {
-    query,
-    readConfig,
-    keys: { env: { ANTHROPIC_API_KEY: "sk-config" } },
-  });
-  expect(code).toBe(0);
-  expect(calls[0]!.options.env?.["ANTHROPIC_API_KEY"]).toBe("sk-config");
-  expect(io.out()).not.toContain("sk-config");
+  const code = await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { readConfig, keys: { env: {}, keychain: () => "" } });
+  expect(code).toBe(1);
+  expect(io.out()).toContain("credential env:ANTHROPIC_API_KEY");
+  expect(io.out()).toContain('provider "anthropic" has no API key, so nothing was sent');
 });
 
 test("refusals: no project, no message, unknown project, no marker; the session never starts", async () => {
-  const { query, calls } = fakeQuery();
+  const model = statusModel();
   const cases = [
     { project: undefined, message: "Hi" },
     { project: "ice-house", message: undefined },
@@ -263,39 +177,40 @@ test("refusals: no project, no message, unknown project, no marker; the session 
   ];
   for (const args of cases) {
     const io = capture();
-    expect(await runAgent({ ...args, json: false }, io.ctx, { query, readConfig: noConfig })).toBe(2);
+    expect(await runAgent({ ...args, json: false }, io.ctx, { provider: adapterProvider(model), readConfig: noConfig })).toBe(2);
     expect(io.err()).toStartWith("pablo:");
   }
-  expect(calls).toHaveLength(0);
+  expect(model.requests).toHaveLength(0);
 });
 
-test("an error result exits 1 and prints the errors", async () => {
-  const query: HarnessQuery = async function* () {
-    yield { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 9, duration_ms: 10, total_cost_usd: 0, errors: ["too many turns"] } as unknown as SDKMessage;
-  };
+test("a session that hits the turn cap exits 1 and says what to do next", async () => {
+  const looping = createScriptedChatAdapter({
+    turns: Array.from({ length: 50 }, (_, i) => [{ type: "tool_call" as const, call: { id: `t${i}`, name: "status", arguments: { project: "ice-house" } } }]),
+  });
   const io = capture();
-  expect(await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { query, readConfig: noConfig })).toBe(1);
-  expect(io.out()).toContain("— failed: 9 turn(s)");
-  expect(io.out()).toContain("too many turns");
+  expect(await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { provider: adapterProvider(looping), readConfig: noConfig })).toBe(1);
+  expect(io.out()).toContain("— failed: 40 turn(s)");
+  expect(io.out()).toContain("turn cap (40 turns) without a final answer. Send a follow-up message");
 });
 
-test("a session that fails to start exits 1 with the login hint", async () => {
+test("a session that fails outside the loop exits 1 with the provider hint", async () => {
   const query: HarnessQuery = async function* () {
     yield* [];
-    throw new Error("Claude Code process exited with code 1");
+    throw new Error("socket closed");
   };
   const io = capture();
-  expect(await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { query, readConfig: noConfig })).toBe(1);
-  expect(io.err()).toContain("exited with code 1");
-  expect(io.err()).toContain("log in");
+  expect(await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { query, provider: adapterProvider(statusModel()), readConfig: noConfig })).toBe(1);
+  expect(io.err()).toContain("socket closed");
+  expect(io.err()).toContain('Check the "scripted" provider');
+  expect(io.err()).toContain("pablo config test");
 });
 
 test("a stream with no result exits 1", async () => {
   const query: HarnessQuery = async function* () {
-    yield init();
+    yield { kind: "session", model: "m", apiKeySource: "none", tools: [] };
   };
   const io = capture();
-  expect(await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { query, readConfig: noConfig })).toBe(1);
+  expect(await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { query, provider: adapterProvider(statusModel()), readConfig: noConfig })).toBe(1);
   expect(io.err()).toContain("without a result");
 });
 
@@ -307,12 +222,15 @@ test("`pablo agent` with no --project is refused before any session", async () =
 // The transcript
 // ---------------------------------------------------------------------------
 
-test("stream noise and subagent frames map to nothing", () => {
-  expect(transcriptEntries({ type: "stream_event" } as unknown as SDKMessage)).toEqual([]);
-  expect(transcriptEntries({ type: "system", subtype: "status" } as unknown as SDKMessage)).toEqual([]);
-  expect(
-    transcriptEntries({ type: "assistant", parent_tool_use_id: "x", message: { content: [{ type: "text", text: "hi" }] } } as unknown as SDKMessage),
-  ).toEqual([]);
+test("a session entry prints the model, the credential label and the tools", () => {
+  expect(formatEntry({ kind: "session", model: "m-1", apiKeySource: "env:ANTHROPIC_API_KEY", tools: ["resume", "status"] })).toBe(
+    "session: m-1, credential env:ANTHROPIC_API_KEY\n  tools: resume, status",
+  );
+});
+
+test("a result whose model has no price says the cost is incomplete rather than reading as free", () => {
+  const line = formatEntry({ kind: "result", ok: true, text: "", turns: 2, durationMs: 1000, costUsd: 0, unpricedModel: "gpt-x", errors: [] });
+  expect(line).toBe("— done: 2 turn(s), 1.0s, $0.0000 (no price for gpt-x; its turns are not counted)");
 });
 
 test("long tool results are previewed on one line", () => {

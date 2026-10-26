@@ -28,7 +28,7 @@ import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { venvPython } from "../src/casting";
 import type { CastingDeps } from "../src/casting";
 import { readCoreState } from "../src/core/machine";
-import { harnessTools, pabloServer } from "../src/harness/tools";
+import { harnessTools } from "../src/harness/tools";
 import { readMarker } from "../src/marker";
 import { buildMcpServer } from "../src/mcp";
 import { migrateOutputs } from "../src/migrate-outputs";
@@ -455,7 +455,7 @@ test("AC3: with the roles bound, perform returns the manifest version, the audio
   clean();
   const mcp = await callTool(buildMcpServer(ctxFor(vault, deps, "mcp")), "perform", args);
   clean();
-  const harness = await callTool(pabloServer(ctxFor(vault, deps, "mcp"), harnessTools()), "perform", args);
+  const harness = await callTool(buildMcpServer(ctxFor(vault, deps, "mcp"), harnessTools()), "perform", args);
   expect(mcp).toEqual(cli.body);
   expect(harness).toEqual(cli.body);
   expect(calls.filter((c) => c[3] === "perform")).toHaveLength(3);
