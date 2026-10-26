@@ -456,6 +456,10 @@ const WRITE_ARGS = z.object({
     .describe("Sampling temperature, 0 to 2 (defaults to the provider's config, then 0.8). 0 decodes greedily: the same pack gives the same text."),
   seed: z.number().int().nonnegative().optional().describe("Sampling seed, to reproduce a draw (default: the endpoint picks one)."),
   direction: z.string().optional().describe("A steer for this chapter beyond its beat row, e.g. \"slower, stay on Cora\". Goes into the pack as its own slice and into the chapter's frontmatter as `direction:`."),
+  voices: z
+    .enum(["narrator", "characters"])
+    .optional()
+    .describe("The narrated output only: who reads the unit. narrator (default): one narrator reads it all. characters: quoted dialogue whose speaker the paragraph names goes to that character's line."),
 });
 
 /**
@@ -522,6 +526,7 @@ async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext):
     temperature: args.temperature !== undefined ? String(args.temperature) : undefined,
     seed: args.seed !== undefined ? String(args.seed) : undefined,
     direction: args.direction,
+    voices: args.voices,
   };
   const deps: RunWriteDeps = { stderr: ctx.stderr, env: ctx.env, ...(ctx.writer ? { adapter: ctx.writer } : {}) };
 
@@ -1845,6 +1850,7 @@ const OUTPUT_ARGS = z.object({
       "list: the work's outputs with units drafted and next step. add <type>: declare the output in pablo.json and scaffold outputs/<type>/ (plan.md, RULES.md), refused until the story core is at beats. remove <type>: undeclare it and archive outputs/<type>/ under outputs/_removed/. plan <type>: rewrite outputs/<type>/plan.md from the beats. Each write is one commit.",
     ),
   type: z.string().optional().describe("The output type for add, remove and plan, e.g. \"novel\" or \"radio\"."),
+  from: z.string().optional().describe("add narrated: the output the narration reads, a prose output the work has (e.g. \"novel\", \"story\")."),
   project: projectField,
   "dry-run": z.boolean().optional().default(false).describe("plan: show the rows; write and commit nothing."),
 });
@@ -1856,7 +1862,7 @@ async function runOutputVerb(args: z.infer<typeof OUTPUT_ARGS>, ctx: VerbContext
     args.sub === "list"
       ? listOutputs(resolved.projectPath)
       : args.sub === "add"
-        ? addOutput(resolved.vaultRoot, resolved.projectPath, args.type)
+        ? addOutput(resolved.vaultRoot, resolved.projectPath, args.type, { from: args.from })
         : args.sub === "remove"
           ? removeOutput(resolved.vaultRoot, resolved.projectPath, args.type)
           : planOutput(resolved.vaultRoot, resolved.projectPath, args.type, { dryRun: args["dry-run"] });

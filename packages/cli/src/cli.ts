@@ -152,11 +152,14 @@ function helpText(): string {
     "  pablo write --project <slug> [--output <type>] --unit N [--dry-run]",
     "                                            draft unit N of an output on the local model;",
     "                                            --chapter N is --output novel --unit N; a work",
-    "                                            with several outputs needs --output",
+    "                                            with several outputs needs --output;",
+    "                                            --output narrated [--voices characters] reads",
+    "                                            the source unit's prose as a script, no model",
     "  pablo output list|add|remove|plan [<type>] --project <slug>",
     "                                            the work's outputs: list them, add one (once the",
     "                                            core is at beats), remove one (archived under",
-    "                                            outputs/_removed/), or rewrite its plan.md",
+    "                                            outputs/_removed/), or rewrite its plan.md;",
+    "                                            add narrated --from <output> reads that output",
     "  pablo story \"<prompt>\" [--output <type>]... [--review] [--title T] [--words N]",
     "                                            create a work and write it end to end: the core",
     "                                            through the harness, then each output (default:",
@@ -448,6 +451,8 @@ interface ParsedArgs {
   readonly seed: string | undefined;
   /** `write --direction "<text>"` (AGT-1562): a steer for the chapter; its own pack slice. */
   readonly direction: string | undefined;
+  /** `write --voices narrator|characters` (AGT-2137): who reads a narrated unit; validated by `runWrite`. */
+  readonly voices: string | undefined;
   /** `voice new --global`: scaffold under the global voices directory instead of the vault. */
   readonly global: boolean;
   /** `voice flag --section <heading>`: which `## ` section to append the flagged line under (default "Flagged"). */
@@ -561,6 +566,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     temperature: typeof values["temperature"] === "string" ? values["temperature"] : undefined,
     seed: typeof values["seed"] === "string" ? values["seed"] : undefined,
     direction: typeof values["direction"] === "string" ? values["direction"] : undefined,
+    voices: typeof values["voices"] === "string" ? values["voices"] : undefined,
     global: values["global"] === true,
     section: typeof values["section"] === "string" ? values["section"] : undefined,
     title: typeof values["title"] === "string" ? values["title"] : undefined,

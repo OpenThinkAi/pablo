@@ -7,7 +7,7 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { readMarker } from "../src/marker";
@@ -47,8 +47,26 @@ function fixture(): { vault: string; work: string } {
 
 const fakeWriter = (prompt: string, unit: number): string => `Unit ${unit} begins.\nThe prompt ran ${prompt.length} characters.`;
 
+/**
+ * The narrated output (AGT-2137) reads another output's units: on the fixture
+ * it reads the novel, with every chapter written and committed first.
+ */
+function prepareNarrated(vault: string, work: string): void {
+  for (const row of NOVEL.plan(work)) {
+    const path = join(work, NOVEL.artifactDir, NOVEL.unitFileName(row.unit, row.title));
+    mkdirSync(join(work, NOVEL.artifactDir), { recursive: true });
+    writeFileSync(path, `---\nchapter: ${row.unit}\ntitle: ${row.title}\nstatus: draft\nmodel: fake\nprompt_hash: x\n---\n\nThe lamp burned on.\n"Keep it lit," said Ines.\n`);
+  }
+  const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as { outputs: Record<string, unknown> };
+  marker.outputs["narrated"] = { added: "2026-10-26", from: "novel" };
+  writeFileSync(join(work, "pablo.json"), `${JSON.stringify(marker, null, 2)}\n`);
+  git(vault, "add", ".");
+  git(vault, "commit", "-q", "-m", "chapters and the narrated output");
+}
+
 async function conform(def: unknown) {
   const { vault, work } = fixture();
+  if ((def as { id?: string } | undefined)?.id === "narrated") prepareNarrated(vault, work);
   const marker = readMarker(work);
   if (!marker.ok) throw new Error(marker.message);
   return runConformance(def, {

@@ -151,6 +151,8 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     target: { type: "string" }, // AGT-1534: publish --target
     date: { type: "string" }, // AGT-1555: timeline --date
     direction: { type: "string" }, // AGT-1562: write --direction
+    voices: { type: "string" }, // AGT-2137: write --voices narrator|characters
+    from: { type: "string" }, // AGT-2137: output add narrated --from <output>
     branch: { type: "string" }, // AGT-1564: critique --branch
     reader: { type: "string" }, // AGT-1582: share --reader
     chapters: { type: "string" }, // AGT-1582: share --chapters

@@ -61,15 +61,25 @@ result's `notice` reminds you to. A work that already has a `pablo.json` is refu
 ```
 pablo output list --project <slug>
 pablo output add <type> --project <slug>
+pablo output add narrated --from <output> --project <slug>
 pablo output remove <type> --project <slug>
 pablo output plan <type> --project <slug> [--dry-run]
 ```
 
 A work is a **story core** (premise, research, bible, acts, beats, facts) plus
 one or more **outputs** made from it. The output types are `novel`, `story`,
-`screenplay` and `radio`. Each output declares the tracks it allows (`novel`,
-`story`, `screenplay` and `radio`: `fiction` and `historical-fiction`); `pablo output add <type>` refuses a type the
-work's track does not allow, naming the types it does.
+`screenplay`, `radio` and `narrated`. Each output declares the tracks it allows
+(`novel`, `story`, `screenplay` and `radio`: `fiction` and `historical-fiction`;
+`narrated`: `fiction`, `historical-fiction` and `nonfiction`); `pablo output add
+<type>` refuses a type the work's track does not allow, naming the types it does.
+
+`narrated` is a straight, audiobook-style reading of another output's prose. It is
+added over a prose output the work already has: `pablo output add narrated --from
+novel` (or `story`) records `"from": "novel"` in `pablo.json`'s `outputs.narrated`.
+Its units (readings) mirror the source's units one for one, so its `plan.md` is
+the source's. `--from` is refused without a source, for a script output such as
+`radio`, for an output the work does not have, and on any other type. While a
+narrated output reads an output, `output remove` refuses that output.
 
 | Sub | What it does |
 |---|---|
@@ -290,6 +300,20 @@ Drafts one unit of an output on your configured local model. `--chapter N` is
 short for `--output novel --unit N`. A work with several outputs needs `--output`.
 The `story` output has a single unit, so `write --output story` needs no `--unit`.
 
+`write --output narrated --unit N` makes reading N from the source output's unit N
+with **no model**: a `CAST:` line, then a `NARRATOR:` line per paragraph, the words
+the source's, unchanged. With `--voices characters`, a paragraph whose quoted
+dialogue names its speaker in its narration (a character from `bible/characters/`)
+is split at the quotes: each quote, without its quotation marks, becomes that
+character's line (`WILFRED: Four thousand ton,`), the narration stays the
+narrator's, and the character joins the `CAST:` line. A paragraph whose speaker
+cannot be named stays the narrator's, whole. It is refused (exit `2`) when the
+source unit is not written yet. The reading is stored line for line on
+`draft/narrated-NN` with `model: pablo-derived` and the script's hash as
+`prompt_hash`; the JSON body adds `from` (the source unit's file), and `--dry-run`
+shows the script as the pack's one `source` section. `--words`, `--scenes`,
+`--temperature`, `--seed` and `--direction` do nothing for a reading.
+
 | Flag | Meaning |
 |---|---|
 | `--words W` | target length; default is the output's own (1800 for a chapter; for a story, 600 per beat and at least 1800) |
@@ -297,6 +321,7 @@ The `story` output has a single unit, so `write --output story` needs no `--unit
 | `--temperature T` | 0 to 2; default is the provider's `temperature` in config, else 0.8 |
 | `--seed N` | sampling seed, for a repeatable draw |
 | `--direction "..."` | a steer beyond the beat ("slower, stay on Cora"); sent as its own section and recorded as `direction:` in the frontmatter |
+| `--voices narrator\|characters` | the narrated output only: one narrator (default), or speaker lines for attributed dialogue; refused on any other output |
 | `--force` | overwrite an existing unit file |
 | `--dry-run` | build and show the prompt pack, send nothing |
 
@@ -470,6 +495,9 @@ refusal) for two things:
   - dash year ranges and foreshadowing phrases
   - stock names listed in `style/prose.md` (`## Names`) and `style/anti-tells.md`
   - every `Flagged:` line from `style/prose.md`, found verbatim
+  - `narration-drift` on a narrated reading: the first line where its words (speaker
+    labels, the `CAST:` line and double quotation marks aside) differ from its source
+    unit's prose, or the words the reading lost
 
 With `--output`, it also runs the core check (`core[]`). That flags mentions dated
 after the unit's year, and names the bible, `facts.md` and the output's continuity
@@ -597,6 +625,7 @@ pablo publish --project <slug> [--output <type>] --target <target>
 | `novel` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-<target>.md`. `draft`: every chapter in order, frontmatter stripped, sentence lines joined into paragraphs, quotes curled. `review`: chapter headings with each source sentence line numbered `[n]` (restarting in every chapter) so a reader can cite a line. `final`: the clean manuscript, same as the draft, plus `<slug>-final.epub` (one XHTML file per chapter; no pandoc needed); `files` lists both. |
 | `story` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-story-<target>.md`: `draft` and `final` are the clean compiled story; `review` adds a "Review copy, N words" line under the title |
 | `screenplay` | `fountain` | `<work>/.pablo/out/<slug>-screenplay.fountain`: a `Title:` page, then every written scene in order, frontmatter stripped, the Fountain copied line for line |
+| `narrated` | `script` | `<work>/.pablo/out/<slug>-narrated-script.md`: every reading's script in unit order, frontmatter stripped, under a `## Reading N: <title>` heading each. The audio targets come with the mixer. |
 | `radio` | `bundle`, `stream` | `bundle`: `.pablo/out/<slug>-radio-bundle/` with every script, each mixed episode's newest audio and manifest, and `bundle.json`; unmixed episodes are listed in `notes`. `stream`: each mixed episode to `.pablo/out/stream/`. `player` is refused; use `pablo review`. |
 
 Returns `{ok, output, target, where, chapters, words, files?, notes?}`. Here

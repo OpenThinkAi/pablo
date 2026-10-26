@@ -80,7 +80,20 @@ export interface UnitPackOptions {
   readonly output?: string | undefined;
   /** For the global voices directory the layered voice reads (`$XDG_CONFIG_HOME`); defaults to `process.env`. */
   readonly env?: Record<string, string | undefined> | undefined;
+  /** `write --voices narrator|characters` (AGT-2137): who reads a derived output's unit. Only a type with `derive` reads it. */
+  readonly voices?: string | undefined;
 }
+
+/** `derive()`'s answer (AGT-2137): the unit's text, made from another output's unit with no model, or a refusal. */
+export type DeriveOutcome =
+  | {
+      readonly ok: true;
+      /** The unit's body, as `write` stores it (no frontmatter). */
+      readonly text: string;
+      /** The unit file it was made from, work-relative. */
+      readonly source: string;
+    }
+  | { readonly ok: false; readonly code: 2; readonly message: string };
 
 /** The writer's pack for one unit, or a refusal (a `neverSend` violation). */
 export type UnitPackOutcome =
@@ -201,4 +214,13 @@ export interface OutputDefinition {
    * `preconditions` are its status. Pure over the work directory.
    */
   readonly unitStatus?: (workDir: string, unit: number) => UnitStatusReport;
+  /**
+   * For an output derived from another output's units (`narrated`,
+   * AGT-2137): makes unit N's text from the source with no model, so its
+   * words are the source's. `write` stores this instead of a model's
+   * answer, and `output add` takes `--from <output>` for such a type.
+   * Absent: units are drafted by the writer from the pack. Pure over the
+   * work directory.
+   */
+  readonly derive?: (workDir: string, unit: number, options: Pick<UnitPackOptions, "voices">) => DeriveOutcome;
 }
