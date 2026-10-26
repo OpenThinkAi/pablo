@@ -20,7 +20,7 @@
  * marker can validate against it without an initialisation cycle.
  */
 
-import { CORE_STAGE_IDS, HISTORICAL_CORE_STAGE_IDS } from "../core/machine";
+import { CORE_STAGE_IDS, HISTORICAL_CORE_STAGE_IDS, NONFICTION_CORE_STAGE_IDS } from "../core/machine";
 
 /** A track's id: a key of `TRACKS`. */
 export type TrackId = "fiction" | "historical-fiction" | "nonfiction";
@@ -60,7 +60,7 @@ export const TRACKS = {
   },
   nonfiction: {
     id: "nonfiction",
-    coreStages: ["thesis", "research", "claims", "outline"],
+    coreStages: NONFICTION_CORE_STAGE_IDS,
     policy: "nonfiction",
     checks: ["claim-support", "citations"],
     outputs: ["narrated", "essay"],

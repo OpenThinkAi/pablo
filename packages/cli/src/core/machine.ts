@@ -21,6 +21,14 @@
  *     period facts   facts/period.md has at least one fact row
  *     bible, acts, beats, facts decided   as above
  *
+ * A `nonfiction` work (AGT-2101) has its own core instead, with no bible,
+ * acts or beats (files and parsers in `nonfiction.ts`):
+ *
+ *     thesis         core/thesis.md has text
+ *     research       a sourced note, required as on historical-fiction
+ *     claims         core/claims.md rows, each citing research note ids that exist
+ *     outline        core/outline.md has at least one section row
+ *
  * The stages a track adds or makes required are its gate (`trackGate`):
  * `write` refuses while one is short, naming the track and the stage.
  *
@@ -38,6 +46,8 @@ import { beatsFile, parseBeatRows, section } from "@openthink/pablo-core";
 import type { BeatRow } from "@openthink/pablo-core";
 // Type-only: `tracks/registry.ts` imports this module's stage lists, so a value import here would be a cycle.
 import type { TrackId } from "../tracks/registry";
+import { CLAIMS_FILE, hasProse, OUTLINE_FILE, parseClaims, parseSections, researchNoteId, THESIS_FILE } from "./nonfiction";
+import type { ClaimRow, SectionRow } from "./nonfiction";
 
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
 export interface BibleFile {
@@ -64,7 +74,16 @@ export const CORE_STAGE_IDS = ["premise", "research", "bible", "acts", "beats", 
 /** The `historical-fiction` core (D-5): the period brief, required research and distilled period facts come before the bible. */
 export const HISTORICAL_CORE_STAGE_IDS = ["premise", "period", "research", "period-facts", "bible", "acts", "beats", "facts"] as const;
 
-export type CoreStageId = (typeof CORE_STAGE_IDS)[number] | (typeof HISTORICAL_CORE_STAGE_IDS)[number];
+/**
+ * The `nonfiction` core (AGT-2101, D-5): no bible, acts or beats. A thesis, required research, claims that each cite a
+ * research note, and an outline of sections (`core/nonfiction.ts` holds the files and parsers).
+ */
+export const NONFICTION_CORE_STAGE_IDS = ["thesis", "research", "claims", "outline"] as const;
+
+export type CoreStageId =
+  | (typeof CORE_STAGE_IDS)[number]
+  | (typeof HISTORICAL_CORE_STAGE_IDS)[number]
+  | (typeof NONFICTION_CORE_STAGE_IDS)[number];
 
 /** The period brief a historical work's `period` stage needs. */
 export const PERIOD_BRIEF_FILE = "bible/period.md";
@@ -99,6 +118,12 @@ export interface CoreState {
   readonly sourcedResearch: readonly string[];
   /** The fact rows in `facts/period.md` (table rows or bullets); 0 when it does not exist. */
   readonly periodFacts: number;
+  /** `core/thesis.md` has text other than headings (the nonfiction thesis). */
+  readonly thesis: boolean;
+  /** The claim rows of `core/claims.md` (nonfiction), each with the research note ids it cites. */
+  readonly claims: readonly ClaimRow[];
+  /** The section rows of `core/outline.md` (nonfiction). */
+  readonly sections: readonly SectionRow[];
   readonly bible: {
     readonly files: readonly BibleFile[];
     readonly picks: readonly PickRow[];
@@ -253,6 +278,9 @@ export function readCoreState(workDir: string, track: TrackId = "fiction"): Core
   const research = listFiles(workDir, join(workDir, "research"));
   const sourcedResearch = research.filter((rel) => rel.endsWith(".md") && hasSources(read(join(workDir, rel)) ?? ""));
   const periodFacts = countFactRows(read(join(workDir, PERIOD_FACTS_FILE)) ?? "");
+  const thesis = hasProse(read(join(workDir, THESIS_FILE)) ?? "");
+  const claims = parseClaims(read(join(workDir, CLAIMS_FILE)) ?? "");
+  const sections = parseSections(read(join(workDir, OUTLINE_FILE)) ?? "");
 
   const files: BibleFile[] = [];
   const picks: PickRow[] = [];
@@ -293,6 +321,9 @@ export function readCoreState(workDir: string, track: TrackId = "fiction"): Core
     research,
     sourcedResearch,
     periodFacts,
+    thesis,
+    claims,
+    sections,
     bible: { files, picks, timelineText },
     acts: parseActs(outlineText),
     beats: parseBeatRows(outlineText, relative(workDir, outlinePath)),
@@ -306,14 +337,33 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** The stage ids `track`'s core runs, in order. Nonfiction has its own core (AGT-2101); until then it reads as fiction's. */
+/** The stage ids `track`'s core runs, in order. */
 export function coreStageIds(track: TrackId): readonly CoreStageId[] {
-  return track === "historical-fiction" ? HISTORICAL_CORE_STAGE_IDS : CORE_STAGE_IDS;
+  if (track === "historical-fiction") return HISTORICAL_CORE_STAGE_IDS;
+  if (track === "nonfiction") return NONFICTION_CORE_STAGE_IDS;
+  return CORE_STAGE_IDS;
+}
+
+/**
+ * What keeps a nonfiction work's claims short: an unsourced claim, or a cited id that names no research note
+ * (a note's id is its path under `research/` without `.md`).
+ */
+function claimProblems(state: CoreState): string[] {
+  const ids = new Set(state.research.filter((f) => f.endsWith(".md")).map((f) => researchNoteId(f.split("\\").join("/"))));
+  const problems: string[] = [];
+  for (const claim of state.claims) {
+    if (claim.sources.length === 0) problems.push(`claim ${claim.number} cites no research note`);
+    for (const source of claim.sources) {
+      if (!ids.has(source)) problems.push(`claim ${claim.number} cites ${source}, which is not a note under research/`);
+    }
+  }
+  return problems;
 }
 
 /** The core's stages over `state`, in its track's order (`coreStageIds`). Pure. */
 export function coreStages(state: CoreState): CoreStage[] {
-  const historical = state.track === "historical-fiction";
+  // Research is required (gated) on both factual tracks: a sourced note, as `research save` writes.
+  const researchRequired = state.track === "historical-fiction" || state.track === "nonfiction";
   const bibleMissing = state.bible.files.filter((f) => !f.exists).map((f) => `${f.file} does not exist`);
   if (!state.bible.files.some((f) => f.exists && f.file.includes("characters/"))) {
     bibleMissing.push("bible/characters/ has no character files");
@@ -321,6 +371,8 @@ export function coreStages(state: CoreState): CoreStage[] {
   const bibleFiles = state.bible.files.filter((f) => f.exists).length;
   const picks = state.bible.picks;
   const sourced = state.sourcedResearch.length;
+  const claimIssues = claimProblems(state);
+  const claimsDone = state.claims.length > 0 && claimIssues.length === 0;
 
   const all: Record<CoreStageId, CoreStage> = {
     premise: {
@@ -336,7 +388,7 @@ export function coreStages(state: CoreState): CoreStage[] {
       summary: state.period ? "ok" : "missing",
       missing: state.period ? [] : [`${PERIOD_BRIEF_FILE} has no period brief yet`],
     },
-    research: historical
+    research: researchRequired
       ? {
           id: "research",
           done: sourced > 0,
@@ -377,6 +429,30 @@ export function coreStages(state: CoreState): CoreStage[] {
       summary: String(state.beats.length),
       missing: state.beats.length > 0 ? [] : [`${state.outlineFile} has no beat rows`],
     },
+    thesis: {
+      id: "thesis",
+      done: state.thesis,
+      gate: true,
+      summary: state.thesis ? "ok" : "missing",
+      missing: state.thesis ? [] : [`${THESIS_FILE} has no text`],
+    },
+    claims: {
+      id: "claims",
+      done: claimsDone,
+      gate: true,
+      summary:
+        claimIssues.length === 0
+          ? plural(state.claims.length, "claim")
+          : `${plural(state.claims.length, "claim")}, ${plural(claimIssues.length, "unsupported source")}`,
+      missing: state.claims.length === 0 ? [`${CLAIMS_FILE} has no claim rows`] : claimIssues,
+    },
+    outline: {
+      id: "outline",
+      done: state.sections.length > 0,
+      gate: true,
+      summary: plural(state.sections.length, "section"),
+      missing: state.sections.length > 0 ? [] : [`${OUTLINE_FILE} has no section rows`],
+    },
     facts: {
       id: "facts",
       done: picks.length === 0,
@@ -405,6 +481,12 @@ export function coreNext(state: CoreState): string | undefined {
       return `write the period brief (${PERIOD_BRIEF_FILE})`;
     case "research":
       return "save sourced research notes (pablo research save)";
+    case "thesis":
+      return "save the thesis (pablo save --stage thesis)";
+    case "claims":
+      return "save the claims, each citing a research note (pablo save --stage claims)";
+    case "outline":
+      return "save the outline sections (pablo save --stage outline)";
     case "period-facts":
       return `distill the research into sourced period facts (${PERIOD_FACTS_FILE})`;
     case "bible":

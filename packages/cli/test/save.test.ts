@@ -125,11 +125,11 @@ test("resolveStageTarget refuses bible/../x.md, an absolute bible path, and a no
 });
 
 test("resolveStageTarget refuses an unknown stage, naming it", () => {
-  const result = resolveStageTarget("/vault/novels/ice-house", "outline");
+  const result = resolveStageTarget("/vault/novels/ice-house", "synopsis");
   expect(result.ok).toBe(false);
   if (!result.ok) {
     expect(result.message).toContain("--stage expects");
-    expect(result.message).toContain('"outline"');
+    expect(result.message).toContain('"synopsis"');
   }
 });
 

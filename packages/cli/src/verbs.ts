@@ -605,7 +605,7 @@ export function draftChapterBody(body: unknown): unknown {
 
 const SAVE_ARGS = z.object({
   project: projectField,
-  stage: z.string().optional().describe("acts|beats|premise|bible/<file> — which planning target to replace."),
+  stage: z.string().optional().describe("acts|beats|premise|bible/<file> — which planning target to replace (a nonfiction work: thesis|claims|outline)."),
   file: z
     .string()
     .optional()
