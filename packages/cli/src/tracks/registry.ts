@@ -21,7 +21,7 @@
  * marker can validate against it without an initialisation cycle.
  */
 
-import { CORE_STAGE_IDS } from "../core/machine";
+import { CORE_STAGE_IDS, HISTORICAL_CORE_STAGE_IDS } from "../core/machine";
 
 /** A track's id: a key of `TRACKS`. */
 export type TrackId = "fiction" | "historical-fiction" | "nonfiction";
@@ -54,7 +54,7 @@ export const TRACKS = {
   },
   "historical-fiction": {
     id: "historical-fiction",
-    coreStages: ["premise", "period", "research", "period-facts", "bible", "acts", "beats", "facts"],
+    coreStages: HISTORICAL_CORE_STAGE_IDS,
     policy: "historical-fiction",
     checks: [...FICTION_CHECKS, "fact-accuracy", "anachronism"],
     outputs: FICTION_OUTPUTS,

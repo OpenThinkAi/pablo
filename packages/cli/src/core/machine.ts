@@ -10,6 +10,20 @@
  *     beats          one row per story unit in the beats file
  *     facts decided  no [pick] left; checked per unit (`undecidedPicks`)
  *
+ * The work's track (AGT-2099/AGT-2100, pm project `pablo-platform`, D-5)
+ * picks the stage list. A `historical-fiction` work adds a period brief
+ * before research, makes research required, and needs distilled period facts
+ * before the bible:
+ *
+ *     premise        as above
+ *     period         bible/period.md has text (the period/event brief)
+ *     research       research/ has a sourced note (a `## Sources` list); required
+ *     period facts   facts/period.md has at least one fact row
+ *     bible, acts, beats, facts decided   as above
+ *
+ * The stages a track adds or makes required are its gate (`trackGate`):
+ * `write` refuses while one is short, naming the track and the stage.
+ *
  * The output layer (the novel's chapters today, `novel/machine.ts`) sits on
  * top: a unit's own preconditions (the previous unit, the timeline year gate)
  * are the output's, not the core's.
@@ -22,6 +36,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { beatsFile, parseBeatRows, section } from "@openthink/pablo-core";
 import type { BeatRow } from "@openthink/pablo-core";
+// Type-only: `tracks/registry.ts` imports this module's stage lists, so a value import here would be a cycle.
+import type { TrackId } from "../tracks/registry";
 
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
 export interface BibleFile {
@@ -44,7 +60,16 @@ export interface ActRow {
 
 /** The core's stages, in the order the design's core table lists them. */
 export const CORE_STAGE_IDS = ["premise", "research", "bible", "acts", "beats", "facts"] as const;
-export type CoreStageId = (typeof CORE_STAGE_IDS)[number];
+
+/** The `historical-fiction` core (D-5): the period brief, required research and distilled period facts come before the bible. */
+export const HISTORICAL_CORE_STAGE_IDS = ["premise", "period", "research", "period-facts", "bible", "acts", "beats", "facts"] as const;
+
+export type CoreStageId = (typeof CORE_STAGE_IDS)[number] | (typeof HISTORICAL_CORE_STAGE_IDS)[number];
+
+/** The period brief a historical work's `period` stage needs. */
+export const PERIOD_BRIEF_FILE = "bible/period.md";
+/** The distilled, sourced period facts a historical work's `period-facts` stage needs (D-10). */
+export const PERIOD_FACTS_FILE = "facts/period.md";
 
 /** One core stage as `status` and `resume` report it. */
 export interface CoreStage {
@@ -53,6 +78,8 @@ export interface CoreStage {
   readonly done: boolean;
   /** The stage is optional per policy: unmet, it is reported but does not block. */
   readonly optional?: true;
+  /** The track adds this stage or makes it required: unmet, `write` refuses naming the track (`trackGate`). */
+  readonly gate?: true;
   /** One short line: `ok`, `3 files, 1 [pick] row`, `4 rows`. */
   readonly summary: string;
   /** What is absent, by file, when the stage is not met. */
@@ -60,10 +87,18 @@ export interface CoreStage {
 }
 
 export interface CoreState {
+  /** The work's track, which picks the stage list (`pablo.json` `track`, else `fiction`). */
+  readonly track: TrackId;
   /** `bible/overview.md` exists and has non-empty text under `## Logline`. */
   readonly premise: boolean;
+  /** `bible/period.md` exists and has text (the historical period brief). */
+  readonly period: boolean;
   /** Work-relative paths of the files under `research/` (never sent to a writer; presence only). */
   readonly research: readonly string[];
+  /** The research notes (`.md`) among `research` with at least one entry under `## Sources`. */
+  readonly sourcedResearch: readonly string[];
+  /** The fact rows in `facts/period.md` (table rows or bullets); 0 when it does not exist. */
+  readonly periodFacts: number;
   readonly bible: {
     readonly files: readonly BibleFile[];
     readonly picks: readonly PickRow[];
@@ -149,6 +184,42 @@ function parseActs(outline: string): ActRow[] {
   return rows;
 }
 
+/** True if `text` has a `## Sources` heading with at least one `- `/`* ` entry under it (`renderResearchNote`'s shape). */
+function hasSources(text: string): boolean {
+  let inSources = false;
+  for (const line of text.split("\n")) {
+    if (/^##\s/.test(line)) {
+      inSources = /^##\s+Sources\b/i.test(line);
+      continue;
+    }
+    if (inSources && /^\s*[-*]\s+\S/.test(line)) return true;
+  }
+  return false;
+}
+
+/**
+ * The fact rows in a period-facts file: table data rows (not the header or
+ * its `---` separator) and bullets. The row format is `distill_facts`'s
+ * (AGT-2109); the gate only needs to know there is at least one.
+ */
+function countFactRows(text: string): number {
+  const lines = text.split("\n");
+  let n = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = (lines[i] ?? "").trim();
+    if (/^[-*]\s+\S/.test(line)) {
+      n++;
+      continue;
+    }
+    if (!line.startsWith("|")) continue;
+    if (/^\|[\s:|-]*$/.test(line)) continue;
+    // A header row is the one directly above a separator.
+    if (/^\|[\s:|-]*$/.test((lines[i + 1] ?? "").trim())) continue;
+    if (line.split("|").some((cell) => cell.trim() !== "")) n++;
+  }
+  return n;
+}
+
 /** Every non-dot file under `dir`, recursively, work-relative and sorted. */
 function listFiles(workDir: string, dir: string): string[] {
   if (!existsSync(dir)) return [];
@@ -173,9 +244,13 @@ function containsPhrase(haystack: string, phrase: string): boolean {
  * file is never an error — an absent `bible/overview.md` makes `premise`
  * false — because `status` exists to report what is missing, not to throw.
  */
-export function readCoreState(workDir: string): CoreState {
+export function readCoreState(workDir: string, track: TrackId = "fiction"): CoreState {
   const overviewText = read(join(workDir, "bible", "overview.md"));
   const premise = overviewText !== undefined && hasLogline(overviewText);
+  const period = (read(join(workDir, PERIOD_BRIEF_FILE)) ?? "").replace(/^#[^\n]*$/gm, "").trim() !== "";
+  const research = listFiles(workDir, join(workDir, "research"));
+  const sourcedResearch = research.filter((rel) => rel.endsWith(".md") && hasSources(read(join(workDir, rel)) ?? ""));
+  const periodFacts = countFactRows(read(join(workDir, PERIOD_FACTS_FILE)) ?? "");
 
   const files: BibleFile[] = [];
   const picks: PickRow[] = [];
@@ -211,8 +286,12 @@ export function readCoreState(workDir: string): CoreState {
   const outlineText = read(outlinePath) ?? "";
 
   return {
+    track,
     premise,
-    research: listFiles(workDir, join(workDir, "research")),
+    period,
+    research,
+    sourcedResearch,
+    periodFacts,
     bible: { files, picks, timelineText },
     acts: parseActs(outlineText),
     beats: parseBeatRows(outlineText, relative(workDir, outlinePath)),
@@ -224,62 +303,93 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** The core's stages over `state`, in the design table's order. Pure. */
+/** The stage ids `track`'s core runs, in order. Nonfiction has its own core (AGT-2101); until then it reads as fiction's. */
+export function coreStageIds(track: TrackId): readonly CoreStageId[] {
+  return track === "historical-fiction" ? HISTORICAL_CORE_STAGE_IDS : CORE_STAGE_IDS;
+}
+
+/** The core's stages over `state`, in its track's order (`coreStageIds`). Pure. */
 export function coreStages(state: CoreState): CoreStage[] {
+  const historical = state.track === "historical-fiction";
   const bibleMissing = state.bible.files.filter((f) => !f.exists).map((f) => `${f.file} does not exist`);
   if (!state.bible.files.some((f) => f.exists && f.file.includes("characters/"))) {
     bibleMissing.push("bible/characters/ has no character files");
   }
   const bibleFiles = state.bible.files.filter((f) => f.exists).length;
   const picks = state.bible.picks;
+  const sourced = state.sourcedResearch.length;
 
-  return [
-    {
+  const all: Record<CoreStageId, CoreStage> = {
+    premise: {
       id: "premise",
       done: state.premise,
       summary: state.premise ? "ok" : "missing",
       missing: state.premise ? [] : ["bible/overview.md has no text under ## Logline"],
     },
-    {
-      id: "research",
-      done: state.research.length > 0,
-      optional: true,
-      summary: plural(state.research.length, "file"),
-      missing: state.research.length > 0 ? [] : ["research/ has no files"],
+    period: {
+      id: "period",
+      done: state.period,
+      gate: true,
+      summary: state.period ? "ok" : "missing",
+      missing: state.period ? [] : [`${PERIOD_BRIEF_FILE} has no period brief yet`],
     },
-    {
+    research: historical
+      ? {
+          id: "research",
+          done: sourced > 0,
+          gate: true,
+          summary: plural(sourced, "sourced note"),
+          missing: sourced > 0 ? [] : ["research has no sourced notes yet"],
+        }
+      : {
+          id: "research",
+          done: state.research.length > 0,
+          optional: true,
+          summary: plural(state.research.length, "file"),
+          missing: state.research.length > 0 ? [] : ["research/ has no files"],
+        },
+    "period-facts": {
+      id: "period-facts",
+      done: state.periodFacts > 0,
+      gate: true,
+      summary: plural(state.periodFacts, "fact"),
+      missing: state.periodFacts > 0 ? [] : [`${PERIOD_FACTS_FILE} has no sourced period facts yet`],
+    },
+    bible: {
       id: "bible",
       // Any bible file is enough to start acts; the stage's `missing` still names every absent one.
       done: bibleFiles > 0,
       summary: `${plural(bibleFiles, "file")}, ${plural(picks.length, "[pick] row")}`,
       missing: bibleMissing,
     },
-    {
+    acts: {
       id: "acts",
       done: state.acts.length > 0,
       summary: String(state.acts.length),
       missing: state.acts.length > 0 ? [] : [`${state.outlineFile} has no | Act | table`],
     },
-    {
+    beats: {
       id: "beats",
       done: state.beats.length > 0,
       summary: String(state.beats.length),
       missing: state.beats.length > 0 ? [] : [`${state.outlineFile} has no beat rows`],
     },
-    {
+    facts: {
       id: "facts",
       done: picks.length === 0,
       summary: picks.length === 0 ? "decided" : `${plural(picks.length, "open [pick]", "open [pick]s")} (checked per unit)`,
       missing: picks.map((pick) => `${pick.name} still has a [pick] in ${pick.file}`),
     },
-  ];
+  };
+  return coreStageIds(state.track).map((id) => all[id]);
 }
 
 /**
  * The first core stage that makes the core short, and what to do about it;
- * `undefined` once premise, bible, acts and beats are in. Research is
- * optional and facts are checked per unit (a `[pick]` blocks only the units
- * whose beat names it), so neither makes the whole core short.
+ * `undefined` once every required stage up to beats is in. Research is
+ * optional on fiction (required on historical-fiction) and facts are checked
+ * per unit (a `[pick]` blocks only the units whose beat names it), so facts
+ * never makes the whole core short.
  */
 export function coreNext(state: CoreState): string | undefined {
   const stages = coreStages(state);
@@ -288,6 +398,12 @@ export function coreNext(state: CoreState): string | undefined {
   switch (short.id) {
     case "premise":
       return "write bible/overview.md";
+    case "period":
+      return `write the period brief (${PERIOD_BRIEF_FILE})`;
+    case "research":
+      return "save sourced research notes (pablo research save)";
+    case "period-facts":
+      return `distill the research into sourced period facts (${PERIOD_FACTS_FILE})`;
     case "bible":
       return "write the bible (bible/characters/, bible/places.md, bible/timeline.md)";
     case "acts":
@@ -295,6 +411,26 @@ export function coreNext(state: CoreState): string | undefined {
     default:
       return "save the beats (pablo save --stage beats)";
   }
+}
+
+/** A track gate that is shut: the stage, the refusal line naming the track, and what is missing. */
+export interface TrackGate {
+  readonly stage: CoreStageId;
+  /** `historical-fiction: research has no sourced notes yet`. */
+  readonly message: string;
+  readonly missing: readonly string[];
+}
+
+/**
+ * The first stage the work's track adds or makes required that is still
+ * short, or `undefined` when the track lets drafting go ahead. Fiction has no
+ * gate (its research stays optional); the output's own preconditions cover
+ * the rest of the core.
+ */
+export function trackGate(state: CoreState): TrackGate | undefined {
+  const shut = coreStages(state).find((s) => s.gate === true && !s.done);
+  if (shut === undefined) return undefined;
+  return { stage: shut.id, message: `${state.track}: ${shut.missing[0] ?? `${shut.id} is not met`}`, missing: shut.missing };
 }
 
 /**

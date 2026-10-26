@@ -244,7 +244,7 @@ export async function buildResume(
 
   const realNamesOff = markerResult.ok && !realNamesOf(markerResult.marker);
 
-  const report = readWorkReport(workDir, markerResult.ok ? markerResult.marker.outputs : {});
+  const report = readWorkReport(workDir, markerResult.ok ? markerResult.marker.outputs : {}, track);
 
   const last: { note?: NoteSummary; commit?: CommitSummary } = {};
   const note = readLastNote(workDir);

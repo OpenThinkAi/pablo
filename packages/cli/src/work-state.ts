@@ -50,9 +50,9 @@ export function workNext(core: CoreState, outputs: Readonly<Record<string, Outpu
   return "all outputs drafted";
 }
 
-/** Reads `workDir`'s core and every output in `declared` (the marker's `outputs`) into one report. */
-export function readWorkReport(workDir: string, declared: Outputs): WorkReport {
-  const core = readCoreState(workDir);
+/** Reads `workDir`'s core (on `track`'s stage list) and every output in `declared` (the marker's `outputs`) into one report. */
+export function readWorkReport(workDir: string, declared: Outputs, track: TrackId = DEFAULT_TRACK): WorkReport {
+  const core = readCoreState(workDir, track);
   const outputs: Record<string, OutputReport> = {};
   for (const type of Object.keys(declared)) {
     const def = outputDefinition(type);
@@ -114,8 +114,8 @@ export interface WorkStatus extends WorkReport {
  */
 export function readWorkStatus(workDir: string): WorkStatus {
   const marker = readMarker(workDir);
-  const report = readWorkReport(workDir, marker.ok ? marker.marker.outputs : {});
   const track = marker.ok ? trackOf(marker.marker) : DEFAULT_TRACK;
+  const report = readWorkReport(workDir, marker.ok ? marker.marker.outputs : {}, track);
   return { core: report.core, outputs: report.outputs, waiting: waitingForReview(workDir), next: report.next, track };
 }
 

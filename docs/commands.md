@@ -173,16 +173,20 @@ The work in two layers: the story core's stages, then each output and its units,
 plus the work's track. Always exits `0`.
 
 ```
-{core: {stages[{id, done, summary, missing[]}], premise, research[], bible, acts, beats, outlineFile},
+{core: {track, stages[{id, done, summary, missing[], optional?, gate?}], premise, period, research[], sourcedResearch[], periodFacts, bible, acts, beats, outlineFile},
  outputs: {<type>: {noun, plural, dir, units[], drafted, total, next?}},
  waiting[], next, track}
 ```
 
 - **`track`** is `pablo.json`'s `track`, or `fiction` for a work without one. The prose form has it as a `track: <id>` line after the outputs.
-- **Core stages** are `premise`, `research`, `bible`, `acts`, `beats` and `facts`.
+- **Core stages** depend on the track. On `fiction` they are `premise`, `research`, `bible`, `acts`, `beats` and `facts`.
   - `premise` means `bible/overview.md` has text under `## Logline`.
   - `research` is optional and never holds the core back.
   - `facts` is checked per unit, so an open `[pick]` blocks only the units whose beat names it.
+- **On `historical-fiction`** they are `premise`, `period`, `research`, `period-facts`, `bible`, `acts`, `beats` and `facts`. The three stages the track adds or makes required carry `gate: true`; `write` refuses while one is short.
+  - `period` means `bible/period.md` has text: the brief for the period or event.
+  - `research` is required: at least one note under `research/` with an entry under `## Sources` (what `research save` writes).
+  - `period-facts` means `facts/period.md` has at least one fact row.
 - **The beats file** is `outline/beats.md`, or `outline/chapters.md` on an unmigrated work (`outlineFile` says which).
 - **`waiting`** lists the change branches with commits that `main` lacks.
 - **`next`** is one of:
@@ -273,8 +277,11 @@ The `story` output has a single unit, so `write --output story` needs no `--unit
 
 Before sending anything, it:
 
-1. Runs the same checks as `status --for` and refuses (exit `2`, with `missing[]`) if any fail.
-2. Builds the pack: the voice, the work's rules, period facts, cast and places, the timeline up to the beat's date, continuity, the end of the previous unit, and the beat.
+1. Checks the work's track gate. On a `historical-fiction` work it refuses (exit `2`) until the
+   period brief, a sourced research note and the period facts exist, naming the track and the
+   short stage: `historical-fiction: research has no sourced notes yet`. A `fiction` work has no gate.
+2. Runs the same checks as `status --for` and refuses (exit `2`, with `missing[]`) if any fail.
+3. Builds the pack: the voice, the work's rules, period facts, cast and places, the timeline up to the beat's date, continuity, the end of the previous unit, and the beat.
    - Any source under one of the marker's `neverSend` prefixes is a refusal, not a silent drop.
    - In the style files, any section whose heading mentions replies or agents is left out.
    - The voice is layered, lowest first: **global** (`~/.config/pablo/voices/default/`,
@@ -285,7 +292,7 @@ Before sending anything, it:
      rules, and every voice's exemplars a section after the craft rules (the work's own
      voices first, each voice's newest first; the first section to give under the
      budget). Every output (novel, story, radio) builds its voice this way.
-3. Refuses if the unit file already exists, unless you pass `--force`.
+4. Refuses if the unit file already exists, unless you pass `--force`.
 
 `--dry-run` prints each section of the pack with its token count, plus a wait estimate
 when the endpoint has been timed, and the voice layers it used, one line each with the
