@@ -413,7 +413,7 @@ interface ParsedArgs {
   readonly for: string | undefined;
   /** `bind --role <NAME>` (AGT-1680): a role from a script's `CAST:` line; the voice is `--voice <slug>`. */
   readonly role: string | undefined;
-  /** `save --stage acts|beats|premise|bible/<file>`. */
+  /** `save --stage acts|beats|premise|bible/<file>` (nonfiction: `thesis|claims|outline`). */
   readonly stage: string | undefined;
   /** `save --file <path>` — stdin is read when omitted. */
   readonly file: string | undefined;

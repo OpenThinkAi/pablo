@@ -193,6 +193,11 @@ plus the work's track. Always exits `0`.
   - `period` means `bible/period.md` has text: the brief for the period or event.
   - `research` is required: at least one note under `research/` with an entry under `## Sources` (what `research save` writes).
   - `period-facts` means `facts/period.md` has at least one fact row.
+- **On `nonfiction`** they are `thesis`, `research`, `claims` and `outline` (no bible, acts or beats stage); each carries `gate: true`, and `write` refuses while one is short. The core JSON adds `thesis`, `claims[{number, claim, sources[]}]` and `sections[{number, section, summary}]`.
+  - `thesis` means `core/thesis.md` has text.
+  - `research` is required, as on `historical-fiction`: at least one sourced note under `research/`.
+  - `claims` means `core/claims.md` has claim rows, each citing at least one research note id that exists under `research/`.
+  - `outline` means `core/outline.md` has at least one section row.
 - **The beats file** is `outline/beats.md`, or `outline/chapters.md` on an unmigrated work (`outlineFile` says which).
 - **`waiting`** lists the change branches with commits that `main` lacks.
 - **`next`** is one of:
@@ -239,6 +244,7 @@ your agent. pablo's part is saving the results where its stage checks can see th
 
 ```
 pablo save --project <slug> --stage premise|acts|beats|bible/<file> [--file F]
+pablo save --project <slug> --stage thesis|claims|outline [--file F]     # nonfiction
 ```
 
 Reads stdin, or `--file`, and writes:
@@ -255,6 +261,19 @@ header. Input is checked before anything is written. A beat row needs six column
 (`# | Story date | Title | Beat | POV | Status`) with a four-digit year in the date.
 An act row needs three. A bad row is refused, naming the row and column. The file is
 committed by path. Returns `{ok, path, stage, committed, notice?}`.
+
+A nonfiction work (`track: "nonfiction"`) has its own core, and its own stages:
+
+| Stage | Target |
+|---|---|
+| `thesis` | replaces `core/thesis.md` (empty input is refused) |
+| `claims` | replaces the claims table in `core/claims.md` |
+| `outline` | replaces the section table in `core/outline.md` |
+
+A claim row needs three columns (`# | Claim | Sources`), and its sources cell names at
+least one research note id: the note's path under `research/` without `.md`
+(`printing-press` for `research/printing-press.md`), comma separated. A section row
+needs three (`# | Section | What it covers`). Each track refuses the other's stages.
 
 ---
 
@@ -285,7 +304,10 @@ Before sending anything, it:
 
 1. Checks the work's track gate. On a `historical-fiction` work it refuses (exit `2`) until the
    period brief, a sourced research note and the period facts exist, naming the track and the
-   short stage: `historical-fiction: research has no sourced notes yet`. A `fiction` work has no gate.
+   short stage: `historical-fiction: research has no sourced notes yet`.
+   On a `nonfiction` work it refuses until the thesis, a sourced research note, the claims
+   (each citing a note) and at least one outline section exist: `nonfiction: core/outline.md has no section rows`.
+   A `fiction` work has no gate.
 2. Runs the same checks as `status --for` and refuses (exit `2`, with `missing[]`) if any fail.
 3. Builds the pack: the voice, the work's rules, period facts, cast and places, the timeline up to the beat's date, continuity, the end of the previous unit, and the beat.
    - Any source under one of the marker's `neverSend` prefixes is a refusal, not a silent drop.

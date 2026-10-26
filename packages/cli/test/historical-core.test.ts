@@ -65,7 +65,7 @@ test("a historical-fiction work's core stages are premise, period, research, per
   const ids = coreStages(readCoreState(work, "historical-fiction")).map((s) => s.id);
   expect(ids).toEqual(["premise", "period", "research", "period-facts", "bible", "acts", "beats", "facts"]);
   expect(ids).toEqual([...HISTORICAL_CORE_STAGE_IDS]);
-  expect([...TRACKS["historical-fiction"].coreStages]).toEqual(ids);
+  expect([...TRACKS["historical-fiction"].coreStages] as string[]).toEqual(ids);
 });
 
 test("the period stage needs bible/period.md with text; a heading alone is not a brief", () => {

@@ -15,6 +15,18 @@
  *  - `bible/<file>` replaces `bible/<file>` whole (must stay under `bible/`,
  *    `.md` only).
  *
+ * A nonfiction work (AGT-2101, `pablo.json` `track: "nonfiction"`) has its
+ * own core instead (`core/nonfiction.ts`), and its own stages:
+ *
+ *  - `thesis`      replaces `core/thesis.md` whole (refused when empty).
+ *  - `claims`      replaces the `| # | Claim | Sources |` table in
+ *                  `core/claims.md`; every claim cites at least one research
+ *                  note id (`research/<id>.md`).
+ *  - `outline`     replaces the `| # | Section | What it covers |` table in
+ *                  `core/outline.md`.
+ *
+ * Each track refuses the other's stages, naming the stages it takes.
+ *
  * Validation runs before any write — a malformed table is refused (exit 2)
  * naming the row and column, and nothing is written. The touched file is
  * committed by pathspec (never `git add -A`); a git failure is a `notice` on
@@ -22,10 +34,13 @@
  * `gitCommit` in `./init.ts`, reused here rather than duplicated.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { beatsFile } from "@openthink/pablo-core";
+import { CLAIMS_FILE, OUTLINE_FILE, parseSources, THESIS_FILE } from "./core/nonfiction";
 import { gitCommit } from "./init";
+import { readMarker, trackOf } from "./marker";
+import type { TrackId } from "./tracks/registry";
 
 const ACTS_HEADER = "| Act | Years | What it accomplishes |";
 const ACTS_SEP = "|---|---|---|";
@@ -34,6 +49,18 @@ const ACTS_COLUMNS = 3;
 const BEATS_HEADER = "| # | Story date | Title (working) | Beat | POV | Status |";
 const BEATS_SEP = "|---|---|---|---|---|---|";
 const BEATS_COLUMNS = 6;
+
+const CLAIMS_HEADER = "| # | Claim | Sources |";
+const CLAIMS_SEP = "|---|---|---|";
+const CLAIMS_COLUMNS = 3;
+
+const OUTLINE_HEADER = "| # | Section | What it covers |";
+const OUTLINE_SEP = "|---|---|---|";
+const OUTLINE_COLUMNS = 3;
+
+/** The `--stage` values each kind of core takes, as usage text. */
+const FICTION_STAGES = "acts|beats|premise|bible/<file>";
+const NONFICTION_STAGES = "thesis|claims|outline";
 
 /** Exit codes — mirrors `cli.ts`'s contract (0 ok, 2 refused, 1 error). */
 export const SAVE_EXIT_OK = 0;
@@ -46,7 +73,7 @@ export interface SaveOptions {
   readonly json: boolean;
 }
 
-type StageKind = "premise" | "acts" | "beats" | "bible";
+type StageKind = "premise" | "acts" | "beats" | "bible" | "thesis" | "claims" | "outline";
 
 export interface StageTarget {
   readonly kind: StageKind;
@@ -62,7 +89,17 @@ type StageTargetResult = { readonly ok: true; readonly target: StageTarget } | {
  * a throw) an unknown stage or a `bible/<file>` path that isn't `.md`, tries
  * to escape `bible/`, or is absolute.
  */
-export function resolveStageTarget(projectPath: string, stage: string): StageTargetResult {
+export function resolveStageTarget(projectPath: string, stage: string, track: TrackId = "fiction"): StageTargetResult {
+  if (track === "nonfiction") {
+    const rel = stage === "thesis" ? THESIS_FILE : stage === "claims" ? CLAIMS_FILE : stage === "outline" ? OUTLINE_FILE : undefined;
+    if (rel === undefined) {
+      return { ok: false, message: `pablo: save: a nonfiction work's --stage is ${NONFICTION_STAGES} (got "${stage}")` };
+    }
+    return { ok: true, target: { kind: stage as StageKind, absPath: join(projectPath, rel), relPath: rel } };
+  }
+  if (stage === "thesis" || stage === "claims" || stage === "outline") {
+    return { ok: false, message: `pablo: save: --stage ${stage} is a nonfiction stage; a ${track} work's --stage is ${FICTION_STAGES}` };
+  }
   if (stage === "premise") {
     return { ok: true, target: { kind: "premise", absPath: join(projectPath, "bible", "overview.md"), relPath: "bible/overview.md" } };
   }
@@ -92,7 +129,7 @@ export function resolveStageTarget(projectPath: string, stage: string): StageTar
 
   return {
     ok: false,
-    message: `pablo: save: --stage expects acts|beats|premise|bible/<file> (got "${stage}")`,
+    message: `pablo: save: --stage expects ${FICTION_STAGES} (got "${stage}")`,
   };
 }
 
@@ -220,6 +257,51 @@ export function validateBeatsRows(rows: readonly string[][]): ValidationResult {
   return { ok: true };
 }
 
+/** `claims` rows: exactly 3 cells; `#` a positive integer; a claim; at least one research note id. */
+export function validateClaimsRows(rows: readonly string[][]): ValidationResult {
+  if (rows.length === 0) return { ok: false, message: "pablo: save: claims: no claim rows (| # | Claim | Sources |)" };
+  for (let i = 0; i < rows.length; i++) {
+    const n = i + 1;
+    const cells = rows[i]!;
+    if (cells.length !== CLAIMS_COLUMNS) {
+      return { ok: false, message: `pablo: save: row ${n}, column ${CLAIMS_COLUMNS}: expected ${CLAIMS_COLUMNS} columns, got ${cells.length}` };
+    }
+    if (!/^\d+$/.test(cells[0]!) || Number(cells[0]) < 1) {
+      return { ok: false, message: `pablo: save: row ${n}, column 1: claim number must be a positive integer (got "${cells[0]}")` };
+    }
+    if (cells[1] === "") return { ok: false, message: `pablo: save: row ${n}, column 2: the claim is empty` };
+    if (parseSources(cells[2]!).length === 0) {
+      return { ok: false, message: `pablo: save: row ${n}, column 3: a claim must cite at least one research note id (research/<id>.md)` };
+    }
+  }
+  return { ok: true };
+}
+
+/** `outline` rows: exactly 3 cells; `#` a positive integer; a section title. */
+export function validateOutlineRows(rows: readonly string[][]): ValidationResult {
+  if (rows.length === 0) return { ok: false, message: "pablo: save: outline: no section rows (| # | Section | What it covers |)" };
+  for (let i = 0; i < rows.length; i++) {
+    const n = i + 1;
+    const cells = rows[i]!;
+    if (cells.length !== OUTLINE_COLUMNS) {
+      return { ok: false, message: `pablo: save: row ${n}, column ${OUTLINE_COLUMNS}: expected ${OUTLINE_COLUMNS} columns, got ${cells.length}` };
+    }
+    if (!/^\d+$/.test(cells[0]!) || Number(cells[0]) < 1) {
+      return { ok: false, message: `pablo: save: row ${n}, column 1: section number must be a positive integer (got "${cells[0]}")` };
+    }
+    if (cells[1] === "") return { ok: false, message: `pablo: save: row ${n}, column 2: the section title is empty` };
+  }
+  return { ok: true };
+}
+
+/** Replaces the first `| # |` table in `text`, else appends a `## <heading>` section holding it (a fresh file gets `# <title>` first). */
+function replaceOrAppendNumberedTable(text: string, title: string, heading: string, tableText: string): string {
+  const lines = text.split("\n");
+  const span = findTable(lines, "#", 0);
+  if (span !== undefined) return spliceTable(lines, span, tableText);
+  return appendSection(text.trim() === "" ? `# ${title}\n` : text, heading, tableText);
+}
+
 function buildTable(header: string, separator: string, rows: readonly string[][]): string {
   const body = rows.map((cells) => `| ${cells.join(" | ")} |`);
   return [header, separator, ...body].join("\n");
@@ -328,6 +410,23 @@ export function buildContent(target: StageTarget, rawInput: string, existingText
     return { ok: true, content: wholeFileContent(rawInput) };
   }
 
+  if (target.kind === "thesis") {
+    if (rawInput.trim() === "") return { ok: false, message: "pablo: save: thesis: the input is empty" };
+    return { ok: true, content: wholeFileContent(rawInput) };
+  }
+
+  if (target.kind === "claims" || target.kind === "outline") {
+    const claims = target.kind === "claims";
+    const rows = extractDataRows(rawInput, "#");
+    const validated = claims ? validateClaimsRows(rows) : validateOutlineRows(rows);
+    if (!validated.ok) return validated;
+    const table = claims ? buildTable(CLAIMS_HEADER, CLAIMS_SEP, rows) : buildTable(OUTLINE_HEADER, OUTLINE_SEP, rows);
+    const content = claims
+      ? replaceOrAppendNumberedTable(existingText, "Claims", "## Claims", table)
+      : replaceOrAppendNumberedTable(existingText, "Outline", "## Sections", table);
+    return { ok: true, content };
+  }
+
   if (target.kind === "acts") {
     const rows = extractDataRows(rawInput, "act");
     const validated = validateActsRows(rows);
@@ -406,12 +505,15 @@ export function saveCore(options: SaveCoreOptions, projectPath: string): SaveOut
 
   if (stage === undefined) {
     return {
-      body: { ok: false, code: SAVE_EXIT_REFUSED, message: "pablo: save requires --stage acts|beats|premise|bible/<file>" },
+      body: { ok: false, code: SAVE_EXIT_REFUSED, message: `pablo: save requires --stage ${FICTION_STAGES} (nonfiction: ${NONFICTION_STAGES})` },
       exitCode: SAVE_EXIT_REFUSED,
     };
   }
 
-  const targetResult = resolveStageTarget(projectPath, stage);
+  // The track picks the stages (AGT-2101); a work whose marker cannot be read saves as fiction, as before.
+  const marker = readMarker(projectPath);
+  const track = marker.ok ? trackOf(marker.marker) : "fiction";
+  const targetResult = resolveStageTarget(projectPath, stage, track);
   if (!targetResult.ok) {
     return { body: { ok: false, code: SAVE_EXIT_REFUSED, message: targetResult.message }, exitCode: SAVE_EXIT_REFUSED };
   }
@@ -428,6 +530,7 @@ export function saveCore(options: SaveCoreOptions, projectPath: string): SaveOut
     return { body: { ok: false, code: SAVE_EXIT_REFUSED, message: built.message }, exitCode: SAVE_EXIT_REFUSED };
   }
 
+  mkdirSync(dirname(target.absPath), { recursive: true });
   writeFileSync(target.absPath, built.content, "utf8");
 
   const commitMessage = `${basename(projectPath)}: save ${stage}`;
