@@ -3,12 +3,13 @@
  * `src/mixer-host.ts` answers and what the mixer view may ask for. Types and a few constants, no IO, so the
  * view (browser bundle) and the host (node) share one definition.
  *
- * The view never reads a file. It calls exactly four mutations: `loadMix`, `peaks`, `clipAudio` and `saveMix`
- * (the in-mixer pablo actions, `retake`, `regenerateCue` and `flag`, come with their own tickets).
+ * The view never reads a file. It calls `loadMix`, `peaks`, `clipAudio`, `saveMix` and `renderMix` (AGT-2152: the
+ * Render button), plus the markers' mutations (the in-mixer pablo actions, `retake`, `regenerateCue` and `flag`,
+ * come with their own tickets).
  */
 
 /** The mutation names the host registers (and ui-leaf declares); anything else is a 404 from ui-leaf. */
-export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags"] as const;
+export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags"] as const;
 
 export type TrackName = "dialogue" | "sfx" | "beds" | "music";
 export type FadeCurve = "linear" | "scurve" | "log" | "exp";
@@ -140,6 +141,14 @@ export interface MixPayload {
   /** The newest manifest version; above `manifest.version` the mix is behind a `fix` (rebasing is a later ticket). */
   readonly latestManifest: number;
   readonly layout: readonly TrackLayout[];
+  /** The newest episode audio on disk: its manifest version and the mix version it was rendered from (null: none). */
+  readonly rendered: RenderedFrom;
+}
+
+/** Which mix version the newest episode audio was rendered from (AGT-2152); `mix` is null with no audio, or audio older than mix documents. */
+export interface RenderedFrom {
+  readonly manifest: number | null;
+  readonly mix: number | null;
 }
 
 /** The answer to `peaks({source})`. */
@@ -181,6 +190,20 @@ export interface SavedMixPayload {
   readonly summary: MixDiff;
   readonly document: MixDocument;
   readonly versions: readonly MixVersionInfo[];
+}
+
+/** The answer to `renderMix({episode, base})` (AGT-2152): `pablo mix` ran on mix version `base`. */
+export interface RenderedMixPayload {
+  readonly episode: number;
+  /** The mix version rendered (the `base` asked for). */
+  readonly mixVersion: number;
+  /** The manifest version that now holds the audio. */
+  readonly manifestVersion: number;
+  /** The episode file written. */
+  readonly audio: string | null;
+  readonly duration: number;
+  readonly rendered: RenderedFrom;
+  readonly message: string;
 }
 
 // ---------------------------------------------------------------------------

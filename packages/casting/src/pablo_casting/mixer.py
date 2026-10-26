@@ -12,6 +12,12 @@ view makes; the view itself never reads a file (`packages/cli/src/mixer-host.ts`
 - `mixer audio --source take:KEY|cue:KEY [--stretch S]`  that source's audio as a base64 16-bit WAV at the
   mix rate: a take **paced** by its stretch (pacing happens before the timeline, so the preview never
   time-stretches live), a cue as the library holds it.
+- `mixer render --base M`  renders the episode file from mix version `M` (AGT-2152, the mixer's Render button):
+  `mix` on the newest manifest version with that document. Refused (exit 2, nothing rendered) when `M` is not
+  the newest mix version, or when it no longer fits the newest manifest's takes (after a `fix`): `mix` would then
+  set it aside for the auto mix, and Render renders the document the window shows or nothing.
+- `load` also says which mix version the newest episode audio was rendered from (`rendered`), so the window can
+  say when the audio on disk is older than the mix it shows.
 - `mixer save --base M --from FILE`  the next mix version, `by: "human"`, with a summary of what changed from
   the base. Refused (exit 2, nothing written) when `M` is not the newest version, when the document does not
   validate or fit its manifest, or when nothing changed: `write_mix` opens each version exclusively, so a save
@@ -25,6 +31,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
@@ -33,9 +40,9 @@ import numpy as np
 import soundfile as sf
 
 from pablo_casting.cues import CueLibrary, CueUnavailable, cue_key
-from pablo_casting.manifest import read_version, versions
-from pablo_casting.mix import SR, Seams, Sources
-from pablo_casting.mixdoc import CUE_TRACK, TRACKS, MixDocError, check_against, clips, mix_versions, read_mix, validate, write_mix
+from pablo_casting.manifest import audio_versions, read_version, versions
+from pablo_casting.mix import SR, MixRequest, Seams, Sources, mix
+from pablo_casting.mixdoc import CUE_TRACK, TRACKS, MixDocError, check_against, clips, compatible, mix_versions, read_mix, validate, write_mix
 from pablo_casting.takes import KEY_RE, read_take
 
 EXIT_OK = 0
@@ -95,6 +102,21 @@ def _layout(doc: Mapping[str, object]) -> list[dict[str, object]]:
     return out
 
 
+DOCUMENT_RE = re.compile(r"^mix\.v(\d+)\.json$")
+
+
+def rendered_from(work: Path, episode: int) -> dict[str, object]:
+    """The newest episode audio: its manifest version and the mix version it was rendered from (None: no audio,
+    or audio mixed before mix documents, whose manifest names none)."""
+    mixed = audio_versions(work, episode)
+    if not mixed:
+        return {"manifest": None, "mix": None}
+    info = read_version(work, episode, mixed[-1]).get("mix")
+    name = info.get("document") if isinstance(info, Mapping) else None
+    match = DOCUMENT_RE.match(name) if isinstance(name, str) else None
+    return {"manifest": mixed[-1], "mix": int(match.group(1)) if match else None}
+
+
 def cmd_load(work: Path, episode: int, version: int | None) -> Result:
     found = mix_versions(work, episode)
     if not found:
@@ -126,6 +148,7 @@ def cmd_load(work: Path, episode: int, version: int | None) -> Result:
         "manifest": _manifest_view(manifest),
         "latest_manifest": manifests[-1],
         "layout": _layout(doc),
+        "rendered": rendered_from(work, episode),
     }, EXIT_OK
 
 
@@ -322,6 +345,38 @@ def cmd_save(work: Path, episode: int, base: int | None, source: str | None) -> 
     }, EXIT_OK
 
 
+# --- rendering (AGT-2152) ---------------------------------------------------------------------------------------
+
+
+def cmd_render(work: Path, episode: int, base: int | None, cues_dir: Path, seams: Seams) -> Result:
+    if base is None:
+        return _refused("mixer render needs --base <the mix version to render>", missing=["--base"])
+    found = mix_versions(work, episode)
+    if not found:
+        return _refused(f"episode {episode} has no mix document yet (run pablo mix)")
+    newest = found[-1]
+    if base != newest:
+        return _refused(f"mix v{base} is not the newest (v{newest}); reload v{newest} and render it. Nothing was rendered", stale=True, base=base, newest=newest)
+    manifests = versions(work, episode)
+    if not manifests:
+        return _refused(f"episode {episode} has no manifest (run pablo perform)")
+    try:
+        doc = read_mix(work, episode, newest)
+    except (OSError, json.JSONDecodeError) as unreadable:
+        return _error(f"mix v{newest} could not be read: {unreadable}")
+    if not compatible(doc, read_version(work, episode, manifests[-1])):
+        return _refused(
+            f"mix v{newest} does not fit manifest v{manifests[-1]}'s takes (a fix re-took lines since it was made), so pablo mix "
+            "would set it aside for the automatic mix. Nothing was rendered",
+            base=base,
+            manifest=manifests[-1],
+        )
+    body, code = mix(MixRequest(work=work, episode=episode, cues_dir=cues_dir), seams)
+    if code == EXIT_OK:
+        body = {**body, "rendered": rendered_from(work, episode)}
+    return body, code
+
+
 def cmd_mixer(
     op: str | None,
     work: Path,
@@ -334,8 +389,8 @@ def cmd_mixer(
     cues_dir: Path,
     seams: Seams,
 ) -> Result:
-    if op not in ("load", "peaks", "audio", "save"):
-        return _error(f'unknown mixer subcommand "{op}": one of load, peaks, audio, save')
+    if op not in ("load", "peaks", "audio", "save", "render"):
+        return _error(f'unknown mixer subcommand "{op}": one of load, peaks, audio, save, render')
     if op in ("peaks", "audio"):
         # a source is content-addressed: it needs no episode
         return (cmd_peaks if op == "peaks" else cmd_audio)(work, source, stretch, cues_dir, seams)
@@ -349,7 +404,9 @@ def cmd_mixer(
         return _error(f"--episode must be a positive integer, got {number}")
     if op == "load":
         return cmd_load(work, number, version)
+    if op == "render":
+        return cmd_render(work, number, base, cues_dir, seams)
     return cmd_save(work, number, base, document)
 
 
-__all__ = ["cmd_mixer", "compute_peaks", "diff_summary", "peaks_path"]
+__all__ = ["cmd_mixer", "cmd_render", "compute_peaks", "diff_summary", "peaks_path", "rendered_from"]

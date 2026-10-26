@@ -257,3 +257,13 @@ test("samples rounds half to even, as Python's round does", () => {
   expect(samples(1)).toBe(SR);
   expect(samples(-1.5 / SR)).toBe(-2);
 });
+
+test("AGT-2152: the audio on disk is older than the mix when it was rendered from an earlier version, from none, or there are edits", async () => {
+  const { audioOlderThanMix } = await import("../views/mixer-logic");
+  const at = (version: number, mix: number | null) => ({ version, rendered: { manifest: mix === null ? null : 1, mix } });
+  expect(audioOlderThanMix(at(2, 2), false)).toBe(false);
+  expect(audioOlderThanMix(at(2, 2), true)).toBe(true); // unsaved edits are newer than any audio
+  expect(audioOlderThanMix(at(3, 2), false)).toBe(true);
+  expect(audioOlderThanMix(at(1, null), false)).toBe(true);
+  expect(audioOlderThanMix(at(1, 2), false)).toBe(false); // an older version opened by --version
+});
