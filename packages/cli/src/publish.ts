@@ -5,10 +5,17 @@
  * one sentence per line, and the compiler strips frontmatter, joins sentences
  * back into paragraphs, curls quotes, and assembles the chapters.
  *
- * Only `--target draft` exists today: one markdown file, every chapter in
- * order, written to `<work>/.pablo/out/<slug>-draft.md` (gitignored machine
- * state; never committed). `review` and `final` are refused until they have
- * something to publish to; pandoc formats (epub, docx, pdf) are deferred.
+ * Targets, written under `<work>/.pablo/out/` (gitignored machine state;
+ * never committed):
+ *
+ *   draft   `<slug>-draft.md`: every chapter in order, compiled
+ *   review  `<slug>-review.md` (AGT-2136): chapter headings and the source's
+ *           line numbers (one sentence per line, numbered per chapter) so a
+ *           reader can point at a line
+ *   final   `<slug>-final.md` and `<slug>-final.epub` (AGT-2136): the clean
+ *           manuscript, nothing added
+ *
+ * Other pandoc formats (docx, pdf) are deferred.
  *
  * Dashes are left as written: the style guide bans em-dashes in the source
  * and `check` flags them, so the compiler never invents one.
@@ -17,6 +24,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { joinSentences } from "@openthink/pablo-core";
+import { buildEpub } from "./epub";
 import { parseFrontmatter } from "./novel/machine";
 import { NOVEL_PUBLISH_TARGETS, NOVEL_UNIT_FILE, novelUnitDir, NOVEL_DIR } from "./outputs/novel/units";
 
@@ -104,11 +112,51 @@ export interface CompileChapter {
 export function compileDraft(title: string, chapters: readonly CompileChapter[]): string {
   const sections: string[] = [`# ${curlQuotes(title)}`];
   for (const chapter of [...chapters].sort((a, b) => a.number - b.number)) {
-    const chapterTitle = parseFrontmatter(chapter.text)["title"];
-    const heading = chapterTitle ? `## Chapter ${chapter.number}: ${curlQuotes(chapterTitle)}` : `## Chapter ${chapter.number}`;
-    sections.push(heading, ...bodyParagraphs(stripFrontmatter(chapter.text)).map(curlQuotes));
+    sections.push(`## ${chapterHeading(chapter)}`, ...bodyParagraphs(stripFrontmatter(chapter.text)).map(curlQuotes));
   }
   return `${sections.join("\n\n")}\n`;
+}
+
+function chapterHeading(chapter: CompileChapter): string {
+  const chapterTitle = parseFrontmatter(chapter.text)["title"];
+  return chapterTitle ? `Chapter ${chapter.number}: ${curlQuotes(chapterTitle)}` : `Chapter ${chapter.number}`;
+}
+
+/**
+ * The review target's document: the draft's headings, but every sentence line
+ * of the source is numbered `[n]` (restarting at 1 in each chapter, counting
+ * non-blank lines of the body) so a note can say "chapter 3, line 12". Lines
+ * of one paragraph stay together (a trailing double space keeps each on its
+ * own line); a blank line separates paragraphs. Pure.
+ */
+export function compileReview(title: string, chapters: readonly CompileChapter[]): string {
+  const sections: string[] = [`# ${curlQuotes(title)}`];
+  for (const chapter of [...chapters].sort((a, b) => a.number - b.number)) {
+    sections.push(`## ${chapterHeading(chapter)}`);
+    let n = 0;
+    let paragraph: string[] = [];
+    const flush = (): void => {
+      if (paragraph.length > 0) sections.push(paragraph.join("  \n"));
+      paragraph = [];
+    };
+    for (const line of stripFrontmatter(chapter.text).split(/\r?\n/)) {
+      if (line.trim() === "") flush();
+      else paragraph.push(`[${++n}] ${curlQuotes(line.trim())}`);
+    }
+    flush();
+  }
+  return `${sections.join("\n\n")}\n`;
+}
+
+/** The final target's clean manuscript as an EPUB. Pure. */
+export function compileEpub(slug: string, title: string, chapters: readonly CompileChapter[]): Uint8Array {
+  return buildEpub({
+    id: slug,
+    title: curlQuotes(title),
+    chapters: [...chapters]
+      .sort((a, b) => a.number - b.number)
+      .map((chapter) => ({ heading: chapterHeading(chapter), paragraphs: bodyParagraphs(stripFrontmatter(chapter.text)).map(curlQuotes) })),
+  });
 }
 
 export interface PublishSuccess {
@@ -119,6 +167,8 @@ export interface PublishSuccess {
   readonly where: string;
   readonly chapters: number;
   readonly words: number;
+  /** Every file written, as names under the out directory (the final target writes two). */
+  readonly files?: readonly string[];
 }
 
 export interface PublishRefusal {
@@ -137,7 +187,7 @@ function refuse(message: string, tried: readonly string[] = []): PublishRefusal 
 /**
  * The novel output's publish (`OUTPUTS.novel.publish.run`): compiles the
  * work's chapter files (`NN-*.md` in the novel's artifact directory) into
- * `<workDir>/.pablo/out/<slug>-draft.md`.
+ * `<workDir>/.pablo/out/<slug>-<target>.md` (and `.epub` for final).
  */
 export function publishWork(workDir: string, slug: string, title: string, target: string | undefined): PublishOutcome {
   if (target === undefined) {
@@ -146,10 +196,6 @@ export function publishWork(workDir: string, slug: string, title: string, target
   if (!(PUBLISH_TARGETS as readonly string[]).includes(target)) {
     return refuse(`pablo: publish: unknown --target "${target}" (expected ${PUBLISH_TARGETS.join("|")})`);
   }
-  if (target !== "draft") {
-    return refuse(`pablo: publish --target ${target} is not implemented yet (only draft is)`);
-  }
-
   const dir = novelUnitDir(workDir);
   const chapters: CompileChapter[] = [];
   if (existsSync(dir)) {
@@ -162,16 +208,21 @@ export function publishWork(workDir: string, slug: string, title: string, target
     return refuse(`pablo: publish: no chapters to compile (${NOVEL_DIR}/NN-*.md)`, [dir]);
   }
 
-  const compiled = compileDraft(title, chapters);
   const outDir = join(workDir, ".pablo", "out");
-  const where = join(outDir, `${slug}-draft.md`);
+  const where = join(outDir, `${slug}-${target}.md`);
   // The slug comes from pablo.json, which readMarker only checks is non-empty: a
   // traversal slug must not turn this write into one outside the work.
   if (!where.startsWith(outDir + sep)) {
     return refuse(`pablo: publish: marker slug "${slug}" would write outside ${outDir}`);
   }
+  const compiled = target === "review" ? compileReview(title, chapters) : compileDraft(title, chapters);
   mkdirSync(outDir, { recursive: true });
   writeFileSync(where, compiled, "utf8");
+  const files = [`${slug}-${target}.md`];
+  if (target === "final") {
+    writeFileSync(join(outDir, `${slug}-final.epub`), compileEpub(slug, title, chapters));
+    files.push(`${slug}-final.epub`);
+  }
   const words = compiled.split(/\s+/).filter((word) => word !== "").length;
-  return { ok: true, code: 0, target: "draft", where, chapters: chapters.length, words };
+  return { ok: true, code: 0, target: target as PublishTarget, where, chapters: chapters.length, words, files };
 }
