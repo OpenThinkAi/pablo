@@ -50,11 +50,25 @@ const CODING_TOOLS = ["Bash", "Read", "Edit", "Write", "MultiEdit", "Glob", "Gre
 
 test("the session offers pablo's tools by their plain names, and nothing else", () => {
   const tools = loopSpec(spec()).tools.map((tool) => tool.name);
-  expect(tools).toEqual(mcpTools().map((tool) => tool.name));
+  expect(tools).toEqual(mcpTools().filter((tool) => tool.harness !== false).map((tool) => tool.name));
   expect(tools).toContain("resume");
   expect(tools).toContain("status");
   for (const tool of CODING_TOOLS) expect(tools).not.toContain(tool);
   for (const tool of tools) expect(tool).not.toStartWith("mcp__");
+});
+
+// AGT-2143: init, story and merge are MCP tools for an outside agent, but the author's acts inside pablo: the
+// harness's own agent is never offered them (story drafts prose through the whole pipeline; merge would land its
+// own draft). output_add plans, so it reaches the harness like save does.
+test("the session is never offered init, story or merge; output_add reaches it", () => {
+  const served = mcpTools().map((tool) => tool.name);
+  const tools = loopSpec(spec()).tools.map((tool) => tool.name);
+  for (const name of ["init", "story", "merge"]) {
+    expect(served).toContain(name);
+    expect(tools).not.toContain(name);
+    expect(harnessTools(async () => "ok").map((tool) => tool.name)).not.toContain(name);
+  }
+  expect(tools).toContain("output_add");
 });
 
 test("the research checklist tools reach the session by their plain names", () => {

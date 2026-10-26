@@ -19,8 +19,9 @@ import { dirname, join, relative } from "node:path";
 import { WORK_RULES_FILE } from "@openthink/pablo-core";
 import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, NOVEL_DIR, markerPath, writeMarker } from "./marker";
 import type { Marker } from "./marker";
+import { findVault, resolveProjectFromCwd } from "./project";
 import type { Refusal } from "./project";
-import { outputsOnTrack } from "./outputs/registry";
+import { isOutputId, outputsOnTrack } from "./outputs/registry";
 import { isTrackId, trackIds } from "./tracks/registry";
 import type { TrackId } from "./tracks/registry";
 import { trackCoreFiles, trackExtraFiles } from "./tracks/scaffold";
@@ -397,4 +398,77 @@ export function initAdopt(vault: string, projectDir: string, slug: string, opts:
     adoptedLine: `pablo: adopted ${projectDir} (wrote pablo.json${gitignoreChanged ? "; added .pablo/ to .gitignore" : ""})`,
     notice: `pablo: adopt does not commit; commit pablo.json${gitignoreChanged ? " and .gitignore" : ""} yourself`,
   };
+}
+
+/** What `pablo init` was asked for, from the CLI's positionals and flags or the MCP `init` tool's arguments (AGT-2143). */
+export interface InitRequest {
+  /** The output to scaffold the work with (the CLI's `<format>`); only `novel`. Omitted with `track` for a core-only work. */
+  readonly output?: string;
+  readonly slug?: string;
+  readonly title?: string;
+  readonly track?: string;
+  /** Write only the marker into the existing work named by `project`. */
+  readonly adopt?: boolean;
+  readonly project?: string;
+}
+
+/** A refusal `initWork` returns before any scaffold runs: exit 2 for a framework refusal, 1 for a usage error. */
+export interface InitRefusal {
+  readonly ok: false;
+  readonly code: 1 | 2;
+  readonly message: string;
+  readonly tried?: readonly string[];
+}
+
+/**
+ * `pablo init` for the CLI and the MCP `init` tool alike (AGT-2143), so both
+ * refuse the same way: find the vault, then adopt, scaffold a core-only work on
+ * a track (`track` with no `output`), or scaffold a novel. Messages keep the
+ * CLI's flag spelling; an MCP caller passes the same names as arguments.
+ */
+export function initWork(cwd: string, env: Record<string, string | undefined>, req: InitRequest): InitOk | InitRefusal | Refusal {
+  const vaultResult = findVault(cwd, env);
+  if (!vaultResult.ok) return vaultResult;
+  const vault = vaultResult.path;
+
+  if (req.adopt === true) {
+    if (req.project === undefined) return { ok: false, code: 2, message: "pablo: init --adopt requires --project <slug>" };
+    const resolved = resolveProjectFromCwd(cwd, req.project, env);
+    if (!resolved.ok) return resolved;
+    return initAdopt(vault, resolved.path, req.project, { author: vaultAuthor(vault) });
+  }
+
+  // `init --track <t> <slug> "<Title>"` (AGT-2103): a core-only work on the track, no output yet.
+  if (req.track !== undefined && req.output === undefined && req.slug !== undefined && req.title !== undefined) {
+    // `pablo init novel <slug> --track t` (the title left off) is a mistyped novel init, not a work named "novel".
+    if (isOutputId(req.slug)) {
+      const message = `pablo: init: "${req.slug}" is an output, not a slug; did you mean pablo init ${req.slug} <slug> "<Title>" --track ${req.track}?`;
+      return { ok: false, code: 1, message };
+    }
+    return initTrack(vault, req.slug, req.title, req.track, { author: vaultAuthor(vault) });
+  }
+
+  const { output, slug, title } = req;
+  if (output === undefined || slug === undefined || title === undefined) {
+    const message = 'pablo: usage: pablo init <format> <slug> "<Title>" [--track <t>], or pablo init --track <t> <slug> "<Title>"';
+    return { ok: false, code: 1, message };
+  }
+  if (output !== "novel") return { ok: false, code: 1, message: `pablo: init: only "novel" is implemented (got "${output}")` };
+
+  return initNovel(vault, slug, title, { author: vaultAuthor(vault), ...(req.track === undefined ? {} : { track: req.track }) });
+}
+
+/** `init`'s `--json` body on success (the CLI prints it; the MCP tool returns it). */
+export function initBody(result: InitOk): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    ok: true,
+    path: result.path,
+    format: result.format ?? null,
+    ...(result.track === undefined ? {} : { track: result.track }),
+    slug: result.slug,
+    title: result.title,
+    committed: result.committed,
+  };
+  if (result.notice) body["notice"] = result.notice;
+  return body;
 }

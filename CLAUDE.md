@@ -269,7 +269,8 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 and the mixer hosts take the output as a parameter
                 (radio the default). `--stream`/`--all` stay radio's.
                 `pablo story "<prompt>"` (AGT-1690, `src/story.ts`, one
-                `VERBS` entry with no MCP tool) creates a work under
+                `VERBS` entry; an MCP tool since AGT-2143 but, like `init` and
+                `merge`, `harness: false`, never one of the harness's own) creates a work under
                 `stories/` (`novels/` when a novel is asked for), runs each
                 core stage as one harness message on its own `plan/` branch,
                 then `output add`, `write`, merge and publish per requested

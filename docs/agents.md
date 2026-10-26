@@ -61,7 +61,8 @@ them without reading this page.
    there; don't work around it.
 5. **Leave acceptance to the author.** Every change lands on a branch (`draft/`,
    `revise/`, `plan/`). Tell the author what is waiting; they accept it with
-   `pablo merge` or in the screen. `merge` is deliberately not an MCP tool.
+   `pablo merge` or in the screen. The `merge` tool is for when the author has
+   read the branch and tells your agent to accept it, never on the agent's own call.
 6. **Ask about the author's calls, assume the rest.** Plot direction, a character's
    fate or motive, and any open `[pick]` are theirs. For everything else proceed with
    a stated assumption, and batch your questions.
@@ -96,7 +97,10 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `critique` | Comment on a change branch: continuity contradictions, things mentioned before their date, voice tells |
 | `read` / `search` | Read a file in the work, or search it |
 | `web_search` / `web_fetch` | Search the web through pablo's configured backend (SearXNG; set `web.search` in the config, see `docs/configuration.md`), and read one page as markdown with its URL and retrieval date. pablo's own tools: an agent does not need its own WebSearch/WebFetch, and `web_search` fails with a clear message when no backend is set |
-| `output` | List or add outputs (novel, story, screenplay, radio) |
+| `init` | Start a new work: a slug, a title, and a track (core only) or the novel output |
+| `story` | Write a whole story from a prompt, end to end (or resume a run with `project`) |
+| `output` / `output_add` | List, remove or re-plan outputs / add one (novel, story, screenplay, radio) once the core is at beats |
+| `merge` | Accept a draft branch onto main, when the author says so |
 | `publish` | Compile the drafted text into one file |
 | `voice_list` / `voice_show` / `voice_flag` / `voice_exemplar` / `voice_rule` / `voice_edit` / `voice_remove` / `voice_use` | Inspect and grow the voice: list rules with ids, add, edit or remove one, add a named voice to a work |
 | `prose` | One-off copy in a named voice, outside any work |

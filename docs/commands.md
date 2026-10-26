@@ -898,14 +898,20 @@ It serves:
 | Where things stand | `resume`, `status`, `timeline` |
 | Writing | `write`, `prose`, `revise` (deprecated aliases, removed next release: `draft_unit`, `draft_chapter` for `write`; `revise_passage` for `revise` with `branch`) |
 | Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `distill_facts`, `plan_research`, `waive_research_item`, `link_research_item`, `record_fact` |
-| Setup and publishing | `output`, `migrate`, `publish` |
+| Starting a work | `guide` (call it first), `init`, `story`, `output_add` |
+| Accepting a draft | `merge` |
+| Setup and publishing | `output` (list, remove, plan), `migrate`, `publish` |
 | Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule`, `voice_edit`, `voice_remove`, `voice_use` |
-| Reading | `read`, `search` |
+| Reading | `read`, `search`, `web_search`, `web_fetch` |
 | Radio | `bind`, `audition`, `cast`, `voices`, `describe_voice`, `perform`, `mix`, `fix` |
 
-Deliberately missing: `merge`, `story`, `share` and `notes`. Accepting work and
-sending it to people are your acts, never a model's. There is also no `voice new`
-tool.
+`init`, `story`, `output_add` and `merge` take the same arguments as the verbs and
+refuse the same way. `merge` accepts a draft: an agent calls it only when you tell
+it to. Those three (`init`, `story`, `merge`) are never offered to pablo's own
+agent (`pablo agent`, the screen's compose view): it does not start works, run the
+drafting pipeline or land its own drafts. Deliberately missing: `share` and
+`notes`; sending the manuscript to people is your act, never a model's. There is
+also no `voice new` tool.
 
 ### agent
 

@@ -43,12 +43,13 @@ const SERVER_VERSION = VERSION;
 export const MCP_INSTRUCTIONS = [
   "pablo manages a writing project (a novel, story, screenplay, radio drama, or a nonfiction work) in the author's vault. You plan with the author; pablo writes the prose.",
   "",
-  "- Call `guide` first. With no arguments it lists the tracks and outputs; with `track` and `output` it returns the step-by-step path from creating the work to publishing it, as pablo commands (the tool is the verb's name, or its narrow form: `research save` is `save_research`, `research plan` is `plan_research`).",
+  "- Call `guide` first. With no arguments it lists the tracks and outputs; with `track` and `output` it returns the step-by-step path from creating the work to publishing it, as pablo commands (the tool is the verb's name, or its narrow form: `research save` is `save_research`, `research plan` is `plan_research`, `output add` is `output_add`; `init` and `merge` are tools of their own).",
   "- Then start every session on a work with `resume` (pass `project`, the work's slug). It returns where the work stands and `next`.",
   "- Never write the book's prose yourself. Every sentence of prose comes from `write` (or `revise` with `branch`), which send one prompt to the author's configured writer model. Do not put prose into `save`.",
   "- Save planning through pablo: when you and the author agree on a premise, acts, beats or a bible file, call `save` so it lands where the framework reads it and is committed.",
   "- A result of `{ok: false, missing: [...]}` is a direction, not an error: it names what the plan still needs. Steer the author there; do not work around it.",
-  "- Every manuscript change lands on a branch (`draft/`, `revise/`, `plan/`). Tell the author what is waiting; they accept it themselves (`pablo merge`, or the screen). There is deliberately no merge tool.",
+  "- Every manuscript change lands on a branch (`draft/`, `revise/`, `plan/`). Tell the author what is waiting; accepting it is the author's call. Call `merge` only when the author has read the branch and told you to accept it.",
+  "- A new work starts with `init` (a slug, a title, and a track or the novel output) or, for a whole story from a prompt, `story`; add an output once the core is at beats with `output_add`.",
   "- Ask the author about their calls (plot direction, a character's fate or motive, any open `[pick]`); proceed with a stated assumption on everything else, and batch questions.",
   "- When you record a fact, say whether it was researched (with the source), invented, or decided by the author.",
 ].join("\n");

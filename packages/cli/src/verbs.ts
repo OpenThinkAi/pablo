@@ -13,7 +13,9 @@
  * `run(args, ctx)` returns `{body, exitCode}` — `body` is the EXACT object
  * the CLI's `--json` flag prints for that verb, success or refusal
  * (`{ok:false, code, message, missing[]/tried[]}` is data, never a thrown
- * error — AC3). `init` is P1 for MCP and has no entry here.
+ * error — AC3). `init` (AGT-2143) has an entry for MCP's sake; the CLI
+ * dispatches it itself (it runs before any marker exists), through the same
+ * `initWork` the entry's `run` calls.
  *
  * Every verb's `run` does its OWN vault/project/marker resolution from
  * `ctx.cwd`/`ctx.env` (mirroring `cli.ts`'s own shared dispatch block) so it
@@ -86,6 +88,7 @@ import { readTool, searchTool } from "./harness-tools";
 import { runWebVerb, WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "./web-tools";
 import type { WebSeams } from "./web-tools";
 import { addOutput, listOutputs, planOutput, removeOutput } from "./output-verbs";
+import { initBody, initWork } from "./init";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { proseCore } from "./prose";
@@ -153,6 +156,11 @@ export interface VerbContext {
   readonly researcher?: Adapter;
   /** AGT-2126: network seams for `web_search` and `web_fetch`. Tests inject fakes so a tool never reaches the network. */
   readonly web?: WebSeams;
+  /**
+   * AGT-2143: the continuity extractor `merge` (and `story`'s merges) run the after-write rituals with. Tests inject a
+   * fake adapter so a merge never reaches a model; left `undefined`, the routed extraction provider is used, as on the CLI.
+   */
+  readonly extractor?: Adapter;
 }
 
 /** `run`'s return: `body` is the exact `--json` object; `exitCode` is the CLI's exit-code contract (0 ok, 2 refused, 1 error). */
@@ -167,6 +175,14 @@ export interface McpToolSpec<Args extends z.ZodRawShape = z.ZodRawShape> {
   readonly description: string;
   readonly args: z.ZodObject<Args>;
   run(args: z.infer<z.ZodObject<Args>>, ctx: VerbContext): Promise<VerbResult>;
+  /**
+   * AGT-2143: `false` serves the tool over `pablo mcp` only and keeps it out of
+   * pablo's own agent loop (`harnessTools()`). For the author's acts an outside
+   * agent may take on the author's word but the in-app agent never takes on its
+   * own: starting a work (`init`), running the drafting pipeline (`story`), and
+   * accepting a draft (`merge`). Absent, the tool reaches both.
+   */
+  readonly harness?: false;
 }
 
 export interface Verb<Args extends z.ZodRawShape = z.ZodRawShape> {
@@ -184,6 +200,8 @@ export interface Verb<Args extends z.ZodRawShape = z.ZodRawShape> {
    * on the verb's own name/args/run, unaffected by how MCP exposes it.
    */
   readonly mcpTools?: readonly McpToolSpec[];
+  /** AGT-2143: as `McpToolSpec.harness`, for a verb that registers itself as its own MCP tool. */
+  readonly harness?: false;
   /**
    * AGT-1261 (standards review finding): field names in `args.shape` that
    * `cli.ts` reads from positionals (`args.rest`), not a named flag —
@@ -1018,7 +1036,7 @@ const MERGE_ARGS = z.object({
 async function runMergeVerb(args: z.infer<typeof MERGE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
-  const outcome = await mergeDraftInProject(resolved.projectPath, args.branch, ctx.env);
+  const outcome = await mergeDraftInProject(resolved.projectPath, args.branch, ctx.env, ctx.extractor);
   return { body: outcome.body, exitCode: outcome.exitCode };
 }
 
@@ -1946,6 +1964,69 @@ async function runOutputVerb(args: z.infer<typeof OUTPUT_ARGS>, ctx: VerbContext
   return { body: outcome, exitCode: outcome.ok ? 0 : outcome.code };
 }
 
+// AGT-2143 (D-16): over MCP, adding an output is its own tool with a narrow schema, and the `output` tool keeps
+// list, remove and plan, so there is one way to add an output, not two. The CLI's `pablo output add` is unchanged.
+const OUTPUT_MCP_ARGS = OUTPUT_ARGS.extend({
+  sub: z
+    .enum(["list", "remove", "plan"])
+    .describe(
+      "list: the work's outputs with units drafted and next step. remove <type>: undeclare it and archive outputs/<type>/ under outputs/_removed/. plan <type>: rewrite outputs/<type>/plan.md from the beats. Each write is one commit. To add an output use output_add.",
+    ),
+});
+
+const OUTPUT_MCP: McpToolSpec = {
+  name: "output",
+  description:
+    "The work's outputs (novel, story, radio, ...) derived from its story core: `list` them, `remove <type>` (archived under outputs/_removed/, never deleted), or regenerate a type's `plan`. Each write is one commit. Adding one is `output_add`.",
+  args: OUTPUT_MCP_ARGS,
+  run: async (raw, ctx) => runOutputVerb(OUTPUT_MCP_ARGS.parse(raw), ctx),
+};
+
+const OUTPUT_ADD_MCP_ARGS = z.object({
+  project: projectField,
+  type: z.string().describe('The output type to add, e.g. "story", "novel", "screenplay", "radio" or "narrated"; the work\'s track decides which it allows.'),
+  from: z.string().optional().describe('narrated only: the prose output the narration reads, one the work has (e.g. "novel", "story").'),
+});
+
+const OUTPUT_ADD_MCP: McpToolSpec = {
+  name: "output_add",
+  description:
+    "Add an output to the work (`pablo output add <type>`): declare it in pablo.json and scaffold outputs/<type>/ (plan.md, RULES.md), in one commit. Refused until the story core is at beats, for a type the work's track does not allow, or for one the work already has; the refusal names what is missing.",
+  args: OUTPUT_ADD_MCP_ARGS,
+  run: async (raw, ctx) => {
+    const args = OUTPUT_ADD_MCP_ARGS.parse(raw);
+    return runOutputVerb({ sub: "add", type: args.type, from: args.from, project: args.project, "dry-run": false }, ctx);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// init (AGT-2143): `initWork`, shared with `cli.ts`'s `runInit`
+// ---------------------------------------------------------------------------
+
+const INIT_ARGS = z.object({
+  output: z
+    .string()
+    .optional()
+    .describe('The output to scaffold the work with: only "novel" today. Omit it, and pass `track`, for a core-only work with no output yet (add one later with output_add).'),
+  slug: z.string().optional().describe('The new work\'s slug: lowercase letters, digits and hyphens (e.g. "ice-house").'),
+  title: z.string().optional().describe("The new work's title."),
+  track: z
+    .string()
+    .optional()
+    .describe("The work's track (fiction, historical-fiction or nonfiction), written to pablo.json with that track's core files. Default: fiction."),
+  adopt: z.boolean().optional().default(false).describe("Write only pablo.json into the existing work named by `project`, touching nothing else."),
+  project: z.string().optional().describe("adopt: the existing work's slug."),
+});
+
+async function runInitVerb(args: z.infer<typeof INIT_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const outcome = initWork(ctx.cwd, ctx.env, args);
+  if (!outcome.ok) {
+    const body = { ok: false, code: outcome.code, message: outcome.message, ...(outcome.tried === undefined ? {} : { tried: outcome.tried }) };
+    return { body, exitCode: outcome.code };
+  }
+  return { body: initBody(outcome), exitCode: 0 };
+}
+
 // ---------------------------------------------------------------------------
 // story (AGT-1690): `story.ts`, loaded on first use (it brings the harness)
 // ---------------------------------------------------------------------------
@@ -1970,7 +2051,10 @@ const STORY_ARGS = z.object({
 
 async function runStoryVerb(args: z.infer<typeof STORY_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const { runStory } = await import("./story");
-  return runStory(args, ctx, ctx.writer === undefined ? {} : { writer: ctx.writer });
+  return runStory(args, ctx, {
+    ...(ctx.writer === undefined ? {} : { writer: ctx.writer }),
+    ...(ctx.extractor === undefined ? {} : { extractor: ctx.extractor }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2001,6 +2085,16 @@ export const VERBS: readonly Verb[] = [
       "Call this first. The step-by-step path from nothing to a finished piece for a track and an output: create the work, each core stage with the verb that meets it, research where the track gates it, add the output, write, check, publish. With no arguments: the tracks and the outputs each allows. Reads nothing; needs no project.",
     args: GUIDE_ARGS,
     run: runGuideVerb,
+  },
+  {
+    name: "init",
+    description:
+      "Start a new work in the vault: with `output` \"novel\", `slug` and `title` a novel scaffolded from the vault's template (`track` optional); with `track`, `slug` and `title` and no `output`, a core-only work with its track's core files and no output yet; with `adopt` and `project`, only the marker written into an existing work. One commit (adopt commits nothing). Refuses a bad slug, an unknown track, a work that already exists.",
+    args: INIT_ARGS,
+    run: runInitVerb,
+    positionalArgs: ["output", "slug", "title"],
+    // Starting a work is outside any session: an outside agent may do it on the author's word, the harness never.
+    harness: false,
   },
   {
     name: "resume",
@@ -2050,6 +2144,7 @@ export const VERBS: readonly Verb[] = [
     args: OUTPUT_ARGS,
     run: runOutputVerb,
     positionalArgs: ["sub", "type"],
+    mcpTools: [OUTPUT_MCP, OUTPUT_ADD_MCP],
   },
   {
     name: "story",
@@ -2058,10 +2153,10 @@ export const VERBS: readonly Verb[] = [
     args: STORY_ARGS,
     run: runStoryVerb,
     positionalArgs: ["prompt"],
-    // A story run accepts its own branches and starts its own harness session:
-    // like `merge`, it is the author's act, so it registers no MCP tool (and so
-    // is never one of the harness's own tools).
-    mcpTools: [],
+    // AGT-2143: an MCP tool, so an outside agent can start a work on the author's
+    // word. Never one of the harness's own tools: a run drafts prose through the
+    // whole pipeline, accepts its own branches and starts its own harness session.
+    harness: false,
   },
   {
     name: "draft_chapter",
@@ -2132,9 +2227,11 @@ export const VERBS: readonly Verb[] = [
     args: MERGE_ARGS,
     run: runMergeVerb,
     positionalArgs: ["branch"],
-    // Merging is the human's review gate: a model connected over MCP must not
-    // be able to land its own draft, so this verb registers no MCP tool.
-    mcpTools: [],
+    // AGT-2143 (D-16): an MCP tool, so an outside agent can accept a draft once
+    // the author says so. Merging stays the author's review gate inside pablo:
+    // the harness's own agent is never offered it (it must not land its own
+    // draft); the author accepts there in the screen.
+    harness: false,
   },
   {
     name: "publish",
