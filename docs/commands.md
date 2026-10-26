@@ -479,8 +479,23 @@ get the Fountain lint in `hits[]`: `fountain-no-heading` (the scene does not ope
 with a scene heading), `fountain-heading-spacing` (a heading without a blank line
 before and after), `fountain-cue-no-dialogue`, `fountain-stray-parenthetical` (one
 outside a speech), `fountain-colon-dialogue` (`NAME: words` on one line),
-`fountain-markdown` (a code fence) and `fountain-unclosed-boneyard`. Hits are data:
-exit is `0` either way.
+`fountain-markdown` (a code fence) and `fountain-unclosed-boneyard`.
+
+On a **nonfiction** work, each `*.md` unit also gets **claim support** in `hits[]`.
+Every sentence that states a fact (a number, a name past its first word, or a
+reporting cue such as "according to" or "was founded") is traced by shared words
+to a `core/claims.md` row or a note under `research/`:
+
+- `claim-unsupported`: the claim traces to no row or note. `detail` names the
+  nearest candidate source, or says there is none.
+- `claim-uncited`: the claim traces to a source but the text does not cite it.
+  `detail` names the source and the citation to add.
+
+A citation is a bracket of research note ids (`@<id>`) and/or claims row numbers
+(`#<n>`): `[@ice-harvest]`, `[#2]`, `[@ice-harvest; #3]`. A claim whose citation
+resolves is never a hit; a citation that resolves to nothing is named in the hit.
+
+Hits are data: exit is `0` either way.
 
 ```
 {ok: true, hits[], unprovenanced[], core?[], radio?}

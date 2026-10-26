@@ -16,6 +16,9 @@
  *    for where these rules come from — the guide's own flagged lines are "the
  *    best document in the vault and the pattern the rest follows."
  *
+ * A nonfiction work's `*.md` units also get the claim-support check (AGT-2114, `claim-support.ts`):
+ * `claim-unsupported` and `claim-uncited` hits in `hits[]`.
+ *
  * Voice-pattern scoring beyond verbatim flagged lines is P1, out of scope
  * here (AC3). `checkFile` and `checkWork` are pure/read-only and exported for
  * AGT-1237's `write` to call directly and put the hits in its receipt.
@@ -26,7 +29,8 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { TextSource } from "@openthink/pablo-core";
 import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
-import { readMarker } from "./marker";
+import { readMarker, trackOf } from "./marker";
+import { checkClaimSupport, readClaimSources } from "./claim-support";
 import { coreCheck } from "./core-check";
 import { resolveOutput } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
@@ -434,10 +438,15 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
   const hits: Hit[] = [];
   const unprovenanced: string[] = [];
 
+  // A nonfiction work's prose units also get claim support (AGT-2114, `claim-support.ts`).
+  const workMarker = readMarker(workDir);
+  const claimSources = workMarker.ok && trackOf(workMarker.marker) === "nonfiction" ? readClaimSources(workDir) : undefined;
+
   for (const filePath of filePaths) {
     const text = read(filePath);
     const label = relative(workDir, filePath);
     hits.push(...checkFile(text, label, rules));
+    if (claimSources !== undefined && filePath.endsWith(".md")) hits.push(...checkClaimSupport(text, label, claimSources));
     if (isUnprovenanced(text)) unprovenanced.push(label);
   }
 
