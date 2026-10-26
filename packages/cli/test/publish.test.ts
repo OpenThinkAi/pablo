@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bodyParagraphs, compileDraft, curlQuotes, publishWork, stripFrontmatter } from "../src/publish";
+import { bodyParagraphs, compileDraft, compileReview, curlQuotes, publishWork, stripFrontmatter } from "../src/publish";
 import { VERBS } from "../src/verbs";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
@@ -76,7 +76,7 @@ test("publishWork writes one file under .pablo/out and refuses other targets", (
   expect(text).not.toMatch(/^---$/m);
   expect(text).not.toMatch(/["']/);
 
-  for (const target of ["review", "final", "pdf", undefined]) {
+  for (const target of ["pdf", undefined]) {
     const refused = publishWork(work, "ice-house", "The Ice House", target);
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.code).toBe(2);
@@ -100,7 +100,7 @@ test("the publish verb resolves the project and returns {target, where}", async 
   expect(ok.exitCode).toBe(0);
   expect((ok.body as { where: string }).where).toBe(join(vault, "novels", "ice-house", ".pablo", "out", "ice-house-draft.md"));
 
-  const refused = await verb.run({ project: "ice-house", target: "final" }, ctx);
+  const refused = await verb.run({ project: "ice-house", target: "pdf" }, ctx);
   expect(refused.exitCode).toBe(2);
 });
 
@@ -118,9 +118,62 @@ test("pablo publish --project --target draft works end to end through the CLI", 
   expect(body.target).toBe("draft");
   expect(existsSync(body.where)).toBe(true);
 
-  expect(run(["publish", "--project", "ice-house", "--target", "final"]).exitCode).toBe(2);
+  expect(run(["publish", "--project", "ice-house", "--target", "pdf"]).exitCode).toBe(2);
   const help = run(["--help"]).stdout.toString();
   const [verbs, later] = help.split("Later (not yet implemented):");
   expect(verbs).toMatch(/^ {2}publish$/m);
   expect(later).not.toMatch(/^ {2}publish$/m);
 });
+
+test("compileReview numbers each source line per chapter under chapter headings", () => {
+  const out = compileReview("T", [
+    { number: 2, text: "---\ntitle: B\n---\n\"Hi.\"\nBye.\n\nEnd.\n" },
+    { number: 1, text: "One.\nTwo.\n" },
+  ]);
+  expect(out).toBe(
+    ["# T", "## Chapter 1", "[1] One.  \n[2] Two.", "## Chapter 2: B", "[1] “Hi.”  \n[2] Bye.", "[3] End."].join("\n\n") + "\n",
+  );
+});
+
+test("review and final targets on the novel fixture", () => {
+  const vault = tempVault();
+  const work = join(vault, "novels", "ice-house");
+  mkdirSync(join(work, "chapters"), { recursive: true });
+  writeFileSync(join(work, "chapters", "02-second.md"), "---\ntitle: Second & Third\n---\nHe said \"go\".\nShe didn't.\n");
+
+  const review = publishWork(work, "ice-house", "The Ice House", "review");
+  expect(review.ok).toBe(true);
+  if (!review.ok) return;
+  expect(review.where).toBe(join(work, ".pablo", "out", "ice-house-review.md"));
+  const reviewText = readFileSync(review.where, "utf8");
+  expect(reviewText).toContain("## Chapter 1: The Last Full Cut");
+  expect(reviewText).toContain("## Chapter 2: Second & Third");
+  expect(reviewText).toContain("[1] He said “go”.  \n[2] She didn’t.");
+  expect(existsSync(join(work, ".pablo", "out", "ice-house-final.epub"))).toBe(false);
+
+  const final = publishWork(work, "ice-house", "The Ice House", "final");
+  expect(final.ok).toBe(true);
+  if (!final.ok) return;
+  expect(final.files).toEqual(["ice-house-final.md", "ice-house-final.epub"]);
+  const finalText = readFileSync(final.where, "utf8");
+  expect(finalText).toBe(readFileSync(publishDraftPath(work), "utf8"));
+  expect(finalText).not.toMatch(/\[\d+\]/);
+
+  const epub = new Uint8Array(readFileSync(join(work, ".pablo", "out", "ice-house-final.epub")));
+  expect(new TextDecoder().decode(epub.slice(30, 38))).toBe("mimetype");
+  const probe = join(mkdtempSync(join(tmpdir(), "pablo-epub-")), "unzipped");
+  mkdirSync(probe);
+  const unzip = Bun.spawnSync(["unzip", "-q", join(work, ".pablo", "out", "ice-house-final.epub"), "-d", probe]);
+  expect(unzip.exitCode).toBe(0);
+  expect(readFileSync(join(probe, "mimetype"), "utf8")).toBe("application/epub+zip");
+  const chapter2 = readFileSync(join(probe, "OEBPS", "chapter-02.xhtml"), "utf8");
+  expect(chapter2).toContain("<h1>Chapter 2: Second &amp; Third</h1>");
+  expect(chapter2).toContain("<p>He said “go”. She didn’t.</p>");
+  expect(readFileSync(join(probe, "OEBPS", "content.opf"), "utf8")).toContain("<dc:title>The Ice House</dc:title>");
+});
+
+function publishDraftPath(work: string): string {
+  const draft = publishWork(work, "ice-house", "The Ice House", "draft");
+  if (!draft.ok) throw new Error("draft failed");
+  return draft.where;
+}

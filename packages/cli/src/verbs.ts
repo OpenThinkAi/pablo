@@ -793,7 +793,7 @@ const PUBLISH_ARGS = z.object({
   target: z
     .string()
     .describe(
-      "The publish target, by output: novel and story draft|review|final (one compiled markdown file under .pablo/out/; the novel builds only draft); radio bundle|player|stream (bundle: every episode's script plus its newest mixed audio and manifest in one directory, .pablo/out/<slug>-radio-bundle/; player is `pablo review`; stream: each episode's newest mixed audio and manifest, with its time to first audio, in the listening directory .pablo/out/stream/ where the review player finds it).",
+      "The publish target, by output: novel and story draft|review|final (one compiled markdown file under .pablo/out/; the novel's review numbers each source line, and its final also writes an .epub); radio bundle|player|stream (bundle: every episode's script plus its newest mixed audio and manifest in one directory, .pablo/out/<slug>-radio-bundle/; player is `pablo review`; stream: each episode's newest mixed audio and manifest, with its time to first audio, in the listening directory .pablo/out/stream/ where the review player finds it).",
     ),
   output: outputField.optional(),
 });
