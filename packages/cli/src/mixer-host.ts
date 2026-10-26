@@ -3,7 +3,8 @@
  * (`views/mixer.tsx`, AGT-1768, opened by `openMixer` below) is mounted on. Like the review player's host it is the only thing that
  * touches the casting directory; the view is dumb and never reads a file.
  *
- * It answers five mutations (names and payloads in `views/mixer-protocol.ts`; the markers' own are `mixer-notes-host.ts`'s),
+ * It answers five mutations (names and payloads in `views/mixer-protocol.ts`; the markers' own are `mixer-notes-host.ts`'s,
+ * the punch list's (AGT-2155: flags, re-take, compare and choose takes) `mixer-punch-host.ts`'s),
  * each reading the disk afresh:
  *  - `loadMix({episode, version?})` — the mix document (the newest `renders/epNN/mix.v<m>.json` unless a version
  *    is asked for), the mix versions, the manifest line/cue info the document was made against, and the
@@ -38,6 +39,8 @@ import type { CastingDeps } from "./casting";
 import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./ui-leaf-host";
 import { createNotesHost } from "./mixer-notes-host";
 import type { NotesHost } from "./mixer-notes-host";
+import { createPunchHost } from "./mixer-punch-host";
+import type { PunchHost } from "./mixer-punch-host";
 import { REVIEW_CSP, castingDir, episodeTitle } from "./review-host";
 
 type Env = Record<string, string | undefined>;
@@ -58,7 +61,7 @@ export interface MixerHostOptions {
   readonly stderr?: { write(text: string): unknown };
 }
 
-export interface MixerHost extends NotesHost {
+export interface MixerHost extends NotesHost, PunchHost {
   loadMix(args: unknown): MixPayload;
   peaks(args: unknown): PeaksPayload;
   clipAudio(args: unknown): ClipAudioPayload;
@@ -120,6 +123,16 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
   const ctx = { env: options.env, stderr: options.stderr ?? { write: () => undefined } };
   const peakCache = new Map<string, PeaksPayload>();
   const notes = createNotesHost({ work, title: options.title ?? "radio", ...(options.now === undefined ? {} : { now: options.now }) });
+  const punch = createPunchHost({
+    work,
+    title: options.title ?? "radio",
+    env: options.env,
+    casting: options.casting,
+    ...(options.vault === undefined ? {} : { vault: options.vault }),
+    ...(options.library === undefined ? {} : { library: options.library }),
+    ...(options.stderr === undefined ? {} : { stderr: options.stderr }),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
 
   /** One `mixer` call; a refusal or error is thrown with the Python side's own words. */
   function call(op: string, args: readonly string[]): Record<string, unknown> {
@@ -155,6 +168,7 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
 
   return {
     ...notes,
+    ...punch,
     cueOptions(args) {
       const episode = positiveInt(args, "episode", true);
       const body = call("cue-options", ["--episode", String(episode), ...cueFlags(args)]);
@@ -283,6 +297,12 @@ export function mixerMutations(host: MixerHost): Record<string, MutationHandler>
     deleteNote: async (args) => host.deleteNote(args),
     exportNotes: async (args) => host.exportNotes(args),
     notesToFlags: async (args) => host.notesToFlags(args),
+    listFlags: async (args) => host.listFlags(args),
+    flag: async (args) => host.flag(args),
+    unflag: async (args) => host.unflag(args),
+    retake: async (args) => host.retake(args),
+    lineTakes: async (args) => host.lineTakes(args),
+    chooseTake: async (args) => host.chooseTake(args),
   };
   return handlers;
 }

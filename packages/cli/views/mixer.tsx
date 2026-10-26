@@ -25,6 +25,7 @@ import {
 import type { LaneRow, Mixer, PlacedClip, TrackRows } from "./mixer-logic";
 import { MixEngine } from "./mixer-audio";
 import { MARKERS_CSS, MarkerPins, MarkersPanel, useMarkers } from "./mixer-markers";
+import { PUNCH_CSS, PunchPanel, usePunch } from "./mixer-punch";
 import { dirty, dragEdit, editReducer, initialEdit, isStaleRefusal, moveClip, proposal, setFade, setGain, setTrack, splitClip } from "./mixer-edit";
 import type { GestureKind } from "./mixer-edit";
 import { INSPECTOR_CSS, Inspector } from "./mixer-inspector";
@@ -445,6 +446,15 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
       .then(() => setPlaying(true));
   }, []);
   const markers = useMarkers({ mutate, episode: data.episode, payload, placed: placement?.placed ?? [], getTime, pause: pauseForNote, resume: resumeAfterNote });
+  // AGT-2155: a re-take or a chosen take wrote and remixed a version (the saved mix rebased onto it): show the newest.
+  const punch = usePunch({
+    mutate,
+    episode: data.episode,
+    onChanged: () => {
+      setVersion(undefined);
+      setReloads((n) => n + 1);
+    },
+  });
   // ---------------------------------------------------------------------------
   // Editing (AGT-1769): gestures and keys become `mixer-edit.ts` edits; the history is `editReducer`'s.
   // ---------------------------------------------------------------------------
@@ -637,7 +647,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
 
   return (
     <div className="mixer">
-      <style>{CSS + MARKERS_CSS + INSPECTOR_CSS + CUE_CSS}</style>
+      <style>{CSS + MARKERS_CSS + INSPECTOR_CSS + CUE_CSS + PUNCH_CSS}</style>
       <header className="top">
         <div className="titles">
           <span className="work">{data.title}</span>
@@ -799,6 +809,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
           </div>
         </div>
         <MarkersPanel api={markers} onJump={(t) => void seek(t)} />
+        <PunchPanel api={punch} lines={payload.manifest.lines} locked={unsaved} onJump={(t) => void seek(t)} />
       </div>
     </div>
   );

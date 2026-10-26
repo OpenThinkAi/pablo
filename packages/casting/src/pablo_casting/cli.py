@@ -45,6 +45,13 @@ Commands:
 - `takes gc --work W [--yes [--key K ...]]`  lists the takes no manifest
              version references; with `--yes` moves them (or only the named
              `--key`s) into `archive/takes/<stamp>/`. Nothing is deleted.
+- `takes line --work W --episode N --line I`  every take line I has had across
+             the manifest versions, with its status, gates and the fix that made
+             it; `current` marks the newest version's (AGT-2155, `choose.py`).
+- `takes choose <key> --work W --episode N --line I [--cues DIR] [--vault V | --library DIR]`
+             the next manifest version with line I back on that earlier take
+             (a `chosen take` flag applied and moved to `flags-done.json`), then
+             remixed like a fix, so a mixer-saved mix is rebased onto it.
 - `manifest write --work W --episode N --from FILE [--flag ID ...] [--audio F]`
              writes `renders/epNN/v<k+1>.json` through the "only flagged lines
              change" invariant; a violation is exit 1 naming the offending
@@ -92,7 +99,8 @@ Commands:
              `wrong voice`/`flat` temperature, `rushed` pace), write `v<k+1>`
              through the "only flagged lines change" invariant, remix it, and move
              the flags to `flags-done.json` with the version they landed in; no open
-             flags is exit 2 (AGT-1685, `fix.py`).
+             flags is exit 2 (AGT-1685, `fix.py`). `--line I` (AGT-2155) applies
+             only the open flags on line I; the rest stay open.
 - `gate`     score a take with the scorer stack and judge it against a card's
              thresholds; `gate calibrate` fits thresholds from approved takes
              (see `gate_command.py`). Writes nothing but a receipt unless
@@ -805,6 +813,23 @@ def cmd_sounds(env: Mapping[str, str], args: argparse.Namespace) -> Result:
         return refused(str(refusal), **({"problems": refusal.problems} if refusal.problems else {}))
 
 
+def _takes_choose(env: Mapping[str, str], args: argparse.Namespace, work: Path, mixer: Seams | None) -> Result:
+    """`takes choose <key> --episode N --line I` (AGT-2155): the chosen take's version, remixed like a fix."""
+    from pablo_casting.choose import cmd_takes_choose
+    from pablo_casting.mix import cmd_mix
+
+    try:
+        configured = load_config(env).library
+        seams = mixer or _real_seams(env, args.sounds, log=True)
+    except (ConfigRefusal, SoundRefusal) as refusal:
+        return refused(str(refusal))
+
+    def remix(version: int) -> Result:
+        return cmd_mix(work, args.episode, version, args.cues, args.library or configured, args.vault, seams)
+
+    return cmd_takes_choose(work, args.rest[1] if len(args.rest) > 1 else None, args.episode, args.line, remix)
+
+
 def run(
     argv: Sequence[str],
     env: Mapping[str, str] | None = None,
@@ -851,9 +876,15 @@ def run(
             return cmd_takes_show(work, args.rest[1] if len(args.rest) > 1 else None), args.json
         if args.command == "takes" and sub == "gc":
             return cmd_takes_gc(work, args.yes, args.key), args.json
+        if args.command == "takes" and sub == "line":
+            from pablo_casting.choose import cmd_takes_line
+
+            return cmd_takes_line(work, args.episode, args.line), args.json
+        if args.command == "takes" and sub == "choose":
+            return _takes_choose(env, args, work, mixer), args.json
         if args.command == "manifest" and sub == "write":
             return cmd_manifest_write(work, args.episode, args.from_file, args.flag, args.audio), args.json
-        subs = "show, gc" if args.command == "takes" else "write"
+        subs = "show, gc, line, choose" if args.command == "takes" else "write"
         return error(f'unknown {args.command} subcommand "{sub}": one of {subs}'), args.json
     if args.command == "gate":
         if args.rest[:1] == ["calibrate"]:
@@ -942,7 +973,7 @@ def run(
             return cmd_mix(fix_work, args.episode, version, args.cues, args.library or configured, args.vault, fix_seams)
 
         return cmd_fix(
-            env, work, args.episode, args.vault, args.library, configured, args.json_lines, engines or real_engine, scorers or real_scorers, remix
+            env, work, args.episode, args.vault, args.library, configured, args.json_lines, engines or real_engine, scorers or real_scorers, remix, args.line
         ), args.json
     if args.command == "mixer":
         from pablo_casting.mix import cues_dir_for

@@ -47,10 +47,10 @@ const PARITY: Readonly<Record<string, Entry>> = {
   voices: gap("mixer", "AGT-2157"),
   describe_voice: gap("mixer", "AGT-2157"),
   bind: gap("mixer", "AGT-2157"),
-  perform: gap("mixer", "AGT-2155"),
+  perform: mixer("retake"), // a line is performed again from the punch list (AGT-2155); a first performance is the CLI's
   mix: mixer("renderMix"),
-  fix: gap("mixer", "AGT-2155"),
-  takes: gap("mixer", "AGT-2155"),
+  fix: mixer("retake", "flag", "unflag", "listFlags"),
+  takes: mixer("lineTakes", "chooseTake"),
   // ---- not editing or composing
   init: support("scaffolds a new work; run once"),
   resume: support("read-only session summary for an agent"),

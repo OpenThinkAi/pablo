@@ -99,7 +99,7 @@ test("AGT-1769: a loaded mix is editable: every clip has trim edges and fade han
   expect(html).not.toContain("read-only");
 });
 
-test("the view bundles the way the ui-leaf binary bundles it and calls only loadMix, peaks, clipAudio, saveMix, renderMix and the marker mutations", async () => {
+test("the view bundles the way the ui-leaf binary bundles it and calls only loadMix, peaks, clipAudio, saveMix, renderMix, the marker and the punch-list mutations", async () => {
   const result = await Bun.build({
     entrypoints: [new URL("../views/mixer.tsx", import.meta.url).pathname],
     external: ["react", "react/jsx-runtime", "react-dom", "react-dom/client"],
@@ -109,7 +109,8 @@ test("the view bundles the way the ui-leaf binary bundles it and calls only load
   expect(result.success).toBe(true);
   const text = (await result.outputs[0]?.text()) ?? "";
   const called = new Set([...text.matchAll(/mutate\(\s*"([A-Za-z]+)"/g)].map((m) => m[1]));
-  expect([...called].sort()).toEqual(["clipAudio", "cueOptions", "deleteNote", "exportNotes", "listNotes", "loadMix", "notesToFlags", "peaks", "regenerateCue", "renderMix", "saveMix", "saveNote"]);
+  const punch = ["chooseTake", "flag", "lineTakes", "listFlags", "retake", "unflag"]; // AGT-2155
+  expect([...called].sort()).toEqual(["clipAudio", "cueOptions", "deleteNote", "exportNotes", "listNotes", "loadMix", "notesToFlags", "peaks", "regenerateCue", "renderMix", "saveMix", "saveNote", ...punch].sort());
 });
 
 test("AGT-2152: a Render button sits beside Save, and the window says when the audio on disk is older than this mix", () => {

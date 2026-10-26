@@ -284,8 +284,8 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `$XDG_DATA_HOME/pablo/casting/venv` for an npm install),
                 pulls the configured weights and leaves a receipt. A missing
                 `uv` is a refusal naming `brew install uv`; only `cli.ts`,
-                `radio.ts`, `casting-verbs.ts` and `mixer-host.ts` import the
-                runner, and it
+                `radio.ts`, `casting-verbs.ts`, `mixer-host.ts` and
+                `mixer-punch-host.ts` import the runner, and it
                 runs only inside a casting verb, so a writing verb on a
                 writing work never touches it. `src/radio.ts` (AGT-1680) is
                 the radio door: `check` (on a work whose scripts carry a
@@ -363,6 +363,12 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `mixer cue-options|cue` (`mixer_cue.py`): the cue library
                 makes the asset, the next mix version swaps only that
                 clip's source key.
+                The punch list (AGT-2155):
+                `views/mixer-punch.tsx` and `src/mixer-punch-host.ts` flag a
+                line through the review host's own `flag`, re-take it with
+                `runFix` (`pablo fix --line`) and compare/choose takes with
+                `runTakes` (`takes line`, `takes choose`, `choose.py`): the
+                same functions as the CLI, nothing window-only.
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`

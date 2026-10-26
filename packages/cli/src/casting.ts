@@ -456,7 +456,12 @@ interface GcEntry {
 
 /**
  * `pablo takes show <key>` and `pablo takes gc` (AGT-1681): the take store of
- * the work's radio output (`outputs/radio/casting/takes/`). Both need a work.
+ * the work's radio output (`outputs/radio/casting/takes/`). All need a work.
+ *
+ * `takes line --episode N --line I` lists every take a line has had across
+ * the manifest versions (AGT-2155, the mixer's compare); `takes choose <key>
+ * --episode N --line I` writes the next version with that earlier take back
+ * on the line and remixes it, so a mixer-saved mix is rebased onto it.
  *
  * `gc` always lists first: the takes no manifest version references. With
  * `yes` (`--yes`) it archives exactly the listed keys; otherwise, with a
@@ -465,17 +470,41 @@ interface GcEntry {
  * deleted.
  */
 export async function runTakes(
-  args: { readonly sub: string | undefined; readonly key: string | undefined; readonly yes: boolean },
+  args: {
+    readonly sub: string | undefined;
+    readonly key: string | undefined;
+    readonly yes: boolean;
+    /** `line` and `choose` (AGT-2155): the episode and line whose takes are compared or chosen from. */
+    readonly episode?: number | undefined;
+    readonly line?: number | undefined;
+    /** `choose` remixes: where the cue library is (`<library>/cues`, else `<vault>/casting/cues`). */
+    readonly vault?: string | undefined;
+    readonly library?: string | undefined;
+  },
   ctx: CastingContext,
   deps: CastingDeps,
   work: string | undefined,
   confirm?: Confirm,
 ): Promise<VerbResult> {
-  if (args.sub !== "show" && args.sub !== "gc") {
-    return failure(`pablo: takes needs a subcommand: \`takes show <key>\` or \`takes gc\`${args.sub ? ` (got "${args.sub}")` : ""}`);
+  if (args.sub !== "show" && args.sub !== "gc" && args.sub !== "line" && args.sub !== "choose") {
+    return failure(`pablo: takes needs a subcommand: \`takes show <key>\`, \`takes gc\`, \`takes line\` or \`takes choose <key>\`${args.sub ? ` (got "${args.sub}")` : ""}`);
   }
   if (work === undefined) return refusal(`pablo: takes ${args.sub} needs --project <slug>: takes live in the work's outputs/radio/casting/`, ["--project"]);
-  if (args.sub === "show" && !args.key) return failure("pablo: usage: pablo takes show <key> --project <slug>");
+  if ((args.sub === "show" || args.sub === "choose") && !args.key) return failure(`pablo: usage: pablo takes ${args.sub} <key> --project <slug>${args.sub === "choose" ? " --episode N --line I" : ""}`);
+  if (args.sub === "line" || args.sub === "choose") {
+    const missing = [...(args.episode === undefined ? ["--episode N"] : []), ...(args.line === undefined ? ["--line I"] : [])];
+    if (missing.length > 0) return refusal(`pablo: takes ${args.sub} needs ${missing.join(" and ")}`, missing);
+    const at = ["--episode", String(args.episode), "--line", String(args.line), "--work", work];
+    if (args.sub === "line") {
+      const plain = ensureProvisioned(ctx, deps, work);
+      return plain.ok ? runPython(plain.layout, deps, ctx, ["takes", "line", ...at]) : plain.result;
+    }
+    // `choose` remixes the version it writes, like `fix`: the `mix` extra, and asynchronously (a window's server keeps answering).
+    const ready = ensureProvisioned(ctx, deps, work, [MIX_EXTRA]);
+    if (!ready.ok) return ready.result;
+    const where = [...(args.vault === undefined ? [] : ["--vault", args.vault]), ...(args.library === undefined ? [] : ["--library", args.library])];
+    return runPythonStreaming(ready.layout, deps, ctx, ["takes", "choose", args.key as string, ...at, ...where], () => undefined);
+  }
 
   const ready = ensureProvisioned(ctx, deps, work);
   if (!ready.ok) return ready.result;
@@ -506,6 +535,20 @@ export async function runTakes(
   }
   // Exactly the keys the author saw: a take referenced since the listing is skipped, not moved.
   return runPython(ready.layout, deps, ctx, ["takes", "gc", "--work", work, "--yes", ...keys.flatMap((key) => ["--key", key])]);
+}
+
+/** Plain-text `pablo takes line` (AGT-2155): one row per take the line has had, the current one starred. */
+export function lineTakesText(body: unknown): string {
+  const b = body as Record<string, unknown>;
+  const takes = (b["takes"] ?? []) as readonly Record<string, unknown>[];
+  return [
+    `episode ${String(b["episode"])} line ${String(b["line"])} (${String(b["speaker"])}): ${String(b["text"])}`,
+    ...takes.map((t) => {
+      const reasons = Array.isArray(t["reasons"]) && t["reasons"].length > 0 ? ` fixed for ${(t["reasons"] as string[]).join(", ")}` : "";
+      const versions = ((t["versions"] ?? []) as number[]).map((v) => `v${v}`).join(", ");
+      return `${t["current"] === true ? "*" : " "} ${String(t["key"]).slice(0, 12)}  ${String(t["status"])}  ${String(t["seconds"])} s  in ${versions}${reasons}`;
+    }),
+  ].join("\n");
 }
 
 /** Plain-text `pablo takes show`. */

@@ -519,5 +519,5 @@ test("only cli.ts, radio.ts and the casting verbs reach the casting runner: a wr
     }
   };
   walk(src);
-  expect(importers.sort()).toEqual(["casting-verbs.ts", "cli.ts", "mixer-host.ts", "radio.ts"]);
+  expect(importers.sort()).toEqual(["casting-verbs.ts", "cli.ts", "mixer-host.ts", "mixer-punch-host.ts", "radio.ts"]);
 });
