@@ -35,7 +35,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { outputRulesFile, readStyle, readWorkRules } from "@openthink/pablo-core";
-import type { TextSource } from "@openthink/pablo-core";
+import type { PackVoice, PackVoiceMissing, TextSource } from "@openthink/pablo-core";
 import { SLUG_PATTERN } from "./init";
 import { DEFAULT_VOICE, markerPath } from "./marker";
 import { globalVoicesDir, isVoicePathArgument, readVoice } from "./voice";
@@ -111,22 +111,8 @@ export function resolveVoiceLayers(options: ResolveVoiceLayersOptions): Resolved
   const seen = new Set<string>();
 
   // A voice directory or one-off file, read the way `--voice` reads it, labelled for receipts.
-  const voicePiece = (layer: VoiceLayerKind, path: string, via?: string): VoiceLayer | undefined => {
-    const voice = readVoice(path);
-    const base = display(path);
-    const relabel = (s: TextSource): TextSource => ({ ...s, path: isFile(path) ? base : `${base}/${s.path}` });
-    const piece: VoiceLayer = {
-      layer,
-      name: voice.name,
-      path,
-      label: base,
-      ...(via === undefined ? {} : { via }),
-      rules: voice.rules.map(relabel),
-      exemplars: voice.exemplars.map(relabel),
-      ...(voice.never === undefined ? {} : { never: relabel(voice.never) }),
-    };
-    return isEmpty(piece) ? undefined : piece;
-  };
+  const voicePiece = (layer: VoiceLayerKind, path: string, via?: string): VoiceLayer | undefined =>
+    readPiece(layer, path, display, via);
 
   const add = (piece: VoiceLayer | undefined, want: { layer: VoiceLayerKind; name: string; path: string; via?: string }) => {
     if (seen.has(want.path)) return;
@@ -182,12 +168,124 @@ export function layerOf(resolved: ResolvedVoiceLayers, kind: VoiceLayerKind): re
   return resolved.layers.filter((piece) => piece.layer === kind);
 }
 
-/** One line per piece for a receipt or `--dry-run`: `vault  style/  (style/prose.md, style/anti-tells.md)`. */
+/** What put a piece in the pack, as a receipt says it: its `pablo.json` entry, `global default`, or nothing for a layer base. */
+export function viaOf(piece: VoiceLayer): string | undefined {
+  if (piece.via !== undefined) return piece.via;
+  return piece.layer === "global" && piece.name === GLOBAL_DEFAULT_VOICE ? "global default" : undefined;
+}
+
+/**
+ * One line per piece for a receipt or `--dry-run`: `vault  style  (style/prose.md, style/anti-tells.md)`.
+ * The global default is always labelled as such, and a voice the work's `pablo.json` names that was not found is a
+ * `missing` line naming the entry (AGT-2139), never left out.
+ */
 export function describeVoiceLayers(resolved: ResolvedVoiceLayers): string[] {
-  return resolved.layers.map((piece) => {
+  const found = resolved.layers.map((piece) => {
     const files = [...piece.rules, ...piece.exemplars, ...(piece.never ? [piece.never] : [])].map((s) => s.path);
-    return `${piece.layer}  ${piece.label}${piece.via ? `  [${piece.via}]` : ""}  (${files.join(", ")})`;
+    const via = viaOf(piece);
+    return `${piece.layer}  ${piece.label}${via ? `  [${via}]` : ""}  (${files.join(", ")})`;
   });
+  return [...found, ...listedMissing(resolved).map((m) => `missing  ${m.name}  [${m.via}]  (${m.reason})`)];
+}
+
+/** The `missing` entries a `pablo.json` entry named: the ones an author asked for and did not get. */
+function listedMissing(resolved: ResolvedVoiceLayers): PackVoiceMissing[] {
+  return resolved.missing.flatMap((m) =>
+    m.via === undefined ? [] : [{ ...(m.layer === undefined ? {} : { layer: m.layer }), name: m.name, via: m.via, reason: m.reason }],
+  );
+}
+
+/** The resolved layers in the shape a pack, its dry run and its receipt carry (core's `PackVoice`). */
+export function packVoice(resolved: ResolvedVoiceLayers): PackVoice {
+  return {
+    layers: resolved.layers.map((piece) => {
+      const via = viaOf(piece);
+      return { layer: piece.layer, name: piece.name, source: piece.label, ...(via === undefined ? {} : { via }) };
+    }),
+    missing: listedMissing(resolved),
+  };
+}
+
+/** The voice material of some layers, merged in the order a pack sends it. */
+export interface MergedVoice {
+  /** Every piece's rules, lowest precedence first, so the most specific rule is read last. */
+  readonly rules: readonly TextSource[];
+  /** Every piece's exemplars, most specific piece first, each piece's newest first. */
+  readonly exemplars: readonly TextSource[];
+  /** Every piece's `never.md`, lowest precedence first. */
+  readonly never: readonly TextSource[];
+}
+
+/** Merges the material of `pieces` (already in precedence order, lowest first) for a pack. */
+export function mergeVoice(pieces: readonly VoiceLayer[]): MergedVoice {
+  return {
+    rules: pieces.flatMap((piece) => piece.rules),
+    exemplars: [...pieces].reverse().flatMap((piece) => piece.exemplars),
+    never: pieces.flatMap((piece) => (piece.never === undefined ? [] : [piece.never])),
+  };
+}
+
+export interface ResolveProseVoiceOptions {
+  /** Where `resolveVoice` found the `--voice` (a voice directory, `<vault>/style/`, or a one-off file). */
+  readonly voicePath: string;
+  /** The vault, when there is one: it decides whether the voice sits in the vault layer. */
+  readonly vaultRoot?: string | undefined;
+  /** For `$XDG_CONFIG_HOME`; defaults to `process.env`. */
+  readonly env?: Record<string, string | undefined> | undefined;
+}
+
+/**
+ * The layered voice of a `pablo prose` pack (AGT-2139, D-15): `prose` has no
+ * work and no output, so its layers are the global default under the voice
+ * `--voice` names, which sits in the layer of the place it lives (the global
+ * voices directory, the vault's `voices/` or `style/`, else a one-off file:
+ * the work layer, the most specific there is). The named voice reached twice
+ * (`--voice default`) is kept once.
+ */
+export function resolveProseVoiceLayers(options: ResolveProseVoiceOptions): ResolvedVoiceLayers {
+  const globalDir = globalVoicesDir(options.env ?? process.env);
+  const vaultRoot = options.vaultRoot === undefined ? undefined : resolve(options.vaultRoot);
+  const voicePath = resolve(options.voicePath);
+  const display = (path: string) => (vaultRoot === undefined ? path : labelOf(vaultRoot, path));
+  const layers: VoiceLayer[] = [];
+  const missing: MissingVoiceLayer[] = [];
+
+  const globalDefault = join(globalDir, GLOBAL_DEFAULT_VOICE);
+  if (globalDefault !== voicePath) {
+    const piece = existsSync(globalDefault) ? readPiece("global", globalDefault, display) : undefined;
+    if (piece === undefined) {
+      missing.push({ layer: "global", name: GLOBAL_DEFAULT_VOICE, tried: [globalDefault], reason: `no ${globalDefault}` });
+    } else {
+      layers.push(piece);
+    }
+  }
+
+  const layer: VoiceLayerKind =
+    within(globalDir, voicePath) ? "global"
+    : vaultRoot !== undefined && (voicePath === join(vaultRoot, "style") || within(join(vaultRoot, "style"), voicePath) || within(join(vaultRoot, "voices"), voicePath)) ? "vault"
+    : "work";
+  const named = readPiece(layer, voicePath, display, "--voice");
+  if (named !== undefined) layers.push(named);
+  return { layers, missing };
+}
+
+/** A voice directory or one-off file read the way `--voice` reads it, labelled for receipts; `undefined` when it holds nothing. */
+function readPiece(layer: VoiceLayerKind, path: string, display: (path: string) => string, via?: string): VoiceLayer | undefined {
+  const voice = readVoice(path);
+  const base = display(path);
+  const file = isFile(path);
+  const relabel = (s: TextSource): TextSource => ({ ...s, path: file ? base : `${base}/${s.path}` });
+  const piece: VoiceLayer = {
+    layer,
+    name: voice.name,
+    path,
+    label: base,
+    ...(via === undefined ? {} : { via }),
+    rules: voice.rules.map(relabel),
+    exemplars: voice.exemplars.map(relabel),
+    ...(voice.never === undefined ? {} : { never: relabel(voice.never) }),
+  };
+  return isEmpty(piece) ? undefined : piece;
 }
 
 // ---------------------------------------------------------------------------

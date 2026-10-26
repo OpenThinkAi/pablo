@@ -344,6 +344,7 @@ export async function runWrite(
     marker: markerResult.marker,
     direction,
     output: output.id,
+    ...(deps.env === undefined ? {} : { env: deps.env }),
   });
   if (!packResult.ok) {
     emitError(packResult.message, undefined, packResult.code, args.json);
@@ -375,6 +376,8 @@ export async function runWrite(
         expectedOutputTokens: pack.expectedOutputTokens,
         prompt_hash: pack.hash,
         adjustments: pack.adjustments,
+        // The layered voice (AGT-2139): every layer used, lowest first, and any voice pablo.json names that was not found.
+        ...(pack.voiceLayers === undefined ? {} : { voiceLayers: pack.voiceLayers }),
       };
       console.log(JSON.stringify(body));
     } else {

@@ -154,3 +154,12 @@ test("no pablo.json reads the default list; a voice option overrides the marker"
   const overridden = resolveVoiceLayers({ vaultRoot: vault, workRoot: work, env, voice: ["plain"] });
   expect(overridden.layers.map((l) => l.name)).toEqual(["style", "plain", "QWEN.md"]);
 });
+
+test("describeVoiceLayers labels the global default and lists a voice pablo.json names that was not found (AGT-2139)", () => {
+  const { vault, work, globalVoices, env } = setup();
+  writeVoice(join(globalVoices, "default"), "Global default rule.");
+  setVoiceList(work, ["../../style", "ghost", "QWEN.md"]);
+  const lines = describeVoiceLayers(resolveVoiceLayers({ vaultRoot: vault, workRoot: work, env }));
+  expect(lines[0]).toContain("[global default]");
+  expect(lines.at(-1)).toBe('missing  ghost  [voice[1]: ghost]  (no voice "ghost")');
+});
