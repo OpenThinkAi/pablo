@@ -50,6 +50,7 @@ const KNOWN_INTENTS: readonly Intent[] = [
   { name: "continuity", kind: "extraction" },
   { name: "research", kind: "planning" },
   { name: "agent", kind: "planning" },
+  { name: "check", kind: "planning" },
 ];
 
 const NUMBER_FIELDS = new Set(["timeoutMs", "temperature"]);

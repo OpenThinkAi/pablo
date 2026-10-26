@@ -49,7 +49,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { WORK_RULES_FILE, createPlanner, createProviders, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
+import { PLAN_INTENT, WORK_RULES_FILE, createPlanner, createProviders, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
 import type { Adapter, Intent, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
 import { coreStages, readCoreState } from "./core/machine";
@@ -67,7 +67,8 @@ import type { OutputDefinition } from "./outputs/types";
 import { startPlanSession } from "./plan";
 import { findVault, resolveProject } from "./project";
 import type { AskAuthor } from "./harness/ask-author";
-import { AGENT_INTENT, harnessProvider, LOCAL_FALLBACK_NOTICE } from "./harness/provider";
+import { RESEARCH_INTENT } from "./distill";
+import { harnessProvider, LOCAL_FALLBACK_NOTICE, shouldWarnLocal } from "./harness/provider";
 import type { HarnessProvider } from "./harness/provider";
 import { planTools } from "./harness/plan-tools";
 import { loadPromptWork } from "./harness/prompt";
@@ -428,7 +429,7 @@ interface Run {
   readonly ctx: VerbContext;
   readonly deps: StoryDeps;
   /** The agent provider, resolved once per run (`agentProviderFor`). */
-  agent?: HarnessProvider;
+  agent?: Map<string, HarnessProvider>;
 }
 
 function waiting(run: Run, step: string, branch: string): VerbResult {
@@ -489,14 +490,26 @@ function retitleFromPremise(run: Run): void {
   run.title = title;
 }
 
-function agentProviderFor(run: Run): HarnessProvider | VerbResult {
+/**
+ * The intent a core stage's model calls route under (AGT-2127, D-13): the research stage under `research` (map it to a
+ * local provider to keep notes on this machine), premise through beats under `plan`. Drafting goes through `write`
+ * and its own intents; the free-running `pablo agent` loop is the `agent` intent.
+ */
+export function stageIntent(stage: StoryCoreStage): Intent {
+  return stage === "research" ? RESEARCH_INTENT : PLAN_INTENT;
+}
+
+function agentProviderFor(run: Run, stage: StoryCoreStage): HarnessProvider | VerbResult {
   if (run.deps.agent !== undefined) return run.deps.agent;
-  if (run.agent !== undefined) return run.agent;
+  const intent = stageIntent(stage);
+  const cached = run.agent?.get(intent.name);
+  if (cached !== undefined) return cached;
   try {
     const config = loadConfig({ env: run.ctx.env, readFile: run.deps.readConfig, projectDir: run.work });
-    run.agent = harnessProvider(config, { keys: run.deps.keys ?? { env: run.ctx.env } });
-    if (run.agent.local && !config.intents.has(AGENT_INTENT.name)) run.ctx.stderr.write(`${LOCAL_FALLBACK_NOTICE(run.agent.adapter.id)}\n`);
-    return run.agent;
+    const provider = harnessProvider(config, { keys: run.deps.keys ?? { env: run.ctx.env } }, intent);
+    if (shouldWarnLocal(provider, config, intent)) run.ctx.stderr.write(`${LOCAL_FALLBACK_NOTICE(provider.adapter.id, intent.name)}\n`);
+    (run.agent ??= new Map()).set(intent.name, provider);
+    return provider;
   } catch (error) {
     return fail((error as Error).message);
   }
@@ -508,7 +521,7 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
   if (!marker.ok) return { ok: false, result: refuse(marker.message) };
   const prompt = loadPromptWork(run.work, marker.marker, run.slug);
   if (!prompt.ok) return { ok: false, result: refuse(prompt.message) };
-  const provider = agentProviderFor(run);
+  const provider = agentProviderFor(run, stage);
   if ("body" in provider) return { ok: false, result: provider };
 
   const session = startPlanSession(run.vault, run.slug, { env: run.ctx.env });

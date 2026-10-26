@@ -59,7 +59,7 @@
 
 import { z } from "zod";
 import { readFileSync } from "node:fs";
-import { createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
+import { CHECK_INTENT, createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
 import { checkWork, radioScriptsChecked } from "./check";
@@ -419,11 +419,11 @@ const CRITIQUE_ARGS = z.object({
  * survivors come back, as line comments, and are saved under the work's `.pablo/critique/` for review mode. The book
  * is not changed and no branch is made.
  */
-/** The critic's model (the planner role), or the test injection; a planner that cannot be built is exit 1. Shared by `critique` and `check --across`. */
+/** The critic's model (the planner role, under the `check` intent), or the test injection; a planner that cannot be built is exit 1. Shared by `critique` and `check --across`. */
 function criticAsk(ctx: VerbContext, projectDir: string): Ask | VerbResult {
   if (critiqueModel.ask !== undefined) return critiqueModel.ask;
   try {
-    return adapterAsk(createPlanner(loadConfig({ env: ctx.env, projectDir }), { keys: { env: ctx.env }, claude: { env: ctx.env } }).adapter);
+    return adapterAsk(createPlanner(loadConfig({ env: ctx.env, projectDir }), { keys: { env: ctx.env }, claude: { env: ctx.env }, intent: CHECK_INTENT }).adapter);
   } catch (error) {
     return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
   }
