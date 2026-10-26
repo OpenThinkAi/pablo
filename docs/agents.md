@@ -87,7 +87,7 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `timeline` | The bible's timeline as of a date |
 | `save` | Write the premise, acts, beats or a bible file, validated and committed |
 | `write` (`draft_chapter`, `draft_unit` are deprecated aliases, removed next release) | Draft one unit on the writer model; returns the branch and a receipt, never the prose |
-| `revise` (`revise_passage` is a deprecated alias, removed next release) | Revise a passage on the writer model; the result lands on a `revise/` branch for the author |
+| `revise` (`revise_passage` is a deprecated alias for `revise` with `branch`, removed next release) | Revise a passage on the writer model; with `branch` the result lands on a `revise/` branch for the author |
 | `revise` | The same, but returns the candidate text instead of committing it |
 | `check` | Tells, banned names and provenance gaps in the drafted text |
 | `critique` | Comment on a change branch: continuity contradictions, things mentioned before their date, voice tells |

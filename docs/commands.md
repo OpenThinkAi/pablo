@@ -305,7 +305,7 @@ Sends one passage of a file to the local model with your instruction and returns
 candidate. It never changes the file. Find the passage by quoting it, or with
 `--start`/`--end` character offsets into the body (frontmatter excluded). Returns
 `{ok, candidate, span, receipt}`. To keep a candidate, use the screen's revise
-action, which commits it on a `revise/<id>` branch.
+action, or `--branch` (with `--passage`), which commit it on a `revise/<id>` branch.
 
 ---
 
@@ -317,7 +317,7 @@ on their own branch:
 | Branch | Made by |
 |---|---|
 | `draft/...` | `write` |
-| `revise/<id>` | revising in the screen, or the MCP `revise_passage` tool |
+| `revise/<id>` | revising in the screen, or the MCP `revise` tool with `branch` |
 | `edit/...` | editing by hand in the screen |
 | `plan/...` | an agent session's planning writes; `promote`; `research save`; `fact record`; `agent --tag-facts` |
 | `reader/<round>` | `notes pull` |
@@ -553,7 +553,7 @@ It serves:
 | Area | Tools |
 |---|---|
 | Where things stand | `resume`, `status`, `timeline` |
-| Writing | `write`, `prose`, `revise` (deprecated aliases, removed next release: `draft_unit`, `draft_chapter` for `write`; `revise_passage` for `revise`) |
+| Writing | `write`, `prose`, `revise` (deprecated aliases, removed next release: `draft_unit`, `draft_chapter` for `write`; `revise_passage` for `revise` with `branch`) |
 | Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `record_fact` |
 | Setup and publishing | `output`, `migrate`, `publish` |
 | Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule` |

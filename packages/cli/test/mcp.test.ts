@@ -185,6 +185,14 @@ test('callTool("status", {project: "nope"}) is a normal result carrying ok:false
   expect(body).toMatchObject({ ok: false, code: 2 });
 });
 
+test("revise with branch needs a passage (it is what revise_passage aliases)", async () => {
+  const result = await client.callTool({
+    name: "revise",
+    arguments: { project: "ice-house", file: "chapters/01.md", instruction: "tighten", start: 0, end: 5, branch: true },
+  });
+  expect(parseTextBody(result)).toMatchObject({ ok: false, code: 2 });
+});
+
 test('callTool("check", {project: "ice-house"}) parses with hits/unprovenanced', async () => {
   const result = await client.callTool({ name: "check", arguments: { project: "ice-house" } });
 
