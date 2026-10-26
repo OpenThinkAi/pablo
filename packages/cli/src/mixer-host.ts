@@ -30,7 +30,7 @@ import { MUTATIONS } from "../views/mixer-protocol";
 import type { ClipAudioPayload, ManifestCue, ManifestLine, MixDiff, MixPayload, MixSource, MixVersionInfo, PeaksPayload, SavedMixPayload } from "../views/mixer-protocol";
 import { runCasting } from "./casting";
 import type { CastingDeps } from "./casting";
-import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./reader-host";
+import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./ui-leaf-host";
 import { createNotesHost } from "./mixer-notes-host";
 import type { NotesHost } from "./mixer-notes-host";
 import { REVIEW_CSP, castingDir, episodeTitle } from "./review-host";
