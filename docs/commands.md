@@ -115,11 +115,12 @@ pablo resume --project <slug>
 ```
 
 The one call an agent makes to get up to speed on a work. Returns
-`{format, title, core, outputs, waiting[], last, open, next, track, brief?, notices?}`:
+`{format, title, core, outputs, waiting[], last, open, next, track, realNames?, brief?, notices?}`:
 
 | Field | What it holds |
 |---|---|
 | `track` | the work's track (`fiction`, `historical-fiction` or `nonfiction`), as `status` reports it |
+| `realNames` | `false` when the work's `pablo.json` sets `realNames: false` (distilled facts use the bible's invented names); omitted when real names are allowed, the default. See `docs/configuration.md` |
 | `core`, `outputs` | the same two layers as `status` |
 | `last` | the newest dated file in `notes/` and the last commit touching the work |
 | `open` | every `[pick]` placeholder, plus every bullet under a "Decisions" or "Open questions" heading in `bible/` and the beats file |

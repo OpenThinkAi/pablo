@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CORE_STAGE_IDS, coreStages, readCoreState } from "../src/core/machine";
-import { readMarker, trackOf, writeMarker } from "../src/marker";
+import { readMarker, realNamesOf, trackOf, writeMarker } from "../src/marker";
 import { buildResume, formatResumeProse } from "../src/resume";
 import { DEFAULT_TRACK, TRACKS, isTrackId, trackDefinition, trackIds } from "../src/tracks/registry";
 import { formatStatusProse, readWorkStatus } from "../src/work-state";
@@ -137,5 +137,45 @@ test("status and resume report a declared track", async () => {
   expect(resume.track).toBe("historical-fiction");
   expect(formatResumeProse(resume)).toContain("track: historical-fiction");
 
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("realNames defaults to true, is read as written, and refuses a non-boolean", () => {
+  const { root, work } = tempWork();
+  const set = (value: unknown): void => {
+    const path = join(work, "pablo.json");
+    const data = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    writeFileSync(path, JSON.stringify({ ...data, realNames: value }));
+  };
+  const absent = readMarker(work);
+  expect(absent.ok && realNamesOf(absent.marker)).toBe(true);
+  expect(absent.ok && absent.marker.realNames).toBeUndefined();
+
+  set(false);
+  const off = readMarker(work);
+  expect(off.ok && realNamesOf(off.marker)).toBe(false);
+  set(true);
+  const on = readMarker(work);
+  expect(on.ok && realNamesOf(on.marker)).toBe(true);
+
+  set("no");
+  const bad = readMarker(work);
+  expect(bad.ok).toBe(false);
+  if (!bad.ok) expect(bad.message).toContain('"realNames"');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("resume reports realNames: false only when the work sets it", async () => {
+  const { root, work } = tempWork();
+  const before = await buildResume(work, "ice-house", NO_THINK);
+  expect(before).not.toHaveProperty("realNames");
+  expect(formatResumeProse(before)).not.toContain("realNames");
+
+  const path = join(work, "pablo.json");
+  const data = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  writeFileSync(path, JSON.stringify({ ...data, realNames: false }));
+  const after = await buildResume(work, "ice-house", NO_THINK);
+  expect(after.realNames).toBe(false);
+  expect(formatResumeProse(after)).toContain("realNames: false");
   rmSync(root, { recursive: true, force: true });
 });
