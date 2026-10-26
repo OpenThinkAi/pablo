@@ -69,7 +69,7 @@ import { VERSION } from "./version";
 import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
-const P0_VERBS = [
+export const P0_VERBS = [
   "init",
   "resume",
   "status",
