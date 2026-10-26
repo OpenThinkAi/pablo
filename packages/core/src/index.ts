@@ -18,3 +18,4 @@ export {
   continuityFile,
   outputContinuityFile,
 } from "./work-paths";
+export * from "./web/fetch";
