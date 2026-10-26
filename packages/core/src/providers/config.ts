@@ -27,6 +27,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ProviderConfigError } from "./errors";
 import { keySourceFor } from "./keys";
+import { readWebConfig } from "../web/search";
+import type { WebConfig } from "../web/search";
 import type { KeySource } from "./keys";
 
 /** Which adapter drives a provider: an OpenAI-compatible endpoint, or Anthropic's Messages API. */
@@ -83,6 +85,8 @@ export interface PabloConfig {
   readonly intents: ReadonlyMap<string, string>;
   /** Readers by name (the `readers` key of the config file); empty when there are none. */
   readonly readers: ReadonlyMap<string, ReaderConfig>;
+  /** The `web` key: `web.search` names the `web_search` backend. Absent when not configured. */
+  readonly web?: WebConfig;
 }
 
 export const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:8002/v1";
@@ -163,7 +167,8 @@ export function parseConfig(text: string, source = "the config file"): PabloConf
   const defaultProvider = readDefault(raw["default"], providers, source);
   const intents = readIntents(raw["intents"], providers, source);
   const readers = readReaders(raw["readers"], source);
-  return { providers, defaultProvider, intents, readers };
+  const web = readWebConfig(raw["web"], source);
+  return { providers, defaultProvider, intents, readers, web };
 }
 
 export interface LoadConfigOptions {

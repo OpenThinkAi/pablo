@@ -32,6 +32,9 @@ text) is reported by name the first time a command needs a model; nothing is sen
   "readers": {
     "sam": { "github": "sam-reads", "name": "Sam Lee", "email": "sam@example.com" }
   },
+  "web": {
+    "search": { "backend": "searxng", "url": "http://127.0.0.1:8080" }
+  },
   "editor": "nvim"
 }
 ```
@@ -54,6 +57,17 @@ always present; an entry named `local` changes only the fields it sets.
 
 Common local endpoints: LM Studio `http://127.0.0.1:1234/v1`, Ollama
 `http://127.0.0.1:11434/v1`, llama.cpp's server `http://127.0.0.1:8080/v1`.
+
+## `web`
+
+`web.search` names the backend `web_search` uses. With no `web.search` block,
+`web_search` fails with "no search backend configured".
+
+| Field | Meaning | Default |
+|---|---|---|
+| `backend` | `"searxng"` (self-hosted, no API key) | required |
+| `url` | Base URL of the backend, http or https. pablo calls `<url>/search?format=json`; the SearXNG instance must list `json` under `search.formats` | required |
+| `timeoutMs` | How long to wait for an answer | `15000` |
 
 ### API keys
 

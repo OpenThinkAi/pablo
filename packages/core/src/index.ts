@@ -4,6 +4,7 @@ export * from "./markup";
 export * from "./pack";
 export * from "./providers";
 export * from "./diff";
+export * from "./web";
 export { joinManuscript, joinParagraphs, joinSentences, splitManuscript, splitSentences } from "./sentences";
 export type { FactEntry, FactLine, FactScan, Provenance } from "./facts";
 export { establishedByOf, formatFactLine, formatProvenance, parseFactLine, scanFacts, unitTag, withProvenance } from "./facts";
