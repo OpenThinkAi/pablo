@@ -317,7 +317,7 @@ on their own branch:
 | `draft/...` | `write` |
 | `revise/<id>` | revising in the screen, or the MCP `revise_passage` tool |
 | `edit/...` | editing by hand in the screen |
-| `plan/...` | an agent session's planning writes; `promote`; `agent --tag-facts` |
+| `plan/...` | an agent session's planning writes; `promote`; `research save`; `fact record`; `agent --tag-facts` |
 | `reader/<round>` | `notes pull` |
 
 `status` and `resume` list them under `waiting`.
@@ -403,6 +403,43 @@ pablo promote --project <slug> --finding <id> --keep <type>
 Settles a `check --across` finding. The kept output's fact goes into `facts.md`
 (the facts every output must honour) on a `plan/` branch for review. Each
 contradicting unit gets a comment on its line there.
+
+### research
+
+```
+pablo research save --project <slug> --title <text> --note <text> --source <url> [--source <url>]...
+```
+
+Keeps a research finding as `research/<slug>.md` in the work: the title, the
+retrieval date, the note, then a Sources list. At least one `--source` (a URL or
+a full citation) is required, and a note never replaces an earlier one (the slug
+gets a `-2` suffix). The write lands on a new `plan/` branch for you to review.
+The same writer is the harness's `save_research` tool, and over MCP this verb is
+the `save_research` tool (sources go in `sources`).
+
+```
+{ok: true, path, branch, sha?}
+```
+
+### fact
+
+```
+pablo fact record --project <slug> --fact <text> --where continuity|<bible file> --kind researched|invented|author
+                  [--source <citation>] [--heading <text>] [--chapter chNN]
+pablo fact record --project <slug> --fact <text> --kind author --promote --established-by <output>/<unit>
+```
+
+Appends one fact, tagged with where it came from: `researched` needs a
+`--source` (several are joined into one citation), `invented` and `author` need
+none. It goes to `continuity` or a bible file, under `--heading` when given, or
+with `--promote` to `facts.md` (the facts every output honours), which needs
+`--established-by` such as `novel/ch03`. Never to `research/`. The write lands on
+a new `plan/` branch for you to review. The same writer is the harness's
+`record_fact` tool, and over MCP this verb is the `record_fact` tool.
+
+```
+{ok: true, path, line, branch, sha?}
+```
 
 ---
 
@@ -515,7 +552,7 @@ It serves:
 |---|---|
 | Where things stand | `resume`, `status`, `timeline` |
 | Writing | `write`, `draft_unit`, `draft_chapter`, `prose`, `revise`, `revise_passage` |
-| Planning and checks | `save`, `check`, `critique`, `promote` |
+| Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `record_fact` |
 | Setup and publishing | `output`, `migrate`, `publish` |
 | Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule` |
 | Reading | `read`, `search` |

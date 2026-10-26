@@ -77,6 +77,8 @@ const P0_VERBS = [
   "save",
   "check",
   "promote",
+  "research",
+  "fact",
   "migrate",
   "merge",
   "publish",
@@ -166,6 +168,12 @@ function helpText(): string {
     "  pablo promote --project <slug> --finding <id> --keep <type>",
     "                                            a finding's fact to facts.md on a plan/ branch,",
     "                                            commenting the contradicting units' lines",
+    "  pablo research save --project <slug> --title T --note N --source URL [--source URL]...",
+    "                                            keep a finding with its sources as research/<slug>.md",
+    "                                            on a plan/ branch (also the save_research MCP tool)",
+    "  pablo fact record --project <slug> --fact F --where continuity|<bible file> --kind researched|invented|author",
+    "                    [--source CITATION] [--heading H] [--chapter chNN] [--promote --established-by novel/ch03]",
+    "                                            one tagged fact on a plan/ branch (also record_fact over MCP)",
     "  pablo migrate lines --project <slug> [--dry-run]",
     `                                            one-time split of ${OUTPUTS.novel.artifactDir}/*.md to one`,
     "                                            sentence per line, committed on its own",
@@ -593,6 +601,14 @@ export function acrossText(raw: unknown): string {
       ].join("\n"),
     )
     .join("\n");
+}
+
+/** Plain-text output for `research save` and `fact record` (AGT-2106). */
+export function researchFactText(raw: unknown): string {
+  const body = raw as Record<string, unknown>;
+  if (body["ok"] !== true) return String(body["message"]);
+  const what = typeof body["line"] === "string" ? `recorded ${String(body["line"])} ->` : "saved";
+  return [`pablo: ${what} ${String(body["path"])} on ${String(body["branch"])}`, "  review the branch in the screen (pablo), then merge it"].join("\n");
 }
 
 /** Plain-text output for `promote` (AGT-1671). */
@@ -1725,6 +1741,18 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return EXIT_REFUSED;
     }
     return await runVerbEntry("promote", args, cwd, promoteText);
+  }
+
+  // `research save` and `fact record` (AGT-2106) run off their `VERBS` entries, as `pablo mcp` does.
+  if (args.verb === "research" || args.verb === "fact") {
+    const sub = args.verb === "research" ? "save" : "record";
+    const usage = `pablo ${args.verb} ${sub} --project <slug> ...`;
+    if (projectPath === undefined || args.rest[0] !== sub) {
+      const message = args.rest[0] !== sub ? `pablo: ${args.verb}: the only action is "${sub}" (${usage})` : `pablo: ${args.verb} ${sub} requires --project <slug>`;
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    return await runVerbEntry(args.verb, args, cwd, researchFactText);
   }
 
   // `output list|add|remove|plan` (AGT-1669) runs off its one `VERBS` entry, as `pablo mcp` does.
