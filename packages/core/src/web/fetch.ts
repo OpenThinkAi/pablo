@@ -16,6 +16,10 @@ export interface WebFetchOptions {
   timeoutMs?: number;
   /** Truncate the extracted markdown to roughly this many tokens. Default 4000. */
   maxTokens?: number;
+  /** Resolve a hostname to its addresses for the private-address check; defaults to `node:dns`. */
+  resolveHost?: (host: string) => Promise<string[]>;
+  /** Redirect hops followed (each re-checked) before giving up. Default 5. */
+  maxRedirects?: number;
   /** Clock for the retrieval date. */
   now?: () => Date;
 }
@@ -35,7 +39,7 @@ export interface WebFetchResult {
   tokens: number;
 }
 
-export type WebFetchErrorCode = "bad-url" | "bad-scheme" | "http-status" | "too-large" | "timeout" | "unsupported-type" | "network";
+export type WebFetchErrorCode = "bad-url" | "bad-scheme" | "blocked-host" | "too-many-redirects" | "http-status" | "too-large" | "timeout" | "unsupported-type" | "network";
 
 export class WebFetchError extends Error {
   constructor(readonly code: WebFetchErrorCode, message: string) {
@@ -76,25 +80,37 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
   }, timeoutMs);
   try {
     let res: Response;
-    try {
-      res = await doFetch(parsed.href, {
-        signal: controller.signal,
-        headers: { accept: "text/html,text/plain,text/markdown;q=0.9,*/*;q=0.1", "user-agent": "pablo-web-fetch" },
-        redirect: "follow",
-      });
-    } catch (err) {
-      throw wrapNetwork(err, timedOut, timeoutMs, parsed.href);
+    let current = parsed;
+    const maxRedirects = options.maxRedirects ?? 5;
+    for (let hop = 0; ; hop++) {
+      try {
+        await assertPublicHost(current, options.resolveHost);
+        res = await doFetch(current.href, {
+          signal: controller.signal,
+          headers: { accept: "text/html,text/plain,text/markdown;q=0.9,*/*;q=0.1", "user-agent": "pablo-web-fetch" },
+          redirect: "manual",
+        });
+      } catch (err) {
+        throw wrapNetwork(err, timedOut, timeoutMs, current.href);
+      }
+      if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+        if (hop >= maxRedirects) throw new WebFetchError("too-many-redirects", `${parsed.href} redirected more than ${maxRedirects} times`);
+        let next: URL;
+        try {
+          next = new URL(res.headers.get("location")!, current);
+        } catch {
+          throw new WebFetchError("bad-url", `${current.href} redirected to an invalid URL`);
+        }
+        if (next.protocol !== "http:" && next.protocol !== "https:") {
+          throw new WebFetchError("bad-scheme", `redirected to a non-http(s) URL: ${next.href}`);
+        }
+        await res.body?.cancel().catch(() => {});
+        current = next;
+        continue;
+      }
+      break;
     }
-    const finalUrl = res.url || parsed.href;
-    let finalProtocol = parsed.protocol;
-    try {
-      finalProtocol = new URL(finalUrl).protocol;
-    } catch {
-      /* keep the requested scheme */
-    }
-    if (finalProtocol !== "http:" && finalProtocol !== "https:") {
-      throw new WebFetchError("bad-scheme", `redirected to a non-http(s) URL: ${finalUrl}`);
-    }
+    const finalUrl = current.href;
     if (!res.ok) throw new WebFetchError("http-status", `${parsed.href} returned HTTP ${res.status}`);
 
     const type = (res.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
@@ -139,6 +155,46 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Hosts the fetcher refuses: loopback, private, link-local and other non-public ranges. */
+export function isBlockedAddress(raw: string): boolean {
+  const host = raw.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+  }
+  if (host.includes(":")) {
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
+    if (mapped) return isBlockedAddress(mapped[1]!);
+    if (/^::ffff:[0-9a-f]+:[0-9a-f]+$/.test(host)) return true;
+    if (host === "::" || host === "::1") return true;
+    const first = parseInt(host.split(":")[0] || "0", 16);
+    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+  }
+  return false;
+}
+
+async function assertPublicHost(url: URL, resolveHost?: (host: string) => Promise<string[]>): Promise<void> {
+  const host = url.hostname;
+  if (isBlockedAddress(host)) throw new WebFetchError("blocked-host", `refusing to fetch a local or private address: ${host}`);
+  if (/^[\d.]+$/.test(host) || host.includes(":")) return; // an IP literal, already checked
+  const resolve =
+    resolveHost ??
+    (async (name: string) => {
+      const dns = await import("node:dns/promises");
+      return (await dns.lookup(name, { all: true })).map((r) => r.address);
+    });
+  let addresses: string[];
+  try {
+    addresses = await resolve(host);
+  } catch (err) {
+    throw new WebFetchError("network", `could not resolve ${host}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const bad = addresses.find(isBlockedAddress);
+  if (bad) throw new WebFetchError("blocked-host", `${host} resolves to a local or private address (${bad})`);
 }
 
 function wrapNetwork(err: unknown, timedOut: boolean, timeoutMs: number, url: string): Error {
