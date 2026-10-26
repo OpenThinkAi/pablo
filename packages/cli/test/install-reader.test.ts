@@ -152,7 +152,7 @@ test("the script is plain POSIX sh with set -eu, parses, and only runs main on i
   expect(res.stdout.toString()).toBe("");
 });
 
-test("fresh Mac with Homebrew: installs bun and gh with brew, pablo with bun, signs in, starts the tray, in order", () => {
+test("fresh Mac with Homebrew: installs bun and gh with brew, pablo with bun, signs in, in order", () => {
   const sb = sandbox();
   freshMac(sb);
   const { code, out, calls } = sb.run();
@@ -164,7 +164,6 @@ test("fresh Mac with Homebrew: installs bun and gh with brew, pablo with bun, si
     "bun add -g @openthink/pablo@latest",
     "bun pm -g trust @openthink/ui-leaf",
     "gh auth login",
-    "pablo tray install",
   ].map((c) => calls.findIndex((x) => x === c));
   expect(order.every((i) => i >= 0)).toBe(true);
   expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -192,11 +191,10 @@ esac`,
   expect(calls.some((c) => c.startsWith("curl -fsSL https://api.github.com/repos/cli/cli/releases/latest"))).toBe(true);
   expect(calls.some((c) => c.includes("releases/download/v2.99.0/gh_2.99.0_macOS_arm64.zip"))).toBe(true);
   expect(existsSync(join(sb.home, ".bun", "bin", "gh"))).toBe(true);
-  expect(calls).toContain("pablo tray install");
   expect(calls.some((c) => c.startsWith("brew"))).toBe(false);
 });
 
-test("re-run when everything is present: nothing is reinstalled, pablo is upgraded, sign-in is skipped, the tray is refreshed", () => {
+test("re-run when everything is present: nothing is reinstalled, pablo is upgraded, sign-in is skipped", () => {
   const sb = sandbox();
   freshMac(sb, { brew: false });
   installedBun(sb);
@@ -208,7 +206,6 @@ test("re-run when everything is present: nothing is reinstalled, pablo is upgrad
   expect(calls.some((c) => c.startsWith("curl"))).toBe(false);
   expect(calls).toContain("bun add -g @openthink/pablo@latest");
   expect(calls).not.toContain("gh auth login");
-  expect(calls).toContain("pablo tray install");
   expect(out).toContain("already signed in");
 });
 
@@ -224,7 +221,6 @@ test("no Chrome: says so plainly, points at the download, does not install it, a
   expect(out).toContain("https://www.google.com/chrome/");
   expect(out.split("https://www.google.com/chrome/").length).toBeGreaterThan(2); // repeated in the closing summary
   expect(calls.some((c) => /chrome/i.test(c))).toBe(false);
-  expect(calls).toContain("pablo tray install");
 });
 
 test("missing Xcode Command Line Tools: opens Apple's installer and stops before installing anything", () => {
@@ -248,7 +244,7 @@ test("not a Mac: refuses before doing anything", () => {
   expect(calls.filter((c) => !c.startsWith("uname"))).toEqual([]);
 });
 
-test("a failed pablo install stops with a clear message and never reaches sign-in or the tray", () => {
+test("a failed pablo install stops with a clear message and never reaches sign-in", () => {
   const sb = sandbox();
   freshMac(sb, { brew: false });
   installedGh(sb, false);
@@ -258,7 +254,6 @@ test("a failed pablo install stops with a clear message and never reaches sign-i
   expect(out).toContain("Stopped: Installing pablo did not work");
   expect(out).toContain("run the same command again");
   expect(calls).not.toContain("gh auth login");
-  expect(calls).not.toContain("pablo tray install");
 });
 
 test("the chapter-window binary missing after install is caught, with the fix named", () => {
@@ -273,7 +268,6 @@ test("the chapter-window binary missing after install is caught, with the fix na
   expect(code).not.toBe(0);
   expect(out).toContain("chapter-window component did not finish downloading");
   expect(out).toContain("bun pm -g trust @openthink/ui-leaf");
-  expect(calls).not.toContain("pablo tray install");
 });
 
 test("GitHub sign-in with no terminal to type in is a clear stop; a failed sign-in is too", () => {
@@ -293,14 +287,11 @@ test("GitHub sign-in with no terminal to type in is a clear stop; a failed sign-
   const failed = sb2.run();
   expect(failed.code).not.toBe(0);
   expect(failed.out).toContain("sign-in did not finish");
-  expect(failed.calls).not.toContain("pablo tray install");
 });
 
 test("every pablo verb the installer runs or tells the reader to run exists in the CLI (checked against cli.ts, not a stub)", () => {
   const script = readFileSync(SCRIPT, "utf8");
   const cli = readFileSync(join(import.meta.dir, "..", "src", "cli.ts"), "utf8");
-  expect(script).toContain("pablo tray install");
-  expect(cli).toContain("pablo tray install|uninstall");
   expect(script).toContain("pablo read --list");
   expect(cli).toContain("pablo read --list");
 });

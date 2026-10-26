@@ -33,7 +33,6 @@
   "files": [
     "src",
     "views",
-    "tray",
     "policies",
     "casting",
     "!casting/.venv",

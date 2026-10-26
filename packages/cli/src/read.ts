@@ -15,7 +15,7 @@
  *  - `<id>.marks.json` / `<id>.sent.json` — Submit's files (AGT-1585, `submit.ts`; pass
  *    `cachedRoundDir(ref)` as its `dir` and `CachedRound.id` as the round id); a
  *    `<id>.sent.json` is what `listReaderRounds` reports as `sent`. A re-fetch keeps them.
- * Later tickets (the reader view, Submit, the tray) read it with `readCachedRound`
+ * Later tickets (the reader view, Submit) read it with `readCachedRound`
  * / `cachedRoundDir` and list rounds with `listReaderRounds`.
  */
 
@@ -172,7 +172,7 @@ export type ListOutcome =
   | { readonly ok: true; readonly rounds: readonly ReaderRound[]; readonly notices: readonly string[] }
   | { readonly ok: false; readonly code: 1; readonly message: string };
 
-/** The one GitHub search that finds the reader's waiting rounds; the tray asks it with a conditional request. */
+/** The one GitHub search that finds the reader's waiting rounds. */
 export const ROUND_SEARCH_ENDPOINT = "search/issues";
 export function roundSearchFields(org: string = READING_ORG): [string, string][] {
   return [
@@ -191,8 +191,8 @@ export interface ListOptions {
 /**
  * The reader's rounds: open PRs in `<org>/*-reading` repos with the signed-in `gh` user as requested
  * reviewer, plus rounds this machine has submitted (`sent`) whose PR is still open. Waiting rounds
- * first, newest first within each group. The one function the list verb, the reader view and the
- * tray share. A PR whose chapter list cannot be read is still listed (with no chapters) and noticed.
+ * first, newest first within each group. The one function the list verb and the reader view
+ * both use. A PR whose chapter list cannot be read is still listed (with no chapters) and noticed.
  */
 export function listReaderRounds(options: ListOptions): ListOutcome {
   const { run } = options;

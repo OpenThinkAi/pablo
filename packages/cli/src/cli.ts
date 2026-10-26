@@ -65,7 +65,6 @@ import { openReader } from "./reader-host";
 import { openReview } from "./review-host";
 import { openMixer } from "./mixer-host";
 import { createNotesHost } from "./mixer-notes-host";
-import { realTrayDeps, runTray } from "./tray/cli";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
 import { TARGET_USAGE } from "./voice-rules";
@@ -97,7 +96,6 @@ const P0_VERBS = [
   "agent",
   "read",
   "search",
-  "tray",
   "doctor",
   "audition",
   "takes",
@@ -224,9 +222,6 @@ function helpText(): string {
     "  pablo notes pull --project <slug>        each reader's submitted review becomes a",
     "                                            reader/<round> branch: one commit per suggestion,",
     "                                            authored as the reader; comments for review mode",
-    "  pablo tray                               the reader's tray: poll GitHub every 30-60s for new",
-    "                                            rounds, notify, open one from the menu-bar icon",
-    "  pablo tray install|uninstall             install/remove the launchd agent that runs the tray",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list [--project <slug>]      every voice, and every rule with its id",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
@@ -1510,11 +1505,6 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // `read <path> --project <slug>` (a file in a work) is the author's, below.
   if (args.verb === "read" && args.project === undefined && (args.list || parseRoundRef(args.rest[0] ?? "") !== undefined)) {
     return args.list || args.noOpen ? runReadRounds(args) : await runReadView(args);
-  }
-
-  // `tray` (AGT-1589) is the reader's: no vault, no project, never an MCP tool.
-  if (args.verb === "tray") {
-    return await runTray(args.rest[0], realTrayDeps());
   }
 
   // `doctor` (AGT-1678) reports the machine, not a work: no vault, no project.

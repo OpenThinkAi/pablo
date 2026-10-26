@@ -27,7 +27,6 @@ import type { MountOptions, MutationHandler, View } from "@openthink/ui-leaf";
 import { parseDraft } from "../views/reader-protocol";
 import type { HostAnswer, ReaderData, ViewChapter } from "../views/reader-protocol";
 import { VIEWS_ROOT, executable, findChrome, resolveUiLeafBinary } from "./ui-leaf-host";
-import { markReaderActive } from "./tray/activity";
 import { cachedRoundDir, fetchRound, readCachedRound } from "./read";
 import type { CachedRound, RoundRef } from "./read";
 import { CHAPTER_PATH, realRunner } from "./share";
@@ -230,8 +229,6 @@ export async function openReader(ref: RoundRef, signal?: AbortSignal, overrides:
   const binaryPath = deps.binaryPath();
   const data = host.data();
   let view: View;
-  // While this window is open the tray's self-updater must not replace pablo's files (AGT-1598).
-  const release = markReaderActive(deps.env);
   try {
     view = await deps.mount({
       view: "reader",
@@ -249,7 +246,6 @@ export async function openReader(ref: RoundRef, signal?: AbortSignal, overrides:
       ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
-    release();
     return { ok: false, code: 1, message: `pablo: read: could not open the reader window (${(error as Error).message})` };
   }
 
@@ -263,7 +259,6 @@ export async function openReader(ref: RoundRef, signal?: AbortSignal, overrides:
     timer = undefined;
   });
   const closed = view.closed.then(() => {
-    release();
     if (timer !== undefined) clearTimeout(timer);
   });
   return { ok: true, view, closed };

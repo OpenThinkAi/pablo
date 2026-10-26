@@ -7,7 +7,7 @@ repository, each round is a pull request, and a reader's notes are a review on i
 
 > **Current limitation.** Reading repositories are created in the `OpenThinkAi`
 > GitHub organization, and that is not configurable yet. Outside that organization,
-> `share`, `read --list` and the tray will not work. Everything else in pablo does
+> `share` and `read --list` will not work. Everything else in pablo does
 > not depend on this.
 
 ## For the author
@@ -50,8 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/OpenThinkAi/pablo/main/install-read
 ```
 
 It says what it is doing at each step. It installs what your Mac is missing (Bun and
-the GitHub CLI), installs pablo, asks you to sign in to GitHub in your browser, and
-starts pablo's menu-bar tray, which tells you when a chapter is ready. It also checks
+the GitHub CLI), installs pablo, and asks you to sign in to GitHub in your browser. It also checks
 for Apple's developer tools (if they are missing it opens Apple's installer; run the
 line again when that finishes) and [Google Chrome](https://www.google.com/chrome/),
 where chapters open. Running it again is safe: it skips what is installed and
@@ -60,19 +59,23 @@ upgrades pablo.
 You also need a GitHub account with access to the book's reading repo. The author
 invites you; accept the invitation from GitHub's email once per book.
 
-The tray keeps pablo up to date by itself. Every six hours it checks for a new
-version and installs it while no chapter window is open; if anything fails it puts the
-previous version back and waits a day before trying that version again. To turn this
-off, set `{"tray": {"autoUpdate": false}}` in `~/.config/pablo/config.json`.
-
-Without the tray, `pablo read --list` shows the rounds waiting for you and
+To upgrade pablo, run the install line again. `pablo read --list` shows the rounds waiting for you and
 `pablo read <book>-reading#<number>` opens one.
 
-## Removing the tray
+## Removing pablo
+
+To remove pablo, run `bun remove -g @openthink/pablo`.
+
+## Removing an old tray
+
+Earlier versions installed a menu-bar tray (`pablo tray`), which this version
+removes. Running the install line again removes it for you. To do it by hand instead, run:
 
 ```sh
-pablo tray uninstall
+launchctl bootout gui/$(id -u)/ai.openthink.pablo.tray
+rm -f ~/Library/LaunchAgents/ai.openthink.pablo.tray.plist
+rm -rf ~/Library/Application\ Support/pablo/PabloTray.app
+rm -rf ~/.local/state/pablo/tray
 ```
 
-This stops it, removes its login item, its logs and its menu-bar helper. To remove
-pablo itself afterwards, `bun remove -g @openthink/pablo`.
+The `tray.autoUpdate` config key is gone too; pablo no longer reads it.

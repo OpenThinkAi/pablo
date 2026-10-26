@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/OpenThinkAi/pablo/main/install-reader.sh | sh
 #
 # Sets up a reader's Mac in one go: Xcode Command Line Tools check, Google Chrome check, Bun, the
-# GitHub CLI (gh), pablo itself (from npm), a GitHub sign-in, and pablo's menu-bar tray.
+# GitHub CLI (gh), pablo itself (from npm), and a GitHub sign-in.
 #
 # Safe to run again: it skips what is already there and upgrades pablo.
 # Safe to pipe into sh: everything lives in functions and nothing runs until the very last line,
@@ -138,7 +138,7 @@ install_bun() {
   ok "Bun is installed."
 }
 
-# gh without Homebrew: GitHub's own macOS download, placed beside bun (a folder pablo's tray also searches).
+# gh without Homebrew: GitHub's own macOS download, placed beside bun.
 install_gh_from_release() {
   tag=$(curl -fsSL "$GH_RELEASE_API" | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1)
   case "$tag" in
@@ -226,10 +226,17 @@ sign_in_github() {
   ok "Signed in to GitHub."
 }
 
-start_tray() {
-  step "Starting pablo's menu-bar tray (it tells you when a chapter is ready to read)"
-  must "Starting the tray" pablo tray install
-  ok "The tray is installed and will start whenever you log in."
+# Earlier versions installed a menu-bar tray. pablo no longer has a `tray` verb, so a leftover launchd
+# agent would fail and restart forever. Remove it when present; do nothing otherwise.
+remove_old_tray() {
+  plist="$HOME/Library/LaunchAgents/ai.openthink.pablo.tray.plist"
+  [ -f "$plist" ] || return 0
+  step "Removing the old pablo menu-bar tray (pablo no longer has one)"
+  launchctl bootout "gui/$(id -u)/ai.openthink.pablo.tray" >/dev/null 2>&1 || true
+  rm -f "$plist"
+  rm -rf "$HOME/Library/Application Support/pablo/PabloTray.app" "${XDG_STATE_HOME:-$HOME/.local/state}/pablo/tray"
+  rm -f "$HOME/Library/Logs/pablo/tray.log" "$HOME/Library/Logs/pablo/tray.err"
+  ok "The old tray is removed."
 }
 
 finish() {
@@ -250,7 +257,7 @@ main() {
   install_gh
   install_pablo
   sign_in_github
-  start_tray
+  remove_old_tray
   finish
 }
 

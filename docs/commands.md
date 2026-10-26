@@ -14,7 +14,7 @@ work has no valid `pablo.json` marker, and points you at `pablo init --adopt`. P
 | `2` | refused: a precondition is unmet (no project, no marker, a missing beat, a file that already exists...). The message names what is missing. |
 | `1` | error: something broke, or the verb is not implemented |
 
-`config` takes `--project` only to pick a work's `pablo.json` instead of the global file. These verbs take no `--project`: `prose`, `doctor`, `tray`, `read --list` and
+`config` takes `--project` only to pick a work's `pablo.json` instead of the global file. These verbs take no `--project`: `prose`, `doctor`, `read --list` and
 `read <round>`. `init` and `story` take a slug in other ways, described below.
 `pablo --version` (or `-v`) prints the installed version. `pablo --help` lists
 the verbs; a verb has no help page of its own, so `pablo <verb> --help` prints
@@ -737,17 +737,6 @@ vault, is refused. After a pull, the pull request is closed (not merged), its
 branches are deleted, and the round is marked `pulled`. It is never pulled twice.
 Returns `{ok, code, pulled[], skipped[{round, reason, message}], notices[]}`. Exit is
 `1` if any round errored and `2` if any was refused.
-
-### tray
-
-```
-pablo tray
-pablo tray install | uninstall
-```
-
-The reader's menu-bar app (macOS). It checks GitHub every 30-60 seconds for new
-rounds, sends a notification, and opens a round from the menu. `install` and
-`uninstall` add or remove the launchd agent that keeps it running.
 
 ---
 
