@@ -111,7 +111,7 @@ const P0_VERBS = [
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
 const LATER_VERBS = ["dry-run"] as const;
 
-const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
+export const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
 export const EXIT_OK = 0;
 export const EXIT_REFUSED = 2;
