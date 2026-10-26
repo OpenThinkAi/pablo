@@ -131,10 +131,13 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 (`a c`, AGT-1566) talks to the harness through a `Composer`
                 seam the cli passes to `runScreen` (`harness/compose.ts`: one
                 loop run per message, each given the previous run's returned
-                history); the tui knows nothing of providers. Saved sessions
-                (`sessions.ts`) are still the Agent SDK's format and unused
-                until neutral JSONL lands (AGT-2122): each `pablo agent` run
-                is a fresh conversation.
+                history); the tui knows nothing of providers. `pablo agent`
+                saves and resumes its conversation as provider-neutral JSONL
+                (`sessions.ts`, AGT-2122, D-14): a header line then one
+                `{message}` line per `ChatMessage` in the work's
+                `.pablo/sessions/<id>.jsonl`, plus `index.json`. An old
+                Agent-SDK-format file is reported as legacy and left alone;
+                the compose view does not save sessions yet.
                 `harness/loop.ts` (AGT-2120, D-12) is pablo's own agent loop
                 on any provider's `chat()`: model -> tool calls -> results ->
                 model to a final answer or the turn cap, emitting the same

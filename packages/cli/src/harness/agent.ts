@@ -135,6 +135,7 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   ctx.stderr.write(`pablo: starting a session on ${provider.adapter.id} (${provider.adapter.model})\n`);
   if (!args.json) ctx.stdout.write(`› ${args.message}\n`);
   try {
+    // Manual `next()` rather than `for await`: only it exposes the generator's return value, the conversation to save.
     const turn = runHarness(args.message, spec, deps.query ?? loopQuery, session.history);
     for (;;) {
       const next = await turn.next();

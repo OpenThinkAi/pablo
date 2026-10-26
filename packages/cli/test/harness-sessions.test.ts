@@ -123,6 +123,10 @@ test("a damaged current session is refused, not overwritten", async () => {
   writeFileSync(path, `${good}{"message":{"role":"us`);
   const resumed = chooseSession(dir, { fresh: false });
   expect(resumed.history).toHaveLength(2);
+  // ...and the next append lands on a clean line, so the session stays resumable.
+  appendMessages(dir, first.id, [{ role: "user", content: "c" }, { role: "assistant", content: "d" }]);
+  const after = loadSession(dir, first.id);
+  expect(after.kind === "ok" && after.history).toHaveLength(4);
 });
 
 test("a current session with no transcript yet is started under its id, not resumed", () => {

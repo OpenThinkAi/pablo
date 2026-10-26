@@ -884,9 +884,10 @@ pablo has no price for is named rather than counted as free). Each run is a fres
 conversation saved as provider-neutral JSONL in the work's `.pablo/sessions/`; the next
 run resumes it (on any provider, so a session can move between the local model and
 Claude), and `--new` starts a fresh one while the old file stays. A resumed Claude
-session replays earlier tool turns without their thinking blocks. A session file from
-before this format (the old Agent SDK's) is reported as legacy, not resumable, and left
-untouched; a new session starts instead. When the agent asks you a question, it
+session replays earlier tool turns without their thinking blocks. A session file saved
+by an older pablo (the old Agent SDK's format) is reported as legacy, not resumable, and left
+untouched; a new session starts instead. Only `pablo agent` saves and resumes; the
+screen's compose view starts fresh each time. When the agent asks you a question, it
 prints the choices and reads your answer from stdin (type a number to pick one).
 
 `--tag-facts` tags every untagged bible and continuity fact as researched, invented

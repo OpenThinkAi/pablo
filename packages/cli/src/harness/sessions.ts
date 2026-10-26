@@ -24,7 +24,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ChatMessage } from "@openthink/pablo-core";
 
@@ -121,7 +121,11 @@ export function appendMessages(workDir: string, id: string, messages: readonly C
   const path = transcriptPath(workDir, id);
   mkdirSync(sessionsDir(workDir), { recursive: true });
   let out = "";
-  if (!existsSync(path)) {
+  if (existsSync(path)) {
+    // A torn final line (a write cut short) was dropped on load; cut it from the file too, so this append starts on a clean line.
+    const text = readFileSync(path, "utf8");
+    if (text !== "" && !text.endsWith("\n")) truncateSync(path, Buffer.byteLength(text.slice(0, text.lastIndexOf("\n") + 1)));
+  } else {
     out += `${JSON.stringify({ pablo: "session", version: FORMAT_VERSION, id, startedAt: now().toISOString() })}\n`;
   }
   out += messages.map((message) => `${JSON.stringify({ message })}\n`).join("");
