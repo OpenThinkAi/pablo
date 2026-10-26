@@ -32,7 +32,7 @@ import { BEATS_FILE, LEGACY_CONTINUITY_FILE, NOVEL_CONTINUITY_FILE, parsePlanRow
 import type { PlanFileRow } from "@openthink/pablo-core";
 import { coreNext, coreStages, readCoreState } from "./core/machine";
 import { gitCommit } from "./init";
-import { markerPath, readMarker } from "./marker";
+import { markerPath, readMarker, trackOf } from "./marker";
 import type { Marker } from "./marker";
 import { dirtyPaths } from "./migrate";
 import { LEDGER_TEMPLATE } from "./novel/continuity";
@@ -211,6 +211,13 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   const legacy = legacyRefusal("add", workDir, found.marker.slug);
   if (legacy !== undefined) return legacy;
   if (found.marker.outputs[id] !== undefined) return refuse("add", `the work already has the ${id} output`);
+
+  // D-7: an output declares the tracks it allows; a work on another track cannot add it.
+  const track = trackOf(found.marker);
+  if (!def.def.tracks.includes(track)) {
+    const allowed = outputIds().filter((o) => (outputDefinition(o)?.tracks ?? []).includes(track));
+    return refuse("add", `the ${id} output is not allowed on the ${track} track (allowed: ${allowed.length === 0 ? "none" : allowed.join(", ")})`, [`<type>: ${allowed.join(" | ")}`]);
+  }
 
   // An output maps its units onto the core's beats: the core must be at beats first.
   const core = readCoreState(workDir);

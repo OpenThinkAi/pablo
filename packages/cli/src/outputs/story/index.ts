@@ -93,6 +93,7 @@ export const STORY: OutputDefinition = {
   artifactDir: STORY_DIR,
   rulesTemplate: STORY_RULES_TEMPLATE,
   soleUnit: STORY_UNIT,
+  tracks: ["fiction", "historical-fiction"],
   stages: ["draft", "revise", "publish"],
   plan: storyDefaultPlan,
   preconditions: storyPreconditions,

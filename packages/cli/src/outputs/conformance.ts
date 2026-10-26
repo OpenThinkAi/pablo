@@ -47,6 +47,7 @@ export const OUTPUT_FIELDS: Readonly<Record<string, FieldKind>> = {
   artifactDir: "string",
   rulesTemplate: "string",
   stages: "strings",
+  tracks: "strings",
   plan: "function",
   preconditions: "function",
   pack: "function",

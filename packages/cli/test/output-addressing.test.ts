@@ -394,6 +394,23 @@ test("output add refuses while the story core is not at beats, naming what is sh
   expect(existsSync(join(work, "outputs", "blog"))).toBe(false);
 });
 
+test("output add refuses a type the work's track does not allow, naming the allowed types (AGT-2105)", () => {
+  const { vault, work } = vaultWith({ novel: { dir: "chapters", added: "2026-09-01" } });
+  const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as Record<string, unknown>;
+  writeFileSync(join(work, "pablo.json"), `${JSON.stringify({ ...marker, track: "nonfiction" }, null, 2)}\n`);
+  git(vault, "commit", "-q", "-am", "nonfiction");
+  const refused = addOutput(vault, work, "radio");
+  expect(refused.ok).toBe(false);
+  if (!refused.ok) {
+    expect(refused.message).toContain("not allowed on the nonfiction track");
+    expect(refused.message).toContain("allowed: none");
+  }
+  expect(existsSync(join(work, "outputs", "radio"))).toBe(false);
+  // A fiction work (no track) still adds it.
+  const ok = vaultWith({ novel: { dir: "chapters", added: "2026-09-01" } });
+  expect(addOutput(ok.vault, ok.work, "radio").ok).toBe(true);
+});
+
 test("output add refuses a marker still on the deprecated format key, pointing at migrate outputs", () => {
   const { vault, work } = vaultWith(undefined);
   const refused = addOutput(vault, work, "blog");

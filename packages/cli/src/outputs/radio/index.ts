@@ -156,6 +156,7 @@ export const RADIO: OutputDefinition = {
   plural: "episodes",
   artifactDir: RADIO_DIR,
   rulesTemplate: RADIO_RULES_TEMPLATE,
+  tracks: ["fiction", "historical-fiction"],
   stages: RADIO_STAGES,
   plan: radioDefaultPlan,
   preconditions: radioPreconditions,
