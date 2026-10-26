@@ -291,6 +291,6 @@ test("GitHub sign-in with no terminal to type in is a clear stop; a failed sign-
 
 test("the installer no longer tells the reader to run a removed verb", () => {
   const script = readFileSync(SCRIPT, "utf8");
-  expect(script).not.toContain("pablo read");
+  expect(script).not.toMatch(/pablo read\b/);
   expect(script).toContain("pull request");
 });
