@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/OpenThinkAi/pablo/main/install-read
 ```
 
 It says what it is doing at each step. It installs what your Mac is missing (Bun and
-the GitHub CLI), installs pablo, asks you to sign in to GitHub in your browser. It also checks
+the GitHub CLI), installs pablo, and asks you to sign in to GitHub in your browser. It also checks
 for Apple's developer tools (if they are missing it opens Apple's installer; run the
 line again when that finishes) and [Google Chrome](https://www.google.com/chrome/),
 where chapters open. Running it again is safe: it skips what is installed and
@@ -59,7 +59,7 @@ upgrades pablo.
 You also need a GitHub account with access to the book's reading repo. The author
 invites you; accept the invitation from GitHub's email once per book.
 
-`pablo read --list` shows the rounds waiting for you and
+To upgrade pablo, run the install line again. `pablo read --list` shows the rounds waiting for you and
 `pablo read <book>-reading#<number>` opens one.
 
 ## Removing pablo

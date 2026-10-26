@@ -61,7 +61,7 @@ llama.cpp, MLX) or an Anthropic API key.
   checks before it drafts.
 - **[Configuration](docs/configuration.md):** models, keys, routing, readers.
 - **[Command reference](docs/commands.md):** every command and flag.
-- **[Sharing with readers](docs/readers.md):** reading rounds, the reader's installer.
+- **[Sharing with readers](docs/readers.md):** reading rounds and the reader's installer.
 
 A starter vault to copy is in [`examples/starter-vault`](examples/starter-vault).
 

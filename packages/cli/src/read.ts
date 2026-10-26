@@ -191,7 +191,7 @@ export interface ListOptions {
 /**
  * The reader's rounds: open PRs in `<org>/*-reading` repos with the signed-in `gh` user as requested
  * reviewer, plus rounds this machine has submitted (`sent`) whose PR is still open. Waiting rounds
- * first, newest first within each group. The one function the list verb, the reader view
+ * first, newest first within each group. The one function the list verb and the reader view
  * both use. A PR whose chapter list cannot be read is still listed (with no chapters) and noticed.
  */
 export function listReaderRounds(options: ListOptions): ListOutcome {

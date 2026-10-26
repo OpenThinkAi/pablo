@@ -465,7 +465,7 @@ export function shareRound(options: ShareOptions): ShareOutcome {
     if (access.kind === "invited") {
       notices.push(
         `pablo: share: ${reader.github} was invited to ${repo} (read access); they must accept the invitation GitHub emailed them ` +
-          `(once per book) before the round appears for them`,
+          `(once per book) before \`pablo read --list\` shows them the round`,
       );
     } else if (access.kind === "failed") {
       notices.push(`pablo: share: could not invite ${reader.github} to ${repo} (${access.reason}); add them as a collaborator with read access`);
