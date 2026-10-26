@@ -24,6 +24,7 @@ import { runCheck, screenChecks } from "./check";
 import { reviewCommentsOf } from "./critique";
 import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
+import { migrateTrack } from "./migrate-track";
 import { mergeDraftInProject } from "./novel/merge";
 import { initAdopt, initNovel, vaultAuthor } from "./init";
 import type { InitResult } from "./init";
@@ -182,6 +183,10 @@ function helpText(): string {
     "                                            story core plus a novel output (pablo.json",
     "                                            outputs, outputs/novel/, outline/beats.md,",
     "                                            facts.md), committed on its own",
+    "  pablo migrate track --project <slug> --track <t> [--dry-run]",
+    "                                            write the track (fiction, historical-fiction,",
+    "                                            nonfiction) into pablo.json, committed on its own;",
+    "                                            reports the new core stages the work lacks",
     "  pablo merge --project <slug> <draft/chNN>",
     "                                            merge a reviewed draft branch to main, then run",
     "                                            the after-write steps (outline, note, README,",
@@ -388,6 +393,8 @@ interface ParsedArgs {
   readonly file: string | undefined;
   /** `write --chapter N`; parsed and validated by `runWrite`, not here. */
   readonly chapter: string | undefined;
+  /** `migrate track --track <id>` (AGT-2104): the track to write into pablo.json. */
+  readonly track: string | undefined;
   /** `--output <type>` (AGT-1669): the output `write`, `status`, `check`, `publish` and `share` act on. */
   readonly output: string | undefined;
   /** `write --unit N` (AGT-1669); validated by `runWrite`. */
@@ -510,6 +517,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
     file: typeof values["file"] === "string" ? values["file"] : undefined,
     chapter: typeof values["chapter"] === "string" ? values["chapter"] : undefined,
+    track: typeof values["track"] === "string" ? values["track"] : undefined,
     output: typeof values["output"] === "string" ? values["output"] : undefined,
     unit: typeof values["unit"] === "string" ? values["unit"] : undefined,
     words: typeof values["words"] === "string" ? values["words"] : undefined,
@@ -1595,8 +1603,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   if (args.verb === "migrate") {
     const [sub] = args.rest;
-    if (sub !== "lines" && sub !== "outputs") {
-      const message = `pablo: migrate: unknown migration "${sub ?? ""}" (expected lines or outputs)`;
+    if (sub !== "lines" && sub !== "outputs" && sub !== "track") {
+      const message = `pablo: migrate: unknown migration "${sub ?? ""}" (expected lines, outputs or track)`;
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
@@ -1609,6 +1617,22 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     if (!vaultResult.ok) {
       emit(refusalResult(vaultResult), args.json);
       return vaultResult.code;
+    }
+    if (sub === "track") {
+      const result = migrateTrack(vaultResult.path, projectPath, { track: args.track, dryRun: args.dryRun });
+      if (!result.ok) {
+        emit({ ok: false, code: result.code, message: result.message }, args.json);
+        return result.code;
+      }
+      if (args.json) {
+        console.log(JSON.stringify(result));
+      } else {
+        const verb = result.dryRun ? "would write" : result.changes.length === 0 ? "already on" : "wrote";
+        console.log(`pablo: migrate track: ${verb} track ${result.track} (was ${result.from})${result.committed ? " (committed)" : ""}`);
+        if (result.missingStages.length > 0) console.log(`  missing new core stages: ${result.missingStages.join(", ")}`);
+        if (result.notice) console.log(result.notice);
+      }
+      return EXIT_OK;
     }
     if (sub === "outputs") {
       const result = migrateOutputs(vaultResult.path, projectPath, { dryRun: args.dryRun });

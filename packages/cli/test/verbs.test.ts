@@ -132,6 +132,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     heading: { type: "string" },
     promote: { type: "boolean", default: false },
     "established-by": { type: "string" },
+    track: { type: "string" }, // AGT-2104: migrate track --track
     global: { type: "boolean", default: false },
     line: { type: "string" },
     section: { type: "string" },
