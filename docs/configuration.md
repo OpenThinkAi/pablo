@@ -3,7 +3,9 @@
 pablo reads one file: `$XDG_CONFIG_HOME/pablo/config.json`, which is
 `~/.config/pablo/config.json` unless you set `XDG_CONFIG_HOME`. It is optional. With
 no file, pablo uses one provider called `local`: an OpenAI-compatible server at
-`http://127.0.0.1:8002/v1`, model `mlx-community/gemma-4-31b-it-4bit`.
+`http://127.0.0.1:8002/v1`, model `mlx-community/gemma-4-31b-it-4bit`. A work can
+route its own models on top of it from its `pablo.json` (see
+[Per-work providers and intents](#per-work-providers-and-intents)).
 
 A mistake in the file (an unknown key kind, a bad URL, an API key written in plain
 text) is reported by name the first time a command needs a model; nothing is sent.
@@ -71,12 +73,14 @@ Common local endpoints: LM Studio `http://127.0.0.1:1234/v1`, Ollama
 
 ### API keys
 
-pablo never accepts a key written in the config file. It reads it from one of two
+pablo never accepts a key written in the config file. It reads it from one of these
 places:
 
 - **The environment.** A provider named `anthropic` reads `ANTHROPIC_API_KEY`; one
   named `my-cloud` reads `MY_CLOUD_API_KEY` (the name upper-cased, anything that is
   not a letter or digit turned into `_`, then `_API_KEY`).
+- **A variable you name.** `"key": "env:WORK_ANTHROPIC_KEY"` reads that variable
+  instead of the conventional one.
 - **The macOS Keychain.** `"key": "keychain:<service>"` or
   `"keychain:<service>/<account>"` reads a generic password. Create one with
   `security add-generic-password -s anthropic-api-key -a "$USER" -w`.
@@ -109,6 +113,29 @@ must map the four writing intents**, or drafting still goes to `127.0.0.1:8002`:
 
 pablo is designed around a local writer: the agent plans, and prose comes from a
 model you run. A hosted model works for every step; it just costs per chapter.
+
+### Per-work providers and intents
+
+A work's `pablo.json` may carry its own `providers` and `intents`, in the same shape as
+above. They are merged over this file for every command run on that work: a provider
+entry changes only the fields it sets on the global one of the same name (its key
+reference included), a new name adds a provider, and an intent mapping replaces the
+global one for that intent. `default`, `readers` and the rest stay global.
+
+```json
+{
+  "title": "The Lighthouse",
+  "slug": "lighthouse",
+  "providers": {
+    "lighthouse-qwen": { "endpoint": "http://127.0.0.1:8000/v1", "model": "qwen3-32b", "local": true }
+  },
+  "intents": { "draft": "lighthouse-qwen" }
+}
+```
+
+`pablo.json` is committed with the work, so the key rule is the same and checked by
+every command: `key` is `env:<NAME>` or `keychain:...`, never the key itself. A work
+whose `pablo.json` holds a key is refused until it is removed.
 
 ### Claude for `pablo agent` and `pablo story`
 

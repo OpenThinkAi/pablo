@@ -18,6 +18,8 @@
  * | `publish`   | no       | `{}`                              |
  * | `policy`    | no       | —  (the harness's minimal default judgement policy) |
  * | `track`     | no       | `"fiction"` (`fiction`, `historical-fiction`, `nonfiction`) |
+ * | `providers` | no       | —  (the global config's; merged over it by `loadConfig({ projectDir })`) |
+ * | `intents`   | no       | —  (the global config's; merged over it the same way) |
  * | `format`    | deprecated | —  (`"novel"` only; read as `outputs.novel`) |
  *
  * `outputs` maps an output type to its entry: `{ dir?, added, ...more }`.
@@ -46,12 +48,19 @@
  * absent so a rewritten marker is byte-for-byte what it was; an unknown
  * value is refused naming the allowed ids.
  *
+ * `providers` and `intents` (AGT-2129, D-13) route this work's model calls
+ * over the global config; core's `loadConfig({ projectDir })` reads and
+ * validates them. One check is made here too, so every verb refuses it: a
+ * provider's `key` written inline (anything but `env:<NAME>` or
+ * `keychain:<service>[/<account>]`), since this file is committed.
+ *
  * A missing required key is refused by name (`message` names the exact key).
  * A directory with no `pablo.json` at all is refused with a pointer at
  * `pablo init --adopt --project <slug>`.
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { keySourceFor } from "@openthink/pablo-core";
 import { join, resolve } from "node:path";
 import { NOVEL_DIR } from "./outputs/novel/units";
 import type { OutputId } from "./outputs/registry";
@@ -257,6 +266,8 @@ export function readMarker(workDir: string): MarkerResult {
   if (track !== undefined && !isTrackId(track)) {
     return refuse(`pablo: ${path} has unknown track ${JSON.stringify(track)} at "track" (allowed: ${trackIds().join(", ")})`, [path]);
   }
+  const inlineKey = inlineKeyRefusal(data["providers"], path);
+  if (inlineKey !== undefined) return inlineKey;
 
   const marker: Marker = {
     title: data["title"] as string,
@@ -279,6 +290,22 @@ export function readMarker(workDir: string): MarkerResult {
     return { ok: true, marker, deprecated };
   }
   return { ok: true, marker };
+}
+
+/** A provider entry whose `key` is not an `env:` or `keychain:` reference, as a refusal; the rest of `providers` is core's to validate. */
+function inlineKeyRefusal(providers: unknown, path: string): Refusal | undefined {
+  if (!isObject(providers)) return undefined;
+  for (const [id, entry] of Object.entries(providers)) {
+    if (!isObject(entry) || entry["key"] === undefined) continue;
+    const key = entry["key"];
+    try {
+      if (typeof key !== "string") throw new Error(`pablo: ${path}: provider "${id}": "key" must be a string`);
+      keySourceFor(id, key, `${path}: provider "${id}"`);
+    } catch (error) {
+      return refuse((error as Error).message, [path]);
+    }
+  }
+  return undefined;
 }
 
 /** Writes `marker` as `<workDir>/pablo.json`, pretty-printed with a trailing newline. */

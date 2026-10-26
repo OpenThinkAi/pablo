@@ -223,3 +223,24 @@ test("malformed outputs entries are refused by their exact key", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("readMarker refuses a provider key written inline (AGT-2129), and keeps env: and keychain: references", () => {
+  const dir = tempDir();
+  const write = (providers: unknown) =>
+    writeFileSync(join(dir, "pablo.json"), JSON.stringify({ title: "T", slug: "t", outputs: {}, providers, intents: { draft: "work" } }));
+
+  write({ work: { kind: "anthropic", key: "sk-ant-notarealkey" } });
+  const inline = readMarker(dir);
+  expect(inline.ok).toBe(false);
+  if (!inline.ok) {
+    expect(inline.code).toBe(2);
+    expect(inline.message).toContain('provider "work"');
+    expect(inline.message).toContain("env:<NAME>");
+    expect(inline.message).not.toContain("sk-ant-notarealkey");
+  }
+
+  write({ work: { kind: "anthropic", key: "env:WORK_KEY" }, other: { kind: "anthropic", key: "keychain:work-key/me" } });
+  expect(readMarker(dir).ok).toBe(true);
+
+  rmSync(dir, { recursive: true, force: true });
+});

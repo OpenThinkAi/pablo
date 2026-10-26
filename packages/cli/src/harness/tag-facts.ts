@@ -128,7 +128,7 @@ export async function runTagFacts(project: string | undefined, ctx: TagFactsCont
   if (classify === undefined) {
     let adapter = deps.adapter;
     try {
-      adapter ??= createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig }), { keys: deps.keys ?? { env: ctx.env }, claude: { env: ctx.env } }).adapter;
+      adapter ??= createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig, projectDir: found.path }), { keys: deps.keys ?? { env: ctx.env }, claude: { env: ctx.env } }).adapter;
     } catch (error) {
       return refuse(ctx, 1, (error as Error).message);
     }

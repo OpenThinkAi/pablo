@@ -406,10 +406,10 @@ const CRITIQUE_ARGS = z.object({
  * is not changed and no branch is made.
  */
 /** The critic's model (the planner role), or the test injection; a planner that cannot be built is exit 1. Shared by `critique` and `check --across`. */
-function criticAsk(ctx: VerbContext): Ask | VerbResult {
+function criticAsk(ctx: VerbContext, projectDir: string): Ask | VerbResult {
   if (critiqueModel.ask !== undefined) return critiqueModel.ask;
   try {
-    return adapterAsk(createPlanner(loadConfig({ env: ctx.env }), { keys: { env: ctx.env }, claude: { env: ctx.env } }).adapter);
+    return adapterAsk(createPlanner(loadConfig({ env: ctx.env, projectDir }), { keys: { env: ctx.env }, claude: { env: ctx.env } }).adapter);
   } catch (error) {
     return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
   }
@@ -419,7 +419,7 @@ async function runCritiqueVerb(args: z.infer<typeof CRITIQUE_ARGS>, ctx: VerbCon
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
 
-  const ask = criticAsk(ctx);
+  const ask = criticAsk(ctx, resolved.projectPath);
   if (typeof ask !== "function") return ask;
   const result = await critiqueBranch({ vaultRoot: resolved.vaultRoot, projectPath: resolved.projectPath, branch: args.branch, ask, progress: (line) => ctx.stderr.write(`${line}\n`) });
   if (result.ok) return { body: result, exitCode: 0 };
@@ -661,7 +661,7 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
 
   // AGT-1671: contradictions between the outputs' ledgers, through the critic's refute step.
   if (args.across) {
-    const ask = criticAsk(ctx);
+    const ask = criticAsk(ctx, resolved.projectPath);
     if (typeof ask !== "function") return ask;
     const result = await checkAcross({ projectPath: resolved.projectPath, ask, progress: (line) => ctx.stderr.write(`${line}\n`) });
     if (result.ok) return { body: result, exitCode: 0 };
@@ -986,7 +986,7 @@ export async function shareWith(args: z.infer<typeof SHARE_ARGS> & { readonly li
 
   let readers;
   try {
-    readers = loadConfig({ env: ctx.env }).readers;
+    readers = loadConfig({ env: ctx.env, projectDir: resolved.projectPath }).readers;
   } catch (error) {
     return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
   }
@@ -1033,7 +1033,7 @@ export async function notesWith(args: z.infer<typeof NOTES_ARGS>, ctx: VerbConte
 
   let readers;
   try {
-    readers = loadConfig({ env: ctx.env }).readers;
+    readers = loadConfig({ env: ctx.env, projectDir: resolved.projectPath }).readers;
   } catch (error) {
     return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
   }

@@ -46,3 +46,11 @@ test("a malformed keychain reference is rejected", () => {
   expect(() => keySourceFor("openai", "keychain:")).toThrow(ProviderConfigError);
   expect(() => keySourceFor("openai", "keychain:SERVICE/")).toThrow(ProviderConfigError);
 });
+
+test("an env: reference names the variable the key is read from (AGT-2129)", () => {
+  const source = keySourceFor("anthropic", "env:WORK_ANTHROPIC_KEY");
+  expect(source).toEqual({ from: "env", variable: "WORK_ANTHROPIC_KEY" });
+  expect(resolveKey(source, { env: { WORK_ANTHROPIC_KEY: "from-env", ANTHROPIC_API_KEY: "not-this" } })).toBe("from-env");
+  expect(() => keySourceFor("anthropic", "env:")).toThrow(ProviderConfigError);
+  expect(() => keySourceFor("anthropic", "env:1BAD")).toThrow(ProviderConfigError);
+});

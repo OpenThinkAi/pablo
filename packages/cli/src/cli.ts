@@ -1239,7 +1239,7 @@ export function composeSpec(dir: string, cwd: string, env: Record<string, string
   return {
     work: work.work,
     projectPath: dir,
-    auth: harnessAuth(loadConfig({ env }), env),
+    auth: harnessAuth(loadConfig({ env, projectDir: dir }), env),
     ctx: { cwd, env, stderr: { write: () => {} }, caller: "mcp" },
   };
 }

@@ -91,7 +91,7 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
 
   let auth: HarnessAuth;
   try {
-    const config = loadConfig({ env: ctx.env, readFile: deps.readConfig });
+    const config = loadConfig({ env: ctx.env, readFile: deps.readConfig, projectDir: project.path });
     auth = harnessAuth(config, ctx.env, deps.keys ?? { env: ctx.env });
   } catch (error) {
     return refuse(ctx, args.json, 1, (error as Error).message);

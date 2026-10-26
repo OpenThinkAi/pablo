@@ -1,7 +1,9 @@
 /**
- * Where a provider's API key comes from. Two forms, and no third:
+ * Where a provider's API key comes from. Two places, and no third:
  *
- * - the environment, by convention: `<PROVIDER>_API_KEY` (`ANTHROPIC_API_KEY`);
+ * - the environment: by convention `<PROVIDER>_API_KEY` (`ANTHROPIC_API_KEY`),
+ *   or a variable named in the config as `"key": "env:<NAME>"` (AGT-2129, so a
+ *   work's `pablo.json` can point one provider at its own variable);
  * - the macOS Keychain, named in the config file as
  *   `"key": "keychain:<service>[/<account>]"`.
  *
@@ -17,6 +19,9 @@ export type KeySource =
   | { readonly from: "keychain"; readonly service: string; readonly account: string | undefined };
 
 const KEYCHAIN_PREFIX = "keychain:";
+const ENV_PREFIX = "env:";
+/** An environment variable's name: letters, digits and underscores, not starting with a digit. */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** `local` becomes `LOCAL_API_KEY`, `anthropic` becomes `ANTHROPIC_API_KEY`. */
 export function envVariableFor(providerId: string): string {
@@ -24,15 +29,26 @@ export function envVariableFor(providerId: string): string {
 }
 
 /**
- * The key source for a provider: the `keychain:` reference from its config
- * entry, or the environment variable its id implies.
+ * The key source for a provider: the `env:` or `keychain:` reference from its
+ * config entry, or the environment variable its id implies. Anything else is
+ * taken to be a key written inline and refused; the refusal never repeats it.
  */
 export function keySourceFor(providerId: string, configured?: string, where = "the config file"): KeySource {
   if (configured === undefined) return { from: "env", variable: envVariableFor(providerId) };
+  if (configured.startsWith(ENV_PREFIX)) {
+    const variable = configured.slice(ENV_PREFIX.length);
+    if (!ENV_NAME.test(variable)) {
+      throw new ProviderConfigError(
+        `pablo: ${where}: "key" must read "env:<NAME>" with NAME an environment variable's name (letters, digits and underscores).`,
+      );
+    }
+    return { from: "env", variable };
+  }
   if (!configured.startsWith(KEYCHAIN_PREFIX)) {
     throw new ProviderConfigError(
       `pablo: ${where}: "key" must not hold the key itself. Either set the ${envVariableFor(providerId)} ` +
-        `environment variable and drop "key", or point at the Keychain: "key": "keychain:<service>[/<account>]".`,
+        `environment variable and drop "key", name another variable: "key": "env:<NAME>", ` +
+        `or point at the Keychain: "key": "keychain:<service>[/<account>]".`,
     );
   }
   const reference = configured.slice(KEYCHAIN_PREFIX.length);

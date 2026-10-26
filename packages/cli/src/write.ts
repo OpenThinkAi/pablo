@@ -378,7 +378,7 @@ export async function runWrite(
       };
       console.log(JSON.stringify(body));
     } else {
-      const providers = createProviders(loadConfig());
+      const providers = createProviders(loadConfig({ projectDir: projectPath }));
       const providerId = providers.route(DRAFT_INTENT);
       console.log(renderPack(pack, providers.rates(providerId)).text);
     }
@@ -418,7 +418,7 @@ export async function runWrite(
     deleteBranch(repo, markerResult.marker.slug, branchName, { force: true, env });
   };
 
-  const config = loadConfig();
+  const config = loadConfig({ projectDir: projectPath });
   const providers = createProviders(config);
   const providerId = providers.route(DRAFT_INTENT);
   // The flag wins, then the routed provider's own config, then the default. The
