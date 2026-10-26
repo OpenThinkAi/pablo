@@ -20,7 +20,16 @@ export interface BookStage {
   readonly output?: string;
   /** A unit row's number within its output (`radio › 3` is `output: "radio", unit: 3`). */
   readonly unit?: number;
+  /** A drafted unit row's file (work-relative) and how it is stored (`sentences` joins lines into paragraphs; `lines` keeps them line for line). */
+  readonly file?: string;
+  readonly storage?: Storage;
 }
+
+/** How a unit's text is stored: one sentence per line (read as paragraphs), or line for line (a radio script). */
+export type Storage = "sentences" | "lines";
+
+/** The file behind a unit row and its storage mode, from the rail. */
+export interface UnitRef { readonly file: string; readonly storage: Storage }
 
 /** The output unit `a w` writes: what `write --output <output> --unit <unit>` takes. */
 export interface WriteTarget { readonly output: string; readonly unit: number }
@@ -40,6 +49,8 @@ export interface BookRail {
   readonly outputOf: Readonly<Record<string, string>>;
   /** The unit each unit row writes, by row id. A `chapter:N` row with no output named is the novel's chapter N. */
   readonly targets: Readonly<Record<string, WriteTarget>>;
+  /** The file and storage mode of each drafted unit row, by row id. */
+  readonly units: Readonly<Record<string, UnitRef>>;
   /** Units drafted of the total, per output: the status line's progress while the cursor is in that output. */
   readonly counts: Readonly<Record<string, { readonly drafted: number; readonly total: number }>>;
 }
@@ -50,7 +61,9 @@ export function bookRail(stages: readonly BookStage[]): BookRail {
   const waiting: Record<string, string> = {};
   const outputOf: Record<string, string> = {};
   const targets: Record<string, WriteTarget> = {};
+  const units: Record<string, UnitRef> = {};
   for (const s of stages) {
+    if (s.file !== undefined) units[s.id] = { file: s.file, storage: s.storage ?? "sentences" };
     const legacy = /^chapter:(\d+)$/.exec(s.id)?.[1];
     if (s.output !== undefined) outputOf[s.id] = s.output;
     if (s.unit !== undefined && s.output !== undefined) targets[s.id] = { output: s.output, unit: s.unit };
@@ -67,6 +80,7 @@ export function bookRail(stages: readonly BookStage[]): BookRail {
     folded: stages.filter((s) => s.group).map((s) => s.id),
     outputOf,
     targets,
+    units,
     counts: Object.fromEntries([...new Set(Object.values(outputOf))].map((o) => [o, bookCounts(stages, o)])),
   };
 }

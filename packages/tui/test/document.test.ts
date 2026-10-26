@@ -1,7 +1,7 @@
 // The main pane's document: frontmatter hidden, sentence lines read as paragraphs, text sanitised, ids mapped to files.
 
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -118,4 +118,24 @@ test("paneOf: a paragraph stored as one line, or as one sentence per line, gives
 test("paneOf: tables, fences and lists are drawn, never selected; nothing to select in an empty or all-structure document", () => {
   expect(paneOf("| a | b |\n| - | - |\n\n- one\n- two", 40).sentences).toEqual([]);
   expect(paneOf("", 40)).toEqual({ lines: [], sentences: [] });
+});
+
+test("AGT-2148: a `lines`-stored unit keeps its lines; a `sentences` one still joins them", () => {
+  const script = "---\nepisode: 3\n---\n\nCAST: ANNA, EDWIN\n\nANNA\nIt is dry.\nEDWIN\nSince June.\n";
+  expect(displayDoc(script, 40, "lines").lines).toEqual(["CAST: ANNA, EDWIN", "", "ANNA", "It is dry.", "EDWIN", "Since June."]);
+  expect(displayDoc(script, 40).lines).toContain("ANNA It is dry. EDWIN Since June.");
+  const doc = displayDoc(script, 40, "lines");
+  expect(doc.sentences).toEqual([]);
+  // File line 9 (`EDWIN`, frontmatter counted) shows on display row 4.
+  expect(doc.anchors.get(9)).toBe(4);
+});
+
+test("AGT-2148: unit:<output>:<n> loads the file its row names; no row or no file is a notice", () => {
+  const dir = project();
+  mkdirSync(join(dir, "outputs", "radio"), { recursive: true });
+  writeFileSync(join(dir, "outputs", "radio", "03-the-well.md"), "---\nepisode: 3\n---\n\nANNA\nIt is dry.\n");
+  expect(sourceOf("unit:radio:3")).toEqual({ kind: "unit", output: "radio", unit: 3 });
+  expect(loadDocument(dir, "unit:radio:3", { file: "outputs/radio/03-the-well.md", storage: "lines" })).toMatchObject({ file: "outputs/radio/03-the-well.md", editable: "outputs/radio/03-the-well.md", storage: "lines" });
+  expect(loadDocument(dir, "unit:radio:4")!.text).toBe("Radio 4 has no draft yet.");
+  expect(loadDocument(dir, "unit:radio:3", { file: "../escape.md", storage: "lines" })).toBeUndefined();
 });
