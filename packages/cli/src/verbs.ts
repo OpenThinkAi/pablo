@@ -761,7 +761,8 @@ const RESEARCH_ARGS = z.object({
   source: z.array(z.string()).optional().default([]).describe("Where a fact came from: a URL or full citation. Repeatable; at least one."),
   item: z.array(z.string()).optional().default([]).describe("`save`: the research checklist item(s) this note sources, by number. Repeatable."),
   entry: z.string().optional().describe("`waive`/`link`: the checklist item's number."),
-  text: z.string().optional().describe("`waive`: why the item needs no research. `link`: the research note's id (its path under research/ without .md)."),
+  // One positional slot, read per action: the CLI's `waive <#> "<reason>"` and `link <#> <note>`. The MCP tools name it `reason` and `note`.
+  text: z.string().optional().describe("The action's second positional, overloaded: `waive`'s reason (why the item needs no research), or `link`'s research note id (its path under research/ without .md)."),
 });
 
 /** `pablo research save` (the harness's `save_research`) and `research distill` (`distill_facts`), on a `plan/` branch for the author to review. */

@@ -15,6 +15,7 @@ import { main } from "../src/cli";
 import {
   CHECKLIST_FILE,
   checklistItems,
+  itemLabel,
   itemStatus,
   mergeChecklist,
   PERIOD_CATEGORIES,
@@ -154,6 +155,8 @@ test("merging keeps existing rows, appends new items, rejects bad ones and gives
   // Every category is on the list: the ones the agent left empty get a placeholder to source or waive.
   expect(new Set(merged.rows.map((r) => r.category))).toEqual(new Set(PERIOD_CATEGORIES));
   expect(merged.rows.find((r) => r.category === "politics")?.item).toBe(placeholderItem("politics"));
+  // The label names the category once.
+  expect(itemLabel(merged.rows.find((r) => r.category === "politics")!)).toBe("#9 politics: nothing derived from the brief yet; research it or waive it");
 });
 
 test("the plan prompt carries the brief or the thesis and asks for the categories", () => {
@@ -232,6 +235,7 @@ test("research waive sets an item waived with its reason on a plan branch; no re
   expect(sh(vault, "show", `${body.branch}:${body.path}`)).toContain("| 2 | language | Ice-trade slang | waived |  | the cutters never speak on the page |");
 
   expect((await research(vault, env, { sub: "waive", entry: "2", text: "  " })).exitCode).toBe(2);
+  expect((await research(vault, env, { sub: "waive", entry: "2", text: "x".repeat(201) })).exitCode).toBe(2);
   const unknown = await research(vault, env, { sub: "waive", entry: "9", text: "why" });
   expect((unknown.body as { message: string }).message).toContain("has no item #9");
 });

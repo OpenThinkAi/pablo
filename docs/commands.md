@@ -546,7 +546,7 @@ contradicting unit gets a comment on its line there.
 ### research
 
 ```
-pablo research save --project <slug> --title <text> --note <text> --source <url> [--source <url>]...
+pablo research save --project <slug> --title <text> --note <text> --source <url> [--source <url>]... [--item <#>]...
 ```
 
 Keeps a research finding as `research/<slug>.md` in the work: the title, the
@@ -609,7 +609,8 @@ pablo research link <#> <note> --project <slug>
 already in the work (its id, the path under `research/` without `.md`; a note
 with no `## Sources` entry is refused). Each rewrites the checklist on a new
 `plan/` branch for you to review. Both read the checklist from the work as merged,
-so merge `plan`'s branch first. Over MCP: `waive_research_item` (`item`, `reason`)
+so merge `plan`'s branch first, and merge each `waive`/`link` branch before the
+next: every one rewrites the whole table from main, so two unmerged ones conflict. Over MCP: `waive_research_item` (`item`, `reason`)
 and `link_research_item` (`item`, `note`).
 
 ```

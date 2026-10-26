@@ -17,8 +17,10 @@ import { type Adapter, createProviders, EndpointHung, loadConfig, ProviderConfig
 import {
   CHECKLIST_FILE,
   type ChecklistOrigin,
+  type ChecklistItem,
   type ChecklistRow,
   checklistItems,
+  MAX_ITEM_CHARS,
   mergeChecklist,
   PERIOD_CATEGORIES,
   type ProposedItem,
@@ -236,6 +238,7 @@ export function waiveItemInProject(projectPath: string, item: string | undefined
   if (number === undefined) return refuse(`pablo: research waive: name the item by its number (pablo research waive <#> "<reason>"), got "${item ?? ""}"`);
   const why = (reason ?? "").replace(/\s+/g, " ").trim();
   if (why === "") return refuse(`pablo: research waive: a waived item needs a reason (pablo research waive ${number} "<reason>")`);
+  if (why.length > MAX_ITEM_CHARS) return refuse(`pablo: research waive: keep the reason under ${MAX_ITEM_CHARS} characters`);
   const read = readChecklistFor(projectPath, "waive");
   if (!read.ok) return read.result;
   const unknown = unknownItems(read.rows, [number], "waive");
@@ -257,6 +260,7 @@ export function linkItemInProject(projectPath: string, item: string | undefined,
   const number = parseItemNumber(item);
   if (number === undefined) return refuse(`pablo: research link: name the item by its number (pablo research link <#> <note>), got "${item ?? ""}"`);
   const id = researchNoteId(note ?? "");
+  if (id !== "" && !/^[\w.-]+(\/[\w.-]+)*$/.test(id)) return refuse("pablo: research link: a note id is a path under research/ without .md, e.g. ice-harvest or trade/ice-prices");
   if (id === "") return refuse(`pablo: research link: name the research note (its id, the path under research/ without .md): pablo research link ${number} <note>`);
   const read = readChecklistFor(projectPath, "link");
   if (!read.ok) return read.result;
@@ -309,7 +313,11 @@ export function checkSaveItems(projectPath: string, items: readonly (string | nu
  * branch, so the note and the items it closes are reviewed together. The note is sourced (save requires a source),
  * so it counts as such before it reaches main.
  */
-export function linkSavedNote(projectPath: string, session: PlanSession, dir: string, notePath: string, numbers: readonly number[]) {
+export type LinkSavedNoteResult =
+  | { readonly ok: true; readonly id: string; readonly items: readonly ChecklistItem[]; readonly open: number }
+  | { readonly ok: false; readonly notice: string };
+
+export function linkSavedNote(projectPath: string, session: PlanSession, dir: string, notePath: string, numbers: readonly number[]): LinkSavedNoteResult {
   const read = readChecklistFor(projectPath, "save");
   if (!read.ok) return { ok: false as const, notice: String((read.result.body as { message?: unknown }).message) };
   const rel = dir && notePath.startsWith(`${dir}/`) ? notePath.slice(dir.length + 1) : notePath;

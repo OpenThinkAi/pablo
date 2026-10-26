@@ -36,7 +36,7 @@ import { readMarker, realNamesOf } from "./marker";
 import { type PlanSession, planWrite, startPlanSession } from "./plan";
 import { type RecordFactArgs, recordFact } from "./record-fact";
 import { saveResearch, type SaveResearchInput } from "./research";
-import { checkSaveItems, linkItemInProject, linkSavedNote, planChecklistInProject, waiveItemInProject } from "./research-checklist";
+import { checkSaveItems, linkItemInProject, linkSavedNote, type PlanDeps, planChecklistInProject, waiveItemInProject } from "./research-checklist";
 import type { VerbResult } from "./verbs";
 
 const REFUSED = 2;
@@ -75,12 +75,15 @@ export function saveResearchInProject(
   const base = { ok: true, path: result.path, branch: planned.session.branch, ...(result.sha ? { sha: result.sha } : {}) };
   if (checked.numbers.length === 0) return { body: base, exitCode: 0 };
   const linked = linkSavedNote(projectPath, planned.session, planned.dir, result.path, checked.numbers);
-  if (!linked.ok) return { body: { ok: false, code: 1, message: linked.notice, path: result.path, branch: planned.session.branch }, exitCode: 1 };
+  if (!linked.ok) {
+    const message = `${linked.notice} (the note was kept at ${result.path} on ${planned.session.branch}; once it is merged, close the item with \`pablo research link\`)`;
+    return { body: { ok: false, code: 1, message, path: result.path, branch: planned.session.branch }, exitCode: 1 };
+  }
   return { body: { ...base, note: linked.id, items: linked.items, open: linked.open }, exitCode: 0 };
 }
 
 /** `research plan` (AGT-2111): the research checklist from the period brief or thesis, on a new `plan/` branch. */
-export function planChecklist(projectPath: string, env: NodeJS.ProcessEnv, deps: DistillDeps = {}): Promise<VerbResult> {
+export function planChecklist(projectPath: string, env: NodeJS.ProcessEnv, deps: PlanDeps = {}): Promise<VerbResult> {
   return planChecklistInProject(projectPath, env, (p) => planSessionFor(p, env), deps);
 }
 

@@ -175,9 +175,9 @@ function helpText(): string {
     "  pablo promote --project <slug> --finding <id> --keep <type>",
     "                                            a finding's fact to facts.md on a plan/ branch,",
     "                                            commenting the contradicting units' lines",
-    "  pablo research save --project <slug> --title T --note N --source URL [--source URL]...",
+    "  pablo research save --project <slug> --title T --note N --source URL [--source URL]... [--item N]...",
     "                                            keep a finding with its sources as research/<slug>.md",
-    "                    [--item N]...           on a plan/ branch (also the save_research MCP tool);",
+    "                                            on a plan/ branch (also the save_research MCP tool);",
     "                                            --item marks those checklist items sourced by it",
     "  pablo research plan --project <slug>       research/checklist.md from the period brief or thesis",
     "                                            on a plan/ branch (also plan_research)",
@@ -679,8 +679,10 @@ export function researchFactText(raw: unknown): string {
   if (typeof body["open"] === "number") {
     // `research waive|link`, or `research save --item` (AGT-2111).
     const items = (Array.isArray(body["items"]) ? body["items"] : [body["item"]]) as { number: number; category: string; item: string; status: string }[];
+    const saved = body["note"] !== undefined;
+    const head = saved ? `saved ${String(body["path"])} and research/checklist.md` : `updated ${String(body["path"])}`;
     return [
-      `pablo: ${body["note"] !== undefined ? `saved ${String(body["path"])}` : "updated"} ${body["note"] !== undefined ? "and " : ""}${body["note"] !== undefined ? "research/checklist.md" : String(body["path"])} on ${String(body["branch"])}`,
+      `pablo: ${head} on ${String(body["branch"])}`,
       ...items.map((i) => `  #${i.number} ${i.category}: ${i.item} -> ${i.status}`),
       `  ${String(body["open"])} checklist item${body["open"] === 1 ? "" : "s"} still open once merged`,
       review,

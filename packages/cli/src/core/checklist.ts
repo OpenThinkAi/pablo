@@ -111,13 +111,13 @@ export function parseChecklist(text: string): ChecklistRow[] {
   for (let i = header + 2; i < lines.length && (lines[i] ?? "").trim().startsWith("|"); i++) {
     const cells = cellsOf(lines[i] ?? "");
     if (!/^\d+$/.test(cells[0] ?? "") || Number(cells[0]) <= 0) continue;
-    const text = cells[item] ?? "";
-    if (text === "") continue;
+    const itemText = cells[item] ?? "";
+    if (itemText === "") continue;
     const reason = cells[waived] ?? "";
     rows.push({
       number: Number(cells[0]),
       category: categoryId(cells[category] ?? ""),
-      item: text,
+      item: itemText,
       sources: parseSourceIds(cells[sources] ?? ""),
       ...(reason !== "" ? { waived: reason } : {}),
     });
@@ -191,7 +191,7 @@ function key(text: string): string {
 
 /** The placeholder a category the agent left empty gets, so the author still decides it: source it or waive it. */
 export function placeholderItem(category: string): string {
-  return `${category}: nothing derived from the brief yet; research it or waive it`;
+  return `nothing derived from the ${category === "claim" ? "thesis" : "brief"} yet; research it or waive it`;
 }
 
 /**

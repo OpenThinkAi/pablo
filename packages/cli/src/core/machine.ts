@@ -352,7 +352,8 @@ function plural(n: number, one: string, many = `${one}s`): string {
 /** `no checklist`, or `checklist 3 sourced, 1 waived, 2 open`. */
 function checklistSummary(state: CoreState): string {
   if (state.checklist === undefined) return "no checklist";
-  const count = (status: string) => state.checklist?.items.filter((i) => i.status === status).length ?? 0;
+  const items = state.checklist.items;
+  const count = (status: string) => items.filter((i) => i.status === status).length;
   return `checklist ${count("sourced")} sourced, ${count("waived")} waived, ${count("open")} open`;
 }
 
