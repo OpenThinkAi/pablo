@@ -161,15 +161,39 @@ test("the loader reads the named policy and the work's QWEN.md", () => {
   expect(loaded.work.title).toBe("The Salt Ledger");
 });
 
-test("the loader: no policy and no QWEN.md give the default and no rules", () => {
+test("the loader: no policy and no QWEN.md give the track's policy and no rules", () => {
   const dir = work("loader-bare", {});
   const marker = readMarker(dir);
   if (!marker.ok) throw new Error(marker.message);
   const loaded = loadPromptWork(dir, marker.marker, "loader-bare");
   if (!loaded.ok) throw new Error(loaded.message);
-  expect(loaded.work.policy).toBeUndefined();
+  expect(loaded.work.policy?.name).toBe("fiction");
   expect(loaded.work.rules).toBeUndefined();
-  expect(harnessSystemPrompt(loaded.work)).toContain('<judgement_policy name="default">');
+  expect(harnessSystemPrompt(loaded.work)).toContain('<judgement_policy name="fiction">');
+});
+
+function loadFor(slug: string, marker: Record<string, unknown>): PromptWork {
+  const dir = work(slug, marker);
+  const read = readMarker(dir);
+  if (!read.ok) throw new Error(read.message);
+  const loaded = loadPromptWork(dir, read.marker, slug);
+  if (!loaded.ok) throw new Error(loaded.message);
+  return loaded.work;
+}
+
+test("a historical-fiction work's prompt carries the historical policy with no policy key set (AGT-2102)", () => {
+  const marker = { track: "historical-fiction" };
+  expect("policy" in marker).toBe(false);
+  const prompt = harnessSystemPrompt(loadFor("track-historical", marker));
+  const text = readFileSync(join(POLICIES_DIR, "historical-fiction.md"), "utf8").trim();
+  expect(prompt).toContain('<judgement_policy name="historical-fiction">');
+  expect(prompt).toContain(text);
+});
+
+test("each track selects its own shipped policy; an explicit policy overrides the track", () => {
+  expect(loadFor("track-fiction", { track: "fiction" }).policy?.name).toBe("fiction");
+  expect(loadFor("track-nonfiction", { track: "nonfiction" }).policy?.name).toBe("nonfiction");
+  expect(loadFor("track-override", { track: "historical-fiction", policy: "fiction" }).policy?.name).toBe("fiction");
 });
 
 test("a policy pablo does not ship is refused, naming the ones it does", () => {

@@ -10,8 +10,8 @@
  * - `coreStages`: the core stage machine, in order (what has to exist before
  *   any output is written). Fiction's is today's `CORE_STAGE_IDS`.
  * - `policy`: the judgement policy's file name under `packages/cli/policies/`
- *   (`<policy>.md`). Wiring the track to the harness is AGT-2102; until then
- *   `pablo.json` `policy` still names it by hand.
+ *   (`<policy>.md`). `loadPromptWork` loads it for the work's track
+ *   (AGT-2102); an explicit `pablo.json` `policy` still overrides.
  * - `checks`: the checks run on every unit (AGT-2112..2115 add the new ones).
  * - `outputs`: the output types the track allows (D-7). Some are planned and
  *   not in `OUTPUTS` yet (`screenplay`, `narrated`, `essay`); enforcement is
