@@ -494,9 +494,15 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 fade_out}`, track volume/mute/solo/automation, master), versioned
                 like manifests and never rewritten (`write_mix`). `pablo mix`
                 renders `--from DOC` (written `by: "human"`), else the newest
-                document whose clips voice the manifest's takes, else
-                `auto_document` (the rules above as clips) written `by:
-                "auto"`. A bad document is exit 2 with `field` naming the
+                document whose clips voice the manifest's takes, else a
+                newest human document **rebased** onto the manifest
+                (`mix.rebase`, AGT-2153: unchanged lines keep every edit, a
+                re-take drops into the same clip slot with its fades and
+                gain, downstream clips ride their line anchors, and what
+                cannot be re-anchored goes into the document's
+                `rebase.review`, which the mixer lists; written `by:
+                "human"`), else `auto_document` (the rules above as clips)
+                written `by: "auto"`. A bad document is exit 2 with `field` naming the
                 first bad field and `problems` listing all. The gain, fade,
                 crossfade and automation formulas are `mixmath.py`'s
                 (AGT-1765, shared with the TS preview); never re-derive them.

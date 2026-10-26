@@ -9,10 +9,17 @@ writes each line's `start`/`end` back into the manifest. Which document:
   and written as the next mix version with `by: "human"`;
 - else the newest mix version, when it voices exactly the manifest's lines with
   the manifest's takes (a remix keeps it, hand edits to it included);
+- else, when the newest mix version is a human one that no longer fits (after
+  `fix` re-took a line), that document **rebased** onto this manifest (`rebase`,
+  AGT-2153): unchanged lines keep every edit, a re-taken line's new take drops
+  into the same clip slot with its fades and gain, downstream clips ride their
+  line anchors, and anything that cannot be re-anchored is listed in the
+  document's `rebase.review` for the mixer, never dropped; written as the next
+  mix version with `by: "human"` (`rebasedMix` names the one it came from);
 - else the auto mix (`auto_document`), written as the next mix version with
-  `by: "auto"` (`mix.v1` on a first mix). After `fix` re-takes a line the
-  newest document no longer fits; a human one is then named in
-  `supersededMix` (carrying its edits over is AGT-1772's rebase, M8).
+  `by: "auto"` (`mix.v1` on a first mix). A human document set aside by
+  `--auto`, or one that cannot be rebased (its manifest is gone, or the result
+  still does not fit), is named in `supersededMix`.
 
 The auto mix is a `Timeline` (AGT-1697's progressive render builds the same
 one line by line and streams its settled samples): its clips are the document
@@ -1021,6 +1028,202 @@ def render_document(manifest: Mapping[str, object], doc: Mapping[str, object], s
     )
 
 
+# --- rebasing a human mix onto a new manifest (AGT-2153) ---------------------------------------------
+
+
+@dataclass
+class Rebased:
+    """A human document carried onto a new manifest: the proposal to write (`by: "human"`) and what needs a look."""
+
+    document: dict[str, object]
+    retaken: list[int]
+    review: list[dict[str, object]]
+
+
+def _takes_by_line(manifest: Mapping[str, object]) -> dict[int, tuple[str, float]]:
+    return {int(line["i"]): (str(line["take"]), float(line.get("stretch") or 1.0)) for line in _lines(manifest)}  # type: ignore[call-overload, arg-type]
+
+
+def _carry_take(clip: Mapping[str, object], was: tuple[str, float], now: tuple[str, float], sources: Sources) -> tuple[dict[str, object], list[str]]:
+    """`clip` with the re-taken line's new take in its slot: anchor, gain and fades as they were, its trim carried as seconds cut from the new take.
+
+    The tail trim is measured against the old take; when the store no longer has it (archived), no tail is carried.
+    """
+    paced = sources.paced(*now)
+    if paced is None:
+        raise MixRefusal(f"take(s) not in the store: {now[0]}", missing_takes=[now[0]])
+    length = len(paced.audio) / SR
+    before = sources.paced(*was)
+    head = float(clip["in"])  # type: ignore[arg-type]
+    tail = max(0.0, len(before.audio) / SR - float(clip["out"])) if before is not None else 0.0  # type: ignore[arg-type]
+    problems: list[str] = []
+    start, end = head, length - tail
+    if end - start < 1 / SR:
+        problems.append(f"its trim ({head:.3f} s in, {tail:.3f} s off the end) leaves nothing of the new take ({length:.3f} s); reset to the whole take")
+        start, end = 0.0, length
+    fades = {name: clip[name] for name in ("fade_in", "fade_out") if isinstance(clip.get(name), Mapping)}
+    total = sum(float(fade["len"]) for fade in fades.values())  # type: ignore[index, arg-type]
+    if total > end - start + 1e-9:
+        scale = (end - start) / total
+        fades = {name: {**fade, "len": round(float(fade["len"]) * scale, 6)} for name, fade in fades.items()}  # type: ignore[index, arg-type, dict-item]
+        problems.append(f"its fades ({total:.3f} s) are longer than the clip the new take allows ({end - start:.3f} s); shortened to fit")
+    return {**clip, "source": {"kind": "take", "key": now[0], "stretch": now[1]}, "in": start, "out": end, **fades}, problems
+
+
+def rebase(doc: Mapping[str, object], old_manifest: Mapping[str, object], new_manifest: Mapping[str, object], sources: Sources) -> Rebased:
+    """`doc` (a human mix of `old_manifest`) carried onto `new_manifest` after `fix` (the rule is AGT-1772's, Matt 2026-10-11).
+
+    A clip voicing only unchanged lines keeps every edit, byte for byte. A clip whose lines were all re-taken as one new
+    take keeps its slot (id, lane, anchor, gain, fades) with the new take as its source (`_carry_take`). Everything
+    anchored to a line rides that anchor: the resolver places it from the new take's edges at render time, so a longer
+    re-take moves what follows it. Anything that cannot be re-anchored is listed in `review` for the mixer, never
+    dropped: a clip or automation point anchored to a line the manifest no longer has is pinned where it sat (`{at}`),
+    or set aside *into* the list with its whole body when where it sat is unknown; a clip voicing a line the manifest no
+    longer has cannot render and is set aside the same way; a cue clip placing a cue the manifest no longer has keeps its
+    sound and loses its `cue` index; a clip only partly re-taken (a grouped take) is replaced by the auto mix's clips
+    for its lines, carrying its gain, fades, lane and anchor; a line new to the manifest gets the auto mix's clip. A
+    document that was itself rebased and never saved keeps its earlier items in front of the new ones.
+    """
+    old, new = _takes_by_line(old_manifest), _takes_by_line(new_manifest)
+    retaken = sorted(i for i in set(old) & set(new) if old[i][0] != new[i][0])
+    added = sorted(set(new) - set(old))
+    kv = f"v{new_manifest.get('version')}"
+    try:
+        placed = _load(doc, old_manifest, sources)
+        where: Callable[[Mapping[str, object]], int | None] | None = _resolve(placed)
+        sat = {str(p.clip["id"]): p.start for p in placed}
+    except (MixRefusal, MixDocError):  # the old mix can no longer be placed (a take archived): nothing to pin to
+        where, sat = None, {}
+    auto = auto_document(new_manifest, sources)
+    auto_for: dict[int, Mapping[str, object]] = {int(i): c for track, _, _, c in clips(auto) if track == "dialogue" for i in c["lines"]}  # type: ignore[union-attr]
+    old_cues, new_cues = _cues(old_manifest), _cues(new_manifest)
+    # A document rebased before and not yet saved still carries its list: a second fix keeps every item (a clip set
+    # aside lives only there) until the author's save clears it.
+    earlier = doc.get("rebase")
+    review: list[dict[str, object]] = [dict(item) for item in earlier["review"]] if isinstance(earlier, Mapping) else []  # type: ignore[index, union-attr]
+
+    def note(field: str, problem: str, *, clip: object = None, was: object = None) -> None:
+        review.append({"clip": clip, "field": field, "problem": problem, "was": was})
+
+    def pinned(anchor: Mapping[str, object], at: int | None, field: str, clip: object, was: object) -> dict[str, object] | None:
+        """An anchor to a line the manifest lost, pinned where it resolved; None (and listed) when that is unknown."""
+        line = anchor["line"]
+        if at is None:
+            note(field, f"anchored to line {line}, which manifest {kv} does not have, and where it sat is unknown; set aside", clip=clip, was=was)
+            return None
+        note(field, f"anchored to line {line}, which manifest {kv} does not have; pinned at {at / SR:.3f} s", clip=clip, was=was)
+        return {"at": round(max(at, 0) / SR, 6)}
+
+    def carried(clip: Mapping[str, object], field: str) -> dict[str, object] | None:
+        """The clip with an anchor the manifest can satisfy, or None once set aside into the review list."""
+        anchor = clip["anchor"]
+        assert isinstance(anchor, Mapping)
+        if "line" not in anchor or int(anchor["line"]) in new:  # type: ignore[call-overload]
+            return dict(clip)
+        at = pinned(anchor, sat.get(str(clip["id"])), f"{field}.anchor", clip["id"], clip)
+        return None if at is None else {**clip, "anchor": at}
+
+    tracks: dict[str, dict[str, object]] = {}
+    voiced: set[int] = set()
+    for name in TRACKS:
+        track = doc["tracks"][name]  # type: ignore[index]
+        lanes: dict[str, dict[str, list[dict[str, object]]]] = {}
+        for lane, body in track["lanes"].items():
+            out: list[dict[str, object]] = []
+            for k, clip in enumerate(body["clips"]):
+                field = clip_field(name, lane, k)
+                if name == "dialogue":
+                    lines = [int(i) for i in clip["lines"]]
+                    lost = [i for i in lines if i not in new]
+                    if lost:
+                        note(field, f"voices line(s) {', '.join(map(str, lost))}, which manifest {kv} does not have; set aside", clip=clip["id"], was=clip)
+                        continue
+                    kept = carried(clip, field)
+                    if kept is None:
+                        continue
+                    hit = [i for i in lines if i in retaken]
+                    if not hit:
+                        out.append(kept)
+                    elif len(hit) == len(lines) and len({new[i] for i in lines}) == 1:
+                        swapped, problems = _carry_take(kept, old[lines[0]], new[lines[0]], sources)
+                        for problem in problems:
+                            note(field, problem, clip=clip["id"], was=clip)
+                        out.append(swapped)
+                    else:
+                        # The auto mix's clips for these lines, each with this clip's gain and fades; the first one
+                        # keeps its id and anchor, the rest ride the auto anchors (the previous line's end).
+                        replacements: list[dict[str, object]] = []
+                        dressing = {f: kept[f] for f in ("gain", "fade_in", "fade_out") if f in kept}
+                        for i in lines:
+                            source = auto_for[i]
+                            if any(r["source"] == source["source"] for r in replacements):
+                                continue  # a grouped take the auto mix kept together: one clip voices these lines
+                            if not replacements:
+                                replacements.append({**source, **dressing, "id": kept["id"], "anchor": kept["anchor"]})
+                            else:
+                                replacements.append({**source, **dressing, "id": f"{kept['id']}.{i}"})
+                        out.extend(replacements)
+                        note(field, f"line(s) {', '.join(map(str, hit))} re-taken out of the lines {', '.join(map(str, lines))} this clip voices; replaced by the auto mix's clip(s) for them, with its gain, fades and anchor", clip=clip["id"], was=clip)
+                    voiced.update(lines)
+                    continue
+                kept = carried(clip, field)
+                if kept is None:
+                    continue
+                if "cue" in kept:
+                    index = int(kept["cue"])  # type: ignore[call-overload]
+                    if index >= len(new_cues):
+                        del kept["cue"]
+                        note(f"{field}.cue", f"places cue {index}, which manifest {kv} does not have ({len(new_cues)} cue(s)); the clip keeps its sound without the cue", clip=clip["id"], was=clip)
+                    elif index < len(old_cues) and any(old_cues[index].get(f) != new_cues[index].get(f) for f in ("kind", "desc")):
+                        note(f"{field}.cue", f"cue {index} is now {new_cues[index].get('kind')}: {new_cues[index].get('desc')} (was {old_cues[index].get('kind')}: {old_cues[index].get('desc')}); the clip still plays the old sound", clip=clip["id"], was=clip)
+                out.append(kept)
+            lanes[lane] = {"clips": out}
+        automation: list[Mapping[str, object]] = []
+        for k, point in enumerate(track.get("automation", [])):
+            anchor = point["anchor"]
+            if "line" in anchor and int(anchor["line"]) not in new:
+                at = pinned(anchor, where(anchor) if where is not None else None, f"tracks.{name}.automation[{k}].anchor", None, point)
+                if at is not None:
+                    automation.append({**point, "anchor": at})
+            else:
+                automation.append(point)
+        tracks[name] = {**{f: track[f] for f in ("volume", "mute", "solo") if f in track}, "lanes": lanes, "automation": automation}
+    for i in added:
+        if i in voiced:
+            continue
+        source = auto_for[i]
+        lane = str(next(line.get("speaker") for line in _lines(new_manifest) if int(line["i"]) == i) or "VOICE")  # type: ignore[call-overload]
+        clips_out = tracks["dialogue"]["lanes"].setdefault(lane, {"clips": []})["clips"]  # type: ignore[index, union-attr]
+        clips_out.append(dict(source))
+        voiced.update(int(j) for j in source["lines"])  # type: ignore[union-attr]
+        note(clip_field("dialogue", lane, len(clips_out) - 1), f"line {i} is new in manifest {kv}; placed as the auto mix would", clip=source["id"])
+    summary = f"rebased mix.v{doc.get('version')} onto manifest {kv}: " + (f"line(s) {', '.join(map(str, retaken))} re-taken" if retaken else "no line re-taken")
+    if review:
+        summary += f"; {len(review)} item(s) for review"
+    return Rebased(
+        document={
+            "manifest_version": new_manifest.get("version"),
+            "tracks": tracks,
+            "master": doc["master"],
+            "summary": summary,
+            "rebase": {"from": doc.get("version"), "manifest_from": old_manifest.get("version"), "retaken": retaken, "review": review},
+        },
+        retaken=retaken,
+        review=review,
+    )
+
+
+def _rebased(work: Path, episode: int, newest: Mapping[str, object], manifest: Mapping[str, object], sources: Sources) -> Rebased | None:
+    """The newest human document carried onto `manifest`, or None when it cannot be (its own manifest is gone, or the result still does not fit)."""
+    base = newest.get("manifest_version")
+    if not isinstance(base, int) or base not in versions(work, episode):
+        return None
+    out = rebase(newest, read_version(work, episode, base), manifest, sources)
+    if validate(out.document) or check_against(out.document, manifest):
+        return None
+    return out
+
+
 # --- the command --------------------------------------------------------------------------------
 
 
@@ -1089,6 +1292,7 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
     sources = timeline.sources if timeline is not None else Sources(work, seams.cue_library(request.cues_dir), seams.pacer, seams.log)
     existing = mix_versions(work, episode)
     superseded: int | None = None
+    rebased: Rebased | None = None
     new_doc: tuple[Mapping[str, object], str] | None = None  # (proposal, by) to write once the mix succeeds
     try:
         if timeline is not None:
@@ -1110,14 +1314,16 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
                 if problems:
                     raise MixDocError(problems, where=f"mix.v{existing[-1]}.json")
             # An invalid newest document is refused above (a broken hand edit is never silently replaced); a valid
-            # one that no longer fits the manifest (its takes, or a line it anchors to) gives way to the auto mix.
+            # human one that no longer fits the manifest (its takes, or a line it anchors to) is rebased onto it;
+            # an auto one, or a human one that cannot be rebased, gives way to the auto mix.
             if newest is not None and compatible(newest, manifest) and not request.auto:
                 doc, doc_name = newest, f"mix.v{existing[-1]}.json"
             else:
                 if newest is not None and newest.get("by") == "human":
-                    superseded = existing[-1]
-                doc = auto_document(manifest, sources)
-                new_doc = (doc, "auto")
+                    rebased = _rebased(work, episode, newest, manifest, sources) if not request.auto else None
+                    superseded = None if rebased is not None else existing[-1]
+                doc = rebased.document if rebased is not None else auto_document(manifest, sources)
+                new_doc = (doc, "human" if rebased is not None else "auto")
                 doc_name = f"mix.v{(existing[-1] if existing else 0) + 1}.json"
         # The stream's segments came from the timeline's own mixdown, which is `_mix_range` over the very clips the
         # document holds: the episode file is that mixdown through the master, a document render of it the same.
@@ -1202,13 +1408,15 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
         "mixBy": new_doc[1] if new_doc is not None else doc.get("by"),
         "mixWritten": written_doc is not None,
         "supersededMix": superseded,
+        "rebasedMix": rebased.document["rebase"]["from"] if rebased is not None else None,  # type: ignore[index, call-overload]
+        "review": rebased.review if rebased is not None else [],
         "cueSources": _cue_sources(rendered.cues, sources.library),
-
         "wall": info["wall"],
         "message": (
             f"episode {episode} v{out_version}: {duration:.1f} s, {len(rendered.lines)} lines, {len(rendered.cues)} cues "
             f"({rendered.cues_generated} generated, {rendered.cues_reused} reused) from {doc_name} -> {audio_name}"
             + (f"; mix.v{superseded}.json (by: human) {set_aside}" if superseded else "")
+            + (f"; {rebased.document['summary']}" + (" in the mixer" if rebased.review else "") if rebased is not None else "")  # type: ignore[index]
         ),
     }, EXIT_OK
 
@@ -1352,4 +1560,4 @@ def cmd_mix(
     return mix(MixRequest(work=work, episode=number, cues_dir=root, version=version, document=doc, auto=auto), seams)
 
 
-__all__ = ["MixRequest", "Seams", "Sources", "Timeline", "auto_document", "auto_timeline", "check_timings", "cmd_mix", "master", "mix", "render_document"]
+__all__ = ["MixRequest", "Rebased", "Seams", "Sources", "Timeline", "auto_document", "auto_timeline", "check_timings", "cmd_mix", "master", "mix", "rebase", "render_document"]

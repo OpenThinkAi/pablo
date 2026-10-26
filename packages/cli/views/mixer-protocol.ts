@@ -56,6 +56,25 @@ export interface MixTrack {
   readonly automation?: readonly MixPoint[];
 }
 
+/** One thing `mix.rebase` could not carry over mechanically (AGT-2153): the mixer lists it; the author's next save resolves it. */
+export interface RebaseReviewItem {
+  /** The clip concerned, or null for a track's automation point. */
+  readonly clip: string | null;
+  /** The field in the human document it came from (`tracks.sfx.lanes.main.clips[0].anchor`). */
+  readonly field: string;
+  readonly problem: string;
+  /** The clip or point as it was in the human document; a set-aside clip lives on only here. */
+  readonly was: MixClip | MixPoint | null;
+}
+
+/** On a human document `pablo mix` rebased onto a new manifest after `fix`: where it came from and what needs a look. */
+export interface MixRebase {
+  readonly from: number;
+  readonly manifest_from: number;
+  readonly retaken: readonly number[];
+  readonly review: readonly RebaseReviewItem[];
+}
+
 /** `renders/epNN/mix.v<m>.json` as `packages/casting/.../mixdoc.py` defines it. */
 export interface MixDocument {
   readonly schema: number;
@@ -66,6 +85,7 @@ export interface MixDocument {
   readonly by: "auto" | "human";
   readonly created: string;
   readonly summary?: string;
+  readonly rebase?: MixRebase;
   readonly tracks: Readonly<Record<TrackName, MixTrack>>;
   readonly master: { readonly gain: number; readonly peak_db: number | null; readonly target_lufs: null };
 }
@@ -138,7 +158,7 @@ export interface MixPayload {
     readonly lines: readonly ManifestLine[];
     readonly cues: readonly ManifestCue[];
   };
-  /** The newest manifest version; above `manifest.version` the mix is behind a `fix` (rebasing is a later ticket). */
+  /** The newest manifest version; above `manifest.version` the mix is behind a `fix` (the next `pablo mix` rebases a human mix onto it). */
   readonly latestManifest: number;
   readonly layout: readonly TrackLayout[];
   /** The newest episode audio on disk: its manifest version and the mix version it was rendered from (null: none). */
