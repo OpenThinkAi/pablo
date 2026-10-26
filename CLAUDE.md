@@ -139,7 +139,12 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 (AGT-1564) and `comments.ts` the per-branch comment store
                 (`.pablo/comments/<branch>.json`, AGT-1580); `migrate.ts`
                 (`migrate lines`) and `migrate-outputs.ts` (`migrate
-                outputs`) are one-time migrations.
+                outputs`) are one-time migrations. `voice-layers.ts`
+                (AGT-2138, D-15) is the one voice resolver: global
+                (`voices/default` + named) -> vault (`style/`, vault voices)
+                -> work (`pablo.json` `voice` entries + `QWEN.md`) -> output
+                (`outputs/<type>/RULES.md`), each piece labelled with where
+                it came from and absent layers listed in `missing`.
                 Reading rounds: `share.ts` opens a round as a PR on the
                 book's private reading repo (AGT-1582), `read.ts` lists and
                 fetches rounds for a reader, `notes.ts` (`notes pull`,
