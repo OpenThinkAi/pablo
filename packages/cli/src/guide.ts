@@ -17,6 +17,7 @@
 import { outputDefinition, outputIds, outputsOnTrack } from "./outputs/registry";
 import type { CoreStageId } from "./core/machine";
 import { PERIOD_BRIEF_FILE, PERIOD_FACTS_FILE } from "./core/machine";
+import { CHECKLIST_FILE } from "./core/checklist";
 import { CLAIMS_FILE, OUTLINE_FILE, THESIS_FILE } from "./core/nonfiction";
 import { isNarratableSource } from "./outputs/narrated";
 import type { OutputDefinition } from "./outputs/types";
@@ -79,7 +80,7 @@ function coreStep(stage: CoreStageId, track: TrackId): GuideStep[] {
           gate: true,
           title: `distill the research into sourced period facts (${PERIOD_FACTS_FILE})`,
           command: `pablo research distill ${P}`,
-          detail: "the only research the drafting model sees; merge its plan/ branch",
+          detail: "the only research the drafting model sees; accept its plan/ branch in the screen (bare `pablo`)",
         },
       ];
     case "bible":
@@ -142,9 +143,9 @@ function researchSteps(track: TrackId): GuideStep[] {
       phase: "research",
       stage: "research",
       gate: true,
-      title: "plan the research checklist (research/checklist.md)",
+      title: `plan the research checklist (${CHECKLIST_FILE})`,
       command: `pablo research plan ${P}`,
-      detail: "merge its plan/ branch before sourcing or waiving items",
+      detail: "accept its plan/ branch in the screen (bare `pablo`) before sourcing or waiving items",
     },
     {
       phase: "research",
@@ -159,7 +160,7 @@ function researchSteps(track: TrackId): GuideStep[] {
       gate: true,
       title: "or waive an item, with a reason",
       command: `pablo research waive <#> "<reason>" ${P}`,
-      detail: "the gate opens when every item is sourced or waived",
+      detail: "accept each waive branch in the screen before the next (two unaccepted ones conflict); the gate opens when every item is sourced or waived",
     },
   ];
 }
@@ -208,7 +209,7 @@ function outputStageSteps(def: OutputDefinition, stage: string): GuideStep[] | u
           optional: true,
           title: `revise passages of ${each}`,
           command: `pablo revise ${P} --file <file> --passage "<text>" --instruction "<text>" --branch`,
-          detail: "or revise in the screen (bare `pablo`); merge the revise/ branch",
+          detail: "or revise in the screen (bare `pablo`); accept the revise/ branch there",
         },
       ];
     case "cast":
