@@ -507,6 +507,7 @@ interface ParsedArgs {
   readonly chapters: string | undefined;
   /** `agent --new` (AGT-1565): start a fresh harness session; the old one stays on disk. */
   readonly new: boolean;
+  /** `share --list`: the work's rounds. */
   readonly list: boolean;
   /** Every parsed flag, raw (AGT-1679): the casting verbs build their args from it with `verbArgsFromCli`. */
   readonly values: Readonly<Record<string, unknown>>;

@@ -1,13 +1,12 @@
 # Sharing chapters with readers
 
-pablo can send chapters to a reader, let them read and mark them up in a window on
-their own Mac, and bring their notes back into your vault as a branch you review
+pablo can send chapters to a reader, let them review them as a pull request on GitHub, and bring their notes back into your vault as a branch you review
 like any other change. The transport is GitHub: each book gets a private reading
 repository, each round is a pull request, and a reader's notes are a review on it.
 
 > **Current limitation.** Reading repositories are created in the `OpenThinkAi`
 > GitHub organization, and that is not configurable yet. Outside that organization,
-> `share` and `read --list` will not work. Everything else in pablo does
+> `share` will not work. Everything else in pablo does
 > not depend on this.
 
 ## For the author
@@ -59,8 +58,8 @@ upgrades pablo.
 You also need a GitHub account with access to the book's reading repo. The author
 invites you; accept the invitation from GitHub's email once per book.
 
-To upgrade pablo, run the install line again. `pablo read --list` shows the rounds waiting for you and
-`pablo read <book>-reading#<number>` opens one.
+To upgrade pablo, run the install line again. The reader window was removed: open the pull
+request the author sent you on GitHub and review the chapters there.
 
 ## Removing pablo
 

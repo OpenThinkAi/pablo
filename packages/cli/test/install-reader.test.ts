@@ -288,3 +288,9 @@ test("GitHub sign-in with no terminal to type in is a clear stop; a failed sign-
   expect(failed.code).not.toBe(0);
   expect(failed.out).toContain("sign-in did not finish");
 });
+
+test("the installer no longer tells the reader to run a removed verb", () => {
+  const script = readFileSync(SCRIPT, "utf8");
+  expect(script).not.toContain("pablo read");
+  expect(script).toContain("pull request");
+});
