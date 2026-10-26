@@ -750,7 +750,7 @@ Rendering uses the GPU.
 
 | Verb | What it does |
 |---|---|
-| `pablo doctor` | reports the casting side's state, uv and config; never installs anything |
+| `pablo doctor [--json]` | reports the casting side's state, uv and config, and checks the writing side: the config file is found and valid, each provider the config routes to answers, the vault is a git repo, the search backend answers. Each failing line says how to fix it; exits 1 when a required check fails (a missing config file or search backend is a warning, not a failure). Never installs anything |
 | `pablo audition --role R --describe "..." [-n 6] [--designer qwen3\|voxcpm2] [--traits '{...}'] [--seed S]` | renders candidate voices reading a test passage, scored. `audition --dry-run` installs and checks the casting side without loading a model |
 | `pablo cast --role R --candidate n [--recast] [--notes "..."]` | freezes a candidate as a voice card in the shared library. `cast --auto --project <slug> [--episode N\|--all]` matches unbound roles to library voices; add `--design` to design voices for roles with no match. Synthetic voices only |
 | `pablo voices list [--auto-admitted] \| show <slug> \| retire <slug> [--reason "..."]` | the shared voice library; a retired voice still plays for stories already pinned to it |

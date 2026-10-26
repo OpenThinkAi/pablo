@@ -41,6 +41,7 @@ import { loadPromptWork } from "./harness/prompt";
 import type { HarnessSpec } from "./harness/session";
 import { runMcp } from "./mcp";
 import { findVault, resolveProjectFromCwd } from "./project";
+import { realWritingDoctorDeps, runWritingDoctor, writingDoctorText } from "./doctor-writing";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
 import { OUTPUTS, outputDefinition } from "./outputs/registry";
@@ -275,7 +276,10 @@ function helpText(): string {
     "                                            one tiny request per mapped intent; ok/error per provider",
     "  pablo doctor [--json]                    the casting side's state (not provisioned,",
     "                                            stale, provisioned), uv, and its config;",
-    "                                            never provisions or downloads",
+    "                                            never provisions or downloads. Also checks the",
+    "                                            writing side: config, each routed provider,",
+    "                                            the vault is a git repo, the search backend;",
+    "                                            each failure says how to fix it, exit 1 on one",
     "  pablo status --project <slug> --for \"episode N\"",
     "                                            radio: exit 2 while a role is unbound",
     "  pablo bind --project <slug> --role <NAME> --voice <slug>",
@@ -1511,8 +1515,11 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // It reads the casting side's state and never provisions or downloads.
   if (args.verb === "doctor") {
     const result = runDoctor({ env: process.env, stderr: process.stderr }, realCastingDeps(process.env), VERSION);
-    console.log(args.json ? JSON.stringify(result.body) : doctorText(result.body));
-    return result.exitCode;
+    // AGT-2146: the writing side (config, providers, vault git, search); a failed required check exits 1.
+    const writing = await runWritingDoctor(realWritingDoctorDeps(process.env, cwd));
+    const body = { ...(result.body as Record<string, unknown>), ok: writing.ok, writing };
+    console.log(args.json ? JSON.stringify(body) : `${doctorText(result.body)}\n${writingDoctorText(writing)}`);
+    return writing.ok ? result.exitCode : 1;
   }
 
   // The casting verbs (`audition` AGT-1678, `cast`/`voices` AGT-1679) run off
