@@ -60,7 +60,7 @@ import { parseFrontmatter } from "./novel/machine";
 import { jsonlReceiptSink, stateReceiptsPath } from "./paths";
 import { findVault } from "./project";
 import { readVoice, resolveVoice } from "./voice";
-import { mergeVoice, packVoice, resolveProseVoiceLayers } from "./voice-layers";
+import { joinSources, mergeVoice, packVoice, resolveProseVoiceLayers } from "./voice-layers";
 import type { ResolvedVoiceLayers } from "./voice-layers";
 import type { Voice } from "./voice";
 import { yamlScalar } from "./write";
@@ -280,7 +280,7 @@ export function buildProsePack(voice: Voice, options: BuildProseOptions): BuildP
     voice:
       merged === undefined
         ? { rules: voice.rules, exemplars: voice.exemplars, never: voice.never }
-        : { rules: merged.rules, exemplars: merged.exemplars, never: joinNever(merged.never) },
+        : { rules: merged.rules, exemplars: merged.exemplars, never: joinSources(merged.never) },
     ...(options.layers === undefined ? {} : { voiceLayers: packVoice(options.layers) }),
     format: options.format === undefined ? undefined : FORMAT_STANZAS[options.format],
     context: options.context,
@@ -291,12 +291,6 @@ export function buildProsePack(voice: Voice, options: BuildProseOptions): BuildP
   });
 
   return { ok: true, pack };
-}
-
-/** Every layer's `never.md` as the one source a prose pack's `never` slice takes. */
-function joinNever(sources: readonly TextSource[]): TextSource | undefined {
-  if (sources.length <= 1) return sources[0];
-  return { path: sources.map((s) => s.path).join(", "), text: sources.map((s) => s.text.trim()).join("\n\n") };
 }
 
 /**

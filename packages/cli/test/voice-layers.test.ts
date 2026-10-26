@@ -161,5 +161,5 @@ test("describeVoiceLayers labels the global default and lists a voice pablo.json
   setVoiceList(work, ["../../style", "ghost", "QWEN.md"]);
   const lines = describeVoiceLayers(resolveVoiceLayers({ vaultRoot: vault, workRoot: work, env }));
   expect(lines[0]).toContain("[global default]");
-  expect(lines.at(-1)).toBe('missing  ghost  [voice[1]: ghost]  (no voice "ghost")');
+  expect(lines.at(-1)).toBe('missing  ghost  [voice[1]: ghost]: no voice "ghost"');
 });

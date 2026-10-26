@@ -185,7 +185,7 @@ export function describeVoiceLayers(resolved: ResolvedVoiceLayers): string[] {
     const via = viaOf(piece);
     return `${piece.layer}  ${piece.label}${via ? `  [${via}]` : ""}  (${files.join(", ")})`;
   });
-  return [...found, ...listedMissing(resolved).map((m) => `missing  ${m.name}  [${m.via}]  (${m.reason})`)];
+  return [...found, ...listedMissing(resolved).map((m) => `missing  ${m.name}  [${m.via}]: ${m.reason}`)];
 }
 
 /** The `missing` entries a `pablo.json` entry named: the ones an author asked for and did not get. */
@@ -214,6 +214,14 @@ export interface MergedVoice {
   readonly exemplars: readonly TextSource[];
   /** Every piece's `never.md`, lowest precedence first. */
   readonly never: readonly TextSource[];
+}
+
+/** Several sources as one, for a slice that takes one: texts in order, paths joined the way slice sources are; empty ones dropped. */
+export function joinSources(sources: readonly TextSource[]): TextSource | undefined {
+  const kept = sources.filter((source) => source.text.trim() !== "");
+  if (kept.length === 0) return undefined;
+  if (kept.length === 1) return kept[0];
+  return { path: kept.map((source) => source.path).join(", "), text: kept.map((source) => source.text.trim()).join("\n\n") };
 }
 
 /** Merges the material of `pieces` (already in precedence order, lowest first) for a pack. */

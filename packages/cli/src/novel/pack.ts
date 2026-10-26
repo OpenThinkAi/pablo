@@ -30,7 +30,7 @@ import {
 } from "@openthink/pablo-core";
 import type { Marker } from "../marker";
 import { NOVEL_ID } from "../outputs/novel/units";
-import { layerOf, mergeVoice, packVoice, resolveVoiceLayers } from "../voice-layers";
+import { joinSources, layerOf, mergeVoice, packVoice, resolveVoiceLayers } from "../voice-layers";
 
 /** `draft-chapter`'s length target, ported as pablo's default (AC2). */
 export const DEFAULT_WORD_TARGET = 1800;
@@ -139,6 +139,7 @@ export function packFromInputs(
   // The work layer's only piece no `pablo.json` entry named is its own rules file.
   const workVoices = work.filter((piece) => piece.via !== undefined);
   const hasRulesFile = work.some((piece) => piece.via === undefined);
+  // The output layer is one file, `outputs/<type>/RULES.md`: one piece with one rules source.
   const outputPiece = layerOf(resolved, "output")[0];
   const all = mergeVoice(resolved.layers);
   const workRules = joinSources([
@@ -146,6 +147,7 @@ export function packFromInputs(
     ...(hasRulesFile && inputs.workRules !== undefined ? [inputs.workRules] : []),
   ]);
 
+  // `inputs.style` (the reader's `style/`) is replaced: the resolver's vault layer reads the same files.
   const filtered: DraftingInputs = {
     ...inputs,
     style: filterVoice(mergeVoice(below).rules),
@@ -182,14 +184,6 @@ export function packFromInputs(
   }
 
   return { ok: true, pack, inputs: filtered };
-}
-
-/** Several rule sources as one, for a slice that takes one: texts in order, paths joined the way slice sources are. */
-function joinSources(sources: readonly TextSource[]): TextSource | undefined {
-  const kept = sources.filter((source) => source.text.trim() !== "");
-  if (kept.length === 0) return undefined;
-  if (kept.length === 1) return kept[0];
-  return { path: kept.map((source) => source.path).join(", "), text: kept.map((source) => source.text.trim()).join("\n\n") };
 }
 
 /**

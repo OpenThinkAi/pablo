@@ -76,7 +76,8 @@ export interface UnitPackOptions {
    * own continuity ledger plus `facts.md`, never another output's ledger.
    * Callers pass the definition's `id`; absent means the novel.
    */
-  readonly output?: string | undefined;  /** For the global voices directory the layered voice reads (`$XDG_CONFIG_HOME`); defaults to `process.env`. */
+  readonly output?: string | undefined;
+  /** For the global voices directory the layered voice reads (`$XDG_CONFIG_HOME`); defaults to `process.env`. */
   readonly env?: Record<string, string | undefined> | undefined;
 }
 

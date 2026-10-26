@@ -251,7 +251,8 @@ test("AC1: a prose pack carries the global default under its --voice, and its dr
   const pack = outcome.pack as Pack;
   const rules = sliceText(pack, "rules");
   expect(rules.indexOf(GLOBAL_RULE)).toBeGreaterThanOrEqual(0);
-  expect(rules.indexOf(GLOBAL_RULE)).toBeLessThan(rules.length - 1);
+  // The global default is read before the named voice's own rules.
+  expect(rules.indexOf(GLOBAL_RULE)).toBeLessThan(rules.indexOf("# Voice"));
   expect(sliceText(pack, "exemplars")).toContain(PLAIN_EXEMPLAR);
   const body = outcome.body as unknown as { voiceLayers: { layers: unknown[] } };
   expect(body.voiceLayers.layers).toEqual([
