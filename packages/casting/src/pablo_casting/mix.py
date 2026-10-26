@@ -1045,7 +1045,10 @@ def _takes_by_line(manifest: Mapping[str, object]) -> dict[int, tuple[str, float
 
 
 def _carry_take(clip: Mapping[str, object], was: tuple[str, float], now: tuple[str, float], sources: Sources) -> tuple[dict[str, object], list[str]]:
-    """`clip` with the re-taken line's new take in its slot: anchor, gain and fades as they were, its trim carried as seconds cut from the new take."""
+    """`clip` with the re-taken line's new take in its slot: anchor, gain and fades as they were, its trim carried as seconds cut from the new take.
+
+    The tail trim is measured against the old take; when the store no longer has it (archived), no tail is carried.
+    """
     paced = sources.paced(*now)
     if paced is None:
         raise MixRefusal(f"take(s) not in the store: {now[0]}", missing_takes=[now[0]])
@@ -1143,13 +1146,18 @@ def rebase(doc: Mapping[str, object], old_manifest: Mapping[str, object], new_ma
                             note(field, problem, clip=clip["id"], was=clip)
                         out.append(swapped)
                     else:
+                        # The auto mix's clips for these lines, each with this clip's gain and fades; the first one
+                        # keeps its id and anchor, the rest ride the auto anchors (the previous line's end).
                         replacements: list[dict[str, object]] = []
+                        dressing = {f: kept[f] for f in ("gain", "fade_in", "fade_out") if f in kept}
                         for i in lines:
                             source = auto_for[i]
                             if any(r["source"] == source["source"] for r in replacements):
-                                continue
-                            dressing = {f: kept[f] for f in ("gain", "fade_in", "fade_out") if f in kept}
-                            replacements.append({**source, **dressing, "id": kept["id"] if not replacements else f"{kept['id']}.{i}", **({"anchor": kept["anchor"]} if not replacements else {})})
+                                continue  # a grouped take the auto mix kept together: one clip voices these lines
+                            if not replacements:
+                                replacements.append({**source, **dressing, "id": kept["id"], "anchor": kept["anchor"]})
+                            else:
+                                replacements.append({**source, **dressing, "id": f"{kept['id']}.{i}"})
                         out.extend(replacements)
                         note(field, f"line(s) {', '.join(map(str, hit))} re-taken out of the lines {', '.join(map(str, lines))} this clip voices; replaced by the auto mix's clip(s) for them, with its gain, fades and anchor", clip=clip["id"], was=clip)
                     voiced.update(lines)

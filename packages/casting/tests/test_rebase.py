@@ -14,7 +14,7 @@ from test_mix import SCRIPT, ENGINE, ToneEngine, cue, cues_dir, mixed, performed
 from test_mixdoc import clip
 
 from pablo_casting.manifest import flags_path, read_version, write_version
-from pablo_casting.mixdoc import mix_versions, read_mix
+from pablo_casting.mixdoc import mix_versions, read_mix, write_mix
 from pablo_casting.takes import Direction, Line, TakeInputs, record_take
 
 
@@ -37,8 +37,6 @@ def human_mix(work: Path, cues_dir: Path) -> dict[str, object]:
     clip(human, "line-1")["fade_in"] = {"len": 0.3, "curve": "scurve"}
     clip(human, "line-2")["anchor"]["offset"] += 0.5  # type: ignore[index]
     human["tracks"]["music"]["mute"] = True  # type: ignore[index]
-    from pablo_casting.mixdoc import write_mix
-
     return write_mix(work, 1, human, by="human").document
 
 
@@ -100,8 +98,6 @@ def test_a_trim_is_carried_as_seconds_cut_from_the_new_take_and_reset_when_it_do
     trimmed = copy.deepcopy(human)
     clip(trimmed, "line-1")["in"] = 0.2
     clip(trimmed, "line-1")["out"] = clip(trimmed, "line-1")["out"] - 0.1  # type: ignore[operator]
-    from pablo_casting.mixdoc import write_mix
-
     write_mix(work, 1, trimmed, by="human")  # mix.v3
     retake(work, 1, longer_take(work, 1, "The fog is in and thick tonight."))
     mixed(work, cues_dir)
@@ -129,8 +125,6 @@ def test_a_clip_anchored_to_a_line_the_manifest_lost_is_pinned_where_it_sat_and_
     sfx = clip(pinned, "cue-0")
     sfx["anchor"] = {"line": 3, "edge": "start", "offset": -0.2}  # the door now sounds before the last line
     pinned["tracks"]["beds"]["automation"] = [{"anchor": {"line": 3, "edge": "end", "offset": 0.0}, "db": -6.0, "curve": "linear"}]  # type: ignore[index]
-    from pablo_casting.mixdoc import write_mix
-
     write_mix(work, 1, pinned, by="human")  # mix.v3
     before = read_version(work, 1, 1)
     # the next manifest drops line 3 altogether (the script lost it); the flag names the line that went
@@ -173,6 +167,55 @@ def test_a_cue_clip_whose_cue_the_manifest_lost_keeps_its_sound_without_the_inde
     assert beds and all("cue" not in c for c in beds) and all(c["source"]["kind"] == "cue" for c in beds)
     assert all("places cue 1, which manifest v2 does not have" in item["problem"] for item in body["review"])  # type: ignore[union-attr]
     assert len(body["review"]) == len(beds)  # type: ignore[arg-type]
+
+
+def test_a_line_re_taken_out_of_a_grouped_take_is_replaced_by_the_auto_clips_with_its_dressing(work: Path, cues_dir: Path) -> None:
+    # lines 1 and 2 were one pass (a Dia-style group): one take, one clip voicing both
+    both = TakeInputs(engine=ENGINE, voice="card-pair", lines=(Line(*SCRIPT[1]), Line(*SCRIPT[2])), seed=7, direction=Direction())
+    shared = record_take(work, ToneEngine(), both, attempt=0)[0].key
+    grouped = proposal(work, cues=CUES)
+    grouped["lines"][1]["take"] = grouped["lines"][2]["take"] = shared  # type: ignore[index]
+    write_version(work, 1, grouped)
+    mixed(work, cues_dir)
+    human = copy.deepcopy(read_mix(work, 1, 1))
+    assert clip(human, "line-1")["lines"] == [1, 2]
+    clip(human, "line-1")["gain"] = -9.0
+    clip(human, "line-1")["anchor"]["offset"] += 0.4  # type: ignore[index]
+    write_mix(work, 1, human, by="human")  # mix.v2
+    # fix re-takes line 2 alone; line 1 keeps the shared take
+    flags_path(work).write_text(json.dumps({"flags": [{"id": "f-1", "episode": 1, "line": 2, "reason": "flat"}]}))
+    fixed = copy.deepcopy(grouped)
+    fixed["lines"][2]["take"] = take_for(work, 2, attempt=1)  # type: ignore[index]
+    write_version(work, 1, fixed, flags_applied=["f-1"])
+
+    body = mixed(work, cues_dir)
+    doc = read_mix(work, 1, 3)
+    first, second = clip(doc, "line-1"), clip(doc, "line-1.2")
+    assert (first["lines"], first["source"]["key"], first["gain"], first["anchor"]) == ([1], shared, -9.0, clip(human, "line-1")["anchor"])  # type: ignore[index]
+    assert (second["lines"], second["source"]["key"], second["gain"]) == ([2], fixed["lines"][2]["take"], -9.0)  # type: ignore[index]
+    assert (second["anchor"]["line"], second["anchor"]["edge"]) == (1, "end")  # rides line 1's end, as the auto mix places it  # type: ignore[index]
+    (item,) = body["review"]  # type: ignore[misc]
+    assert item["clip"] == "line-1" and "line(s) 2 re-taken out of the lines 1, 2" in item["problem"] and item["was"] == clip(human, "line-1")
+    assert clip(doc, "line-3") == clip(human, "line-3")
+
+
+def test_a_line_new_to_the_manifest_gets_the_auto_clip_and_is_listed(work: Path, cues_dir: Path) -> None:
+    human = human_mix(work, cues_dir)
+    flags_path(work).write_text(json.dumps({"flags": [{"id": "f-1", "episode": 1, "line": 4, "reason": "other"}]}))
+    grown = proposal(work, cues=CUES)
+    grown["lines"].append({"i": 4, "speaker": "OTTO", "text": "Goodnight.", "take": longer_take(work, 2, "Goodnight."), "stretch": 1.0})  # type: ignore[union-attr]
+    write_version(work, 1, grown, flags_applied=["f-1"])
+
+    body = mixed(work, cues_dir)
+    doc = read_mix(work, 1, 3)
+    new = clip(doc, "line-4")
+    assert new["lines"] == [4] and new["anchor"] == {"line": 3, "edge": "end", "offset": pytest.approx(0.35, abs=1e-3)}
+    assert new in doc["tracks"]["dialogue"]["lanes"]["OTTO"]["clips"]  # type: ignore[index]
+    (item,) = body["review"]  # type: ignore[misc]
+    assert item["clip"] == "line-4" and item["problem"] == "line 4 is new in manifest v2; placed as the auto mix would"
+    assert read_version(work, 1, 2)["lines"][4]["start"] > read_version(work, 1, 2)["lines"][3]["end"]  # type: ignore[index, operator]
+    for c in ("line-0", "line-1", "line-2", "line-3"):
+        assert clip(doc, c) == clip(human, c)
 
 
 def test_auto_still_sets_a_human_mix_aside(work: Path, cues_dir: Path) -> None:
