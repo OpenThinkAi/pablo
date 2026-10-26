@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "bun:test";
-import { initAdopt, initNovel, vaultAuthor } from "../src/init";
+import { initAdopt, initNovel, initTrack, vaultAuthor } from "../src/init";
+import { coreStages, readCoreState } from "../src/core/machine";
+import { captureConsoleLog } from "../src/verbs";
+import { main } from "../src/cli";
 import { readMarker } from "../src/marker";
 
 /**
@@ -274,4 +277,86 @@ test("initAdopt twice refuses the second time with exit code 2", () => {
   if (second.ok) return;
   expect(second.code).toBe(2);
   expect(second.message).toContain("already has a pablo.json");
+});
+
+// ---------------------------------------------------------------------------
+// AGT-2103: init --track
+// ---------------------------------------------------------------------------
+
+test("initNovel with track historical-fiction writes track and adds the period core files beside the template", () => {
+  const vault = initGitVault();
+  const result = initNovel(vault, "salt-road", "The Salt Road", { now: () => new Date("2026-03-14T00:00:00Z"), track: "historical-fiction" });
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.track).toBe("historical-fiction");
+  const dest = join(vault, "novels", "salt-road");
+  const marker = readMarker(dest);
+  expect(marker.ok && marker.marker.track).toBe("historical-fiction");
+  expect(existsSync(join(dest, "bible", "period.md"))).toBe(true);
+  expect(existsSync(join(dest, "facts", "period.md"))).toBe(true);
+  // The template's own files are untouched by the track's.
+  expect(fileBytes(dest, "bible/overview.md").toString()).not.toContain("# Period");
+  const tracked = git(vault, "ls-files", "--", "novels/salt-road").split("\n");
+  expect(tracked).toContain("novels/salt-road/bible/period.md");
+  expect(tracked).toContain("novels/salt-road/facts/period.md");
+  // Headings alone satisfy nothing: the period stages are still open.
+  const open = coreStages(readCoreState(dest, "historical-fiction")).filter((s) => !s.done).map((s) => s.id);
+  expect(open).toContain("period");
+  expect(open).toContain("period-facts");
+});
+
+test("initNovel refuses an unknown track and a track the novel output does not allow, writing nothing", () => {
+  const vault = initGitVault();
+  const unknown = initNovel(vault, "salt-road", "The Salt Road", { track: "memoir" });
+  expect(unknown.ok).toBe(false);
+  if (!unknown.ok) expect(unknown.message).toContain('unknown track "memoir"');
+  const nonfiction = initNovel(vault, "salt-road", "The Salt Road", { track: "nonfiction" });
+  expect(nonfiction.ok).toBe(false);
+  if (!nonfiction.ok) expect(nonfiction.message).toContain("pablo init --track nonfiction");
+  expect(existsSync(join(vault, "novels", "salt-road"))).toBe(false);
+});
+
+test("initTrack nonfiction scaffolds a core-only work under essays/ with the nonfiction core and commits it", () => {
+  const vault = initGitVault();
+  const result = initTrack(vault, "the-press", "The Press", "nonfiction", { now: () => new Date("2026-03-14T00:00:00Z"), author: "Test Author" });
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  const dest = join(vault, "essays", "the-press");
+  expect(result.path).toBe(dest);
+  expect(result.format).toBeUndefined();
+  expect(walk(dest, dest)).toEqual(["README.md", "STYLE.md", "core/claims.md", "core/outline.md", "core/thesis.md", "notes/.keep", "pablo.json", "research/.keep"]);
+  const marker = readMarker(dest);
+  expect(marker.ok).toBe(true);
+  if (!marker.ok) return;
+  expect(marker.marker.track).toBe("nonfiction");
+  expect(marker.marker.outputs).toEqual({});
+  expect(marker.marker.author).toBe("Test Author");
+  expect(readFileSync(join(vault, "README.md"), "utf8")).toContain("| [The Press](essays/the-press/) | nonfiction | 2026-03-14 | created |");
+  expect(result.committed).toBe(true);
+  expect(git(vault, "status", "--porcelain")).toBe("");
+  expect(coreStages(readCoreState(dest, "nonfiction")).every((s) => !s.done)).toBe(true);
+});
+
+test("initTrack on a fiction track puts the work under stories/; an unknown track is refused", () => {
+  const vault = initGitVault();
+  const result = initTrack(vault, "harbour", "Harbour", "historical-fiction");
+  expect(result.ok && result.path).toBe(join(vault, "stories", "harbour"));
+  expect(existsSync(join(vault, "stories", "harbour", "bible", "period.md"))).toBe(true);
+  const bad = initTrack(vault, "harbour-2", "Harbour", "memoir");
+  expect(bad.ok).toBe(false);
+});
+
+test("pablo init --track <t> <slug> <Title> and pablo init novel ... --track <t> through the CLI", async () => {
+  const vault = initGitVault();
+  const core = await captureConsoleLog(() => main(["init", "--track", "nonfiction", "the-press", "The Press", "--json"], vault));
+  expect(core.exitCode).toBe(0);
+  const coreBody = JSON.parse(core.text) as Record<string, unknown>;
+  expect(coreBody["track"]).toBe("nonfiction");
+  expect(coreBody["format"]).toBeNull();
+
+  const novel = await captureConsoleLog(() => main(["init", "novel", "salt-road", "The Salt Road", "--track", "historical-fiction", "--json"], vault));
+  expect(novel.exitCode).toBe(0);
+  const novelBody = JSON.parse(novel.text) as Record<string, unknown>;
+  expect(novelBody["format"]).toBe("novel");
+  expect(novelBody["track"]).toBe("historical-fiction");
 });

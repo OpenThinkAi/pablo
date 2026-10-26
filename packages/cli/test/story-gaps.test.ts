@@ -28,6 +28,7 @@ import { runStory, titleFromPremise, titleFromPrompt } from "../src/story";
 import type { StoryDeps } from "../src/story";
 import { publishOutput } from "../src/verbs";
 import type { VerbContext, VerbResult } from "../src/verbs";
+import { fakeTrackPlanner } from "./track-planner";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
@@ -149,7 +150,7 @@ function fakeWriter(): Adapter {
 }
 
 function depsFor(env: Record<string, string>, query: HarnessQuery, extra: Partial<StoryDeps> = {}): StoryDeps {
-  return { query, writer: fakeWriter(), auth: harnessAuth(defaultConfig(), env, { env: {} }), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
+  return { query, writer: fakeWriter(), auth: harnessAuth(defaultConfig(), env, { env: {} }), planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
 function receipts(work: string): Record<string, unknown>[] {
@@ -381,6 +382,8 @@ test("AC6: a run prints one stderr line per stage, in order, and nothing else", 
   const { lines } = await finishedRun(["story"]);
   expect(lines.every((l) => l.startsWith("pablo story: ") && l.endsWith("\n") && l.indexOf("\n") === l.length - 1)).toBe(true);
   expect(lines.map((l) => l.trim())).toEqual([
+    // AGT-2103: the track the run chose, and why, before anything is written.
+    "pablo story: track fiction (inferred: the request names no historical period or event)",
     "pablo story: research (core stage 1 of 5)",
     "pablo story: premise (core stage 2 of 5)",
     "pablo story: bible (core stage 3 of 5)",

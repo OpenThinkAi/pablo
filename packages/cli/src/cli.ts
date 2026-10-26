@@ -28,7 +28,7 @@ import { migrateOutputs } from "./migrate-outputs";
 import { migrateTrack } from "./migrate-track";
 import { migrateStyle } from "./migrate-style";
 import { mergeDraftInProject } from "./novel/merge";
-import { initAdopt, initNovel, vaultAuthor } from "./init";
+import { initAdopt, initNovel, initTrack, vaultAuthor } from "./init";
 import type { InitResult } from "./init";
 import { outputsLabel, readMarker } from "./marker";
 import type { Composer } from "@openthink/pablo-tui";
@@ -141,7 +141,10 @@ function helpText(): string {
     "The vault is $PABLO_VAULT if set, else the nearest ancestor of the current",
     "directory holding a style/ or voices/ directory.",
     "",
-    "  pablo init <format> <slug> \"<Title>\"    scaffold a new work and write its marker",
+    "  pablo init <format> <slug> \"<Title>\" [--track <t>]",
+    "                                            scaffold a new work and write its marker (--track:",
+    "                                            fiction, historical-fiction; adds that track's core files)",
+    "  pablo init --track <t> <slug> \"<Title>\"  a work with only its track's core files, no output yet",
     "  pablo init --adopt --project <slug>      write only the marker into an existing work",
     "  pablo status --project <slug>            the story core's stages, then each output's",
     "  pablo status --project <slug> --for \"<output> N\"",
@@ -160,10 +163,12 @@ function helpText(): string {
     "                                            core is at beats), remove one (archived under",
     "                                            outputs/_removed/), or rewrite its plan.md;",
     "                                            add narrated --from <output> reads that output",
-    "  pablo story \"<prompt>\" [--output <type>]... [--review] [--title T] [--words N]",
+    "  pablo story \"<prompt>\" [--output <type>]... [--review] [--title T] [--words N] [--track <t>]",
     "                                            create a work and write it end to end: the core",
     "                                            through the harness, then each output (default:",
     "                                            a story or novel by the prompt's length cue);",
+    "                                            the track is --track, else inferred from the prompt",
+    "                                            (historical-fiction when it names a period or event);",
     "                                            --review stops on every branch, and",
     "                                            pablo story --project <slug> continues the run",
     "  check, publish and share take --output <type> the same way",
@@ -846,7 +851,8 @@ function emitInitResult(result: InitResult, json: boolean): number {
     const body: Record<string, unknown> = {
       ok: true,
       path: result.path,
-      format: result.format,
+      format: result.format ?? null,
+      ...(result.track === undefined ? {} : { track: result.track }),
       slug: result.slug,
       title: result.title,
       committed: result.committed,
@@ -886,9 +892,15 @@ function runInit(args: ParsedArgs, cwd: string): number {
     return emitInitResult(initAdopt(vault, resolved.path, args.project, { author: vaultAuthor(vault) }), args.json);
   }
 
+  // `pablo init --track <t> <slug> "<Title>"` (AGT-2103): a core-only work on the track, no output yet.
+  if (args.track !== undefined && args.rest.length === 2) {
+    const [coreSlug, coreTitle] = args.rest as [string, string];
+    return emitInitResult(initTrack(vault, coreSlug, coreTitle, args.track, { author: vaultAuthor(vault) }), args.json);
+  }
+
   const [format, slug, title] = args.rest;
   if (format === undefined || slug === undefined || title === undefined) {
-    const message = 'pablo: usage: pablo init <format> <slug> "<Title>"';
+    const message = 'pablo: usage: pablo init <format> <slug> "<Title>" [--track <t>], or pablo init --track <t> <slug> "<Title>"';
     emit({ ok: false, code: EXIT_ERROR, message }, args.json);
     return EXIT_ERROR;
   }
@@ -899,7 +911,7 @@ function runInit(args: ParsedArgs, cwd: string): number {
     return EXIT_ERROR;
   }
 
-  return emitInitResult(initNovel(vault, slug, title, { author: vaultAuthor(vault) }), args.json);
+  return emitInitResult(initNovel(vault, slug, title, { author: vaultAuthor(vault), ...(args.track === undefined ? {} : { track: args.track }) }), args.json);
 }
 
 /**
@@ -1375,8 +1387,10 @@ function storyText(body: Record<string, unknown>): string {
   }
   const published = (body["published"] ?? {}) as Record<string, { where: string; words: number; episodes?: readonly unknown[] }>;
   const assumptions = (body["assumptions"] ?? []) as { question: string }[];
+  const track = body["track"] as { track: string; inferred: boolean; why: string } | undefined;
   return [
     `pablo: wrote ${String(body["project"])} (${String(body["path"])})`,
+    ...(track === undefined ? [] : [`  track: ${track.track} (${track.inferred ? `inferred: ${track.why}` : track.why})`]),
     ...Object.entries(published).map(([id, p]) =>
       p.episodes !== undefined ? `  ${id}: ${p.episodes.length} episode(s), published to ${p.where}` : `  ${id}: ${p.words} words, published to ${p.where}`,
     ),
@@ -1402,6 +1416,7 @@ async function runStoryCli(args: ParsedArgs, argv: readonly string[], cwd: strin
       title: args.title,
       words,
       project: args.project,
+      track: args.track,
     },
     { cwd, env: process.env, stderr: process.stderr },
     interactive ? { ask: stdinAskAuthor(lineReader(process.stdin), process.stderr) } : {},

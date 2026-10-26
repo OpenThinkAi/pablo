@@ -31,7 +31,8 @@ read it. See [Reviewing and accepting](#reviewing-and-accepting).
 ### init
 
 ```
-pablo init novel <slug> "<Title>"
+pablo init novel <slug> "<Title>" [--track <t>]
+pablo init --track <t> <slug> "<Title>"
 ```
 
 Creates a new novel. It copies `<vault>/templates/novel` to `<vault>/novels/<slug>`
@@ -43,7 +44,29 @@ letters, digits and hyphens. An existing destination or a missing template is a
 refusal. If git fails (for example, the vault is not a repository), the files stay
 on disk and the result carries a `notice` instead of `committed: true`.
 
-Returns `{ok, path, format, slug, title, committed, notice?}`.
+`--track` (`fiction`, `historical-fiction`) writes `track` into `pablo.json` and adds
+the files that track's core needs beside the template's: on `historical-fiction`, the
+period brief `bible/period.md` and the period facts table `facts/period.md`, as
+headings only (they satisfy no stage until you fill them). Without `--track` the
+marker has none and the work reads as `fiction`. A track the novel output does not
+allow (`nonfiction`) is refused.
+
+`pablo init --track <t> <slug> "<Title>"` (two positionals) creates a work with only
+its track's core and no output yet: `README.md`, `STYLE.md`, the core files and a
+`pablo.json` with `track` and empty `outputs`, under `essays/<slug>` for
+`nonfiction` and `stories/<slug>` for the fiction tracks. The core files per track:
+
+| Track | Core files |
+|---|---|
+| `fiction` | `bible/overview.md`, `bible/places.md`, `bible/timeline.md`, `bible/characters/`, `outline/beats.md`, `facts.md`, `research/`, `notes/` |
+| `historical-fiction` | fiction's, plus `bible/period.md` and `facts/period.md` |
+| `nonfiction` | `core/thesis.md`, `core/claims.md`, `core/outline.md`, `research/`, `notes/` |
+
+It adds the README row and `.gitignore` line and commits like the novel form; its
+`notice` names the outputs the track allows, for `pablo output add` later.
+
+Returns `{ok, path, format, track?, slug, title, committed, notice?}` (`format` is
+`null` for a core-only work).
 
 ### init --adopt
 
@@ -701,7 +724,7 @@ refused. Both are also MCP tools.
 ### story
 
 ```
-pablo story "<prompt>" [--output <type>]... [--review] [--title T] [--words N]
+pablo story "<prompt>" [--output <type>]... [--review] [--title T] [--words N] [--track <t>]
 pablo story --project <slug>
 ```
 
@@ -714,6 +737,18 @@ Writes a work end to end from a prompt. It:
 `--output` is repeatable. The default is one written output, `story` or `novel`
 depending on the length the prompt asks for. A type that can't run here (radio
 without the casting side) is refused before anything is written.
+
+The work's track is `--track <t>` when given. Without it, one planner call reads the
+prompt: a prompt that names a historical period or event (a past year or era, a war,
+a named event) is `historical-fiction`, anything else `fiction`; `nonfiction` is never
+inferred. The run writes the track into `pablo.json`, scaffolds that track's core files
+(see `init`), prints `pablo story: track <t> (inferred: <why>)` on stderr before
+anything else, and returns `track: {track, inferred, why}` in its result (`why` is
+`--track` for a named one). If the planner can't be reached or answers with something
+unreadable, the run stays on `fiction` and `why` says so. An unknown track, or a
+requested output the track does not allow (every current output on `nonfiction`), is
+refused before anything is written. A historical-fiction run's drafts still wait on the
+period brief and period facts (`write`'s track gate).
 
 By default every branch is accepted as soon as it lands. The agent's questions are
 answered by stated assumptions, which are kept with the run. With `--review`, the run
