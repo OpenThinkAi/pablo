@@ -27,7 +27,7 @@ import {
   withProvenance,
 } from "@openthink/pablo-core";
 import { insertUnderHeading } from "./markdown";
-import { FACTS_TEXT } from "./migrate-outputs";
+import { FACTS_TEXT } from "./tracks/scaffold";
 import { isOutputId, outputIds } from "./outputs/registry";
 import { type PlanSession, planWrite } from "./plan";
 

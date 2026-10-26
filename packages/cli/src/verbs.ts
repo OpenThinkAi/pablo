@@ -1883,6 +1883,12 @@ const STORY_ARGS = z.object({
   title: z.string().optional().describe("The work's title (default: a working title from the prompt)."),
   words: z.number().int().positive().optional().describe("The story's length in words (default: the prompt's word cue, else the story output's own)."),
   project: z.string().optional().describe("Continue the `pablo story` run recorded in this work (its slug)."),
+  track: z
+    .string()
+    .optional()
+    .describe(
+      "The work's track (fiction or historical-fiction), written to pablo.json with that track's core files. nonfiction is refused: story writes fiction (start a nonfiction work with `pablo init --track nonfiction`). Default: inferred from the prompt by one planner call, historical-fiction when it names a historical period or event, else fiction.",
+    ),
 });
 
 async function runStoryVerb(args: z.infer<typeof STORY_ARGS>, ctx: VerbContext): Promise<VerbResult> {

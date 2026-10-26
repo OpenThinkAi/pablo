@@ -49,21 +49,20 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { WORK_RULES_FILE, createProviders, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
+import { WORK_RULES_FILE, createPlanner, createProviders, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
 import type { Adapter, Intent, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
 import { coreStages, readCoreState } from "./core/machine";
 import { ensureGitignoreEntry, gitCommit, SLUG_PATTERN } from "./init";
 import type { CastingDeps } from "./radio";
-import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, readMarker, writeMarker } from "./marker";
-import { FACTS_TEXT } from "./migrate-outputs";
+import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, readMarker, trackOf, writeMarker } from "./marker";
 import { mergeDraft } from "./novel/merge";
 import { addOutput } from "./output-verbs";
 import { radioMachine } from "./outputs/radio/casting-side";
 import { episodeState } from "./outputs/radio/state";
 import { RADIO_ID } from "./outputs/radio/units";
 import { slugify } from "./outputs/novel/units";
-import { outputDefinition, outputIds } from "./outputs/registry";
+import { outputDefinition, outputIds, outputsOnTrack } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
 import { startPlanSession } from "./plan";
 import { findVault, resolveProject } from "./project";
@@ -76,6 +75,11 @@ import { runHarness, sdkQuery } from "./harness/session";
 import type { HarnessQuery } from "./harness/session";
 import { harnessTools } from "./harness/tools";
 import { transcriptEntries } from "./harness/transcript";
+import { explicitTrack, inferTrack } from "./tracks/infer";
+import type { TrackChoice } from "./tracks/infer";
+import { isTrackId, trackIds } from "./tracks/registry";
+import type { TrackId } from "./tracks/registry";
+import { trackCoreFiles } from "./tracks/scaffold";
 import { captureConsoleLog, withWriteLock } from "./verbs";
 import type { VerbContext, VerbResult } from "./verbs";
 import { runWrite } from "./write";
@@ -162,6 +166,11 @@ export interface StoryArgs {
   readonly words?: number | undefined;
   /** Resume the run recorded in this work. */
   readonly project?: string | undefined;
+  /**
+   * `--track <t>` (AGT-2103, D-6): the work's track, written to pablo.json with that track's core files. Absent, the
+   * planner infers `historical-fiction` from a prompt naming a period or event, else `fiction`. Ignored on resume.
+   */
+  readonly track?: string | undefined;
 }
 
 /** What a test injects so no model runs: the harness, the writer, the extractor, the author. */
@@ -184,6 +193,11 @@ export interface StoryDeps {
    * type's own seam (`radioMachine`). Never touched by a run with no radio output.
    */
   readonly casting?: CastingDeps;
+  /**
+   * The planner `story` asks, once, which track an unflagged prompt is on (AGT-2103); absent, pablo's planner
+   * (`createPlanner`). A fake in tests. Never called when `--track` is given or a run resumes.
+   */
+  readonly planner?: Adapter;
 }
 
 /** A question the harness put to an absent author, answered by assumption. */
@@ -209,6 +223,8 @@ interface StoryState {
   review: boolean;
   readonly words?: number;
   readonly started: string;
+  /** The track the run chose and why (AGT-2103): `--track`, or inferred from the prompt. Absent on runs started before it. */
+  readonly track?: TrackChoice;
   /** The work's title is settled: `--title` was given, or the premise stage has supplied it (AGT-1705). */
   titled?: boolean;
   /** Steps finished: `core:<stage>`, `output:<type>`, `draft:<type>:<unit>`, `publish:<type>`. */
@@ -295,20 +311,56 @@ async function ensureOutputs(outputs: readonly string[]): Promise<VerbResult | u
   return undefined;
 }
 
-/** The core files a new work starts with: empty sections the core stages fill, and no output's units (`output add` scaffolds those). */
-function scaffold(title: string, prompt: string, date: string): Record<string, string> {
+/** The files a new work starts with: its README and rules, then its track's core files (`tracks/scaffold.ts`), and no output's units (`output add` scaffolds those). */
+function scaffold(title: string, prompt: string, date: string, track: TrackId): Record<string, string> {
   return {
     "README.md": `# ${title}\n\nAsked for on ${date}:\n\n> ${prompt.replace(/\n/g, "\n> ")}\n\n## Where things stand\n\n- ${date}: created by \`pablo story\`.\n`,
     [WORK_RULES_FILE]: `# ${title}: the work's rules\n\n## Ground rules\n\n- Tell the story the request asks for, in the vault's voice.\n`,
-    "bible/overview.md": "# Overview\n\n## Logline\n\n## Premise\n\n## Themes\n\n## Tone\n\n## Structure\n",
-    "bible/places.md": "# Places\n",
-    "bible/timeline.md": "# Timeline\n\n| Year | Real events | In the story |\n|---|---|---|\n",
-    "bible/characters/.keep": "",
-    "outline/beats.md": "# Outline\n",
-    "facts.md": FACTS_TEXT,
-    "research/.keep": "",
-    "notes/.keep": "",
+    ...trackCoreFiles(track),
   };
+}
+
+/**
+ * The run's track (AGT-2103, D-6): `--track` when given (validated), else one planner call on the prompt. A refusal
+ * comes back as a `VerbResult`.
+ */
+async function chooseTrack(args: StoryArgs, prompt: string, ctx: VerbContext, deps: StoryDeps): Promise<TrackChoice | VerbResult> {
+  const named = args.track?.trim();
+  if (named !== undefined && named !== "") {
+    if (!isTrackId(named)) return refuse(`pablo: story: unknown track ${JSON.stringify(named)} (allowed: ${trackIds().join(", ")}); nothing was written`, [`--track ${trackIds().join(" | ")}`]);
+    // `story` builds a fiction core (premise, bible, acts, beats); a nonfiction work starts from its own core.
+    if (named === "nonfiction") {
+      return refuse('pablo: story: pablo story writes fiction; start a nonfiction work with `pablo init --track nonfiction <slug> "<Title>"`; nothing was written', ["--track fiction | historical-fiction"]);
+    }
+    return explicitTrack(named);
+  }
+  // The planner can take seconds (`claude -p`): say what the wait is.
+  ctx.stderr.write("pablo story: choosing a track from the prompt\n");
+  let planner = deps.planner;
+  if (planner === undefined) {
+    try {
+      planner = createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig }), { keys: deps.keys ?? { env: ctx.env }, claude: { env: ctx.env } }).adapter;
+    } catch (error) {
+      return { track: "fiction", inferred: false, why: `the planner could not be set up (${(error as Error).message}); fiction by default` };
+    }
+  }
+  return inferTrack(prompt, planner);
+}
+
+/** Refuses, before anything is written, a requested output the run's track does not allow (D-7). */
+function outputsOffTrack(outputs: readonly string[], track: TrackId): VerbResult | undefined {
+  const allowed = outputsOnTrack(track);
+  const off = outputs.filter((id) => !allowed.includes(id));
+  if (off.length === 0) return undefined;
+  return refuse(
+    `pablo: story: the ${off.join(", ")} output${off.length === 1 ? " is" : "s are"} not allowed on the ${track} track (allowed: ${allowed.length === 0 ? "none on this machine yet" : allowed.join(", ")}); nothing was written`,
+    off.map((id) => `output ${id} on ${track}`),
+  );
+}
+
+/** The receipt's line for the track: the track, and why. */
+export function trackLine(choice: TrackChoice): string {
+  return `${choice.track} (${choice.inferred ? `inferred: ${choice.why}` : choice.why})`;
 }
 
 /** The first free slug for `title` across every category of the vault. */
@@ -386,6 +438,7 @@ function waiting(run: Run, step: string, branch: string): VerbResult {
       path: run.work,
       waiting: { step, branch },
       next: `accept ${branch} in review mode${branch.startsWith("draft/") ? ` (or \`pablo merge ${branch} --project ${run.slug}\`)` : ""}, then run \`pablo story --project ${run.slug}\``,
+      ...(run.state.track === undefined ? {} : { track: run.state.track }),
       done: run.state.done,
       assumptions: run.state.assumptions,
     },
@@ -483,7 +536,8 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
 /** What a required core stage still lacks after its branch landed, or undefined when it is met. */
 function stageMissing(work: string, stage: StoryCoreStage): readonly string[] | undefined {
   if (stage === "research") return undefined;
-  const found = coreStages(readCoreState(work)).find((s) => s.id === stage);
+  const marker = readMarker(work);
+  const found = coreStages(readCoreState(work, marker.ok ? trackOf(marker.marker) : undefined)).find((s) => s.id === stage);
   return found === undefined || found.done ? undefined : found.missing;
 }
 
@@ -803,13 +857,15 @@ async function advance(run: Run): Promise<VerbResult> {
 
   state.finished = true;
   saveState(run.work, state);
-  const core = coreStages(readCoreState(run.work)).map((s) => ({ id: s.id, done: s.done, summary: s.summary }));
+  const finalMarker = readMarker(run.work);
+  const core = coreStages(readCoreState(run.work, finalMarker.ok ? trackOf(finalMarker.marker) : undefined)).map((s) => ({ id: s.id, done: s.done, summary: s.summary }));
   return {
     body: {
       ok: true,
       project: run.slug,
       path: run.work,
       title: run.title,
+      ...(state.track === undefined ? {} : { track: state.track }),
       outputs: state.outputs,
       review: state.review,
       core,
@@ -895,6 +951,11 @@ export async function runStory(args: StoryArgs, ctx: VerbContext, deps: StoryDep
   // Refused by name before anything is written; a type nobody asked for is never ensured.
   const blocked = await ensureOutputs(outputs);
   if (blocked !== undefined) return blocked;
+  const track = await chooseTrack(args, prompt, ctx, deps);
+  if ("body" in track) return track;
+  const offTrack = outputsOffTrack(outputs, track.track);
+  if (offTrack !== undefined) return offTrack;
+  ctx.stderr.write(`pablo story: track ${trackLine(track)}\n`);
 
   const now = deps.now ?? (() => new Date());
   const date = localDate(now());
@@ -903,12 +964,12 @@ export async function runStory(args: StoryArgs, ctx: VerbContext, deps: StoryDep
   const category = outputs.includes("novel") ? "novels" : "stories";
   const work = join(vault.path, category, slug);
 
-  const files = scaffold(title, prompt, date);
+  const files = scaffold(title, prompt, date, track.track);
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(dirname(join(work, rel)), { recursive: true });
     writeFileSync(join(work, rel), content, "utf8");
   }
-  writeMarker(work, { title, slug, author: DEFAULT_AUTHOR, voice: DEFAULT_VOICE, neverSend: DEFAULT_NEVER_SEND, publish: DEFAULT_PUBLISH, outputs: {} });
+  writeMarker(work, { title, slug, author: DEFAULT_AUTHOR, voice: DEFAULT_VOICE, neverSend: DEFAULT_NEVER_SEND, publish: DEFAULT_PUBLISH, outputs: {}, track: track.track });
   // Machine state (`.pablo/`: the run, receipts, published files) is never committed, as `pablo init` arranges.
   const ignored = ensureGitignoreEntry(vault.path, ".pablo/");
   const createdPaths = [...[...Object.keys(files), "pablo.json"].map((rel) => join(work, rel)), ...(ignored ? [join(vault.path, ".gitignore")] : [])];
@@ -923,6 +984,7 @@ export async function runStory(args: StoryArgs, ctx: VerbContext, deps: StoryDep
     review: args.review === true,
     ...(words === undefined ? {} : { words }),
     started: now().toISOString(),
+    track,
     ...(args.title?.trim() ? { titled: true } : {}),
     done: [],
     plan: [],

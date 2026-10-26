@@ -28,7 +28,8 @@ import { migrateOutputs } from "./migrate-outputs";
 import { migrateTrack } from "./migrate-track";
 import { migrateStyle } from "./migrate-style";
 import { mergeDraftInProject } from "./novel/merge";
-import { initAdopt, initNovel, vaultAuthor } from "./init";
+import { initAdopt, initNovel, initTrack, vaultAuthor } from "./init";
+import type { TrackChoice } from "./tracks/infer";
 import type { InitResult } from "./init";
 import { outputsLabel, readMarker } from "./marker";
 import type { Composer } from "@openthink/pablo-tui";
@@ -44,7 +45,7 @@ import { findVault, resolveProjectFromCwd } from "./project";
 import { realWritingDoctorDeps, runWritingDoctor, writingDoctorText } from "./doctor-writing";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
-import { OUTPUTS, outputDefinition } from "./outputs/registry";
+import { OUTPUTS, isOutputId, outputDefinition } from "./outputs/registry";
 import { radioStageCheck } from "./outputs/radio/state";
 import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
@@ -141,7 +142,11 @@ function helpText(): string {
     "The vault is $PABLO_VAULT if set, else the nearest ancestor of the current",
     "directory holding a style/ or voices/ directory.",
     "",
-    "  pablo init <format> <slug> \"<Title>\"    scaffold a new work and write its marker",
+    "  pablo init <format> <slug> \"<Title>\" [--track <t>]",
+    "                                            scaffold a new work and write its marker (--track:",
+    "                                            fiction, historical-fiction; adds that track's core files)",
+    "  pablo init --track <t> <slug> \"<Title>\"  a work with only its track's core files, no output yet",
+    "                                            (--track: fiction, historical-fiction, nonfiction)",
     "  pablo init --adopt --project <slug>      write only the marker into an existing work",
     "  pablo status --project <slug>            the story core's stages, then each output's",
     "  pablo status --project <slug> --for \"<output> N\"",
@@ -160,10 +165,12 @@ function helpText(): string {
     "                                            core is at beats), remove one (archived under",
     "                                            outputs/_removed/), or rewrite its plan.md;",
     "                                            add narrated --from <output> reads that output",
-    "  pablo story \"<prompt>\" [--output <type>]... [--review] [--title T] [--words N]",
+    "  pablo story \"<prompt>\" [--output <type>]... [--review] [--title T] [--words N] [--track <t>]",
     "                                            create a work and write it end to end: the core",
     "                                            through the harness, then each output (default:",
     "                                            a story or novel by the prompt's length cue);",
+    "                                            the track is --track, else inferred from the prompt",
+    "                                            (historical-fiction when it names a period or event);",
     "                                            --review stops on every branch, and",
     "                                            pablo story --project <slug> continues the run",
     "  check, publish and share take --output <type> the same way",
@@ -846,7 +853,8 @@ function emitInitResult(result: InitResult, json: boolean): number {
     const body: Record<string, unknown> = {
       ok: true,
       path: result.path,
-      format: result.format,
+      format: result.format ?? null,
+      ...(result.track === undefined ? {} : { track: result.track }),
       slug: result.slug,
       title: result.title,
       committed: result.committed,
@@ -886,9 +894,21 @@ function runInit(args: ParsedArgs, cwd: string): number {
     return emitInitResult(initAdopt(vault, resolved.path, args.project, { author: vaultAuthor(vault) }), args.json);
   }
 
+  // `pablo init --track <t> <slug> "<Title>"` (AGT-2103): a core-only work on the track, no output yet.
+  if (args.track !== undefined && args.rest.length === 2) {
+    const [coreSlug, coreTitle] = args.rest as [string, string];
+    // `pablo init novel <slug> --track t` (the title left off) is a mistyped novel init, not a work named "novel".
+    if (isOutputId(coreSlug)) {
+      const message = `pablo: init: "${coreSlug}" is an output, not a slug; did you mean pablo init ${coreSlug} <slug> "<Title>" --track ${args.track}?`;
+      emit({ ok: false, code: EXIT_ERROR, message }, args.json);
+      return EXIT_ERROR;
+    }
+    return emitInitResult(initTrack(vault, coreSlug, coreTitle, args.track, { author: vaultAuthor(vault) }), args.json);
+  }
+
   const [format, slug, title] = args.rest;
   if (format === undefined || slug === undefined || title === undefined) {
-    const message = 'pablo: usage: pablo init <format> <slug> "<Title>"';
+    const message = 'pablo: usage: pablo init <format> <slug> "<Title>" [--track <t>], or pablo init --track <t> <slug> "<Title>"';
     emit({ ok: false, code: EXIT_ERROR, message }, args.json);
     return EXIT_ERROR;
   }
@@ -899,7 +919,7 @@ function runInit(args: ParsedArgs, cwd: string): number {
     return EXIT_ERROR;
   }
 
-  return emitInitResult(initNovel(vault, slug, title, { author: vaultAuthor(vault) }), args.json);
+  return emitInitResult(initNovel(vault, slug, title, { author: vaultAuthor(vault), ...(args.track === undefined ? {} : { track: args.track }) }), args.json);
 }
 
 /**
@@ -1366,7 +1386,7 @@ export function repeatedFlag(argv: readonly string[], flag: string): string[] {
 }
 
 /** One line per thing a story run did, or the branch it waits on. */
-function storyText(body: Record<string, unknown>): string {
+function storyText(body: Record<string, unknown>, trackLine: (choice: TrackChoice) => string): string {
   const waiting = body["waiting"] as { step: string; branch?: string; review?: string; unit?: number } | undefined;
   if (waiting !== undefined) {
     // A radio approval (AGT-1700) waits on the episode's bindings or render, not a branch.
@@ -1375,8 +1395,10 @@ function storyText(body: Record<string, unknown>): string {
   }
   const published = (body["published"] ?? {}) as Record<string, { where: string; words: number; episodes?: readonly unknown[] }>;
   const assumptions = (body["assumptions"] ?? []) as { question: string }[];
+  const track = body["track"] as TrackChoice | undefined;
   return [
     `pablo: wrote ${String(body["project"])} (${String(body["path"])})`,
+    ...(track === undefined ? [] : [`  track: ${trackLine(track)}`]),
     ...Object.entries(published).map(([id, p]) =>
       p.episodes !== undefined ? `  ${id}: ${p.episodes.length} episode(s), published to ${p.where}` : `  ${id}: ${p.words} words, published to ${p.where}`,
     ),
@@ -1386,7 +1408,7 @@ function storyText(body: Record<string, unknown>): string {
 
 /** `pablo story` (AGT-1690): a review run asks the author on the terminal; an on-demand run asks nobody. */
 async function runStoryCli(args: ParsedArgs, argv: readonly string[], cwd: string): Promise<number> {
-  const { runStory } = await import("./story");
+  const { runStory, trackLine } = await import("./story");
   const review = args.values["review"] === true;
   const words = args.words === undefined ? undefined : Number(args.words);
   if (words !== undefined && (!Number.isInteger(words) || words <= 0)) {
@@ -1402,13 +1424,14 @@ async function runStoryCli(args: ParsedArgs, argv: readonly string[], cwd: strin
       title: args.title,
       words,
       project: args.project,
+      track: args.track,
     },
     { cwd, env: process.env, stderr: process.stderr },
     interactive ? { ask: stdinAskAuthor(lineReader(process.stdin), process.stderr) } : {},
   );
   const body = result.body as Record<string, unknown>;
   if (args.json) console.log(JSON.stringify(body));
-  else if (body["ok"] === true) console.log(storyText(body));
+  else if (body["ok"] === true) console.log(storyText(body, trackLine));
   else {
     console.error(String(body["message"]));
     for (const item of (body["missing"] ?? []) as string[]) console.error(`  ${item}`);

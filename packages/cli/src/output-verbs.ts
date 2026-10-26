@@ -42,7 +42,7 @@ import { dirtyPaths } from "./migrate";
 import { LEDGER_TEMPLATE } from "./novel/continuity";
 import { renderNovelPlan } from "./outputs/novel/plan";
 import { isNarratableSource } from "./outputs/narrated";
-import { OUTPUTS, outputDefinition, outputIds } from "./outputs/registry";
+import { OUTPUTS, outputDefinition, outputIds, outputsOnTrack } from "./outputs/registry";
 import type { OutputDefinition, PlanRow } from "./outputs/types";
 
 /** Where every output but the novel keeps its plan, rules and units: `outputs/<type>/`. */
@@ -222,7 +222,7 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   // D-7: an output declares the tracks it allows; a work on another track cannot add it.
   const track = trackOf(found.marker);
   if (!def.def.tracks.includes(track)) {
-    const allowed = outputIds().filter((o) => (outputDefinition(o)?.tracks ?? []).includes(track));
+    const allowed = outputsOnTrack(track);
     return refuse("add", `the ${id} output is not allowed on the ${track} track (allowed: ${allowed.length === 0 ? "none" : allowed.join(", ")})`, [`<type>: ${allowed.join(" | ")}`]);
   }
 

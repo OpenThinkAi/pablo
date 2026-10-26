@@ -11,7 +11,7 @@
 import { afterAll, afterEach, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,6 +33,8 @@ import { defaultOutput, runStory, titleFromPrompt, wordsCue } from "../src/story
 import type { StoryDeps } from "../src/story";
 import { captureConsoleLog, VERBS } from "../src/verbs";
 import type { VerbContext } from "../src/verbs";
+import { parseTrackAnswer, trackInferencePrompt } from "../src/tracks/infer";
+import { fakeTrackPlanner } from "./track-planner";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
@@ -173,7 +175,7 @@ function fakeWriter(): Adapter & { drafts: number; extractions: number } {
 }
 
 function depsFor(env: Record<string, string>, query: HarnessQuery, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
-  return { query, writer, auth: harnessAuth(defaultConfig(), env, { env: {} }), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
+  return { query, writer, auth: harnessAuth(defaultConfig(), env, { env: {} }), planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
 function receipts(work: string): Record<string, unknown>[] {
@@ -545,4 +547,114 @@ test("a resume names what is missing: no run recorded, or a prompt and a project
   const empty = await runStory({}, ctx, deps);
   expect(empty.exitCode).toBe(2);
   expect((empty.body as { missing: string[] }).missing).toEqual(['"<prompt>"']);
+});
+
+// ---------------------------------------------------------------------------
+// AGT-2103: --track, and the track inferred from the prompt
+// ---------------------------------------------------------------------------
+
+const HISTORICAL_ANSWER = '{"track": "historical-fiction", "why": "the request names 1900 Liguria and the emigration to the United States"}';
+
+function trackedFiles(vault: string, work: string): string[] {
+  return git(vault, "ls-files", "--", relative(vault, work)).split("\n").map((p) => relative(relative(vault, work), p));
+}
+
+test("AGT-2103: a prompt naming a period is inferred historical-fiction by one planner call; the track and why are in the receipt and pablo.json, with the period core files", async () => {
+  const { vault, env, ctx } = tempVault();
+  const lines: string[] = [];
+  const planner = fakeTrackPlanner(HISTORICAL_ANSWER);
+  const result = await runStory({ prompt: SPEC, review: true }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const body = result.body as Record<string, any>;
+  expect(result.exitCode).toBe(0);
+  expect(planner.asked).toHaveLength(1);
+  expect(planner.asked[0]).toContain(SPEC);
+  expect(body.track).toEqual({ track: "historical-fiction", inferred: true, why: "the request names 1900 Liguria and the emigration to the United States" });
+  expect(lines[0]).toBe("pablo story: choosing a track from the prompt\n");
+  expect(lines[1]).toBe("pablo story: track historical-fiction (inferred: the request names 1900 Liguria and the emigration to the United States)\n");
+
+  const work = join(vault, "stories", body.project as string);
+  const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as Record<string, unknown>;
+  expect(marker["track"]).toBe("historical-fiction");
+  const tracked = trackedFiles(vault, work);
+  for (const file of ["bible/period.md", "facts/period.md", "bible/overview.md", "outline/beats.md", "facts.md", "STYLE.md"]) expect(tracked).toContain(file);
+});
+
+test("AGT-2103: a plain fiction prompt is inferred fiction, with no period files", async () => {
+  const { vault, env, ctx } = tempVault();
+  const planner = fakeTrackPlanner('{"track": "fiction", "why": "an invented lighthouse, no period named"}');
+  const result = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const body = result.body as Record<string, any>;
+  expect(result.exitCode).toBe(0);
+  expect(planner.asked).toHaveLength(1);
+  expect(body.track).toEqual({ track: "fiction", inferred: true, why: "an invented lighthouse, no period named" });
+  const work = join(vault, "stories", body.project as string);
+  expect(JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")).track).toBe("fiction");
+  expect(existsSync(join(work, "bible", "period.md"))).toBe(false);
+  expect(existsSync(join(work, "facts", "period.md"))).toBe(false);
+});
+
+test("AGT-2103: --track always wins: the planner is never asked", async () => {
+  const { vault, env, ctx } = tempVault();
+  const planner = fakeTrackPlanner(HISTORICAL_ANSWER);
+  const lines: string[] = [];
+  const result = await runStory({ prompt: SPEC, review: true, track: "fiction" }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  expect(lines[0]).toBe("pablo story: track fiction (--track)\n");
+  const body = result.body as Record<string, any>;
+  expect(result.exitCode).toBe(0);
+  expect(planner.asked).toEqual([]);
+  expect(body.track).toEqual({ track: "fiction", inferred: false, why: "--track" });
+  const work = join(vault, "stories", body.project as string);
+  expect(JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")).track).toBe("fiction");
+  expect(existsSync(join(work, "bible", "period.md"))).toBe(false);
+
+  // And the other way: a plain prompt put on historical-fiction by hand.
+  const forced = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true, track: "historical-fiction" }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const forcedBody = forced.body as Record<string, any>;
+  expect(planner.asked).toEqual([]);
+  expect(forcedBody.track.track).toBe("historical-fiction");
+  expect(existsSync(join(vault, "stories", forcedBody.project as string, "bible", "period.md"))).toBe(true);
+});
+
+test("AGT-2103: an unknown track, or a track no requested output allows, is refused before anything is written", async () => {
+  const { vault, env, ctx } = tempVault();
+  const planner = fakeTrackPlanner();
+  const before = git(vault, "rev-parse", "main");
+
+  const unknown = await runStory({ prompt: SPEC, track: "memoir" }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  expect(unknown.exitCode).toBe(2);
+  expect((unknown.body as { message: string }).message).toContain('unknown track "memoir"');
+
+  const nonfiction = await runStory({ prompt: SPEC, track: "nonfiction" }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  expect(nonfiction.exitCode).toBe(2);
+  expect((nonfiction.body as { message: string }).message).toContain("pablo init --track nonfiction");
+
+  // A requested output the track does not allow (D-7): a test type that only nonfiction allows.
+  const off = registerOutput({ ...STORY, id: "nf-only", tracks: ["nonfiction"] });
+  try {
+    const refused = await runStory({ prompt: SPEC, track: "fiction", output: ["nf-only"] }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+    expect(refused.exitCode).toBe(2);
+    expect((refused.body as { message: string }).message).toContain("the nf-only output is not allowed on the fiction track");
+  } finally {
+    off();
+  }
+
+  expect(planner.asked).toEqual([]);
+  expect(git(vault, "rev-parse", "main")).toBe(before);
+  expect(existsSync(join(vault, "stories"))).toBe(false);
+});
+
+test("AGT-2103: a planner that cannot answer leaves the run on fiction and says why", async () => {
+  const { env, ctx } = tempVault();
+  const result = await runStory({ prompt: SPEC, review: true }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner: fakeTrackPlanner("I think it is probably historical.") }));
+  const body = result.body as Record<string, any>;
+  expect(result.exitCode).toBe(0);
+  expect(body.track).toEqual({ track: "fiction", inferred: false, why: "the planner's answer could not be read; fiction by default" });
+});
+
+test("AGT-2103: parseTrackAnswer reads the JSON asked for and nothing else", () => {
+  expect(parseTrackAnswer('```json\n{"track": "historical-fiction", "why": "1906 earthquake"}\n```')).toEqual({ track: "historical-fiction", why: "1906 earthquake" });
+  expect(parseTrackAnswer('{"track": "fiction"}')?.track).toBe("fiction");
+  expect(parseTrackAnswer('{"track": "nonfiction", "why": "x"}')).toBeUndefined();
+  expect(parseTrackAnswer("historical-fiction")).toBeUndefined();
+  expect(trackInferencePrompt("the 1906 San Francisco earthquake")).toContain("> the 1906 San Francisco earthquake");
 });

@@ -31,6 +31,7 @@ import { markerPath, readMarker } from "./marker";
 import { dirtyPaths } from "./migrate";
 import { frontmatterField, novelPlanRows, novelUnitFiles, renderNovelPlan } from "./outputs/novel/plan";
 import { OUTPUTS } from "./outputs/registry";
+import { FACTS_TEXT } from "./tracks/scaffold";
 
 export const MIGRATE_OUTPUTS_COMMIT_MESSAGE = "migrate: story core and novel output";
 
@@ -65,14 +66,6 @@ export interface MigrateOutputsOptions {
   readonly now?: () => Date;
 }
 
-/** `facts.md`'s header: what migration creates, and what the first promotion starts from on a work without one (AGT-1671). */
-export const FACTS_TEXT = `# Facts
-
-Facts every output of this work must honour: continuity an output established
-that the author (or the harness, with the author) promoted to the story core.
-Each fact names where it came from, e.g. \`established-by: novel/ch03\`.
-Nothing lands here by itself; promotion is explicit.
-`;
 
 function refuse(message: string): MigrateOutputsResult {
   return { ok: false, code: 2, message: `pablo: migrate outputs: ${message}` };

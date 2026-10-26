@@ -30,6 +30,7 @@ import { NARRATED } from "./narrated";
 import { RADIO } from "./radio";
 import { SCREENPLAY } from "./screenplay";
 import { STORY } from "./story";
+import type { TrackId } from "../tracks/registry";
 import type { OutputDefinition } from "./types";
 
 export const OUTPUTS = {
@@ -75,6 +76,11 @@ export function isOutputId(id: string): boolean {
 export function outputDefinition(id: string): OutputDefinition | undefined {
   if (Object.hasOwn(OUTPUTS, id)) return OUTPUTS[id as keyof typeof OUTPUTS];
   return registered.get(id);
+}
+
+/** The known types a work on `track` may add (each type's `tracks`, D-7), `outputIds` order. */
+export function outputsOnTrack(track: TrackId): OutputId[] {
+  return outputIds().filter((id) => (outputDefinition(id)?.tracks ?? []).includes(track));
 }
 
 /**

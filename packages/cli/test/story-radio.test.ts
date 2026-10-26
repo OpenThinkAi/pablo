@@ -29,6 +29,7 @@ import { runStory } from "../src/story";
 import type { StoryDeps } from "../src/story";
 import { VERBS } from "../src/verbs";
 import type { VerbContext } from "../src/verbs";
+import { fakeTrackPlanner } from "./track-planner";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
@@ -381,7 +382,7 @@ function ensureSeam(uv: boolean): { looks: () => number; restore: () => void } {
 }
 
 function depsFor(env: Record<string, string>, query: HarnessQuery, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
-  return { query, writer, auth: harnessAuth(defaultConfig(), env, { env: {} }), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
+  return { query, writer, auth: harnessAuth(defaultConfig(), env, { env: {} }), planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
 function streamIndex(work: string): { episode: number; audio: string }[] {
