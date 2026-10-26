@@ -1293,16 +1293,31 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
     existing = mix_versions(work, episode)
     superseded: int | None = None
     rebased: Rebased | None = None
+    human_render = False  # a streamed episode whose human mix is kept: the file is that document's render, not the stream's own mixdown
     new_doc: tuple[Mapping[str, object], str] | None = None  # (proposal, by) to write once the mix succeeds
     try:
         if timeline is not None:
             newest = read_mix(work, episode, existing[-1]) if existing else None
-            if newest is not None and newest.get("by") == "human":
-                superseded = existing[-1]
             timeline.finish()
-            doc = {**timeline.document(), "manifest_version": version}
-            new_doc = (doc, "auto")
             doc_name = f"mix.v{(existing[-1] if existing else 0) + 1}.json"
+            if newest is not None and newest.get("by") == "human":
+                # A stream never replaces a human mix (AGT-2154): it is kept as it stands when it still fits, else
+                # rebased onto this manifest (AGT-2153); only one that cannot be carried over gives way to the auto mix.
+                problems = validate(newest)
+                if problems:
+                    raise MixDocError(problems, where=f"mix.v{existing[-1]}.json")
+                if compatible(newest, manifest) and not request.auto:
+                    doc, doc_name = newest, f"mix.v{existing[-1]}.json"
+                    human_render = True
+                else:
+                    rebased = _rebased(work, episode, newest, manifest, sources) if not request.auto else None
+                    if rebased is not None:
+                        doc, new_doc, human_render = rebased.document, (rebased.document, "human"), True
+                    else:
+                        superseded = existing[-1]
+            if not human_render:
+                doc = {**timeline.document(), "manifest_version": version}
+                new_doc = (doc, "auto")
         elif request.document is not None:
             doc: Mapping[str, object] = {**request.document, "manifest_version": version}
             new_doc = (doc, "human")
@@ -1327,7 +1342,7 @@ def mix(request: MixRequest, seams: Seams, *, timeline: Timeline | None = None, 
                 doc_name = f"mix.v{(existing[-1] if existing else 0) + 1}.json"
         # The stream's segments came from the timeline's own mixdown, which is `_mix_range` over the very clips the
         # document holds: the episode file is that mixdown through the master, a document render of it the same.
-        rendered = timeline.rendered() if timeline is not None else render_document(manifest, doc, sources)
+        rendered = timeline.rendered() if timeline is not None and not human_render else render_document(manifest, doc, sources)
         # The auto mix counts each cue it asks for; a document's render counts each asset it loads.
         rendered.cues_generated, rendered.cues_reused = sources.generated, sources.reused
         duration = round(len(rendered.audio) / SR, 3)

@@ -864,11 +864,12 @@ def perform(
         "rtfEngine": render["rtf_engine"],
         "audioSeconds": render["audio_seconds"],
         "wall": wall,
-        **({"stream": streamed["stream"], "audio": streamed["audio"], "ttfa": streamed["ttfa"], "segments": streamed["segments"]} if streamed else {}),
+        **({"stream": streamed["stream"], "audio": streamed["audio"], "ttfa": streamed["ttfa"], "segments": streamed["segments"], **{k: streamed[k] for k in ("mixBy", "rebasedMix", "supersededMix", "review") if k in streamed}} if streamed else {}),
         "message": (
             f"episode {episode} v{written.manifest['version']}: {len(lines)} lines, {summary['pass']} pass, "
             f"{summary['best_of_failed']} best-of (flagged), {totals.rendered} takes rendered, rtf_total {rtf_total}"
             + (f"; streamed, first audio after {streamed['ttfa']['first_audio']} s, mixed to {Path(str(streamed['audio'])).name}" if streamed else "")  # type: ignore[index]
+            + (f"; your mix.v{streamed['rebasedMix']} was carried over" + (" (some items need a look in the mixer)" if streamed.get("review") else "") if streamed and streamed.get("rebasedMix") else "")
         ),
     }, EXIT_OK
 
@@ -902,7 +903,7 @@ def _mix_streamed(
         live.work,
         {"intent": "stream", "episode": live.episode, "version": version, "segments": len(live.segments), "seconds": round(live.emitted / SR, 3), "ttfa": dict(live.ttfa)},
     )
-    return {"ok": True, "stream": str(live.dir), "audio": body.get("audio"), "ttfa": dict(live.ttfa), "segments": len(live.segments)}
+    return {"ok": True, "stream": str(live.dir), "audio": body.get("audio"), "ttfa": dict(live.ttfa), "segments": len(live.segments), **{k: body[k] for k in ("mixBy", "rebasedMix", "supersededMix", "review") if k in body}}
 
 
 def cmd_perform(
