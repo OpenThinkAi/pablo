@@ -451,3 +451,14 @@ export function clipLabel(payload: Pick<MixPayload, "manifest">, clip: MixClip):
   }
   return clip.id;
 }
+
+/**
+ * Whether the episode audio on disk is older than the mix the window shows (AGT-2152): there are unsaved edits,
+ * there is no audio rendered from a mix document, or the newest audio was rendered from an earlier mix version.
+ * An older version opened by `--version` is not "newer" than audio rendered from a later one.
+ */
+export function audioOlderThanMix(payload: Pick<MixPayload, "version" | "rendered">, unsaved: boolean): boolean {
+  if (unsaved) return true;
+  const from = payload.rendered.mix;
+  return from === null || from < payload.version;
+}

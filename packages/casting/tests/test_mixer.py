@@ -14,12 +14,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile as sf
-from test_mix import cue, cues_dir, fake_pacer, mixed, performed, seams, work  # noqa: F401 (fixtures)
+from test_mix import cue, cues_dir, fake_pacer, mixed, performed, proposal, seams, take_for, work  # noqa: F401 (fixtures)
 
 from pablo_casting.cli import run
 from pablo_casting.cues import cue_key
 from pablo_casting.loudness import DEFAULT_TARGETS, integrated_lufs
-from pablo_casting.manifest import read_version
+from pablo_casting.manifest import audio_versions, flags_path, read_version, write_version
 from pablo_casting.mix import SR, Seams
 from pablo_casting.mixdoc import mix_path, mix_versions, read_mix
 from pablo_casting.mixer import PEAKS_PER_SECOND, compute_peaks, peaks_path
@@ -221,3 +221,43 @@ def test_save_and_the_mixer_need_their_arguments(work: Path, cues_dir: Path, epi
     assert ask(work, cues_dir, s, "save")[1] == 2
     assert ask(work, cues_dir, s, "load", "--episode", "x")[1] == 1
     assert ask(work, cues_dir, s, "rewind")[1] == 1
+
+
+# --- AGT-2152: render from the mixer window -------------------------------------------------------------------
+
+
+def test_load_says_which_mix_version_the_audio_on_disk_was_rendered_from(work: Path, cues_dir: Path, episode: dict[str, object], tmp_path: Path) -> None:
+    s, _ = seams()
+    body, _ = ask(work, cues_dir, s, "load", "--episode", "1")
+    assert body["rendered"] == {"manifest": 1, "mix": 1}
+    assert save(work, cues_dir, s, tmp_path, edited(read_mix(work, 1, 1)), 1)[1] == 0
+    body, _ = ask(work, cues_dir, s, "load", "--episode", "1")
+    assert (body["newest"], body["rendered"]) == (2, {"manifest": 1, "mix": 1})  # the audio is older than mix v2
+
+
+def test_render_mixes_the_saved_document_into_a_new_episode_file(work: Path, cues_dir: Path, episode: dict[str, object], tmp_path: Path) -> None:
+    s, _ = seams()
+    assert save(work, cues_dir, s, tmp_path, edited(read_mix(work, 1, 1)), 1)[1] == 0
+    body, code = ask(work, cues_dir, s, "render", "--episode", "1", "--base", "2")
+    assert code == 0 and body["ok"], body
+    assert body["mixWritten"] is False and str(body["mixDocument"]).endswith("mix.v2.json")
+    assert body["rendered"] == {"manifest": 2, "mix": 2} and audio_versions(work, 1) == [1, 2]
+    assert mix_versions(work, 1) == [1, 2]  # rendering writes no mix version
+    loaded, _ = ask(work, cues_dir, s, "load", "--episode", "1")
+    assert loaded["rendered"] == {"manifest": 2, "mix": 2}
+
+
+def test_render_refuses_a_stale_base_and_a_document_that_no_longer_fits(work: Path, cues_dir: Path, episode: dict[str, object], tmp_path: Path) -> None:
+    s, _ = seams()
+    assert save(work, cues_dir, s, tmp_path, edited(read_mix(work, 1, 1)), 1)[1] == 0
+    body, code = ask(work, cues_dir, s, "render", "--episode", "1", "--base", "1")
+    assert code == 2 and body["stale"] is True and body["newest"] == 2
+    assert ask(work, cues_dir, s, "render", "--episode", "1")[1] == 2  # --base is required
+    retake = proposal(work, cues=[cue("SFX", "A door creaks", 0), cue("BED", "Rain on a tin roof", 1)])
+    retake["lines"][1]["take"] = take_for(work, 1, attempt=1)  # type: ignore[index]
+    flags_path(work).parent.mkdir(parents=True, exist_ok=True)
+    flags_path(work).write_text(json.dumps({"flags": [{"id": "f-1", "episode": 1, "line": 1, "reason": "flat"}]}))
+    write_version(work, 1, retake, flags_applied=["f-1"])  # a fix re-took line 1: mix v2 no longer voices the manifest's takes
+    body, code = ask(work, cues_dir, s, "render", "--episode", "1", "--base", "2")
+    assert code == 2 and "does not fit" in str(body["message"])
+    assert audio_versions(work, 1) == [1] and mix_versions(work, 1) == [1, 2]  # nothing rendered, no auto mix written

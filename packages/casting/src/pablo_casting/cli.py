@@ -228,7 +228,7 @@ def _parser() -> _Parser:
     # mixer
     parser.add_argument("--source", help="mixer peaks/audio: take:<key> or cue:<key>")
     parser.add_argument("--stretch", type=float)
-    parser.add_argument("--base", type=int, help="mixer save: the mix version the edit started from")
+    parser.add_argument("--base", type=int, help="mixer save: the mix version the edit started from; mixer render: the mix version to render")
     # perform
     parser.add_argument("--engine")
     parser.add_argument("--json-lines", action="store_true", dest="json_lines")

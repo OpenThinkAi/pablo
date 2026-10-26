@@ -3,7 +3,8 @@
  * (`views/mixer.tsx`, AGT-1768, opened by `openMixer` below) is mounted on. Like the review player's host it is the only thing that
  * touches the casting directory; the view is dumb and never reads a file.
  *
- * It answers four mutations (names and payloads in `views/mixer-protocol.ts`), each reading the disk afresh:
+ * It answers five mutations (names and payloads in `views/mixer-protocol.ts`; the markers' own are `mixer-notes-host.ts`'s),
+ * each reading the disk afresh:
  *  - `loadMix({episode, version?})` — the mix document (the newest `renders/epNN/mix.v<m>.json` unless a version
  *    is asked for), the mix versions, the manifest line/cue info the document was made against, and the
  *    track/lane layout;
@@ -14,6 +15,10 @@
  *  - `saveMix({episode, base, document})` — validates the document and writes `mix.v<m+1>` `by: "human"` with
  *    a diff summary. Refused, writing nothing, when `base` is not the newest version: no silent overwrite, and
  *    no version is ever rewritten.
+ *  - `renderMix({episode, base})` (AGT-2152) — runs `pablo mix` on mix version `base` (the newest, just saved by the
+ *    window when it had edits), writing the next episode file. Refused, rendering nothing, when `base` is not the
+ *    newest or no longer fits the newest manifest's takes. It runs the child asynchronously: a render takes a while
+ *    and the window's server must keep answering meanwhile.
  *
  * The work is done by `python -m pablo_casting mixer <op>` (`packages/casting/.../mixer.py`), which owns the
  * mix document's validation and exclusive write (`mixdoc.py`) and the pacing (`mix.py`); this file validates
@@ -27,8 +32,8 @@ import { mount } from "@openthink/ui-leaf";
 import type { MountOptions, MutationHandler, View } from "@openthink/ui-leaf";
 import type { MixerData } from "../views/mixer";
 import { MUTATIONS } from "../views/mixer-protocol";
-import type { ClipAudioPayload, ManifestCue, ManifestLine, MixDiff, MixPayload, MixSource, MixVersionInfo, PeaksPayload, SavedMixPayload } from "../views/mixer-protocol";
-import { runCasting } from "./casting";
+import type { ClipAudioPayload, ManifestCue, ManifestLine, MixDiff, MixPayload, MixSource, MixVersionInfo, PeaksPayload, RenderedFrom, RenderedMixPayload, SavedMixPayload } from "../views/mixer-protocol";
+import { MIX_EXTRA, ensureProvisioned, runCasting, runPythonStreaming } from "./casting";
 import type { CastingDeps } from "./casting";
 import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./ui-leaf-host";
 import { createNotesHost } from "./mixer-notes-host";
@@ -58,6 +63,7 @@ export interface MixerHost extends NotesHost {
   peaks(args: unknown): PeaksPayload;
   clipAudio(args: unknown): ClipAudioPayload;
   saveMix(args: unknown): SavedMixPayload;
+  renderMix(args: unknown): Promise<RenderedMixPayload>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -106,6 +112,24 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
     return body;
   }
 
+  /** `call`, but the child runs asynchronously (with the `mix` extra provisioned): for a render. */
+  async function callAsync(op: string, args: readonly string[]): Promise<Record<string, unknown>> {
+    const vault = options.vault === undefined ? [] : ["--vault", options.vault];
+    const library = options.library === undefined ? [] : ["--library", options.library];
+    const ready = ensureProvisioned(ctx, options.casting, work, [MIX_EXTRA]);
+    const result = ready.ok ? await runPythonStreaming(ready.layout, options.casting, ctx, ["mixer", op, ...args, ...vault, ...library, "--work", work], () => undefined) : ready.result;
+    const body = isRecord(result.body) ? result.body : {};
+    if (result.exitCode !== 0 || body["ok"] === false) {
+      throw new Error(typeof body["message"] === "string" ? body["message"] : `the mixer could not ${op} (exit ${result.exitCode})`);
+    }
+    return body;
+  }
+
+  const renderedFrom = (raw: unknown): RenderedFrom => {
+    const whole = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
+    return isRecord(raw) ? { manifest: whole(raw["manifest"]), mix: whole(raw["mix"]) } : { manifest: null, mix: null };
+  };
+
   const versionRows = (rows: unknown): MixVersionInfo[] => (Array.isArray(rows) ? (rows as MixVersionInfo[]) : []);
 
   return {
@@ -125,6 +149,7 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
         manifest,
         latestManifest: body["latest_manifest"] as number,
         layout: body["layout"] as MixPayload["layout"],
+        rendered: renderedFrom(body["rendered"]),
       };
     },
 
@@ -168,6 +193,21 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
         rmSync(dir, { recursive: true, force: true });
       }
     },
+
+    async renderMix(args) {
+      const episode = positiveInt(args, "episode", true);
+      const base = positiveInt(args, "base", true);
+      const body = await callAsync("render", ["--episode", String(episode), "--base", String(base)]);
+      return {
+        episode,
+        mixVersion: base,
+        manifestVersion: body["version"] as number,
+        audio: typeof body["audio"] === "string" ? body["audio"] : null,
+        duration: body["duration"] as number,
+        rendered: renderedFrom(body["rendered"]),
+        message: typeof body["message"] === "string" ? body["message"] : "",
+      };
+    },
   };
 }
 
@@ -178,6 +218,7 @@ export function mixerMutations(host: MixerHost): Record<string, MutationHandler>
     peaks: async (args) => host.peaks(args),
     clipAudio: async (args) => host.clipAudio(args),
     saveMix: async (args) => host.saveMix(args),
+    renderMix: async (args) => host.renderMix(args),
     listNotes: async (args) => host.listNotes(args),
     saveNote: async (args) => host.saveNote(args),
     deleteNote: async (args) => host.deleteNote(args),

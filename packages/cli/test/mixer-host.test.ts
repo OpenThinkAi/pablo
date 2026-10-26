@@ -9,7 +9,7 @@ import { parseCliArgs, runMixerView } from "../src/cli";
 import { NO_CHROME_MIXER_MESSAGE, createMixerHost, mixVersionsOnDisk, mixerMutations, openMixer } from "../src/mixer-host";
 import type { OpenMixerRequest } from "../src/mixer-host";
 import { MUTATIONS } from "../views/mixer-protocol";
-import type { ClipAudioPayload, MixPayload, PeaksPayload, SavedMixPayload } from "../views/mixer-protocol";
+import type { ClipAudioPayload, MixPayload, PeaksPayload, RenderedMixPayload, SavedMixPayload } from "../views/mixer-protocol";
 
 /**
  * AGT-1766: the mixer's host side over a fake casting machine. The Python side (`mixer.py`, tested in
@@ -94,9 +94,11 @@ test("loadMix asks the Python side for the newest mix and returns the document, 
       manifest: { version: 1, duration: 9, lines: [{ i: 0, speaker: "HOST", text: "Hello.", take: KEY(1), stretch: 1, start: 0.5, end: 1.5 }], cues: [] },
       latest_manifest: 3,
       layout: [{ track: "dialogue", lanes: [{ name: "HOST", clips: 1 }], volume: 0, mute: false, solo: false, automation: 0 }],
+      rendered: { manifest: 1, mix: 1 },
     },
   });
   const mix: MixPayload = host(m, work, "/vault").loadMix({ episode: 1 });
+  expect(mix.rendered).toEqual({ manifest: 1, mix: 1 });
   expect(m.calls[0]).toEqual(["mixer", "load", "--episode", "1", "--vault", "/vault", "--work", work, "--json"]);
   expect([mix.episode, mix.title, mix.version, mix.newest, mix.latestManifest]).toEqual([1, "The First Night", 2, 2, 3]);
   expect(mix.versions.map((v) => v.by)).toEqual(["auto", "human"]);
@@ -284,7 +286,24 @@ test("the window may call the four mixer mutations and nothing else", async () =
   const { m, work } = machine();
   const handlers = mixerMutations(host(m, work));
   expect(Object.keys(handlers).sort()).toEqual([...MUTATIONS].sort());
-  expect([...MUTATIONS]).toEqual(["loadMix", "peaks", "clipAudio", "saveMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags"]);
+  expect([...MUTATIONS]).toEqual(["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags"]);
   m.respond = () => ({ code: 2, body: { ok: false, code: 2, message: "nope" } });
   await expect((handlers["loadMix"] as (a: unknown) => Promise<unknown>)({ episode: 1 })).rejects.toThrow("nope");
+});
+
+test("AGT-2152: renderMix runs the Python side's mixer render on the asked version and relays what it wrote", async () => {
+  const { m, work } = machine();
+  m.respond = () => ({
+    code: 0,
+    body: { ok: true, episode: 1, version: 3, audio: "/w/renders/ep01/ep01.v3.m4a", duration: 61.25, message: "episode 1 v3: 61.3 s", rendered: { manifest: 3, mix: 2 } },
+  });
+  const done: RenderedMixPayload = await host(m, work, "/vault").renderMix({ episode: 1, base: 2 });
+  expect(m.calls.at(-1)).toEqual(["mixer", "render", "--episode", "1", "--base", "2", "--vault", "/vault", "--work", work, "--json"]);
+  expect(done).toEqual({ episode: 1, mixVersion: 2, manifestVersion: 3, audio: "/w/renders/ep01/ep01.v3.m4a", duration: 61.25, rendered: { manifest: 3, mix: 2 }, message: "episode 1 v3: 61.3 s" });
+
+  m.respond = () => ({ code: 2, body: { ok: false, code: 2, message: "mix v1 is not the newest (v2); reload v2 and render it. Nothing was rendered", stale: true } });
+  await expect(host(m, work).renderMix({ episode: 1, base: 1 })).rejects.toThrow("is not the newest");
+  const before = m.calls.length;
+  await expect(host(m, work).renderMix({ episode: 1 })).rejects.toThrow("base must be");
+  expect(m.calls.length).toBe(before);
 });

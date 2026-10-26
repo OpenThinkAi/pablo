@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ViewProps } from "@openthink/ui-leaf/view";
-import type { ClipAudioPayload, MixPayload, MixSource, PeaksPayload, SavedMixPayload, TrackName } from "./mixer-protocol";
+import type { ClipAudioPayload, MixPayload, MixSource, PeaksPayload, RenderedMixPayload, SavedMixPayload, TrackName } from "./mixer-protocol";
 import {
   TRACK_ORDER,
+  audioOlderThanMix,
   VOLUME_MAX_DB,
   VOLUME_MIN_DB,
   clampZoom,
@@ -38,8 +39,10 @@ import { INSPECTOR_CSS, Inspector } from "./mixer-inspector";
  * a free offset), drag its edges to trim, its top corner handles to fade, split it at the playhead (B), set its
  * gain and fade curves in the inspector, and set track volume/mute/solo; undo/redo in-session; Save writes the
  * next mix version. Every edit is `mixer-edit.ts`'s pure function of the document, and playback picks it up at once.
- * The view never reads a file. It calls four host mutations, `loadMix`, `peaks`, `clipAudio` and `saveMix`
- * (`mixer-protocol.ts`); placement, envelopes and scheduling are `mixer-logic.ts`'s pure functions.
+ * Render (AGT-2152) saves first when there are edits, runs `pablo mix` on the saved version (`renderMix`) and
+ * reloads the window's mix and audio; the status line says whenever the audio on disk is older than this mix.
+ * The view never reads a file. It calls the host mutations `loadMix`, `peaks`, `clipAudio`, `saveMix` and
+ * `renderMix` (`mixer-protocol.ts`); placement, envelopes and scheduling are `mixer-logic.ts`'s pure functions.
  */
 
 export interface MixerData {
@@ -199,6 +202,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
   const [selected, setSelected] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [rendering, setRendering] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error" | "stale"; text: string } | null>(null);
   const [reloads, setReloads] = useState(0);
   const [loadKey, setLoadKey] = useState(0);
@@ -500,8 +504,9 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
     if (next !== docRef.current) apply(next, "split");
   }, [selected, playhead, apply]);
 
-  const save = useCallback(async () => {
-    if (payload === null || !unsaved || saving) return;
+  /** Saves the edits as the next mix version; the version written, or undefined when nothing was saved. */
+  const save = useCallback(async (): Promise<number | undefined> => {
+    if (payload === null || !unsaved || saving) return undefined;
     setSaving(true);
     setNotice(null);
     try {
@@ -509,13 +514,39 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
       setLoad({ phase: "ready", payload: { ...payload, version: saved.version, newest: saved.version, versions: saved.versions, document: saved.document } });
       dispatchEdit({ type: "saved", doc: saved.document });
       setNotice({ kind: "ok", text: `Saved as mix v${saved.version}${saved.summary.text === "" ? "" : `: ${saved.summary.text}`}.` });
+      return saved.version;
     } catch (e) {
       const text = message(e);
       setNotice(isStaleRefusal(text) ? { kind: "stale", text: `Not saved: ${text} Reload to get the newest mix (your unsaved edits here will be lost).` } : { kind: "error", text: `Not saved: ${text}` });
+      return undefined;
     } finally {
       setSaving(false);
     }
   }, [payload, unsaved, saving, mutate, data.episode]);
+
+  /** Render (AGT-2152): save first when there are edits, `pablo mix` the saved version, then reload the mix and its audio. */
+  const render = useCallback(async () => {
+    if (payload === null || saving || rendering) return;
+    if (payload.version !== payload.newest && !unsaved) {
+      setNotice({ kind: "error", text: `Not rendered: this is mix v${payload.version}, and Render renders the newest (v${payload.newest}). Open v${payload.newest}, or edit and save this one first.` });
+      return;
+    }
+    const base = unsaved ? await save() : payload.version;
+    if (base === undefined) return; // the save said why
+    setRendering(true);
+    setNotice({ kind: "ok", text: `Rendering mix v${base}…` });
+    try {
+      const done = await mutate<RenderedMixPayload>("renderMix", { episode: data.episode, base });
+      setNotice({ kind: "ok", text: `Rendered mix v${done.mixVersion} into episode v${done.manifestVersion} (${done.duration.toFixed(1)} s).` });
+      setVersion(undefined);
+      setReloads((n) => n + 1); // reload the document, the manifest timings and every clip's audio
+    } catch (e) {
+      const text = message(e);
+      setNotice(isStaleRefusal(text) ? { kind: "stale", text: `Not rendered: ${text}` } : { kind: "error", text: `Not rendered: ${text}` });
+    } finally {
+      setRendering(false);
+    }
+  }, [payload, saving, rendering, unsaved, save, mutate, data.episode]);
 
   const reload = () => {
     setNotice(null);
@@ -619,6 +650,9 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
           <button type="button" className="save" onClick={() => void save()} disabled={!unsaved || saving} title="Save as the next mix version (⌘S)">
             {saving ? "Saving…" : "Save"}
           </button>
+          <button type="button" className="render" onClick={() => void render()} disabled={saving || rendering} title="Save (if edited), run pablo mix on this mix and reload its audio">
+            {rendering ? "Rendering…" : "Render"}
+          </button>
         </div>
         <div className="version">
           <label>
@@ -654,6 +688,11 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
                 Reload
               </button>
             )}
+          </span>
+        )}
+        {audioOlderThanMix(payload, unsaved) && (
+          <span className="warn stale-audio">
+            Audio on disk is older than this mix{payload.rendered.mix === null ? "" : ` (rendered from mix v${payload.rendered.mix})`}: Render to hear it in the episode file.
           </span>
         )}
         {payload.latestManifest > payload.manifest.version && (
@@ -796,6 +835,7 @@ button.play { min-width: 64px; border-color: var(--accent); color: var(--accent)
 .clip:hover .fade-handle, .clip.selected .fade-handle { opacity: 1; }
 .editing { display: flex; align-items: center; gap: 6px; }
 button.save:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button.render:not(:disabled) { border-color: var(--accent); }
 .unsaved { color: var(--accent); }
 .ok { color: #9fb98a; }
 .reload { margin-left: 8px; padding: 1px 8px; }

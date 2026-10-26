@@ -35,6 +35,7 @@ const PAYLOAD: MixPayload = {
   },
   latestManifest: 2,
   layout: [],
+  rendered: { manifest: 1, mix: 2 },
 };
 
 const noMutate = (async () => undefined) as never;
@@ -81,7 +82,7 @@ test("AGT-1769: a loaded mix is editable: every clip has trim edges and fade han
   expect(html).not.toContain("read-only");
 });
 
-test("the view bundles the way the ui-leaf binary bundles it and calls only loadMix, peaks, clipAudio, saveMix and the marker mutations", async () => {
+test("the view bundles the way the ui-leaf binary bundles it and calls only loadMix, peaks, clipAudio, saveMix, renderMix and the marker mutations", async () => {
   const result = await Bun.build({
     entrypoints: [new URL("../views/mixer.tsx", import.meta.url).pathname],
     external: ["react", "react/jsx-runtime", "react-dom", "react-dom/client"],
@@ -91,5 +92,18 @@ test("the view bundles the way the ui-leaf binary bundles it and calls only load
   expect(result.success).toBe(true);
   const text = (await result.outputs[0]?.text()) ?? "";
   const called = new Set([...text.matchAll(/mutate\(\s*"([A-Za-z]+)"/g)].map((m) => m[1]));
-  expect([...called].sort()).toEqual(["clipAudio", "deleteNote", "exportNotes", "listNotes", "loadMix", "notesToFlags", "peaks", "saveMix", "saveNote"]);
+  expect([...called].sort()).toEqual(["clipAudio", "deleteNote", "exportNotes", "listNotes", "loadMix", "notesToFlags", "peaks", "renderMix", "saveMix", "saveNote"]);
+});
+
+test("AGT-2152: a Render button sits beside Save, and the window says when the audio on disk is older than this mix", () => {
+  const current = renderToStaticMarkup(<Mixer data={{ title: "The Lamp Room", episode: 1 }} mutate={noMutate} preloaded={PAYLOAD} />);
+  expect(current).toMatch(/<button[^>]*class="render"[^>]*>Render<\/button>/);
+  expect(current).not.toMatch(/<button[^>]*class="render"[^>]*disabled/);
+  expect(current).not.toContain("Audio on disk is older than this mix"); // the audio was rendered from v2, the mix shown
+
+  const behind = renderToStaticMarkup(<Mixer data={{ title: "The Lamp Room", episode: 1 }} mutate={noMutate} preloaded={{ ...PAYLOAD, rendered: { manifest: 1, mix: 1 } }} />);
+  expect(behind).toContain("Audio on disk is older than this mix (rendered from mix v1)");
+
+  const none = renderToStaticMarkup(<Mixer data={{ title: "The Lamp Room", episode: 1 }} mutate={noMutate} preloaded={{ ...PAYLOAD, rendered: { manifest: null, mix: null } }} />);
+  expect(none).toContain("Audio on disk is older than this mix:");
 });

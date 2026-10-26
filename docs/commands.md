@@ -654,7 +654,7 @@ Rendering uses the GPU.
 | `pablo gate <take.wav> --line "..." --card <slug>` | scores one take against a card's quality gates; `gate calibrate` fits the thresholds |
 | `pablo takes show <key> \| gc [--yes] --project <slug>` | inspects one take, or archives the takes no manifest uses (moved, never deleted) |
 | `pablo review --project <slug> [--episode N]` | the review player (needs Google Chrome): play episodes, flag lines for `fix` |
-| `pablo mixer --project <slug> --episode N [--version k] [--export-notes]` | the mixer window (needs Google Chrome); `--export-notes` writes the episode's punch list without opening it |
+| `pablo mixer --project <slug> --episode N [--version k] [--library DIR] [--export-notes]` | the mixer window (needs Google Chrome): edit the mix, Save writes the next mix version, Render saves (if edited), runs `pablo mix` on that version and reloads the window's audio; the window says whenever the audio on disk is older than the mix it shows. `--library DIR` is the library whose `cues/` hold the cue audio; `--export-notes` writes the episode's punch list without opening it |
 
 `perform`, `mix` and `fix` also accept `--output radio --unit N` in place of
 `--episode N`. Check an episode's progress with `pablo status --for "episode N"`.
