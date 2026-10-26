@@ -65,3 +65,17 @@ To upgrade pablo, run the install line again. `pablo read --list` shows the roun
 ## Removing pablo
 
 To remove pablo, `bun remove -g @openthink/pablo`.
+
+## Removing an old tray
+
+Earlier versions installed a menu-bar tray (`pablo tray`), which this version
+removes. If you installed it, stop and delete it by hand, once:
+
+```sh
+launchctl bootout gui/$(id -u)/ai.openthink.pablo.tray
+rm -f ~/Library/LaunchAgents/ai.openthink.pablo.tray.plist
+rm -rf ~/Library/Application\ Support/pablo/PabloTray.app
+rm -rf ~/.local/state/pablo/tray
+```
+
+The `tray.autoUpdate` config key is gone too; pablo no longer reads it.
