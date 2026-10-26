@@ -17,6 +17,7 @@
  * A failure is a thrown plain-words `Error` in the Python side's own words; ui-leaf hands it to the view.
  */
 
+import type { AudioOutput } from "./outputs/audio";
 import type { ChosenTakePayload, FlagsPayload, LineTakesPayload, RetakePayload } from "../views/mixer-protocol";
 import { runTakes } from "./casting";
 import type { CastingDeps } from "./casting";
@@ -36,6 +37,8 @@ export interface PunchHost {
 
 export interface PunchHostOptions {
   readonly work: string;
+  /** The performed output (default radio; narrated, AGT-2158). `env` already names it to the Python side. */
+  readonly output?: AudioOutput;
   readonly title: string;
   readonly vault?: string;
   readonly library?: string;
@@ -69,8 +72,9 @@ function bodyOf(result: { body: unknown; exitCode: number }, what: string): Reco
 
 export function createPunchHost(options: PunchHostOptions): PunchHost {
   const { work } = options;
+  const output = options.output ?? "radio";
   const ctx = { env: options.env, stderr: options.stderr ?? { write: () => undefined } };
-  const review = createReviewHost({ work, title: options.title, ...(options.now === undefined ? {} : { now: options.now }) });
+  const review = createReviewHost({ work, output, title: options.title, ...(options.now === undefined ? {} : { now: options.now }) });
   const where = { ...(options.vault === undefined ? {} : { vault: options.vault }), ...(options.library === undefined ? {} : { library: options.library }) };
 
   async function takesOf(episode: number, line: number): Promise<LineTakesPayload> {
@@ -89,20 +93,20 @@ export function createPunchHost(options: PunchHostOptions): PunchHost {
   return {
     listFlags(args) {
       const episode = episodeArg(args);
-      return { episode, flags: episodeFlags(work, episode) };
+      return { episode, flags: episodeFlags(work, episode, output) };
     },
 
     flag(args) {
       const episode = episodeArg(args);
       lineArg(args);
       review.flag(args);
-      return { episode, flags: episodeFlags(work, episode) };
+      return { episode, flags: episodeFlags(work, episode, output) };
     },
 
     unflag(args) {
       const episode = episodeArg(args);
       review.unflag(args);
-      return { episode, flags: episodeFlags(work, episode) };
+      return { episode, flags: episodeFlags(work, episode, output) };
     },
 
     async retake(args) {
@@ -110,10 +114,10 @@ export function createPunchHost(options: PunchHostOptions): PunchHost {
       const line = lineArg(args);
       const reason = isRecord(args) ? args["reason"] : undefined;
       if (reason !== undefined) review.flag({ episode, line, reason });
-      if (!episodeFlags(work, episode).some((f) => f.line === line)) {
+      if (!episodeFlags(work, episode, output).some((f) => f.line === line)) {
         throw new Error(`line ${line} of episode ${episode} has no open flag: flag it with a reason first (the reason is what the re-take changes)`);
       }
-      const body = bodyOf(await runFix({ work, episode, line, ...where, env: options.env, stderr: ctx.stderr, casting: options.casting }), "the re-take");
+      const body = bodyOf(await runFix({ work, output, episode, line, ...where, env: options.env, stderr: ctx.stderr, casting: options.casting }), "the re-take");
       return {
         episode,
         line,
@@ -122,7 +126,7 @@ export function createPunchHost(options: PunchHostOptions): PunchHost {
         changedLines: Array.isArray(body["changedLines"]) ? (body["changedLines"] as number[]) : [],
         mixed: body["mixed"] === true,
         message: typeof body["message"] === "string" ? body["message"] : "",
-        flags: episodeFlags(work, episode),
+        flags: episodeFlags(work, episode, output),
         takes: await takesOf(episode, line),
       };
     },

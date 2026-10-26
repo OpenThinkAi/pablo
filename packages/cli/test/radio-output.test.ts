@@ -406,7 +406,7 @@ test("the casting verbs' other stage refusals: no script, already performed, mix
   });
   expect((await run("cast", { project: "ice-house", auto: true, all: false, recast: false, output: "radio", unit: 2 })).exitCode).toBe(2);
   // Addressing: another output, a bare --unit, and two different episodes are refused by name.
-  expect((await run("perform", { project: "ice-house", output: "novel", unit: 1, "json-lines": false })).body).toMatchObject({ missing: ["--output radio"] });
+  expect((await run("perform", { project: "ice-house", output: "novel", unit: 1, "json-lines": false })).body).toMatchObject({ missing: ["--output radio", "--output narrated"] });
   expect((await run("perform", { project: "ice-house", unit: 1, "json-lines": false })).body).toMatchObject({ missing: ["--output radio"] });
   expect((await run("perform", { project: "ice-house", output: "radio", unit: 1, episode: 2, "json-lines": false })).exitCode).toBe(2);
   expect(calls).toEqual([]);

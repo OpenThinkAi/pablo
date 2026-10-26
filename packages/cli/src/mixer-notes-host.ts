@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { CATEGORIES, flagDraft, isCategory, punchList, removeMarker, roundTime, upsertMarker } from "../views/mixer-notes";
 import type { Marker, NotesFile, Sounding } from "../views/mixer-notes";
 import type { ExportPayload, NotesPayload, ToFlagsPayload } from "../views/mixer-protocol";
+import type { AudioOutput } from "./outputs/audio";
 import { castingDir, episodeDir, episodeTitle, flagsFile, readFlagsFile, writeFlagsFile } from "./review-host";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -85,12 +86,12 @@ export function markerFrom(raw: unknown): Marker {
   };
 }
 
-export function notesPath(work: string, episode: number): string {
-  return join(episodeDir(work, episode), "notes.json");
+export function notesPath(work: string, episode: number, output: AudioOutput = "radio"): string {
+  return join(episodeDir(work, episode, output), "notes.json");
 }
 
-export function punchListPath(work: string, episode: number): string {
-  return join(episodeDir(work, episode), "punch-list.md");
+export function punchListPath(work: string, episode: number, output: AudioOutput = "radio"): string {
+  return join(episodeDir(work, episode, output), "punch-list.md");
 }
 
 function writeAtomic(path: string, body: string): void {
@@ -100,8 +101,8 @@ function writeAtomic(path: string, body: string): void {
   renameSync(tmp, path);
 }
 
-export function readNotes(work: string, episode: number): Marker[] {
-  const path = notesPath(work, episode);
+export function readNotes(work: string, episode: number, output: AudioOutput = "radio"): Marker[] {
+  const path = notesPath(work, episode, output);
   if (!existsSync(path)) return [];
   let parsed: unknown;
   try {
@@ -115,13 +116,15 @@ export function readNotes(work: string, episode: number): Marker[] {
 
 const upsertAll = (markers: readonly Marker[]): Marker[] => markers.reduce<Marker[]>((acc, m) => upsertMarker(acc, m), []);
 
-function writeNotes(work: string, episode: number, notes: readonly Marker[]): void {
+function writeNotes(work: string, episode: number, notes: readonly Marker[], output: AudioOutput): void {
   const file: NotesFile = { schema: 1, episode, notes };
-  writeAtomic(notesPath(work, episode), `${JSON.stringify(file, null, 2)}\n`);
+  writeAtomic(notesPath(work, episode, output), `${JSON.stringify(file, null, 2)}\n`);
 }
 
 export interface NotesHostOptions {
   readonly work: string;
+  /** The performed output (default radio; narrated, AGT-2158). */
+  readonly output?: AudioOutput;
   /** The work's title, for the punch list's heading. */
   readonly title: string;
   readonly now?: () => Date;
@@ -129,36 +132,37 @@ export interface NotesHostOptions {
 
 export function createNotesHost(options: NotesHostOptions): NotesHost {
   const { work } = options;
+  const output = options.output ?? "radio";
   const now = options.now ?? (() => new Date());
 
   return {
     listNotes(args) {
       const episode = episodeArg(args);
-      return { episode, notes: readNotes(work, episode) };
+      return { episode, notes: readNotes(work, episode, output) };
     },
 
     saveNote(args) {
       const episode = episodeArg(args);
       const marker = markerFrom(isRecord(args) ? args["marker"] : undefined);
-      const notes = upsertMarker(readNotes(work, episode), marker);
-      writeNotes(work, episode, notes);
+      const notes = upsertMarker(readNotes(work, episode, output), marker);
+      writeNotes(work, episode, notes, output);
       return { episode, notes };
     },
 
     deleteNote(args) {
       const episode = episodeArg(args);
       const id = text(isRecord(args) ? args["id"] : undefined, "id", 40);
-      const before = readNotes(work, episode);
+      const before = readNotes(work, episode, output);
       const notes = removeMarker(before, id);
-      if (notes.length !== before.length) writeNotes(work, episode, notes);
+      if (notes.length !== before.length) writeNotes(work, episode, notes, output);
       return { episode, notes };
     },
 
     exportNotes(args) {
       const episode = episodeArg(args);
-      const notes = readNotes(work, episode);
-      const markdown = punchList({ title: options.title, episode, episodeTitle: episodeTitle(work, episode), markers: notes, exported: now().toISOString().slice(0, 10) });
-      const path = punchListPath(work, episode);
+      const notes = readNotes(work, episode, output);
+      const markdown = punchList({ title: options.title, episode, episodeTitle: episodeTitle(work, episode, output), markers: notes, exported: now().toISOString().slice(0, 10) });
+      const path = punchListPath(work, episode, output);
       writeAtomic(path, markdown);
       return { episode, count: notes.length, path, markdown };
     },
@@ -168,10 +172,10 @@ export function createNotesHost(options: NotesHostOptions): NotesHost {
       const idsArg = isRecord(args) ? args["ids"] : undefined;
       if (idsArg !== undefined && (!Array.isArray(idsArg) || idsArg.some((i) => typeof i !== "string"))) throw new Error("ids must be a list of marker ids");
       const wanted = idsArg === undefined ? undefined : new Set(idsArg as string[]);
-      const notes = readNotes(work, episode).filter((m) => wanted === undefined || wanted.has(m.id));
+      const notes = readNotes(work, episode, output).filter((m) => wanted === undefined || wanted.has(m.id));
       const written: string[] = [];
       const skipped: string[] = [];
-      const file = readFlagsFile(work);
+      const file = readFlagsFile(work, output);
       let flags = [...file.flags];
       const stamp = now().toISOString();
       for (const m of notes) {
@@ -187,10 +191,10 @@ export function createNotesHost(options: NotesHostOptions): NotesHost {
         written.push(m.id);
       }
       if (written.length > 0) {
-        mkdirSync(castingDir(work), { recursive: true });
-        writeFlagsFile(work, file, flags);
+        mkdirSync(castingDir(work, output), { recursive: true });
+        writeFlagsFile(work, file, flags, output);
       }
-      return { episode, written, skipped, path: flagsFile(work) };
+      return { episode, written, skipped, path: flagsFile(work, output) };
     },
   };
 }

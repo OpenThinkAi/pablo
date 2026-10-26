@@ -108,6 +108,11 @@ Commands:
 
 The library root is `--library`, else the config's `library`, else
 `<vault>/casting` (`--vault`); its voices are under `voices/`.
+
+`--output radio|narrated` (else `$PABLO_CASTING_OUTPUT`, else radio; AGT-2158,
+`outputs.py`) picks the output whose scripts and casting state every work
+command reads: radio's `outputs/radio/{episodes,casting}/` or narrated's
+`outputs/narrated/{readings,casting}/`. `perform --stream` is radio's only.
 """
 
 from __future__ import annotations
@@ -121,7 +126,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from pablo_casting import __version__
+from pablo_casting import __version__, outputs
 from pablo_casting.binding import BindingRefusal, bind, episode_files, library_dir, read_cast, read_episode
 from pablo_casting.config import CastingConfig, ConfigRefusal, load_config
 from pablo_casting.engines import EngineFactory, real_engine
@@ -244,6 +249,7 @@ def _parser() -> _Parser:
     parser.add_argument("--engine")
     parser.add_argument("--json-lines", action="store_true", dest="json_lines")
     parser.add_argument("--stream", action="store_true")
+    parser.add_argument("--output", help="the audio output: radio (default) or narrated; else $PABLO_CASTING_OUTPUT")
     return parser
 
 
@@ -860,6 +866,27 @@ def run(
         if not work.is_dir():
             return refused(f"--work {args.work} is not a directory", missing=[str(work)]), args.json
 
+    # Which audio output's scripts and casting state the command works on (AGT-2158, `outputs.py`).
+    output = args.output or env.get(outputs.OUTPUT_ENV) or outputs.RADIO
+    if output not in outputs.AUDIO_OUTPUTS:
+        return refused(f'unknown output "{output}": one of {", ".join(outputs.AUDIO_OUTPUTS)}', missing=["--output"]), args.json
+    if output != outputs.RADIO and args.command == "perform" and args.stream:
+        return refused(f"perform --stream publishes radio episodes to the listening directory; the {output} output is performed without it"), args.json
+    with outputs.using(output):
+        return _dispatch(args, env, work, downloader, scorers, toolkits, engines, mixer)
+
+
+def _dispatch(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    work: Path | None,
+    downloader: Downloader | None,
+    scorers: ScorerFactory | None,
+    toolkits: ToolkitFactory | None,
+    engines: EngineFactory | None,
+    mixer: Seams | None,
+) -> tuple[Result, bool]:
+    """`run` after parsing, inside the command's output."""
     if args.command == "version":
         return cmd_version(env), args.json
     if args.command == "doctor":

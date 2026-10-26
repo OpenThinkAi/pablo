@@ -45,7 +45,8 @@ import { findVault, resolveProjectFromCwd } from "./project";
 import { realWritingDoctorDeps, runWritingDoctor, writingDoctorText } from "./doctor-writing";
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
-import { OUTPUTS, isOutputId, outputDefinition } from "./outputs/registry";
+import { AUDIO_OUTPUTS, isAudioOutput } from "./outputs/audio";
+import { OUTPUTS, isOutputId, outputDefinition, resolveOutput } from "./outputs/registry";
 import { radioStageCheck } from "./outputs/radio/state";
 import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
@@ -321,7 +322,7 @@ function helpText(): string {
     "                                            embedding); prints the card hash. --recast",
     "                                            archives the old card under recast/. No",
     "                                            --from-wav: voices are synthetic only",
-    "  pablo cast --auto --project <slug> [--episode N | --all]",
+    "  pablo cast --auto --project <slug> [--episode N | --all | --output narrated [--unit N]]",
     "                                            match every unbound CAST: role to a distinct,",
     "                                            active library voice (by: match, score,",
     "                                            runner-up; review in the middle band); roles",
@@ -338,7 +339,7 @@ function helpText(): string {
     "  pablo voices list [--auto-admitted] | show <slug> | retire <slug> [--reason \"...\"]",
     "                                            the shared voice library; retire keeps the",
     "                                            card hash, so pinned stories still perform",
-    "  pablo perform --project <slug> --output radio --unit N (or --episode N) [--engine chatterbox-turbo|dia] [--json-lines]",
+    "  pablo perform --project <slug> --output radio|narrated --unit N (or --episode N) [--engine chatterbox-turbo|dia] [--json-lines]",
     "                                            refused, naming it, while a role is not cast;",
     "                                            render the episode's lines in their bound voices",
     "                                            (gates, up to 4 takes a line, pace stretch within",
@@ -351,7 +352,7 @@ function helpText(): string {
     "                                            pablo review once 30 s have passed the gates), mix",
     "                                            the episode file and publish it there at once;",
     "                                            --all performs every unrendered episode in order",
-    "  pablo mix --project <slug> --output radio --unit N (or --episode N) [--version k]",
+    "  pablo mix --project <slug> --output radio|narrated --unit N (or --episode N) [--version k]",
     "                                            mix a performed episode: its takes (paced by the",
     "                                            manifest) and the script's cues from the cue",
     "                                            library (<library>/cues; the same description is",
@@ -367,6 +368,7 @@ function helpText(): string {
     "                                            in as chapters are published. Flags go to",
     "                                            outputs/radio/casting/flags.json for `pablo fix`",
     "  pablo mixer --project <slug> --episode N [--version k] [--library DIR]",
+    "  pablo mixer --project <slug> --output narrated --unit N [--version k]",
     "                                            the mixer (needs Google Chrome): the episode's mix",
     "                                            document as tracks (Dialogue a lane per role, SFX,",
     "                                            Beds, Music) of clips with waveforms on a ruler;",
@@ -381,7 +383,7 @@ function helpText(): string {
     "  pablo mixer --project <slug> --episode N --export-notes",
     "                                            no window: write renders/epNN/punch-list.md from",
     "                                            the episode's saved markers (notes.json)",
-    "  pablo fix --project <slug> --output radio --unit N (or --episode N) [--line I] [--json-lines]",
+    "  pablo fix --project <slug> --output radio|narrated --unit N (or --episode N) [--line I] [--json-lines]",
     "                                            re-record only the episode's flagged lines",
     "                                            (flags.json; a reason can bump the engine),",
     "                                            write the next manifest version, remix it and",
@@ -1109,28 +1111,39 @@ export async function runReviewView(args: ParsedArgs, projectPath: string | unde
 /**
  * `pablo mixer --project W --episode N [--version k] [--library DIR]` (AGT-1768): open the mixer on one episode's
  * mix document and hold the process until the window closes. `open` is injectable so tests never start a window.
+ * `--output narrated --unit N` (AGT-2158) opens a narrated unit instead: the work must have that output.
  */
 export async function runMixerView(args: ParsedArgs, projectPath: string | undefined, cwd: string, open: typeof openMixer = openMixer): Promise<number> {
   const whole = (value: unknown): number | undefined | null => (value === undefined ? undefined : Number.isInteger(Number(value)) && Number(value) >= 1 ? Number(value) : null);
   const episode = whole(args.values["episode"] ?? args.unit);
   const version = whole(args.values["version"]);
+  const output = args.output ?? "radio";
   let message: string | undefined;
-  if (projectPath === undefined) message = "pablo: mixer requires --project <slug> and --episode N";
-  else if (episode === undefined) message = "pablo: mixer requires --episode N";
+  if (!isAudioOutput(output)) message = `pablo: mixer: only the ${AUDIO_OUTPUTS.join(" and ")} outputs are mixed; got --output ${output}`;
+  else if (projectPath === undefined) message = "pablo: mixer requires --project <slug> and --episode N (or --output <radio|narrated> --unit N)";
+  else if (episode === undefined) message = output === "radio" ? "pablo: mixer requires --episode N" : `pablo: mixer requires --output ${output} --unit N`;
   else if (episode === null) message = "pablo: mixer: --episode expects a whole number of 1 or more";
   else if (version === null) message = "pablo: mixer: --version expects a whole number of 1 or more";
-  if (message !== undefined || projectPath === undefined || episode === undefined || episode === null || version === null) {
+  if (message !== undefined || !isAudioOutput(output) || projectPath === undefined || episode === undefined || episode === null || version === null) {
     emit({ ok: false, code: EXIT_REFUSED, message: message ?? "pablo: mixer: bad arguments" }, args.json);
     return EXIT_REFUSED;
   }
   const marker = readMarker(projectPath);
+  if (args.output !== undefined) {
+    // A named output must be one the work has (`pablo output add narrated --from <output>`).
+    const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, output, "mixer");
+    if (!resolved.ok) {
+      emit({ ok: false, code: EXIT_REFUSED, message: `${resolved.message} (${resolved.missing.join("; ")})` }, args.json);
+      return EXIT_REFUSED;
+    }
+  }
   const vault = findVault(cwd, process.env);
   // `--export-notes` (AGT-1792): no window, no Chrome, no mix document: the saved markers to a punch list.
   if (args.values["export-notes"] !== undefined && args.values["export-notes"] !== false) {
     try {
-      const exported = createNotesHost({ work: projectPath, title: marker.ok ? marker.marker.title : args.project ?? "radio" }).exportNotes({ episode });
+      const exported = createNotesHost({ work: projectPath, output, title: marker.ok ? marker.marker.title : args.project ?? output }).exportNotes({ episode });
       if (args.json) console.log(JSON.stringify({ ok: true, path: exported.path, count: exported.count }));
-      else console.log(`pablo: wrote the punch list for episode ${episode} (${exported.count} ${exported.count === 1 ? "note" : "notes"}): ${exported.path}`);
+      else console.log(`pablo: wrote the punch list for ${output === "radio" ? "episode" : `${output} unit`} ${episode} (${exported.count} ${exported.count === 1 ? "note" : "notes"}): ${exported.path}`);
       return EXIT_OK;
     } catch (error) {
       emit({ ok: false, code: EXIT_REFUSED, message: `pablo: mixer: ${(error as Error).message}` }, args.json);
@@ -1140,8 +1153,9 @@ export async function runMixerView(args: ParsedArgs, projectPath: string | undef
   const library = args.values["library"];
   const opened = await open({
     work: projectPath,
-    title: marker.ok ? marker.marker.title : args.project ?? "radio",
+    title: marker.ok ? marker.marker.title : args.project ?? output,
     episode,
+    output,
     ...(version === undefined ? {} : { version }),
     ...(vault.ok ? { vault: vault.path } : {}),
     ...(typeof library === "string" ? { library } : {}),
@@ -1152,7 +1166,7 @@ export async function runMixerView(args: ParsedArgs, projectPath: string | undef
     return opened.code;
   }
   if (args.json) console.log(JSON.stringify({ ok: true, url: opened.view.url }));
-  else console.log(`pablo: opened the mixer on episode ${episode}; close it when you are done`);
+  else console.log(`pablo: opened the mixer on ${output === "radio" ? "episode" : `${output} unit`} ${episode}; close it when you are done`);
   await opened.closed;
   return EXIT_OK;
 }

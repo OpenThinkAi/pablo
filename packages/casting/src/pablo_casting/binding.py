@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pablo_casting import outputs
 from pablo_casting.library import Library, LibraryRefusal, card_hash, resolve_root
 from pablo_casting.script import Script, has_cast_line, parse_script
 
@@ -29,14 +30,20 @@ CAST_VERSION = 1
 
 
 def script_dir(work: Path) -> Path:
-    episodes = work / "outputs" / "radio" / "episodes"
-    return episodes if episodes.is_dir() else work / "chapters"
+    """The current output's scripts (`outputs.py`): radio's `episodes/` (else the novel's `chapters/`), narrated's `readings/`."""
+    scripts = outputs.scripts_dir(work)
+    if outputs.current() != outputs.RADIO:
+        return scripts
+    return scripts if scripts.is_dir() else work / "chapters"
 
 
 def casting_dir(work: Path) -> Path:
     """Where `cast.json` lives: the radio output's `casting/`, or the top-level `casting/`
     of a work with no output directory. A `cast.json` already on disk wins, so a work
-    bound before `perform` created `outputs/radio/casting/takes/` keeps its binding."""
+    bound before `perform` created `outputs/radio/casting/takes/` keeps its binding.
+    Any other output (narrated, AGT-2158) keeps its state in `outputs/<output>/casting/`, with no legacy fallback."""
+    if outputs.current() != outputs.RADIO:
+        return outputs.output_dir(work) / "casting"
     radio = work / "outputs" / "radio" / "casting"
     legacy = work / "casting"
     if (radio / "cast.json").is_file():
