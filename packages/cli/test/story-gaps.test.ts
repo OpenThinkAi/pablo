@@ -124,7 +124,7 @@ function fakeWriter(): Adapter {
   return writer as unknown as Adapter;
 }
 
-function depsFor(_env: Record<string, string>, agent: HarnessProvider, extra: Partial<StoryDeps> = {}): StoryDeps {
+function depsFor(agent: HarnessProvider, extra: Partial<StoryDeps> = {}): StoryDeps {
   return { agent, writer: fakeWriter(), planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
@@ -138,7 +138,7 @@ function receipts(work: string): Record<string, unknown>[] {
 /** A finished story run: the work directory and the vault around it. */
 async function finishedRun(output: string[] | undefined, title: string | null = "The Last Passage", args: { title?: string } = {}) {
   const v = tempVault();
-  const result = await runStory({ prompt: SPEC, ...(output ? { output } : {}), ...args }, v.ctx, depsFor(v.env, fakeHarness(title).agent));
+  const result = await runStory({ prompt: SPEC, ...(output ? { output } : {}), ...args }, v.ctx, depsFor(fakeHarness(title).agent));
   const body = result.body as Record<string, any>;
   expect(body.message).toBeUndefined();
   expect(result.exitCode).toBe(0);

@@ -37,21 +37,21 @@ async function connect(id = "cd34") {
     ctx,
     sessionTools: planTools(session, work),
   });
-  const options = { allowedTools: spec.tools.map((tool) => tool.name) };
+  const offered = spec.tools.map((tool) => tool.name);
   const instance = buildMcpServer(ctx, spec.tools);
   const [c, s] = InMemoryTransport.createLinkedPair();
   await instance.connect(s);
   const client = new Client({ name: "t", version: "0" });
   await client.connect(c);
-  return { session, options, client };
+  return { session, offered, client };
 }
 
 const textOf = (r: unknown) => JSON.parse(((r as { content: { text: string }[] }).content[0]!).text);
 
 test("propose is among the session's tools and callable; it lands on the session's plan branch", async () => {
-  const { session, options, client } = await connect();
+  const { session, offered, client } = await connect();
   try {
-    expect(options.allowedTools).toContain("propose");
+    expect(offered).toContain("propose");
     const r = await client.callTool({ name: "propose", arguments: { stage: "premise", content: "A logline." } });
     expect(textOf(r)).toMatchObject({ ok: true, stage: "premise", branch: "plan/2026-10-01-cd34" });
     expect(readFileSync(join(session.worktree as string, "novels/ice-house/bible/overview.md"), "utf8")).toBe("A logline.\n");
@@ -74,9 +74,9 @@ test("an unknown stage is refused over the tool with the valid stages", async ()
 });
 
 test("record_fact shares the session's plan branch with propose; a researched fact needs a source", async () => {
-  const { session, options, client } = await connect("ef56");
+  const { session, offered, client } = await connect("ef56");
   try {
-    expect(options.allowedTools).toContain("record_fact");
+    expect(offered).toContain("record_fact");
     const bad = textOf(await client.callTool({ name: "record_fact", arguments: { fact: "Ice cost a cent.", where: "continuity", kind: "researched" } }));
     expect(bad.ok).toBe(false);
     await client.callTool({ name: "propose", arguments: { stage: "premise", content: "A logline." } });

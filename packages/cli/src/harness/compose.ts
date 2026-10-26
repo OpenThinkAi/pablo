@@ -42,6 +42,7 @@ export function composeEvent(entry: TranscriptEntry): ComposeEvent | undefined {
 export function createComposer(spec: HarnessSpec | (() => HarnessSpec), query: HarnessQuery = loopQuery): Composer {
   // The conversation so far; undefined until the first message starts one.
   let conversation: { readonly spec: HarnessSpec; history: readonly ChatMessage[] } | undefined;
+  // The turn in flight, kept only so `close` can stop it.
   let stream: AsyncGenerator<TranscriptEntry, readonly ChatMessage[] | void, undefined> | undefined;
   let provider: HarnessProvider | undefined;
   // Events that do not come from the loop's stream (question cards), and the questions waiting for an answer.

@@ -152,7 +152,7 @@ function fakeWriter(): Adapter & { drafts: number; extractions: number } {
   return writer as unknown as Adapter & { drafts: number; extractions: number };
 }
 
-function depsFor(_env: Record<string, string>, agent: HarnessProvider, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
+function depsFor(agent: HarnessProvider, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
   return { agent, writer, planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
@@ -207,7 +207,7 @@ test("AC1: the spec example leaves research, a bible, an outline, a drafted and 
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
   const writer = fakeWriter();
-  const result = await runStory({ prompt: SPEC }, ctx, depsFor(env, harness.agent, writer));
+  const result = await runStory({ prompt: SPEC }, ctx, depsFor(harness.agent, writer));
   const body = result.body as Record<string, any>;
   expect(body.message).toBeUndefined();
   expect(result.exitCode).toBe(0);
@@ -263,7 +263,7 @@ test("AC2: --output novel --output story builds one core and both outputs", asyn
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
   const writer = fakeWriter();
-  const result = await runStory({ prompt: SPEC, output: ["novel", "story", "novel"] }, ctx, depsFor(env, harness.agent, writer));
+  const result = await runStory({ prompt: SPEC, output: ["novel", "story", "novel"] }, ctx, depsFor(harness.agent, writer));
   const body = result.body as Record<string, any>;
   expect(body.message).toBeUndefined();
   expect(result.exitCode).toBe(0);
@@ -353,7 +353,7 @@ test("AC3: a run that names no podcast output never calls the podcast type's ens
   const machine = fakeRadioMachine(false);
   try {
     const { env, ctx } = tempVault();
-    const result = await runStory({ prompt: SPEC }, ctx, depsFor(env, fakeHarness().agent, fakeWriter()));
+    const result = await runStory({ prompt: SPEC }, ctx, depsFor(fakeHarness().agent, fakeWriter()));
     expect(result.exitCode).toBe(0);
     expect(podcast.calls()).toBe(0);
     expect(machine.looks()).toBe(0);
@@ -370,7 +370,7 @@ test("AC3: --output podcast on a machine without it is refused by name before an
     const head = git(vault, "rev-parse", "main");
     const harness = fakeHarness();
     const writer = fakeWriter();
-    const result = await runStory({ prompt: SPEC, output: ["story", "podcast"] }, ctx, depsFor(env, harness.agent, writer));
+    const result = await runStory({ prompt: SPEC, output: ["story", "podcast"] }, ctx, depsFor(harness.agent, writer));
     expect(result.exitCode).toBe(2);
     const body = result.body as Record<string, any>;
     expect(body.message).toContain("the podcast output cannot run on this machine");
@@ -391,7 +391,7 @@ test("AC3: --output podcast on a machine without it is refused by name before an
 test("AC3: an output type pablo does not have is refused by name, nothing written", async () => {
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
-  const result = await runStory({ prompt: SPEC, output: ["podcast"] }, ctx, depsFor(env, harness.agent, fakeWriter()));
+  const result = await runStory({ prompt: SPEC, output: ["podcast"] }, ctx, depsFor(harness.agent, fakeWriter()));
   expect(result.exitCode).toBe(2);
   expect((result.body as { message: string }).message).toContain("there is no podcast output on this machine");
   expect((result.body as { missing: string[] }).missing).toEqual(["output podcast"]);
@@ -405,7 +405,7 @@ test("AGT-1686: the real radio type's ensure() refuses --output radio by name wh
   try {
     const { vault, env, ctx } = tempVault();
     const harness = fakeHarness();
-    const result = await runStory({ prompt: SPEC, output: ["story", "radio"] }, ctx, depsFor(env, harness.agent, fakeWriter()));
+    const result = await runStory({ prompt: SPEC, output: ["story", "radio"] }, ctx, depsFor(harness.agent, fakeWriter()));
     expect(result.exitCode).toBe(2);
     const body = result.body as Record<string, any>;
     expect(body.message).toContain("the radio output cannot run on this machine");
@@ -456,7 +456,7 @@ test("AC4: --review stops on every stage's branch, waits until it is accepted, r
   const { vault, env, ctx } = tempVault();
   const harness = fakeHarness();
   const writer = fakeWriter();
-  const deps = depsFor(env, harness.agent, writer);
+  const deps = depsFor(harness.agent, writer);
 
   let result = await runStory({ prompt: SPEC, review: true }, ctx, deps);
   let body = result.body as Record<string, any>;
@@ -516,7 +516,7 @@ test("AC4: --review stops on every stage's branch, waits until it is accepted, r
 
 test("a resume names what is missing: no run recorded, or a prompt and a project together", async () => {
   const { ctx, env } = tempVault();
-  const deps = depsFor(env, fakeHarness().agent, fakeWriter());
+  const deps = depsFor(fakeHarness().agent, fakeWriter());
   const none = await runStory({ project: "ice-house" }, ctx, deps);
   expect(none.exitCode).toBe(2);
   expect((none.body as { message: string }).message).toContain("no pablo story run is recorded");
@@ -541,7 +541,7 @@ test("AGT-2103: a prompt naming a period is inferred historical-fiction by one p
   const { vault, env, ctx } = tempVault();
   const lines: string[] = [];
   const planner = fakeTrackPlanner(HISTORICAL_ANSWER);
-  const result = await runStory({ prompt: SPEC, review: true }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
+  const result = await runStory({ prompt: SPEC, review: true }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(fakeHarness().agent, fakeWriter(), { planner }));
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
   expect(planner.asked).toHaveLength(1);
@@ -560,7 +560,7 @@ test("AGT-2103: a prompt naming a period is inferred historical-fiction by one p
 test("AGT-2103: a plain fiction prompt is inferred fiction, with no period files", async () => {
   const { vault, env, ctx } = tempVault();
   const planner = fakeTrackPlanner('{"track": "fiction", "why": "an invented lighthouse, no period named"}');
-  const result = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
+  const result = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true }, ctx, depsFor(fakeHarness().agent, fakeWriter(), { planner }));
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
   expect(planner.asked).toHaveLength(1);
@@ -575,7 +575,7 @@ test("AGT-2103: --track always wins: the planner is never asked", async () => {
   const { vault, env, ctx } = tempVault();
   const planner = fakeTrackPlanner(HISTORICAL_ANSWER);
   const lines: string[] = [];
-  const result = await runStory({ prompt: SPEC, review: true, track: "fiction" }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
+  const result = await runStory({ prompt: SPEC, review: true, track: "fiction" }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(fakeHarness().agent, fakeWriter(), { planner }));
   expect(lines[0]).toBe("pablo story: track fiction (--track)\n");
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
@@ -586,7 +586,7 @@ test("AGT-2103: --track always wins: the planner is never asked", async () => {
   expect(existsSync(join(work, "bible", "period.md"))).toBe(false);
 
   // And the other way: a plain prompt put on historical-fiction by hand.
-  const forced = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true, track: "historical-fiction" }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
+  const forced = await runStory({ prompt: "write me a story about a lighthouse keeper's cat", review: true, track: "historical-fiction" }, ctx, depsFor(fakeHarness().agent, fakeWriter(), { planner }));
   const forcedBody = forced.body as Record<string, any>;
   expect(planner.asked).toEqual([]);
   expect(forcedBody.track.track).toBe("historical-fiction");
@@ -598,18 +598,18 @@ test("AGT-2103: an unknown track, or a track no requested output allows, is refu
   const planner = fakeTrackPlanner();
   const before = git(vault, "rev-parse", "main");
 
-  const unknown = await runStory({ prompt: SPEC, track: "memoir" }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
+  const unknown = await runStory({ prompt: SPEC, track: "memoir" }, ctx, depsFor(fakeHarness().agent, fakeWriter(), { planner }));
   expect(unknown.exitCode).toBe(2);
   expect((unknown.body as { message: string }).message).toContain('unknown track "memoir"');
 
-  const nonfiction = await runStory({ prompt: SPEC, track: "nonfiction" }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
+  const nonfiction = await runStory({ prompt: SPEC, track: "nonfiction" }, ctx, depsFor(fakeHarness().agent, fakeWriter(), { planner }));
   expect(nonfiction.exitCode).toBe(2);
   expect((nonfiction.body as { message: string }).message).toContain("pablo init --track nonfiction");
 
   // A requested output the track does not allow (D-7): a test type that only nonfiction allows.
   const off = registerOutput({ ...STORY, id: "nf-only", tracks: ["nonfiction"] });
   try {
-    const refused = await runStory({ prompt: SPEC, track: "fiction", output: ["nf-only"] }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner }));
+    const refused = await runStory({ prompt: SPEC, track: "fiction", output: ["nf-only"] }, ctx, depsFor(fakeHarness().agent, fakeWriter(), { planner }));
     expect(refused.exitCode).toBe(2);
     expect((refused.body as { message: string }).message).toContain("the nf-only output is not allowed on the fiction track");
   } finally {
@@ -623,7 +623,7 @@ test("AGT-2103: an unknown track, or a track no requested output allows, is refu
 
 test("AGT-2103: a planner that cannot answer leaves the run on fiction and says why", async () => {
   const { env, ctx } = tempVault();
-  const result = await runStory({ prompt: SPEC, review: true }, ctx, depsFor(env, fakeHarness().agent, fakeWriter(), { planner: fakeTrackPlanner("I think it is probably historical.") }));
+  const result = await runStory({ prompt: SPEC, review: true }, ctx, depsFor(fakeHarness().agent, fakeWriter(), { planner: fakeTrackPlanner("I think it is probably historical.") }));
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
   expect(body.track).toEqual({ track: "fiction", inferred: false, why: "the planner's answer could not be read; fiction by default" });

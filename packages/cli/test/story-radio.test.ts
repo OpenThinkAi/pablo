@@ -362,7 +362,7 @@ function ensureSeam(uv: boolean): { looks: () => number; restore: () => void } {
   };
 }
 
-function depsFor(_env: Record<string, string>, agent: HarnessProvider, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
+function depsFor(agent: HarnessProvider, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
   return { agent, writer, planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
@@ -403,7 +403,7 @@ test("AC1: the written default (no --output radio) with no uv and no venv never 
     now: () => (spied.push("now"), machine.deps.now()),
   };
   try {
-    const result = await runStory({ prompt: SPEC }, { ...ctx, casting: spy }, depsFor(env, fakeHarness().agent, proseWriter(), { casting: spy }));
+    const result = await runStory({ prompt: SPEC }, { ...ctx, casting: spy }, depsFor(fakeHarness().agent, proseWriter(), { casting: spy }));
     const body = result.body as Record<string, any>;
     expect(result.exitCode).toBe(0);
     expect(body.outputs).toEqual(["story"]);
@@ -451,7 +451,7 @@ test("AC2: --output radio builds the core, writes, casts, performs, mixes and pu
     const result = await runStory(
       { prompt: SPEC, output: ["radio"] },
       { ...ctx, stderr: { write: (t: string) => void lines.push(t) } },
-      depsFor(env, fakeHarness().agent, writer, { casting: machine.deps }),
+      depsFor(fakeHarness().agent, writer, { casting: machine.deps }),
     );
     const body = result.body as Record<string, any>;
     expect(body.message).toBeUndefined();
@@ -496,7 +496,7 @@ test("AC2: --output radio builds the core, writes, casts, performs, mixes and pu
     for (const prompt of writer.prompts) expect(prompt).not.toContain(CANARY);
 
     // A finished run resumes as finished: nothing runs again.
-    const again = await runStory({ project: body.project }, ctx, depsFor(env, fakeHarness().agent, writer, { casting: machine.deps }));
+    const again = await runStory({ project: body.project }, ctx, depsFor(fakeHarness().agent, writer, { casting: machine.deps }));
     expect(again.exitCode).toBe(0);
     expect(writer.calls).toBe(4);
     expect(machine.calls.filter((c) => c.startsWith("perform"))).toHaveLength(4);
@@ -514,7 +514,7 @@ test("AC3: output add radio then perform --output radio --all renders every epis
   const seam = ensureSeam(true);
   try {
     // A finished novel, from the same pipeline (no radio: the casting side is never asked).
-    const novel = await runStory({ prompt: SPEC, output: ["novel"] }, ctx, depsFor(env, fakeHarness().agent, proseWriter()));
+    const novel = await runStory({ prompt: SPEC, output: ["novel"] }, ctx, depsFor(fakeHarness().agent, proseWriter()));
     expect(novel.exitCode).toBe(0);
     const slug = (novel.body as { project: string }).project;
     const work = join(vault, "novels", slug);
@@ -577,7 +577,7 @@ test("AC4: --review stops on each episode's script, bindings and render (open fl
   const machine = fakeMachine({ autoFlag: [2] });
   const harness = fakeHarness();
   const writer = scriptWriter();
-  const deps = depsFor(env, harness.agent, writer, { casting: machine.deps });
+  const deps = depsFor(harness.agent, writer, { casting: machine.deps });
   try {
     let result = await runStory({ prompt: SPEC, output: ["radio"], review: true }, ctx, deps);
     let body = result.body as Record<string, any>;
@@ -660,7 +660,7 @@ test("AC5: an uncastable role in episode 2 stops the pipeline with the refusal b
     },
   });
   try {
-    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().agent, writer, { casting: machine.deps }));
+    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(fakeHarness().agent, writer, { casting: machine.deps }));
     const body = result.body as Record<string, any>;
     expect(result.exitCode).toBe(2);
     expect(body).toMatchObject({ ok: false, code: 2, output: "radio", unit: 2, queue: "engine", missing: ["role GHOST"] });
@@ -685,7 +685,7 @@ test("AC5: a casting side that fails to provision stops the pipeline before any 
   const seam = ensureSeam(true);
   const machine = fakeMachine({ syncFails: true });
   try {
-    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().agent, scriptWriter(), { casting: machine.deps }));
+    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(fakeHarness().agent, scriptWriter(), { casting: machine.deps }));
     const body = result.body as Record<string, any>;
     expect(result.exitCode).toBe(1);
     expect(body).toMatchObject({ ok: false, output: "radio", unit: 1 });
@@ -704,7 +704,7 @@ test("AC5: --output radio on a machine that cannot provision the Python side (no
   const seam = ensureSeam(false);
   const machine = fakeMachine({ uv: false });
   try {
-    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(env, fakeHarness().agent, scriptWriter(), { casting: machine.deps }));
+    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(fakeHarness().agent, scriptWriter(), { casting: machine.deps }));
     expect(result.exitCode).toBe(2);
     expect((result.body as { message: string }).message).toContain("the radio output cannot run on this machine");
     expect((result.body as { missing: string[] }).missing).toEqual(["uv (brew install uv)"]);

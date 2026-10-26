@@ -15,7 +15,7 @@ import type { ScriptedChatAdapter } from "@openthink/pablo-core";
 import { main } from "../src/cli";
 import { runAgent } from "../src/harness/agent";
 import type { AgentContext } from "../src/harness/agent";
-import { adapterProvider, AGENT_INTENT, harnessProvider } from "../src/harness/provider";
+import { adapterProvider, AGENT_INTENT, harnessProvider, providerHint } from "../src/harness/provider";
 import { loopSpec } from "../src/harness/session";
 import type { HarnessQuery, HarnessSpec } from "../src/harness/session";
 import { harnessTools } from "../src/harness/tools";
@@ -164,6 +164,28 @@ test("the config's agent provider is the one the session runs on; a missing key 
   expect(code).toBe(1);
   expect(io.out()).toContain("credential env:ANTHROPIC_API_KEY");
   expect(io.out()).toContain('provider "anthropic" has no API key, so nothing was sent');
+});
+
+test("with no cloud provider configured the agent says it runs on the local model; a mapped agent intent or --new says so too", async () => {
+  const unmapped = capture();
+  // The default config routes the agent to `local`; its first request fails (nothing listens in a test), which is fine here.
+  await runAgent({ project: "ice-house", message: "Hi", json: false }, unmapped.ctx, { readConfig: () => JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:9/v1" } } }) });
+  expect(unmapped.err()).toContain('no cloud provider is configured, so the agent runs on the local model ("local")');
+
+  const mapped = capture();
+  await runAgent({ project: "ice-house", message: "Hi", json: false }, mapped.ctx, { readConfig: () => JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:9/v1" } }, intents: { agent: "local" } }) });
+  expect(mapped.err()).not.toContain("no cloud provider");
+
+  const fresh = capture();
+  await runAgent({ project: "ice-house", message: "Hi", json: false, new: true }, fresh.ctx, { provider: adapterProvider(statusModel()), readConfig: noConfig });
+  expect(fresh.err()).toContain("--new: every run is a fresh conversation");
+});
+
+test("the provider hint names how to see, change and test the agent's route", () => {
+  const hint = providerHint(adapterProvider(statusModel(), { credential: "env:ANTHROPIC_API_KEY" }));
+  expect(hint).toContain('Check the "scripted" provider and its key (env:ANTHROPIC_API_KEY)');
+  expect(hint).toContain("`pablo config show`");
+  expect(hint).toContain("`pablo config set intents.agent <provider>`");
 });
 
 test("refusals: no project, no message, unknown project, no marker; the session never starts", async () => {

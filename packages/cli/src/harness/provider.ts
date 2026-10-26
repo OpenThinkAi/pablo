@@ -40,6 +40,7 @@ export interface HarnessProvider {
 export function harnessProvider(config: PabloConfig, options: ProvidersOptions = {}): HarnessProvider {
   const providers = createProviders(config, options);
   const id = providers.route(AGENT_INTENT);
+  // `adapter(id)` throws the registry's error for an id the config lacks, so past it the entry exists.
   const adapter = providers.adapter(id);
   const provider = config.providers.get(id)!;
   return {
@@ -58,5 +59,12 @@ export function adapterProvider(adapter: Adapter, over: Partial<Omit<HarnessProv
 /** What to check when a session fails outside the loop: the provider the `agent` intent routed to. */
 export function providerHint(provider: HarnessProvider): string {
   const key = provider.local ? "" : ` and its key (${provider.credential})`;
-  return `Check the "${provider.adapter.id}" provider${key} with \`pablo config test\`, or map the "agent" intent to another provider.`;
+  return (
+    `Check the "${provider.adapter.id}" provider${key}: \`pablo config show\` shows where the "agent" intent routes, ` +
+    `\`pablo config set intents.agent <provider>\` picks another, and \`pablo config test\` then checks it.`
+  );
 }
+
+/** Shown when no provider is mapped for the agent and the route fell to a local one. */
+export const LOCAL_FALLBACK_NOTICE = (id: string): string =>
+  `pablo: no cloud provider is configured, so the agent runs on the local model ("${id}"). To use Claude, add an anthropic provider (docs/configuration.md); to keep the local model and silence this, set intents.agent.`;

@@ -30,7 +30,7 @@ import { startPlanSession } from "../plan";
 import { lineReader, stdinAskAuthor } from "./ask-author";
 import { planTools } from "./plan-tools";
 import { loadPromptWork } from "./prompt";
-import { harnessProvider, providerHint } from "./provider";
+import { AGENT_INTENT, harnessProvider, LOCAL_FALLBACK_NOTICE, providerHint } from "./provider";
 import type { HarnessProvider } from "./provider";
 import { loopQuery, runHarness } from "./session";
 import { runTagFacts } from "./tag-facts";
@@ -94,10 +94,17 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
 
   let provider: HarnessProvider;
   try {
-    provider = deps.provider ?? harnessProvider(loadConfig({ env: ctx.env, readFile: deps.readConfig, projectDir: project.path }), { keys: deps.keys ?? { env: ctx.env } });
+    if (deps.provider !== undefined) provider = deps.provider;
+    else {
+      const config = loadConfig({ env: ctx.env, readFile: deps.readConfig, projectDir: project.path });
+      provider = harnessProvider(config, { keys: deps.keys ?? { env: ctx.env } });
+      // Before the loop, the agent ran on the Claude login; say so when it now lands on a local model unasked.
+      if (provider.local && !config.intents.has(AGENT_INTENT.name)) ctx.stderr.write(`${LOCAL_FALLBACK_NOTICE(provider.adapter.id)}\n`);
+    }
   } catch (error) {
     return refuse(ctx, args.json, 1, (error as Error).message);
   }
+  if (args.new === true) ctx.stderr.write("pablo: --new: every run is a fresh conversation for now; nothing is saved between runs\n");
 
   // pablo's tools run in this process; their progress goes to stderr, never
   // into the transcript on stdout.

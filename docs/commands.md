@@ -873,8 +873,11 @@ pablo agent --project <slug> --tag-facts
 
 Runs one session of pablo's own agent loop on the provider the config's `agent`
 intent goes to (see `docs/configuration.md`): Claude through an `anthropic` provider,
-or any OpenAI-compatible model with tool calls. Its system prompt carries the work's
-policy and `STYLE.md`. Its tools are pablo's MCP tools and nothing else.
+or any OpenAI-compatible model with tool calls. With no cloud provider configured and
+no `intents.agent` set, it runs on the local model and says so on stderr. Its system
+prompt carries the work's policy and `STYLE.md`. Its tools are pablo's MCP tools and
+nothing else: it has no web access, so it researches from the work's saved notes and
+asks you for a source rather than inventing one.
 
 The transcript prints as it arrives, ending with the turns, time and cost (a model
 pablo has no price for is named rather than counted as free). Each run is a fresh

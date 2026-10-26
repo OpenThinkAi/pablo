@@ -67,7 +67,7 @@ import type { OutputDefinition } from "./outputs/types";
 import { startPlanSession } from "./plan";
 import { findVault, resolveProject } from "./project";
 import type { AskAuthor } from "./harness/ask-author";
-import { harnessProvider } from "./harness/provider";
+import { AGENT_INTENT, harnessProvider, LOCAL_FALLBACK_NOTICE } from "./harness/provider";
 import type { HarnessProvider } from "./harness/provider";
 import { planTools } from "./harness/plan-tools";
 import { loadPromptWork } from "./harness/prompt";
@@ -373,7 +373,7 @@ function freeSlug(vault: string, title: string): string {
 
 const STAGE_TEXT: Readonly<Record<StoryCoreStage, string>> = {
   research:
-    "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice) and keep each finding with save_research, with its sources. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
+    "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice). You have no web access: work from the work's saved notes and what you know with confidence, and keep each finding with save_research, citing only sources you can name exactly (author and title); never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
   premise:
     'Stage 2 of 5, premise. Read the research notes (read, search) and propose the premise with propose (stage "premise"): bible/overview.md with ## Title (the work\'s own short title, two to six words, about the story and not the request), ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure.',
   bible:
@@ -427,6 +427,8 @@ interface Run {
   readonly state: StoryState;
   readonly ctx: VerbContext;
   readonly deps: StoryDeps;
+  /** The agent provider, resolved once per run (`agentProviderFor`). */
+  agent?: HarnessProvider;
 }
 
 function waiting(run: Run, step: string, branch: string): VerbResult {
@@ -489,9 +491,12 @@ function retitleFromPremise(run: Run): void {
 
 function agentProviderFor(run: Run): HarnessProvider | VerbResult {
   if (run.deps.agent !== undefined) return run.deps.agent;
+  if (run.agent !== undefined) return run.agent;
   try {
     const config = loadConfig({ env: run.ctx.env, readFile: run.deps.readConfig, projectDir: run.work });
-    return harnessProvider(config, { keys: run.deps.keys ?? { env: run.ctx.env } });
+    run.agent = harnessProvider(config, { keys: run.deps.keys ?? { env: run.ctx.env } });
+    if (run.agent.local && !config.intents.has(AGENT_INTENT.name)) run.ctx.stderr.write(`${LOCAL_FALLBACK_NOTICE(run.agent.adapter.id)}\n`);
+    return run.agent;
   } catch (error) {
     return fail((error as Error).message);
   }
