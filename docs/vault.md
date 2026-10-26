@@ -99,6 +99,7 @@ before writing, and commits only that file.
 | `voice` | no | `["../../style", "QWEN.md"]` | Which voice the screen's voice tools edit. The writer always gets `style/` then the work's `QWEN.md` |
 | `neverSend` | no | `["research/", "notes/"]` | Paths that must never reach a model. A prompt that would include one is refused, not silently trimmed |
 | `publish` | no | `{}` | Per-target publish settings |
+| `track` | no | `"fiction"` | The kind of work: `fiction`, `historical-fiction` or `nonfiction`. Any other value is refused, naming the allowed ones. `status` and `resume` report it |
 | `policy` | no | a short default | The judgement policy for `pablo agent` (see below) |
 | `format` | old | | `"format": "novel"` is the pre-outputs form. It still works; `pablo migrate outputs` converts the work |
 

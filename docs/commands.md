@@ -115,10 +115,11 @@ pablo resume --project <slug>
 ```
 
 The one call an agent makes to get up to speed on a work. Returns
-`{format, title, core, outputs, waiting[], last, open, next, brief?, notices?}`:
+`{format, title, core, outputs, waiting[], last, open, next, track, brief?, notices?}`:
 
 | Field | What it holds |
 |---|---|
+| `track` | the work's track (`fiction`, `historical-fiction` or `nonfiction`), as `status` reports it |
 | `core`, `outputs` | the same two layers as `status` |
 | `last` | the newest dated file in `notes/` and the last commit touching the work |
 | `open` | every `[pick]` placeholder, plus every bullet under a "Decisions" or "Open questions" heading in `bible/` and the beats file |
@@ -135,15 +136,16 @@ answers within 20 seconds. A missing `think`, a timeout or a failure is a one-li
 pablo status --project <slug>
 ```
 
-The work in two layers: the story core's stages, then each output and its units.
-Always exits `0`.
+The work in two layers: the story core's stages, then each output and its units,
+plus the work's track. Always exits `0`.
 
 ```
 {core: {stages[{id, done, summary, missing[]}], premise, research[], bible, acts, beats, outlineFile},
  outputs: {<type>: {noun, plural, dir, units[], drafted, total, next?}},
- waiting[], next}
+ waiting[], next, track}
 ```
 
+- **`track`** is `pablo.json`'s `track`, or `fiction` for a work without one. The prose form has it as a `track: <id>` line after the outputs.
 - **Core stages** are `premise`, `research`, `bible`, `acts`, `beats` and `facts`.
   - `premise` means `bible/overview.md` has text under `## Logline`.
   - `research` is optional and never holds the core back.

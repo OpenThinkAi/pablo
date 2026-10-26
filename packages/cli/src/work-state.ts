@@ -18,7 +18,9 @@ import { coreNext, coreStages, readCoreState } from "./core/machine";
 import type { CoreStage, CoreState } from "./core/machine";
 import { waitingForReview } from "./branch";
 import type { Outputs } from "./marker";
-import { readMarker } from "./marker";
+import { readMarker, trackOf } from "./marker";
+import { DEFAULT_TRACK } from "./tracks/registry";
+import type { TrackId } from "./tracks/registry";
 import { outputDefinition } from "./outputs/registry";
 import type { OutputReport } from "./outputs/types";
 
@@ -100,6 +102,8 @@ export function outputLines(outputs: Readonly<Record<string, OutputReport>>, det
 
 /** `pablo status`'s whole-work body (no `--for`): the report plus the branches waiting for review. */
 export interface WorkStatus extends WorkReport {
+  /** The work's track (AGT-2099): `pablo.json` `track`, else `fiction`. */
+  readonly track: TrackId;
   readonly waiting: readonly string[];
 }
 
@@ -111,18 +115,21 @@ export interface WorkStatus extends WorkReport {
 export function readWorkStatus(workDir: string): WorkStatus {
   const marker = readMarker(workDir);
   const report = readWorkReport(workDir, marker.ok ? marker.marker.outputs : {});
-  return { core: report.core, outputs: report.outputs, waiting: waitingForReview(workDir), next: report.next };
+  const track = marker.ok ? trackOf(marker.marker) : DEFAULT_TRACK;
+  return { core: report.core, outputs: report.outputs, waiting: waitingForReview(workDir), next: report.next, track };
 }
 
 /**
  * `status`'s prose: the core's stages, then one line per output with its
- * drafted units' statuses, the branches waiting for review, and `next`.
+ * drafted units' statuses, the work's track, the branches waiting for review,
+ * and `next`.
  */
 export function formatStatusProse(status: WorkStatus): string {
   const { waiting } = status;
   return [
     ...coreLines(status.core),
     ...outputLines(status.outputs, true),
+    `track: ${status.track}`,
     waiting.length === 0 ? "waiting for review: none" : `waiting for review: ${waiting.length} (${waiting.join(", ")})`,
     `next: ${status.next}`,
   ].join("\n");

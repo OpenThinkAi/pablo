@@ -17,6 +17,7 @@
  * | `neverSend` | no       | `["research/", "notes/"]`        |
  * | `publish`   | no       | `{}`                              |
  * | `policy`    | no       | —  (the harness's minimal default judgement policy) |
+ * | `track`     | no       | `"fiction"` (`fiction`, `historical-fiction`, `nonfiction`) |
  * | `format`    | deprecated | —  (`"novel"` only; read as `outputs.novel`) |
  *
  * `outputs` maps an output type to its entry: `{ dir?, added, ...more }`.
@@ -39,6 +40,12 @@
  * hyphens) is refused here; a well-formed name pablo does not ship is refused
  * when the harness loads it.
  *
+ * `track` (AGT-2099, pm project `pablo-platform`, D-4..D-6) is the kind of
+ * work: a key of the track registry (`TRACKS`, `tracks/registry.ts`). A
+ * marker without one reads as `fiction` (`trackOf`), and `Marker.track` stays
+ * absent so a rewritten marker is byte-for-byte what it was; an unknown
+ * value is refused naming the allowed ids.
+ *
  * A missing required key is refused by name (`message` names the exact key).
  * A directory with no `pablo.json` at all is refused with a pointer at
  * `pablo init --adopt --project <slug>`.
@@ -50,6 +57,8 @@ import { NOVEL_DIR } from "./outputs/novel/units";
 import type { OutputId } from "./outputs/registry";
 import { isOutputId, outputIds } from "./outputs/registry";
 import type { Refusal } from "./project";
+import type { TrackId } from "./tracks/registry";
+import { DEFAULT_TRACK, isTrackId, trackIds } from "./tracks/registry";
 
 /** An output type's id: a key of the output registry (`OUTPUTS`, `outputs/registry.ts`). */
 export type OutputType = OutputId;
@@ -89,6 +98,8 @@ export interface Marker {
   readonly publish: Readonly<Record<string, unknown>>;
   /** The judgement policy's name; absent means the harness's minimal default. */
   readonly policy?: string;
+  /** The work's track, as written; absent reads as `fiction` (use `trackOf`). */
+  readonly track?: TrackId;
   /** The outputs derived from the work's story core; `{}` is a core with nothing derived yet. */
   readonly outputs: Outputs;
 }
@@ -124,6 +135,11 @@ const warned = new Set<string>();
 export function outputsLabel(marker: Marker): string {
   const types = Object.keys(marker.outputs);
   return types.length === 0 ? "core" : types.join(", ");
+}
+
+/** The work's track: the marker's `track`, else `fiction` (D-6). */
+export function trackOf(marker: Marker): TrackId {
+  return marker.track ?? DEFAULT_TRACK;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -237,6 +253,11 @@ export function readMarker(workDir: string): MarkerResult {
     );
   }
 
+  const track = data["track"];
+  if (track !== undefined && !isTrackId(track)) {
+    return refuse(`pablo: ${path} has unknown track ${JSON.stringify(track)} at "track" (allowed: ${trackIds().join(", ")})`, [path]);
+  }
+
   const marker: Marker = {
     title: data["title"] as string,
     slug,
@@ -245,6 +266,7 @@ export function readMarker(workDir: string): MarkerResult {
     neverSend: Array.isArray(data["neverSend"]) ? (data["neverSend"] as string[]) : DEFAULT_NEVER_SEND,
     publish: isObject(data["publish"]) ? data["publish"] : DEFAULT_PUBLISH,
     ...(policy === undefined ? {} : { policy }),
+    ...(track === undefined ? {} : { track }),
     outputs,
   };
 

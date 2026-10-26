@@ -13,7 +13,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { beatsFile } from "@openthink/pablo-core";
-import { outputsLabel, readMarker } from "./marker";
+import { outputsLabel, readMarker, trackOf } from "./marker";
+import { DEFAULT_TRACK } from "./tracks/registry";
+import type { TrackId } from "./tracks/registry";
 import { waitingForReview } from "./branch";
 import type { CoreState } from "./core/machine";
 import { coreLines, outputLines, readWorkReport } from "./work-state";
@@ -43,6 +45,8 @@ export interface ResumeResult {
   /** The work's outputs as one label (`"novel"`, `"novel, radio"`, `"core"` with none). */
   readonly format: string;
   readonly title: string;
+  /** The work's track (AGT-2099): `pablo.json` `track`, else `fiction`. */
+  readonly track: TrackId;
   /** The story core's state and stages (AGT-1667). */
   readonly core: CoreReport;
   /** Each output the marker names, with its units. `{}` for a core with nothing derived yet. */
@@ -234,6 +238,7 @@ export async function buildResume(
   const markerResult = readMarker(workDir);
   const format = markerResult.ok ? outputsLabel(markerResult.marker) : "";
   const title = markerResult.ok ? markerResult.marker.title : "";
+  const track = markerResult.ok ? trackOf(markerResult.marker) : DEFAULT_TRACK;
 
   const report = readWorkReport(workDir, markerResult.ok ? markerResult.marker.outputs : {});
 
@@ -256,6 +261,7 @@ export async function buildResume(
     last,
     open,
     next: report.next,
+    track,
   };
   if (briefOutcome.brief !== undefined) return { ...result, brief: briefOutcome.brief };
   if (briefOutcome.notice !== undefined) return { ...result, notices: [briefOutcome.notice] };
@@ -268,13 +274,13 @@ const MAX_BRIEF_LINES = 8;
 
 /**
  * The prose form: title, the core's stages, one line per output
- * (`novel: 2 of 24 chapters drafted`), `last`, `open` (max 8 bullets,
+ * (`novel: 2 of 24 chapters drafted`), `track: <id>`, `last`, `open` (max 8 bullets,
  * then `+N more`), `brief` if present (indented, max ~8 lines), then
  * `next: …` as the FINAL line. Under 30 lines total — truncated from the
  * body above, the `next:` line is never cut.
  */
 export function formatResumeProse(result: ResumeResult): string {
-  const body: string[] = [result.title, ...coreLines(result.core), ...outputLines(result.outputs)];
+  const body: string[] = [result.title, ...coreLines(result.core), ...outputLines(result.outputs), `track: ${result.track}`];
   if (result.waiting.length > 0) body.push(`waiting for review: ${result.waiting.join(", ")}`);
 
   if (result.last.note !== undefined) {
