@@ -65,10 +65,12 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 adapters' streaming/normalization path, not by any manuscript
                 — no CriticMarkup is ever written to a vault file), the
                 context-pack assembler, the provider adapters
-                (`providers/`: OpenAI-compatible, Anthropic, and `claude-cli`,
-                the planner's `claude -p` subscription path; `registry.ts`
-                maps an intent to a provider, `planner.ts` picks the planning
-                model (`claude -p` unless an Anthropic key resolves),
+                (`providers/`: OpenAI-compatible and Anthropic; `registry.ts`
+                maps an intent to a provider, `planner.ts` routes the
+                planning intents (`plan`, and `check` which follows `plan`
+                until mapped) through it for story planning, `critique`,
+                `check --across` and `agent --tag-facts` — any provider kind,
+                no `claude -p` and no Claude-login path, AGT-2128, D-12/D-13),
                 `queue.ts` keeps one request in flight per local endpoint,
                 `rates.ts` the measured endpoint rates for wait estimates,
                 `keys.ts` API keys from the environment or the Keychain,
@@ -126,7 +128,8 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 used). A tool added to `VERBS` reaches both `pablo mcp`
                 and the harness. `pablo agent --tag-facts` (AGT-1570) is the one-time
                 catch-up: it tags every untagged bible and continuity fact on a
-                `plan/` branch through `record-fact.ts`'s writer, never a chapter.
+                `plan/` branch through `record-fact.ts`'s writer, never a chapter;
+                its classifier is the `plan` intent's provider.
                 `ask_author` (AGT-1560) is the exception: it needs a
                 front end, so a session gets it only when its spec carries an
                 `AskAuthor` (`pablo agent` reads answers from stdin; the compose
@@ -178,7 +181,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 seams are `screen-{write,revise,voice,reviews}.ts`,
                 `edit-session.ts` (`v e`, an `edit/` branch in a worktree,
                 AGT-1545) and `review-finish.ts`; `critique.ts` is the critic
-                (AGT-1564) and `comments.ts` the per-branch comment store
+                (AGT-1564, on the `check` intent) and `comments.ts` the per-branch comment store
                 (`.pablo/comments/<branch>.json`, AGT-1580); `migrate.ts`
                 (`migrate lines`) and `migrate-outputs.ts` (`migrate
                 outputs`) are one-time migrations. `voice-layers.ts`

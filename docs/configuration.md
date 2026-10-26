@@ -96,13 +96,15 @@ pablo sends eight kinds of request. Each is an *intent*:
 | `revise` | `revise` | the first local provider |
 | `prose` | `prose` | the first local provider |
 | `continuity` | the fact extraction `merge` runs | the first local provider |
-| `plan` | `pablo story`'s premise, bible, acts and beats stages, the track choice, and the built-in agent's helpers | the first non-local provider |
+| `plan` | `pablo story`'s premise, bible, acts and beats stages, the track choice, and `pablo agent --tag-facts` | the first non-local provider |
 | `agent` | the built-in agent (`pablo agent`, the screen's compose view) | the first non-local provider |
-| `check` | the critic that judges a branch (`critique`, `check --across`) | the first non-local provider (falls back to the `plan` mapping, then the Claude subscription) |
+| `check` | the critic that judges a branch (`critique`, `check --across`) | the `plan` mapping when `check` is unmapped, else the first non-local provider |
 | `research` | `pablo story`'s research stage; `research distill` (`distill_facts`): research notes, raw, to period facts; `research plan` (`plan_research`): the period brief or thesis to a research checklist | the first non-local provider (map it to a local one to keep notes on this machine) |
 
 If no provider of the wanted sort exists, the request goes to `default` (which is
-`"local"` unless you set it). `intents` overrides the choice per intent.
+`"local"` unless you set it). `intents` overrides the choice per intent. Every model
+call pablo makes goes through one of these intents, to a provider of any kind; pablo
+never runs `claude -p` or uses your Claude Code login.
 
 **A provider whose key does not resolve is skipped.** A non-local provider with no key (its
 environment variable is unset, or its Keychain item is missing) is passed over for the next
