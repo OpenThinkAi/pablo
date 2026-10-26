@@ -77,6 +77,7 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "draft_chapter",
     "draft_unit",
     "fix", // AGT-1685: fixes a performed radio episode from its flags; project required
+    "guide", // AGT-2142: the path for a track x output; no project
     "link_research_item", // AGT-2111: from the `research` verb
     "migrate",
     "mix", // AGT-1684: mixes a performed radio episode; project required
@@ -178,6 +179,18 @@ test("the server sends its usage instructions at initialize (AGT-1873)", () => {
   expect(instructions).toContain("`resume`");
   expect(instructions).toMatch(/Never write the book's prose yourself/);
   expect(instructions).toMatch(/no merge tool/);
+});
+
+test("the instructions say to call guide first, and guide returns what the CLI's --json does (AGT-2142)", async () => {
+  const instructions = client.getInstructions() ?? "";
+  expect(instructions).toMatch(/Call `guide` first/);
+  expect(instructions.indexOf("`guide`")).toBeLessThan(instructions.indexOf("`resume`"));
+  const { guide } = await import("../src/guide");
+  const body = parseTextBody(await client.callTool({ name: "guide", arguments: { track: "historical-fiction", output: "novel" } }));
+  expect(body).toEqual(JSON.parse(JSON.stringify(guide({ track: "historical-fiction", output: "novel" }))));
+  const index = parseTextBody(await client.callTool({ name: "guide", arguments: {} })) as { ok: boolean; tracks: unknown[] };
+  expect(index.ok).toBe(true);
+  expect(index.tracks.length).toBeGreaterThan(0);
 });
 
 test('callTool("status", {project: "ice-house", for: "chapter 3"}) is a normal result carrying ready:false, not a tool error', async () => {

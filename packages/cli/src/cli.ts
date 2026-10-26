@@ -61,6 +61,7 @@ import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
 import { screenPuller, screenRefresh, screenRounds } from "./screen-reviews";
 import { deriveCliOptions, notesWith, publishOutput, runVoiceEdit, runVoiceList, runVoiceRemove, runVoiceRule, runVoiceUse, shareWith, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
+import { guideText } from "./guide";
 import { realRunner } from "./share";
 import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
@@ -76,6 +77,7 @@ import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
 const P0_VERBS = [
+  "guide",
   "init",
   "resume",
   "status",
@@ -143,6 +145,10 @@ function helpText(): string {
     "The vault is $PABLO_VAULT if set, else the nearest ancestor of the current",
     "directory holding a style/ or voices/ directory.",
     "",
+    "  pablo guide [--track <t>] [--output <type>]",
+    "                                            start here: the step-by-step path for a track and",
+    "                                            an output (create, core stages, research, write,",
+    "                                            check, publish); no flags lists tracks and outputs",
     "  pablo init <format> <slug> \"<Title>\" [--track <t>]",
     "                                            scaffold a new work and write its marker (--track:",
     "                                            fiction, historical-fiction; adds that track's core files)",
@@ -1553,6 +1559,11 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   if (args.verb === "mcp") {
     return await runMcp(cwd);
+  }
+
+  // `guide` (AGT-2142) reads the track and output registries only: no vault, no project.
+  if (args.verb === "guide") {
+    return await runVerbEntry("guide", args, cwd, guideText);
   }
 
   // `prose` (AGT-1241) has no `--project` at all — AC4 requires it to work

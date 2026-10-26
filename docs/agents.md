@@ -45,6 +45,9 @@ These are the rules pablo gives its own built-in agent. `pablo mcp` also sends t
 to your agent as the server's instructions when it connects, so an MCP client gets
 them without reading this page.
 
+0. **Call `guide` first.** `pablo guide` (the `guide` tool) lists the tracks and
+   outputs; with a track and an output it returns the path from creating the work
+   to publishing it, with the command for each step. See [guide](commands.md#guide).
 1. **Start with `resume`.** It returns where the work stands: the core's stages,
    each output's progress, branches waiting for review, open decisions, and `next`.
 2. **Never write the book's prose yourself.** Plan, research, decide and ask in the

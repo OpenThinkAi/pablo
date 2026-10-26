@@ -36,7 +36,7 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the thirty-four verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the thirty-five verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "audition",
     "bind",
@@ -48,6 +48,7 @@ test("VERBS exposes exactly the thirty-four verbs, each project-required verb re
     "draft_unit",
     "fact", // AGT-2106
     "fix", // AGT-1685
+    "guide", // AGT-2142
     "merge",
     "migrate",
     "mix", // AGT-1684
@@ -76,6 +77,7 @@ test("VERBS exposes exactly the thirty-four verbs, each project-required verb re
   for (const v of VERBS) {
     if (v.name === "voice" || v.name === "prose") continue; // neither resolves via a --project slug (AGT-1240, AGT-1241)
     if (v.name === "web") continue; // agent-only web tools: no work (AGT-2126)
+    if (v.name === "guide") continue; // reads the track and output registries only: no work (AGT-2142)
     if (v.name === "describe_voice") continue; // a pure mapping of a description to the traits vocabulary: no work (AGT-1699)
     // The voice library is shared across works (AGT-1679): project is optional, for receipts only.
     // `story` (AGT-1690) creates its work from a prompt; project only resumes a run.

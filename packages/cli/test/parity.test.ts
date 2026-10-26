@@ -52,6 +52,7 @@ const PARITY: Readonly<Record<string, Entry>> = {
   fix: mixer("retake", "flag", "unflag", "listFlags"),
   takes: mixer("lineTakes", "chooseTake"),
   // ---- not editing or composing
+  guide: support("read-only: the path for a track and an output, from the registries"),
   init: support("scaffolds a new work; run once"),
   resume: support("read-only session summary for an agent"),
   status: support("read-only; the TUI rail is the status"),
