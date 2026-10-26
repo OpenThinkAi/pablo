@@ -556,7 +556,9 @@ Hits are data: exit is `0` either way.
 ```
 
 `--across` compares the continuity of every output instead. It reports facts the
-tellings disagree on, each with a finding id and a `promote` action.
+tellings disagree on, each with a finding id and a `promote` action. Its critic, like
+`critique`'s, runs on the provider the `check` intent goes to (the `plan` mapping when
+`check` is unmapped; see [configuration.md](configuration.md#default-and-intents)).
 
 ### promote
 
@@ -892,7 +894,8 @@ screen's compose view starts fresh each time. When the agent asks you a question
 prints the choices and reads your answer from stdin (type a number to pick one).
 
 `--tag-facts` tags every untagged bible and continuity fact as researched, invented
-or author on a `plan/` branch. Chapters are never touched. With `--json` it returns
+or author on a `plan/` branch. Chapters are never touched. The classifier runs on the
+provider the `plan` intent goes to (see [configuration.md](configuration.md#default-and-intents)). With `--json` it returns
 `{ok, provider: {id, model, credential}, entries[], result}`; `credential` is where the
 key comes from (`env:ANTHROPIC_API_KEY`, `keychain:…`, `none`), never the key. Exit `0` on success, `2`
 refused, `1` failed.

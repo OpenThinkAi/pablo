@@ -109,6 +109,8 @@ to (Claude, or any OpenAI-compatible model with tool calls), configured as pablo
 system prompt is the rules above, the work's judgement policy and the work's
 `STYLE.md`, and its only tools are pablo's (see
 [configuration.md](configuration.md#the-model-behind-pablo-agent-and-pablo-story)).
+`critique` and `check --across` run on the `check` intent and `pablo agent --tag-facts`
+on `plan`; no model call goes through a Claude Code login or `claude -p`.
 
 - `pablo agent --project <slug> "<message>"` runs one conversation in the terminal.
 - `a c` in the screen (bare `pablo`) opens the same conversation as a view.

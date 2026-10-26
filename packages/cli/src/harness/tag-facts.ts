@@ -7,8 +7,9 @@
  *
  * It reads `bible/**` and `continuity.md` and writes only those. Chapters are
  * never read or written, and nothing goes under `research/`; the notes there
- * are read only to ground the classifier (Claude, the planner role, never the
- * local writer), the same narrowing the harness doc makes.
+ * are read only to ground the classifier, which runs on the `plan` intent's
+ * provider (the planner role, routed like any model call; D-12, D-13), the
+ * same narrowing the harness doc makes.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -128,7 +129,7 @@ export async function runTagFacts(project: string | undefined, ctx: TagFactsCont
   if (classify === undefined) {
     let adapter = deps.adapter;
     try {
-      adapter ??= createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig, projectDir: found.path }), { keys: deps.keys ?? { env: ctx.env }, claude: { env: ctx.env } }).adapter;
+      adapter ??= createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig, projectDir: found.path }), { keys: deps.keys ?? { env: ctx.env } }).adapter;
     } catch (error) {
       return refuse(ctx, 1, (error as Error).message);
     }

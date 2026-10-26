@@ -1,25 +1,24 @@
 /**
- * The planner role: the model pablo plans with (premise, bible, acts, beats).
+ * The planner role: the model pablo plans with (premise, bible, acts, beats),
+ * and the critic that judges a branch (`critique`, `check --across`) and the
+ * fact tagger (`agent --tag-facts`).
  *
- * Claude on Matt's subscription (`claude -p`) by default. An Anthropic provider
- * in pablo's config whose key resolves overrides that and the call goes to the
- * API instead; with no key anywhere, the subscription still works. Which
- * provider counts as the planner's: the one the `plan` intent maps to, else the
- * first `anthropic`-kind provider. The planner never writes chapter prose.
+ * A planner is an intent routed like every other model call (D-12, D-13): the
+ * config's `intents` mapping, else the first cloud provider whose key
+ * resolves, else the default provider. Any provider kind serves it — an
+ * Anthropic provider, an OpenAI-compatible cloud endpoint or the local model.
+ * There is no Claude-login path; with no cloud key anywhere the planner runs
+ * on the default (local) provider. The planner never writes chapter prose.
  *
  * Every adapter that comes back is wrapped with receipts when a sink is given,
- * so a planner call is logged like any other model call (intent `plan`).
+ * so a planner call is logged like any other model call (under its intent).
  */
 
 import type { ReceiptSink } from "../pack/receipts";
 import { withReceipts } from "../pack/receipts";
-import type { PabloConfig, ProviderConfig } from "./config";
-import type { ClaudeCliAdapterOptions } from "./claude-cli";
-import { createClaudeCliAdapter } from "./claude-cli";
+import type { PabloConfig } from "./config";
 import type { ProvidersOptions } from "./registry";
 import { createProviders } from "./registry";
-import { resolveKey } from "./keys";
-import type { KeyLookup } from "./keys";
 import type { Adapter, Intent } from "./types";
 
 /** The intent a planner call carries; map it in the config's `intents` to pick a provider. */
@@ -33,51 +32,29 @@ export interface PlannerOptions extends ProvidersOptions {
   readonly receipts?: ReceiptSink | undefined;
   /** The intent this planner serves (receipts, and which mapping picks its provider); defaults to `plan`. An unmapped one uses the `plan` mapping. */
   readonly intent?: Intent | undefined;
-  /** The subscription path's settings and injected runner. */
-  readonly claude?: ClaudeCliAdapterOptions | undefined;
 }
 
-export type PlannerRoute = "api-key" | "subscription";
-
 export interface Planner {
-  readonly route: PlannerRoute;
+  /** The provider id the intent routed to. */
+  readonly provider: string;
   readonly adapter: Adapter;
 }
 
-/** The anthropic-kind provider the planner may use, if the config has one. */
-function planningProviderId(config: PabloConfig, intent: Intent = PLAN_INTENT): string | undefined {
-  const mapped = config.intents.get(intent.name) ?? config.intents.get(PLAN_INTENT.name);
-  if (mapped !== undefined) return config.providers.get(mapped)?.kind === "anthropic" ? mapped : undefined;
-  for (const provider of config.providers.values()) if (provider.kind === "anthropic") return provider.id;
-  return undefined;
-}
-
 /**
- * Which way Claude is reached, and with what: the planner's anthropic provider
- * when its key resolves, else the subscription. The harness (AGT-1552) reads
- * the same choice, so the planner and the harness never disagree about whether
- * a key in the config is billing. `key` is for the caller that sends it; it is
- * never logged or put in a message.
+ * The intent whose route a planner call takes: its own when the config maps
+ * it, else `plan`'s when that is mapped (so mapping `plan` once moves every
+ * planning call), else its own unmapped route.
  */
-export type ClaudeCredential =
-  | { readonly route: "subscription" }
-  | { readonly route: "api-key"; readonly provider: ProviderConfig; readonly key: string };
-
-export function claudeCredential(config: PabloConfig, keys?: Partial<KeyLookup>, intent: Intent = PLAN_INTENT): ClaudeCredential {
-  const id = planningProviderId(config, intent);
-  const provider = id === undefined ? undefined : config.providers.get(id);
-  const key = provider === undefined ? undefined : resolveKey(provider.key, keys);
-  return provider !== undefined && key !== undefined ? { route: "api-key", provider, key } : { route: "subscription" };
+function routingIntent(config: PabloConfig, intent: Intent): Intent {
+  if (config.intents.has(intent.name) || !config.intents.has(PLAN_INTENT.name)) return intent;
+  return { name: PLAN_INTENT.name, kind: intent.kind };
 }
 
 export function createPlanner(config: PabloConfig, options: PlannerOptions = {}): Planner {
-  const credential = claudeCredential(config, options.keys, options.intent);
-  const route: PlannerRoute = credential.route;
-  const adapter: Adapter =
-    credential.route === "api-key"
-      ? createProviders(config, options).adapter(credential.provider.id)
-      : createClaudeCliAdapter(options.claude);
-
+  const intent = options.intent ?? PLAN_INTENT;
+  const providers = createProviders(config, options);
+  const provider = providers.route(routingIntent(config, intent));
+  const adapter = providers.adapter(provider);
   const log = options.receipts;
-  return { route, adapter: log === undefined ? adapter : withReceipts(adapter, log, { intent: (options.intent ?? PLAN_INTENT).name }) };
+  return { provider, adapter: log === undefined ? adapter : withReceipts(adapter, log, { intent: intent.name }) };
 }

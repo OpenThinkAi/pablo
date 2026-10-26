@@ -334,12 +334,12 @@ async function chooseTrack(args: StoryArgs, prompt: string, ctx: VerbContext, de
     }
     return explicitTrack(named);
   }
-  // The planner can take seconds (`claude -p`): say what the wait is.
+  // The planner can take seconds: say what the wait is.
   ctx.stderr.write("pablo story: choosing a track from the prompt\n");
   let planner = deps.planner;
   if (planner === undefined) {
     try {
-      planner = createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig }), { keys: deps.keys ?? { env: ctx.env }, claude: { env: ctx.env } }).adapter;
+      planner = createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig }), { keys: deps.keys ?? { env: ctx.env } }).adapter;
     } catch (error) {
       return { track: "fiction", inferred: false, why: `the planner could not be set up (${(error as Error).message}); fiction by default` };
     }

@@ -427,7 +427,7 @@ const CRITIQUE_ARGS = z.object({
 function criticAsk(ctx: VerbContext, projectDir: string): Ask | VerbResult {
   if (critiqueModel.ask !== undefined) return critiqueModel.ask;
   try {
-    return adapterAsk(createPlanner(loadConfig({ env: ctx.env, projectDir }), { keys: { env: ctx.env }, claude: { env: ctx.env }, intent: CHECK_INTENT }).adapter);
+    return adapterAsk(createPlanner(loadConfig({ env: ctx.env, projectDir }), { keys: { env: ctx.env }, intent: CHECK_INTENT }).adapter);
   } catch (error) {
     return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
   }
