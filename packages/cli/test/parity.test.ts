@@ -36,6 +36,8 @@ const PARITY: Readonly<Record<string, Entry>> = {
   story: tui("ai.compose"),
   output: tui("ai.compose"),
   promote: tui("ai.compose"),
+  research: tui("ai.compose"), // via the harness, like save: a plan/ branch the author reviews
+  fact: tui("ai.compose"), // via the harness, like save and promote
   critique: tui("review.comment"),
   merge: tui("review.finish"),
   check: tui("go.hit_next"),
