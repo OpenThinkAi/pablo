@@ -1,28 +1,32 @@
 /**
- * Saved harness sessions (AGT-1565): a book is planned over weeks, so the
- * conversation with pablo survives quitting. It lives under the work's own
- * `.pablo/sessions/` (machine state, gitignored with the rest of `.pablo/`)
- * and is resumed the next time the work is opened.
+ * Saved harness sessions (AGT-1565, provider-neutral since AGT-2122, decision
+ * D-14): a book is planned over weeks, so the conversation with pablo survives
+ * quitting. It lives under the work's own `.pablo/sessions/` (machine state,
+ * gitignored with the rest of `.pablo/`) and is resumed the next time the work
+ * is opened.
  *
- * Two pieces:
- *
- * - `fileSessionStore`: the Agent SDK's `SessionStore` adapter over that
- *   directory. The SDK mirrors every transcript entry into it as the session
- *   runs and, given a session id to resume, loads it back from it. One JSONL
- *   file per session (`<id>.jsonl`, one entry per line, entries with a `uuid`
- *   deduplicated), so a session on disk is a plain file Matt can read or copy.
- * - the index (`index.json`): which session is current, and every session the
+ * - One JSONL file per session, `<id>.jsonl`: a header line
+ *   (`{"pablo":"session","version":1,"id","startedAt"}`) then one line per
+ *   message of the conversation, `{"message": <ChatMessage>}`, exactly the
+ *   neutral history `runLoop` takes and returns. Nothing in it is vendor
+ *   specific, so a session started on the local model resumes on Claude and
+ *   back; it is a plain file the author can read or copy.
+ * - The index (`index.json`): which session is current, and every session the
  *   work has had, oldest first. `pablo agent` resumes the current one; `--new`
  *   mints a fresh one and makes it current. The old session's file stays.
+ * - A `<id>.jsonl` from before AGT-2122 is in the Agent SDK's own format (D-14:
+ *   not migrated). It has no pablo header, so it is reported as legacy, left
+ *   untouched, and the open starts a new session instead.
  *
- * The SDK still keeps its own copy under Claude's config directory (it needs it
- * to run); `.pablo/sessions/` is the copy that belongs to the work.
+ * Anthropic thinking blocks are not in the neutral history (the adapter keeps
+ * them in memory), so a resumed Claude session rebuilds its earlier tool turns
+ * without thinking; the adapter does that by design (`anthropic.ts`).
  */
 
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SessionKey, SessionStore, SessionStoreEntry } from "@anthropic-ai/claude-agent-sdk";
+import type { ChatMessage } from "@openthink/pablo-core";
 
 export interface SessionRecord {
   readonly id: string;
@@ -35,11 +39,14 @@ export interface SessionIndex {
   readonly sessions: readonly SessionRecord[];
 }
 
-/** What a run needs: the id, and whether to resume it or start it under that id. */
+/** What a run needs: the id, the history to resume (empty for a new session), and a legacy file it skipped. */
 export interface SessionChoice {
   readonly id: string;
-  readonly resume: boolean;
-  readonly store: SessionStore;
+  readonly history: readonly ChatMessage[];
+  /** True when this open resumed an existing transcript. */
+  readonly resumed: boolean;
+  /** The id of a current session found in the SDK's format: not resumable, left untouched. */
+  readonly legacy?: string;
 }
 
 export function sessionsDir(workDir: string): string {
@@ -47,8 +54,9 @@ export function sessionsDir(workDir: string): string {
 }
 
 const INDEX_FILE = "index.json";
+const FORMAT_VERSION = 1;
 
-/** Ids are the SDK's UUIDs; refuse anything that could climb out of the directory. */
+/** Ids are UUIDs; refuse anything that could climb out of the directory. */
 function safeSegment(segment: string): string {
   if (segment === "" || segment === "." || segment === ".." || /[\\/\0]/.test(segment)) {
     throw new Error(`unsafe session path segment: ${JSON.stringify(segment)}`);
@@ -56,65 +64,68 @@ function safeSegment(segment: string): string {
   return segment;
 }
 
-function transcriptPath(dir: string, key: { readonly sessionId: string; readonly subpath?: string | undefined }): string {
-  const id = safeSegment(key.sessionId);
-  if (key.subpath === undefined) return join(dir, `${id}.jsonl`);
-  return join(dir, id, `${key.subpath.split("/").map(safeSegment).join("/")}.jsonl`);
+export function transcriptPath(workDir: string, id: string): string {
+  return join(sessionsDir(workDir), `${safeSegment(id)}.jsonl`);
 }
 
-function readLines(path: string): SessionStoreEntry[] {
-  return readFileSync(path, "utf8")
-    .split("\n")
-    .filter((line) => line.trim() !== "")
-    .map((line) => JSON.parse(line) as SessionStoreEntry);
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+function isMessage(value: unknown): value is ChatMessage {
+  if (!isRecord(value)) return false;
+  switch (value["role"]) {
+    case "user":
+      return typeof value["content"] === "string";
+    case "assistant":
+      return typeof value["content"] === "string" && (value["toolCalls"] === undefined || Array.isArray(value["toolCalls"]));
+    case "tool":
+      return typeof value["toolCallId"] === "string" && typeof value["content"] === "string";
+    default:
+      return false;
+  }
 }
 
-/** The SDK's `SessionStore` over `<workDir>/.pablo/sessions/`. */
-export function fileSessionStore(workDir: string): SessionStore {
-  const dir = sessionsDir(workDir);
-  return {
-    async append(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
-      if (entries.length === 0) return;
-      const path = transcriptPath(dir, key);
-      mkdirSync(join(path, ".."), { recursive: true });
-      // A retried batch must not duplicate: entries with a uuid are idempotent.
-      const seen = new Set<string>();
-      if (existsSync(path)) {
-        for (const entry of readLines(path)) if (entry.uuid !== undefined) seen.add(entry.uuid);
-      }
-      const fresh = entries.filter((entry) => {
-        if (entry.uuid === undefined) return true;
-        if (seen.has(entry.uuid)) return false;
-        seen.add(entry.uuid);
-        return true;
-      });
-      if (fresh.length > 0) appendFileSync(path, fresh.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
-    },
-    async load(key: SessionKey): Promise<SessionStoreEntry[] | null> {
-      const path = transcriptPath(dir, key);
-      return existsSync(path) ? readLines(path) : null;
-    },
-    async listSessions(): Promise<Array<{ sessionId: string; mtime: number }>> {
-      if (!existsSync(dir)) return [];
-      return readdirSync(dir)
-        .filter((name) => name.endsWith(".jsonl"))
-        .map((name) => ({ sessionId: name.slice(0, -".jsonl".length), mtime: Math.floor(statSync(join(dir, name)).mtimeMs) }));
-    },
-    async listSubkeys(key: { projectKey: string; sessionId: string }): Promise<string[]> {
-      const sub = join(dir, safeSegment(key.sessionId));
-      if (!existsSync(sub)) return [];
-      const out: string[] = [];
-      const walk = (path: string, prefix: string): void => {
-        for (const name of readdirSync(path)) {
-          const full = join(path, name);
-          if (statSync(full).isDirectory()) walk(full, `${prefix}${name}/`);
-          else if (name.endsWith(".jsonl")) out.push(`${prefix}${name.slice(0, -".jsonl".length)}`);
-        }
-      };
-      walk(sub, "");
-      return out;
-    },
-  };
+export type LoadedSession =
+  | { readonly kind: "ok"; readonly history: readonly ChatMessage[] }
+  | { readonly kind: "legacy" }
+  | { readonly kind: "damaged"; readonly reason: string };
+
+/** Reads a session file: its history, or why it cannot be resumed. A torn last line (a write cut short) is dropped. */
+export function loadSession(workDir: string, id: string): LoadedSession {
+  const lines = readFileSync(transcriptPath(workDir, id), "utf8").split("\n").filter((line) => line.trim() !== "");
+  let header: unknown;
+  try {
+    header = lines.length === 0 ? undefined : JSON.parse(lines[0]!);
+  } catch {
+    return { kind: "legacy" };
+  }
+  if (!isRecord(header) || header["pablo"] !== "session") return { kind: "legacy" };
+  if (header["version"] !== FORMAT_VERSION) return { kind: "damaged", reason: `it is format version ${String(header["version"])}, and this pablo reads version ${FORMAT_VERSION}` };
+  const history: ChatMessage[] = [];
+  for (const [i, line] of lines.slice(1).entries()) {
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      if (i === lines.length - 2) break; // torn final line
+      return { kind: "damaged", reason: `line ${i + 2} is not JSON` };
+    }
+    if (!isRecord(entry) || !isMessage(entry["message"])) return { kind: "damaged", reason: `line ${i + 2} is not a message` };
+    history.push(entry["message"]);
+  }
+  return { kind: "ok", history };
+}
+
+/** Appends messages to a session's file, creating it (with its header) the first time. */
+export function appendMessages(workDir: string, id: string, messages: readonly ChatMessage[], now: () => Date = () => new Date()): void {
+  if (messages.length === 0) return;
+  const path = transcriptPath(workDir, id);
+  mkdirSync(sessionsDir(workDir), { recursive: true });
+  let out = "";
+  if (!existsSync(path)) {
+    out += `${JSON.stringify({ pablo: "session", version: FORMAT_VERSION, id, startedAt: now().toISOString() })}\n`;
+  }
+  out += messages.map((message) => `${JSON.stringify({ message })}\n`).join("");
+  appendFileSync(path, out);
 }
 
 export function readSessionIndex(workDir: string): SessionIndex {
@@ -146,19 +157,27 @@ function writeSessionIndex(workDir: string, index: SessionIndex): void {
 }
 
 /**
- * The session this open should run: the work's current one (resumed once it has
- * a transcript on disk), or a fresh one when there is none or `fresh` is set.
- * A fresh session is recorded as current before it runs; the previous one stays
- * in the index and on disk.
+ * The session this open should run: the work's current one, resumed from its
+ * file, or a fresh one when there is none, `fresh` is set, or the current file
+ * is a legacy SDK transcript (reported in `legacy`, left untouched). A fresh
+ * session is recorded as current before it runs; the previous one stays in the
+ * index and on disk. A damaged current file throws, naming it: it is never
+ * overwritten.
  */
 export function chooseSession(workDir: string, options: { readonly fresh: boolean }, now: () => Date = () => new Date()): SessionChoice {
-  const store = fileSessionStore(workDir);
   const index = readSessionIndex(workDir);
+  let legacy: string | undefined;
   if (!options.fresh && index.current !== undefined) {
-    const resume = existsSync(transcriptPath(sessionsDir(workDir), { sessionId: index.current }));
-    return { id: index.current, resume, store };
+    const path = transcriptPath(workDir, index.current);
+    if (!existsSync(path)) return { id: index.current, history: [], resumed: false };
+    const loaded = loadSession(workDir, index.current);
+    if (loaded.kind === "ok") return { id: index.current, history: loaded.history, resumed: true };
+    if (loaded.kind === "damaged") {
+      throw new Error(`the saved session ${index.current} cannot be resumed (${loaded.reason}); its file is untouched at ${path}. Start a new one with --new`);
+    }
+    legacy = index.current;
   }
   const id = randomUUID();
   writeSessionIndex(workDir, { current: id, sessions: [...index.sessions, { id, startedAt: now().toISOString() }] });
-  return { id, resume: false, store };
+  return { id, history: [], resumed: false, ...(legacy === undefined ? {} : { legacy }) };
 }

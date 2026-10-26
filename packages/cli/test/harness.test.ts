@@ -171,7 +171,7 @@ test("the config's agent provider is the one the session runs on; a missing key 
   expect(io.out()).toContain('provider "anthropic" has no API key, so nothing was sent');
 });
 
-test("with no cloud provider configured the agent says it runs on the local model; a mapped agent intent or --new says so too", async () => {
+test("with no cloud provider configured the agent says it runs on the local model; a mapped agent intent does not", async () => {
   const unmapped = capture();
   // The default config routes the agent to `local`; its first request fails (nothing listens in a test), which is fine here.
   await runAgent({ project: "ice-house", message: "Hi", json: false }, unmapped.ctx, { readConfig: () => JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:9/v1" } } }) });
@@ -183,7 +183,8 @@ test("with no cloud provider configured the agent says it runs on the local mode
 
   const fresh = capture();
   await runAgent({ project: "ice-house", message: "Hi", json: false, new: true }, fresh.ctx, { provider: adapterProvider(statusModel()), readConfig: noConfig });
-  expect(fresh.err()).toContain("--new: every run is a fresh conversation");
+  expect(fresh.err()).toContain("starting a session on");
+  expect(fresh.err()).not.toContain("--new");
 });
 
 test("the provider hint names how to see, change and test the agent's route", () => {

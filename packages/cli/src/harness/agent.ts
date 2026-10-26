@@ -11,9 +11,10 @@
  * `ask_author` (AGT-1560) is answered from stdin: the question card is printed
  * and one line is read back (a number picks an option).
  *
- * The conversation lasts one run. Saved sessions (AGT-1565) were the Agent
- * SDK's format; they come back as neutral JSONL (AGT-2122), and until then
- * `--new` is accepted and changes nothing.
+ * The conversation is saved as provider-neutral JSONL under the work's
+ * `.pablo/sessions/` (AGT-2122, `sessions.ts`) and resumed by the next run;
+ * `--new` starts a fresh one. A session file left in the old SDK format is
+ * reported as legacy and skipped, never touched.
  *
  * Exit codes follow the CLI's contract: 0 when the session ends in a success
  * result, 2 for a refusal (no project, no marker, no message, a policy pablo
@@ -29,6 +30,7 @@ import type { ProgressSink, VerbContext } from "../verbs";
 import { startPlanSession } from "../plan";
 import { lineReader, stdinAskAuthor } from "./ask-author";
 import { planTools } from "./plan-tools";
+import { appendMessages, chooseSession } from "./sessions";
 import { loadPromptWork } from "./prompt";
 import { AGENT_INTENT, harnessProvider, LOCAL_FALLBACK_NOTICE, providerHint } from "./provider";
 import type { HarnessProvider } from "./provider";
@@ -45,7 +47,7 @@ export interface AgentArgs {
   readonly json: boolean;
   /** AGT-1570: tag every untagged fact on a plan branch instead of running a session. */
   readonly tagFacts?: boolean;
-  /** `--new` (AGT-1565): accepted; every run is a fresh conversation until saved sessions return (AGT-2122). */
+  /** `--new` (AGT-1565): start a fresh session; the old one stays on disk. */
   readonly new?: boolean;
 }
 
@@ -104,7 +106,16 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   } catch (error) {
     return refuse(ctx, args.json, 1, (error as Error).message);
   }
-  if (args.new === true) ctx.stderr.write("pablo: --new: every run is a fresh conversation for now; nothing is saved between runs\n");
+  let session: ReturnType<typeof chooseSession>;
+  try {
+    session = chooseSession(project.path, { fresh: args.new === true });
+  } catch (error) {
+    return refuse(ctx, args.json, 1, `pablo: ${(error as Error).message}`);
+  }
+  if (session.legacy !== undefined) {
+    ctx.stderr.write(`pablo: the saved session ${session.legacy} is legacy (the old Agent SDK format), not resumable; it is left untouched and a new session starts\n`);
+  }
+  if (session.resumed) ctx.stderr.write(`pablo: resuming session ${session.id} (${session.history.length} messages)\n`);
 
   // pablo's tools run in this process; their progress goes to stderr, never
   // into the transcript on stdout.
@@ -124,7 +135,15 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   ctx.stderr.write(`pablo: starting a session on ${provider.adapter.id} (${provider.adapter.model})\n`);
   if (!args.json) ctx.stdout.write(`› ${args.message}\n`);
   try {
-    for await (const entry of runHarness(args.message, spec, deps.query ?? loopQuery)) {
+    const turn = runHarness(args.message, spec, deps.query ?? loopQuery, session.history);
+    for (;;) {
+      const next = await turn.next();
+      if (next.done) {
+        // The conversation after this message: save what this run added.
+        if (next.value) appendMessages(project.path, session.id, next.value.slice(session.history.length));
+        break;
+      }
+      const entry = next.value;
       entries.push(entry);
       if (entry.kind === "result") result = entry;
       if (!args.json) ctx.stdout.write(`${formatEntry(entry)}\n`);
