@@ -36,7 +36,7 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the thirty-one verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the thirty-three verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "audition",
     "bind",
@@ -46,6 +46,7 @@ test("VERBS exposes exactly the thirty-one verbs, each project-required verb req
     "describe_voice", // AGT-1699
     "draft_chapter",
     "draft_unit",
+    "fact", // AGT-2106
     "fix", // AGT-1685
     "merge",
     "migrate",
@@ -57,6 +58,7 @@ test("VERBS exposes exactly the thirty-one verbs, each project-required verb req
     "prose",
     "publish",
     "read",
+    "research", // AGT-2106
     "resume",
     "revise",
     "revise_passage",
@@ -121,6 +123,15 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     file: { type: "string" },
     sub: { type: "string" },
     name: { type: "string" },
+    // AGT-2106: research save / fact record
+    note: { type: "string" },
+    source: { type: "string", multiple: true },
+    fact: { type: "string" },
+    where: { type: "string" },
+    kind: { type: "string" },
+    heading: { type: "string" },
+    promote: { type: "boolean", default: false },
+    "established-by": { type: "string" },
     global: { type: "boolean", default: false },
     line: { type: "string" },
     section: { type: "string" },

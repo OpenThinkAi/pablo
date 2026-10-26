@@ -71,6 +71,8 @@ import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
 import { mergeDraftInProject } from "./novel/merge";
 import { readMarker } from "./marker";
+import { FACT_KINDS } from "./record-fact";
+import { recordFactInProject, saveResearchInProject } from "./research-verbs";
 import { readTool, searchTool } from "./harness-tools";
 import { addOutput, listOutputs, planOutput, removeOutput } from "./output-verbs";
 import { findVault, resolveProject } from "./project";
@@ -721,6 +723,129 @@ async function runPromoteVerb(args: z.infer<typeof PROMOTE_ARGS>, ctx: VerbConte
   if (result.ok) return { body: result, exitCode: 0 };
   return { body: { ok: false, code: result.code, message: result.notice }, exitCode: result.code };
 }
+
+// ---------------------------------------------------------------------------
+// research save / fact record (AGT-2106, D-9)
+// ---------------------------------------------------------------------------
+
+const RESEARCH_ARGS = z.object({
+  sub: z.enum(["save"]).describe("`save`: keep a research finding with its sources as research/<slug>.md."),
+  project: projectField,
+  title: z.string().optional().describe("What the note is about, e.g. 'Grape prices, 1919'. Becomes the file name."),
+  note: z.string().optional().describe("The finding, in your own words: the checkable facts and what they mean for the story."),
+  source: z.array(z.string()).optional().default([]).describe("Where a fact came from: a URL or full citation. Repeatable; at least one."),
+});
+
+/** `pablo research save`: the harness's `save_research`, on a `plan/` branch for the author to review. */
+async function runResearchVerb(args: z.infer<typeof RESEARCH_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  return saveResearchInProject(resolved.projectPath, { title: args.title ?? "", note: args.note ?? "", sources: args.source ?? [] }, ctx.env);
+}
+
+const FACT_ARGS = z.object({
+  sub: z.enum(["record"]).describe("`record`: append one fact, tagged with where it came from, on a plan/ branch."),
+  project: projectField,
+  fact: z.string().optional().describe("The fact, in one sentence."),
+  where: z.string().optional().describe("`continuity` or a bible file (`places`, `bible/places.md`). Ignored with --promote."),
+  kind: z.string().optional().describe(`researched (needs --source), invented or author. One of: ${FACT_KINDS.join(", ")}.`),
+  // Same key as `research save`'s repeatable --source, so the CLI option is one declaration; several are joined into one citation.
+  source: z.array(z.string()).optional().default([]).describe("The citation for a researched fact."),
+  heading: z.string().optional().describe("The `## ` heading of the section to file under (default: the end of the file)."),
+  chapter: z.string().optional().describe("An optional chapter tag, e.g. ch03."),
+  promote: z.boolean().optional().default(false).describe("File the fact in facts.md (the story core's facts every output honours); needs --established-by."),
+  "established-by": z.string().optional().describe("With --promote: the output and unit that established it, e.g. novel/ch03 or radio/ep05."),
+});
+
+/** `pablo fact record`: the harness's `record_fact`, on a `plan/` branch for the author to review. */
+async function runFactVerb(args: z.infer<typeof FACT_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const source = (args.source ?? []).map((s) => s.trim()).filter(Boolean).join("; ");
+  return recordFactInProject(
+    resolved.projectPath,
+    {
+      fact: args.fact ?? "",
+      where: args.where ?? "",
+      kind: args.kind ?? "",
+      ...(source ? { source } : {}),
+      ...(args.heading !== undefined ? { heading: args.heading } : {}),
+      ...(args.chapter !== undefined ? { chapter: args.chapter } : {}),
+      ...(args.promote ? { promote: true } : {}),
+      ...(args["established-by"] !== undefined ? { establishedBy: args["established-by"] } : {}),
+    },
+    ctx.env,
+  );
+}
+
+// The MCP names are the harness's own (`save_research`, `record_fact`) so a prompt that names them works over any
+// front end; the harness's session-bound copies (`harness/plan-tools.ts`) replace these in its own server.
+const SAVE_RESEARCH_MCP_ARGS = z.object({
+  project: projectField,
+  title: z.string().describe("What the note is about, e.g. 'Grape prices, 1919'. Becomes the file name."),
+  note: z.string().describe("The finding, in your own words: the checkable facts and what they mean for the story."),
+  sources: z.array(z.string()).describe("Where each fact came from: URLs or full citations. At least one."),
+});
+
+const RECORD_FACT_MCP_ARGS = z.object({
+  project: projectField,
+  fact: z.string().describe("The fact, in one sentence."),
+  where: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9/_.-]*$/i)
+    .refine((w) => !w.includes(".."), "where must stay inside the work")
+    .optional()
+    .describe("`continuity` or a bible file (`places`, `bible/places.md`). Ignored when promote is true."),
+  kind: z.string().describe("researched (needs a source citation), invented or author."),
+  source: z.string().optional().describe("The citation for a researched fact."),
+  heading: z.string().optional().describe("The `## ` heading of the section to file under (default: the end of the file)."),
+  chapter: z.string().optional().describe("An optional chapter tag, e.g. ch03."),
+  promote: z.boolean().optional().describe("File the fact in facts.md instead (the story core's facts every output honours); needs established_by."),
+  established_by: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]*\/[a-z]{2}\d+$/)
+    .optional()
+    .describe("With promote: the output and unit that established the fact, e.g. novel/ch03 or radio/ep05."),
+});
+
+const SAVE_RESEARCH_MCP: McpToolSpec = {
+  name: "save_research",
+  description:
+    "Save a research finding with its sources to the work's research/ notes (research/<slug>.md, with the retrieval date), on a new plan/ branch the author reviews. At least one source is required. The local writer never sees these notes; distilled facts are what reach a draft.",
+  args: SAVE_RESEARCH_MCP_ARGS,
+  run: async (raw, ctx) => {
+    const args = SAVE_RESEARCH_MCP_ARGS.parse(raw);
+    const resolved = resolveVerbProject(ctx, args.project);
+    if (!resolved.ok) return resolved.result;
+    return saveResearchInProject(resolved.projectPath, { title: args.title, note: args.note, sources: args.sources }, ctx.env);
+  },
+};
+
+const RECORD_FACT_MCP: McpToolSpec = {
+  name: "record_fact",
+  description:
+    "Record a fact on a new plan/ branch for the author to review: where is `continuity` or a bible file (`places`, `bible/places.md`); kind is researched (needs a source citation), invented or author. With promote true the fact goes to facts.md instead (where is ignored) and needs established_by, the output and unit that established it (`novel/ch03`, `radio/ep05`).",
+  args: RECORD_FACT_MCP_ARGS,
+  run: async (raw, ctx) => {
+    const args = RECORD_FACT_MCP_ARGS.parse(raw);
+    const resolved = resolveVerbProject(ctx, args.project);
+    if (!resolved.ok) return resolved.result;
+    return recordFactInProject(
+      resolved.projectPath,
+      {
+        fact: args.fact,
+        where: args.where ?? "",
+        kind: args.kind,
+        ...(args.source !== undefined ? { source: args.source } : {}),
+        ...(args.heading !== undefined ? { heading: args.heading } : {}),
+        ...(args.chapter !== undefined ? { chapter: args.chapter } : {}),
+        ...(args.promote === true ? { promote: true } : {}),
+        ...(args.established_by !== undefined ? { establishedBy: args.established_by } : {}),
+      },
+      ctx.env,
+    );
+  },
+};
 
 // ---------------------------------------------------------------------------
 // bind
@@ -1668,6 +1793,24 @@ export const VERBS: readonly Verb[] = [
       "Promote one side of a `check --across` finding: its fact goes to facts.md (the story core's facts every output honours) with established-by, on a plan/ branch for review, and each contradicting unit gets a comment on its line there.",
     args: PROMOTE_ARGS,
     run: runPromoteVerb,
+  },
+  {
+    name: "research",
+    description:
+      "`research save`: keep a research finding with its sources and retrieval date as research/<slug>.md, on a new plan/ branch for the author to review. At least one source is required (--source, repeatable). Over MCP this is the `save_research` tool.",
+    args: RESEARCH_ARGS,
+    run: runResearchVerb,
+    positionalArgs: ["sub"],
+    mcpTools: [SAVE_RESEARCH_MCP],
+  },
+  {
+    name: "fact",
+    description:
+      "`fact record`: append one fact, tagged researched (a source is required), invented or author, to a bible file or continuity.md (or, with --promote, facts.md) on a new plan/ branch for the author to review. Over MCP this is the `record_fact` tool.",
+    args: FACT_ARGS,
+    run: runFactVerb,
+    positionalArgs: ["sub"],
+    mcpTools: [RECORD_FACT_MCP],
   },
   {
     name: "bind",

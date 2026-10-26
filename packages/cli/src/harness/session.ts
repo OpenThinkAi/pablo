@@ -63,7 +63,11 @@ export interface HarnessSpec {
 }
 
 export function harnessOptions(spec: HarnessSpec): Options {
-  const tools = [...(spec.tools ?? harnessTools(spec.ask)), ...(spec.sessionTools ?? [])];
+  // A session tool replaces a same-named `pablo mcp` tool (`save_research`, `record_fact`, AGT-2106): the session's is
+  // bound to its plan branch, the verb's starts a branch per call.
+  const sessionTools = spec.sessionTools ?? [];
+  const taken = new Set(sessionTools.map((tool) => tool.name));
+  const tools = [...(spec.tools ?? harnessTools(spec.ask)).filter((tool) => !taken.has(tool.name)), ...sessionTools];
   const options: Options = {
     systemPrompt: harnessSystemPrompt(spec.work),
     tools: [...BUILTIN_TOOLS],
