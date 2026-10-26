@@ -244,7 +244,7 @@ finish() {
   if [ "$CHROME_MISSING" -eq 1 ]; then
     printf '\nOne thing left: install Google Chrome so chapters can open: %s\n' "$CHROME_URL"
   fi
-  printf '\nThe reader window has been removed: review the chapters in the pull request your author sent you on GitHub.\n'
+  printf '\nNext: open the pull request your author sent you on GitHub and review the chapters there.\n'
   printf 'To upgrade pablo later, run this same command again.\n'
 }
 

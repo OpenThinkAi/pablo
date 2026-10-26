@@ -58,8 +58,8 @@ upgrades pablo.
 You also need a GitHub account with access to the book's reading repo. The author
 invites you; accept the invitation from GitHub's email once per book.
 
-To upgrade pablo, run the install line again. The reader window was removed: open the pull
-request the author sent you on GitHub and review the chapters there.
+To upgrade pablo, run the install line again. Next: open the pull request the author sent you on GitHub and review the chapters
+there. The installer is only needed to clear out the old reader tools; Chrome is no longer used.
 
 ## Removing pablo
 
