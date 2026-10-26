@@ -155,6 +155,28 @@ def test_a_clip_anchored_to_a_line_the_manifest_lost_is_pinned_where_it_sat_and_
     assert clip(doc, "line-2") == clip(human, "line-2")
 
 
+def test_a_second_fix_before_a_save_keeps_the_earlier_review_items(work: Path, cues_dir: Path) -> None:
+    human = human_mix(work, cues_dir)
+    flags_path(work).write_text(json.dumps({"flags": [{"id": "f-1", "episode": 1, "line": 3, "reason": "other"}]}))
+    cut = proposal(work, cues=CUES)
+    cut["lines"] = cut["lines"][:3]  # type: ignore[index]
+    write_version(work, 1, cut, flags_applied=["f-1"])
+    mixed(work, cues_dir)  # mix.v3: line-3's clip set aside into the review list
+    aside = read_mix(work, 1, 3)["rebase"]["review"]  # type: ignore[index]
+    assert [item["clip"] for item in aside] == ["line-3"]
+
+    # another fix lands before the author saves: line 1 re-taken on the three-line manifest
+    flags_path(work).write_text(json.dumps({"flags": [{"id": "f-2", "episode": 1, "line": 1, "reason": "flat"}]}))
+    again = copy.deepcopy(cut)
+    again["lines"][1]["take"] = take_for(work, 1, attempt=1)  # type: ignore[index]
+    write_version(work, 1, again, flags_applied=["f-2"])
+    body = mixed(work, cues_dir)
+    doc = read_mix(work, 1, 4)
+    assert (doc["rebase"]["from"], doc["rebase"]["manifest_from"], doc["rebase"]["retaken"], doc["rebase"]["review"]) == (3, 2, [1], aside)  # type: ignore[index]
+    assert body["review"] == aside and "1 item(s) for review" in str(body["message"])
+    assert clip(doc, "line-1")["source"]["key"] == again["lines"][1]["take"] and clip(doc, "line-2") == clip(human, "line-2")  # type: ignore[index]
+
+
 def test_a_cue_clip_whose_cue_the_manifest_lost_keeps_its_sound_without_the_index(work: Path, cues_dir: Path) -> None:
     human_mix(work, cues_dir)
     flags_path(work).write_text(json.dumps({"flags": [{"id": "f-1", "episode": 1, "line": 1, "reason": "flat"}]}))

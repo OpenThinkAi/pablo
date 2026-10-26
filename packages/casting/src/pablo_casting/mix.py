@@ -1081,7 +1081,8 @@ def rebase(doc: Mapping[str, object], old_manifest: Mapping[str, object], new_ma
     or set aside *into* the list with its whole body when where it sat is unknown; a clip voicing a line the manifest no
     longer has cannot render and is set aside the same way; a cue clip placing a cue the manifest no longer has keeps its
     sound and loses its `cue` index; a clip only partly re-taken (a grouped take) is replaced by the auto mix's clips
-    for its lines, carrying its gain, fades, lane and anchor; a line new to the manifest gets the auto mix's clip.
+    for its lines, carrying its gain, fades, lane and anchor; a line new to the manifest gets the auto mix's clip. A
+    document that was itself rebased and never saved keeps its earlier items in front of the new ones.
     """
     old, new = _takes_by_line(old_manifest), _takes_by_line(new_manifest)
     retaken = sorted(i for i in set(old) & set(new) if old[i][0] != new[i][0])
@@ -1096,7 +1097,10 @@ def rebase(doc: Mapping[str, object], old_manifest: Mapping[str, object], new_ma
     auto = auto_document(new_manifest, sources)
     auto_for: dict[int, Mapping[str, object]] = {int(i): c for track, _, _, c in clips(auto) if track == "dialogue" for i in c["lines"]}  # type: ignore[union-attr]
     old_cues, new_cues = _cues(old_manifest), _cues(new_manifest)
-    review: list[dict[str, object]] = []
+    # A document rebased before and not yet saved still carries its list: a second fix keeps every item (a clip set
+    # aside lives only there) until the author's save clears it.
+    earlier = doc.get("rebase")
+    review: list[dict[str, object]] = [dict(item) for item in earlier["review"]] if isinstance(earlier, Mapping) else []  # type: ignore[index, union-attr]
 
     def note(field: str, problem: str, *, clip: object = None, was: object = None) -> None:
         review.append({"clip": clip, "field": field, "problem": problem, "was": was})
