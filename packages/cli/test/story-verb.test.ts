@@ -192,9 +192,11 @@ test("repeatedFlag reads every --output in order, both spellings", () => {
   expect(repeatedFlag(["story", "x"], "output")).toEqual([]);
 });
 
-test("story is one VERBS entry, CLI only: no MCP tool, project optional, output repeatable", () => {
+// AGT-2143: an MCP tool for an outside agent, never one of the harness's own (`harness: false`).
+test("story is one VERBS entry, MCP-only beside the CLI: never the harness's, project optional, output repeatable", () => {
   const story = VERBS.find((v) => v.name === "story");
-  expect(story?.mcpTools).toEqual([]);
+  expect(story?.mcpTools).toBeUndefined();
+  expect(story?.harness).toBe(false);
   expect(story?.args.safeParse({ prompt: "x", output: ["novel", "story"] }).success).toBe(true);
   expect(story?.args.safeParse({}).success).toBe(true);
 });

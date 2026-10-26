@@ -28,9 +28,9 @@ import { migrateOutputs } from "./migrate-outputs";
 import { migrateTrack } from "./migrate-track";
 import { migrateStyle } from "./migrate-style";
 import { mergeDraftInProject } from "./novel/merge";
-import { initAdopt, initNovel, initTrack, vaultAuthor } from "./init";
+import { initBody, initWork } from "./init";
 import type { TrackChoice } from "./tracks/infer";
-import type { InitResult } from "./init";
+import type { InitOk, InitRefusal } from "./init";
 import { outputsLabel, readMarker } from "./marker";
 import type { Composer } from "@openthink/pablo-tui";
 import { loadConfig } from "@openthink/pablo-core";
@@ -46,7 +46,7 @@ import { realWritingDoctorDeps, runWritingDoctor, writingDoctorText } from "./do
 import type { Refusal } from "./project";
 import { runProse } from "./prose";
 import { AUDIO_OUTPUTS, isAudioOutput } from "./outputs/audio";
-import { OUTPUTS, isOutputId, outputDefinition, resolveOutput } from "./outputs/registry";
+import { OUTPUTS, outputDefinition, resolveOutput } from "./outputs/registry";
 import { radioStageCheck } from "./outputs/radio/state";
 import { runRevise } from "./revise";
 import type { ReviseCoreContext } from "./revise";
@@ -882,24 +882,14 @@ function requireMarker(projectPath: string): Refusal | undefined {
   return marker.ok ? undefined : marker;
 }
 
-function emitInitResult(result: InitResult, json: boolean): number {
+function emitInitResult(result: InitOk | InitRefusal | Refusal, json: boolean): number {
   if (!result.ok) {
-    emit(refusalResult(result), json);
+    emit({ ok: false, code: result.code, message: result.message, ...(result.tried === undefined ? {} : { tried: result.tried }) }, json);
     return result.code;
   }
 
   if (json) {
-    const body: Record<string, unknown> = {
-      ok: true,
-      path: result.path,
-      format: result.format ?? null,
-      ...(result.track === undefined ? {} : { track: result.track }),
-      slug: result.slug,
-      title: result.title,
-      committed: result.committed,
-    };
-    if (result.notice) body["notice"] = result.notice;
-    console.log(JSON.stringify(body));
+    console.log(JSON.stringify(initBody(result)));
   } else {
     const committedNote = result.committed ? " (committed)" : "";
     console.log(result.adoptedLine ?? `pablo: created ${result.path}${committedNote}`);
@@ -909,56 +899,19 @@ function emitInitResult(result: InitResult, json: boolean): number {
   return EXIT_OK;
 }
 
+/**
+ * `pablo init`: the positionals and flags become an `InitRequest` and `initWork`
+ * (shared with the MCP `init` tool, AGT-2143) does the rest. With `--track` and
+ * exactly two positionals the work is core-only (`<slug> "<Title>"`); otherwise
+ * the positionals are `<format> <slug> "<Title>"`.
+ */
 function runInit(args: ParsedArgs, cwd: string): number {
-  const vaultResult = findVault(cwd);
-  if (!vaultResult.ok) {
-    emit(refusalResult(vaultResult), args.json);
-    return vaultResult.code;
-  }
-  const vault = vaultResult.path;
-
-  if (args.adopt) {
-    if (args.project === undefined) {
-      const message = "pablo: init --adopt requires --project <slug>";
-      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
-      return EXIT_REFUSED;
-    }
-
-    const resolved = resolveProjectFromCwd(cwd, args.project);
-    if (!resolved.ok) {
-      emit(refusalResult(resolved), args.json);
-      return resolved.code;
-    }
-
-    return emitInitResult(initAdopt(vault, resolved.path, args.project, { author: vaultAuthor(vault) }), args.json);
-  }
-
-  // `pablo init --track <t> <slug> "<Title>"` (AGT-2103): a core-only work on the track, no output yet.
-  if (args.track !== undefined && args.rest.length === 2) {
-    const [coreSlug, coreTitle] = args.rest as [string, string];
-    // `pablo init novel <slug> --track t` (the title left off) is a mistyped novel init, not a work named "novel".
-    if (isOutputId(coreSlug)) {
-      const message = `pablo: init: "${coreSlug}" is an output, not a slug; did you mean pablo init ${coreSlug} <slug> "<Title>" --track ${args.track}?`;
-      emit({ ok: false, code: EXIT_ERROR, message }, args.json);
-      return EXIT_ERROR;
-    }
-    return emitInitResult(initTrack(vault, coreSlug, coreTitle, args.track, { author: vaultAuthor(vault) }), args.json);
-  }
-
-  const [format, slug, title] = args.rest;
-  if (format === undefined || slug === undefined || title === undefined) {
-    const message = 'pablo: usage: pablo init <format> <slug> "<Title>" [--track <t>], or pablo init --track <t> <slug> "<Title>"';
-    emit({ ok: false, code: EXIT_ERROR, message }, args.json);
-    return EXIT_ERROR;
-  }
-
-  if (format !== "novel") {
-    const message = `pablo: init: only "novel" is implemented (got "${format}")`;
-    emit({ ok: false, code: EXIT_ERROR, message }, args.json);
-    return EXIT_ERROR;
-  }
-
-  return emitInitResult(initNovel(vault, slug, title, { author: vaultAuthor(vault), ...(args.track === undefined ? {} : { track: args.track }) }), args.json);
+  const coreOnly = args.track !== undefined && args.rest.length === 2;
+  const [first, second, third] = args.rest;
+  const request = coreOnly
+    ? { slug: first, title: second, track: args.track }
+    : { output: first, slug: second, title: third, track: args.track };
+  return emitInitResult(initWork(cwd, process.env, { ...request, adopt: args.adopt, project: args.project }), args.json);
 }
 
 /**

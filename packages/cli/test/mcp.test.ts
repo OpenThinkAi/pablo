@@ -61,7 +61,7 @@ function parseTextBody(result: unknown): unknown {
 // already an MCP tool before this ticket (AGT-1241); AC1's "five existing
 // tools" are resume/status/write/save/check. AGT-1264 adds `revise`, also
 // project-scoped.
-const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "save_research", "distill_facts", "record_fact", "plan_research", "waive_research_item", "link_research_item"]);
+const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "output_add", "merge", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "save_research", "distill_facts", "record_fact", "plan_research", "waive_research_item", "link_research_item"]);
 
 test("listTools returns the project-scoped verbs, prose, and the five narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
@@ -78,10 +78,13 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "draft_unit",
     "fix", // AGT-1685: fixes a performed radio episode from its flags; project required
     "guide", // AGT-2142: the path for a track x output; no project
+    "init", // AGT-2143: starts a work; MCP only, never the harness's
     "link_research_item", // AGT-2111: from the `research` verb
+    "merge", // AGT-2143: accepts a draft on the author's word; MCP only, never the harness's
     "migrate",
     "mix", // AGT-1684: mixes a performed radio episode; project required
     "output",
+    "output_add", // AGT-2143: from the `output` verb
     "perform", // AGT-1683: performs a radio episode; project required
     "plan_research", // AGT-2111: from the `research` verb
     "promote",
@@ -96,6 +99,7 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "save_research", // AGT-2106: from the `research` verb
     "search",
     "status",
+    "story", // AGT-2143: the whole pipeline from a prompt; MCP only, never the harness's
     "timeline",
     "voice_edit",
     "voice_exemplar",
@@ -178,7 +182,10 @@ test("the server sends its usage instructions at initialize (AGT-1873)", () => {
   const instructions = client.getInstructions() ?? "";
   expect(instructions).toContain("`resume`");
   expect(instructions).toMatch(/Never write the book's prose yourself/);
-  expect(instructions).toMatch(/no merge tool/);
+  // AGT-2143: merge is a tool now, called only on the author's word.
+  expect(instructions).toMatch(/Call `merge` only when the author has read the branch and told you to accept it/);
+  expect(instructions).toContain("`init`");
+  expect(instructions).toContain("`output_add`");
 });
 
 test("the instructions say to call guide first, and guide returns what the CLI's --json does (AGT-2142)", async () => {

@@ -36,7 +36,7 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the thirty-five verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the thirty-six verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "audition",
     "bind",
@@ -49,6 +49,7 @@ test("VERBS exposes exactly the thirty-five verbs, each project-required verb re
     "fact", // AGT-2106
     "fix", // AGT-1685
     "guide", // AGT-2142
+    "init", // AGT-2143
     "merge",
     "migrate",
     "mix", // AGT-1684
@@ -85,6 +86,11 @@ test("VERBS exposes exactly the thirty-five verbs, each project-required verb re
       expect(v.args.shape).toHaveProperty("project");
       continue;
     }
+    // `init` (AGT-2143) creates a work; project names one only for --adopt.
+    if (v.name === "init") {
+      expect(v.args.shape).toHaveProperty("project");
+      continue;
+    }
     const parsed = v.args.safeParse({});
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
@@ -114,6 +120,7 @@ test("prose's args accept no project, and require nothing on their own (voice/br
 // cli.ts's argv table away from what pablo mcp's tool schemas accept.
 test("deriveCliOptions matches the exact option set cli.ts accepted before this ticket", () => {
   expect(deriveCliOptions()).toEqual({
+    adopt: { type: "boolean", default: false }, // AGT-2143: init's own schema now (cli.ts declared --adopt itself before)
     project: { type: "string" },
     for: { type: "string" },
     chapter: { type: "string" },
@@ -943,10 +950,12 @@ test("timeline refuses a work with no bible/timeline.md, and an unknown project 
   }
 });
 
-// AGT-1536: merging a draft is the human's review gate, so it is not an MCP tool.
-test("merge is a verb with no MCP tool, and requires project and branch", () => {
+// AGT-1536: merging a draft is the human's review gate. AGT-2143: an outside agent may call it on the author's word,
+// so it registers itself as an MCP tool, but never as one of the harness's own (`harness: false`).
+test("merge is an MCP-only verb, and requires project and branch", () => {
   const merge = verb("merge");
-  expect(merge.mcpTools).toEqual([]);
+  expect(merge.mcpTools).toBeUndefined();
+  expect(merge.harness).toBe(false);
   expect(merge.args.safeParse({ project: "ice-house" }).success).toBe(false);
   expect(merge.args.safeParse({ project: "ice-house", branch: "draft/ch02" }).success).toBe(true);
 });
