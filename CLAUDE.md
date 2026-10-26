@@ -91,6 +91,12 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 work's files, e.g. `continuityFile`), and the fiction sentence
                 splitter (`splitSentences`/`joinSentences`) behind
                 one-sentence-per-line manuscripts.
+                `web/` (AGT-2126, D-11) is pablo's own web research: `fetch.ts`'s
+                `webFetch` (http(s) only, SSRF guard, byte cap, timeout, page to
+                markdown) and `search.ts`'s `webSearch` behind a pluggable
+                `SearchBackend` (SearXNG first, `web.search` in the config); the
+                CLI exposes them as the `web_search` and `web_fetch` agent tools
+                (`packages/cli/src/web-tools.ts`).
                 `write` and `prose` save through `splitManuscript`; pack
                 assembly joins manuscript slices with `joinManuscript`, so the
                 model never sees the splits (AGT-1531).

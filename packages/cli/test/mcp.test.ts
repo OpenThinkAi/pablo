@@ -106,6 +106,8 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "voice_use",
     "voices",
     "waive_research_item", // AGT-2111: from the `research` verb
+    "web_fetch", // AGT-2126: from the `web` verb
+    "web_search", // AGT-2126: from the `web` verb
     "write",
   ]);
   for (const tool of tools) {

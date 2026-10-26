@@ -82,6 +82,8 @@ import {
   waiveChecklistItem,
 } from "./research-verbs";
 import { readTool, searchTool } from "./harness-tools";
+import { runWebVerb, WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "./web-tools";
+import type { WebSeams } from "./web-tools";
 import { addOutput, listOutputs, planOutput, removeOutput } from "./output-verbs";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
@@ -148,6 +150,8 @@ export interface VerbContext {
    * adapter so distillation never reaches a model; left `undefined`, the `research` intent's routed provider is used.
    */
   readonly researcher?: Adapter;
+  /** AGT-2126: network seams for `web_search` and `web_fetch`. Tests inject fakes so a tool never reaches the network. */
+  readonly web?: WebSeams;
 }
 
 /** `run`'s return: `body` is the exact `--json` object; `exitCode` is the CLI's exit-code contract (0 ok, 2 refused, 1 error). */
@@ -2185,6 +2189,14 @@ export const VERBS: readonly Verb[] = [
     args: SEARCH_ARGS,
     run: runSearchVerb,
     positionalArgs: ["phrase"],
+  },
+  // AGT-2126 (D-11): `web_search` and `web_fetch`, agent-facing only (web-tools.ts); the entry has no CLI form.
+  {
+    name: "web",
+    description: "Agent tools `web_search` (the configured search backend) and `web_fetch` (one page as markdown, with its URL and retrieval date). No CLI command.",
+    args: z.object({}),
+    run: runWebVerb,
+    mcpTools: [WEB_SEARCH_TOOL, WEB_FETCH_TOOL],
   },
   // AGT-1679: `audition`, `cast`, `voices` — the voice library (casting-verbs.ts).
   ...castingVerbs(),

@@ -64,6 +64,7 @@ const PARITY: Readonly<Record<string, Entry>> = {
   notes: support("review round notes; being removed (AGT-2094)"),
   mcp: support("serves the verbs to agents"),
   agent: support("headless harness entry"),
+  web: support("agent-only web_search / web_fetch tools; no CLI form (AGT-2126)"),
   doctor: support("environment check"),
   config: support("model config: show, set, test"),
   gate: support("pipeline gate inspection"),
