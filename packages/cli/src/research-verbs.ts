@@ -75,6 +75,8 @@ export function recordFactInProject(projectPath: string, args: RecordFactArgs, e
 export interface DistillDeps {
   /** The adapter the `research` intent uses; left `undefined`, the routed provider is built from the config. */
   readonly researcher?: Adapter | undefined;
+  /** Where the one "asking ..." line goes while the agent works. */
+  readonly stderr?: { write(text: string): unknown } | undefined;
 }
 
 /**
@@ -84,10 +86,11 @@ export interface DistillDeps {
  * new `plan/` branch for the author to review.
  */
 export async function distillFactsInProject(projectPath: string, env: NodeJS.ProcessEnv, deps: DistillDeps = {}): Promise<VerbResult> {
-  const refuse = (message: string, extra: Record<string, unknown> = {}, code = REFUSED): VerbResult => ({
-    body: { ok: false, code, message, ...extra },
-    exitCode: code,
+  const refuse = (message: string, extra: Record<string, unknown> = {}): VerbResult => ({
+    body: { ok: false, code: REFUSED, message, ...extra },
+    exitCode: REFUSED,
   });
+  const fail = (message: string): VerbResult => ({ body: { ok: false, code: 1, message }, exitCode: 1 });
   const marker = readMarker(projectPath);
   if (!marker.ok) return refuse(marker.message);
   const realNames = realNamesOf(marker.marker);
@@ -105,16 +108,19 @@ export async function distillFactsInProject(projectPath: string, env: NodeJS.Pro
     throw error;
   }
 
+  deps.stderr?.write(`pablo: research distill: asking ${adapter.id} (${adapter.model}) about ${notes.length} research note${notes.length === 1 ? "" : "s"}\n`);
   let answer: string;
   try {
     answer = await completeText(adapter, distillPrompt(notes, { realNames, ...(brief ? { brief } : {}) }));
   } catch (error) {
-    if (error instanceof EndpointHung || error instanceof ProviderResponseError) return refuse(error.message, {}, 1);
+    if (error instanceof EndpointHung || error instanceof ProviderResponseError) return fail(error.message);
     if (error instanceof ProviderConfigError) return refuse(error.message);
     throw error;
   }
   const proposed = parseDistillAnswer(answer);
-  if (proposed === undefined) return refuse(`pablo: research distill: the research agent (${adapter.id}) did not answer with the facts JSON asked for`, {}, 1);
+  if (proposed === undefined) {
+    return fail(`pablo: research distill: the research agent (${adapter.id}) did not answer with the facts JSON asked for; run it again, or route the research intent to another provider`);
+  }
 
   const checked = checkFacts(proposed, {
     noteIds: new Set(notes.map((n) => n.id)),
@@ -141,7 +147,7 @@ export async function distillFactsInProject(projectPath: string, env: NodeJS.Pro
     content: renderPeriodFacts(checked.facts),
     message: `research: distill ${checked.facts.length} period fact${checked.facts.length === 1 ? "" : "s"}`,
   });
-  if (!written.ok) return refuse(written.notice, {}, 1);
+  if (!written.ok) return fail(written.notice);
   return {
     body: {
       ok: true,

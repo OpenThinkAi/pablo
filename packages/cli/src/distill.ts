@@ -7,9 +7,10 @@
  *
  *  - every row cites a research note that exists (`research/<id>.md`); a row with no source, or a source that is not
  *    a note, is rejected and reported, never written;
- *  - on a work with `realNames: false`, every research name the model used is swapped for its bible counterpart,
- *    mapped in `research/names.md`, and a research name with no counterpart refuses the whole run, naming each one
- *    to map. The map lives under `research/` because that directory never reaches a drafting pack; a map in `bible/`
+ *  - on a work with `realNames: false`, every name the model lists as a research name, and every mapped name found in
+ *    a fact, is swapped for its bible counterpart (mapped in `research/names.md`); a listed research name with no
+ *    counterpart refuses the whole run, naming each one to map. pablo cannot tell a real name the model failed to
+ *    list from an ordinary word, so that case is caught only by the author reviewing the `plan/` branch. The map lives under `research/` because that directory never reaches a drafting pack; a map in `bible/`
  *    would carry the real names straight to the writer.
  *
  * `facts/period.md` is a markdown table, `| Fact | Source | Story date |`, one fact per row after the header and
@@ -293,7 +294,7 @@ export function readBibleText(workDir: string): string {
   const parts: string[] = [];
   const walk = (dir: string): void => {
     if (!existsSync(dir)) return;
-    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const abs = join(dir, entry.name);
       if (entry.isDirectory()) walk(abs);
       else if (entry.isFile() && entry.name.endsWith(".md")) parts.push(readFileSync(abs, "utf8"));
@@ -306,6 +307,7 @@ export function readBibleText(workDir: string): string {
 /** Streams one completion to its full text. */
 export async function completeText(adapter: Adapter, prompt: string): Promise<string> {
   let text = "";
+  // Room for a few hundred short JSON rows; a run that needs more is research to split, not one answer.
   for await (const ev of adapter.complete({ prompt, maxTokens: 8000 })) {
     if (ev.type === "token") text += ev.text;
   }

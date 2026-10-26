@@ -97,7 +97,7 @@ pablo sends six kinds of request. Each is an *intent*:
 | `prose` | `prose` | the first local provider |
 | `continuity` | the fact extraction `merge` runs | the first local provider |
 | `plan` | the critic (`critique`, `check --across`) and the built-in agent's helpers | the first non-local provider |
-| `research` | `research distill` (`distill_facts`): research notes to period facts | the first non-local provider |
+| `research` | `research distill` (`distill_facts`): research notes, raw, to period facts | the first non-local provider (map it to a local one to keep notes on this machine) |
 
 If no provider of the wanted sort exists, the request goes to `default` (which is
 `"local"` unless you set it). `intents` overrides the choice per intent.
@@ -164,7 +164,8 @@ real event can use them. A work that must keep those names out sets `realNames` 
 not. With it `false`, `pablo research distill` (the `distill_facts` tool) swaps each
 research name in a distilled fact for the bible's invented one, mapped in
 `research/names.md` (`| Research name | Bible name |`), and refuses, listing the
-names, while any research name has no mapping. See `docs/commands.md`, `research`.
+names, while any research name the agent lists has no mapping. A real name the agent
+fails to list is not detected: review the `plan/` branch it writes. See `docs/commands.md`, `research`.
 
 ### Claude for `pablo agent` and `pablo story`
 

@@ -504,9 +504,10 @@ with no source, a source that is not a note, a fact over 280 characters or a bad
 date is rejected and listed under `rejected`, never written. With no notes, or
 no fact left, it is refused (exit 2).
 
-On a work with `realNames: false`, every research name the agent used is
-swapped for its bible counterpart, mapped in `research/names.md` (it stays under
-`research/`, which never reaches a writer):
+On a work with `realNames: false`, every name the agent lists as taken from
+research, and every mapped name found in a fact, is swapped for its bible
+counterpart, mapped in `research/names.md` (it stays under `research/`, which
+never reaches a writer):
 
 ```
 | Research name | Bible name |
@@ -514,9 +515,13 @@ swapped for its bible counterpart, mapped in `research/names.md` (it stays under
 | Halvorsen Ice Co. | Nadeau Ice |
 ```
 
-The bible name must appear in `bible/`. A research name with no counterpart
-refuses the whole run (exit 2) and `names` lists every one to map. Over MCP this
-is the `distill_facts` tool.
+The bible name must appear in `bible/`. A listed research name with no
+counterpart refuses the whole run (exit 2) and `names` lists every one to map.
+pablo relies on the agent to list the names it used; a real name it fails to
+list is caught only when you review the `plan/` branch. The work's period brief
+(`bible/period.md`), when present, is sent with the notes. Unless `intents.research`
+maps to a local provider, the notes go to the first non-local provider. Over MCP
+this is the `distill_facts` tool.
 
 ```
 {ok: true, path, branch, sha?, facts, rejected: [{fact, source, reason}], swapped?: [{from, to}], provider, model}

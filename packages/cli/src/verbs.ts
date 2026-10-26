@@ -749,7 +749,7 @@ const RESEARCH_ARGS = z.object({
 async function runResearchVerb(args: z.infer<typeof RESEARCH_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
-  if (args.sub === "distill") return distillFactsInProject(resolved.projectPath, ctx.env, { researcher: ctx.researcher });
+  if (args.sub === "distill") return distillFactsInProject(resolved.projectPath, ctx.env, { researcher: ctx.researcher, stderr: ctx.stderr });
   return saveResearchInProject(resolved.projectPath, { title: args.title ?? "", note: args.note ?? "", sources: args.source ?? [] }, ctx.env);
 }
 
@@ -842,7 +842,7 @@ const DISTILL_FACTS_MCP: McpToolSpec = {
     const args = DISTILL_FACTS_MCP_ARGS.parse(raw);
     const resolved = resolveVerbProject(ctx, args.project);
     if (!resolved.ok) return resolved.result;
-    return distillFactsInProject(resolved.projectPath, ctx.env, { researcher: ctx.researcher });
+    return distillFactsInProject(resolved.projectPath, ctx.env, { researcher: ctx.researcher, stderr: ctx.stderr });
   },
 };
 
