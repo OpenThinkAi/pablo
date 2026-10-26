@@ -67,7 +67,9 @@ pablo output plan <type> --project <slug> [--dry-run]
 
 A work is a **story core** (premise, research, bible, acts, beats, facts) plus
 one or more **outputs** made from it. The output types are `novel`, `story` and
-`radio`.
+`radio`. Each output declares the tracks it allows (`novel`, `story` and `radio`:
+`fiction` and `historical-fiction`); `pablo output add <type>` refuses a type the
+work's track does not allow, naming the types it does.
 
 | Sub | What it does |
 |---|---|

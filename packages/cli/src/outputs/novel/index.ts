@@ -59,6 +59,7 @@ export const NOVEL: OutputDefinition = {
   plural: "chapters",
   artifactDir: NOVEL_DIR,
   rulesTemplate: NOVEL_RULES_TEMPLATE,
+  tracks: ["fiction", "historical-fiction"],
   stages: ["chapter", "revise", "publish"],
   plan: novelDefaultPlan,
   preconditions: (workDir, unit) =>

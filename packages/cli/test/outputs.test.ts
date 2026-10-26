@@ -15,6 +15,7 @@ import { ConformanceError, missingFields, runConformance } from "../src/outputs/
 import { NOVEL } from "../src/outputs/novel";
 import { OUTPUTS, outputDefinition, outputForWork, outputIds, workOutput } from "../src/outputs/registry";
 import type { OutputDefinition } from "../src/outputs/types";
+import { isTrackId, TRACKS, trackIds } from "../src/tracks/registry";
 
 const FIXTURE = join(import.meta.dir, "fixtures", "conformance");
 const SRC = join(import.meta.dir, "..", "src");
@@ -103,6 +104,7 @@ test("a deliberately incomplete type fails conformance naming the missing field"
   const noAfterMerge = { ...NOVEL, id: "half", rituals: { afterRevision: NOVEL.rituals.afterRevision } };
   await expect(conform(noAfterMerge)).rejects.toThrow(/at "rituals\.afterMerge"/);
   expect(missingFields({ ...NOVEL, artifactDir: "" })).toEqual(["artifactDir"]);
+  expect(missingFields({ ...NOVEL, tracks: [] })).toEqual(["tracks"]);
   expect(missingFields({ ...NOVEL, publish: { targets: [], run: NOVEL.publish.run } })).toEqual(["publish.targets"]);
 });
 
@@ -166,4 +168,14 @@ test("nothing under packages/cli/src outside outputs/novel/ names the novel's ch
   };
   walk(SRC);
   expect(offenders).toEqual([]);
+});
+
+test("every output declares at least one track, each a known track, and the track registry agrees (D-7)", () => {
+  for (const id of outputIds()) {
+    const def = outputDefinition(id) as OutputDefinition;
+    expect(def.tracks.length).toBeGreaterThan(0);
+    for (const track of def.tracks) expect(isTrackId(track)).toBe(true);
+    for (const track of trackIds()) expect((TRACKS[track].outputs as readonly string[]).includes(id)).toBe(def.tracks.includes(track));
+  }
+  for (const id of ["novel", "story", "radio"]) expect(outputDefinition(id)?.tracks).toEqual(["fiction", "historical-fiction"]);
 });
