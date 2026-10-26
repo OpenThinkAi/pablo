@@ -226,6 +226,19 @@ sign_in_github() {
   ok "Signed in to GitHub."
 }
 
+# Earlier versions installed a menu-bar tray. pablo no longer has a `tray` verb, so a leftover launchd
+# agent would fail and restart forever. Remove it when present; do nothing otherwise.
+remove_old_tray() {
+  plist="$HOME/Library/LaunchAgents/ai.openthink.pablo.tray.plist"
+  [ -f "$plist" ] || return 0
+  step "Removing the old pablo menu-bar tray (pablo no longer has one)"
+  launchctl bootout "gui/$(id -u)/ai.openthink.pablo.tray" >/dev/null 2>&1 || true
+  rm -f "$plist"
+  rm -rf "$HOME/Library/Application Support/pablo/PabloTray.app" "${XDG_STATE_HOME:-$HOME/.local/state}/pablo/tray"
+  rm -f "$HOME/Library/Logs/pablo/tray.log" "$HOME/Library/Logs/pablo/tray.err"
+  ok "The old tray is removed."
+}
+
 finish() {
   printf '\nAll done. pablo is installed.\n'
   if [ "$CHROME_MISSING" -eq 1 ]; then
@@ -244,6 +257,7 @@ main() {
   install_gh
   install_pablo
   sign_in_github
+  remove_old_tray
   finish
 }
 
