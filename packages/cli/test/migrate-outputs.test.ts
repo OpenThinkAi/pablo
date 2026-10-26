@@ -260,11 +260,11 @@ test("CLI: a marker with both format and outputs, or an unknown output type, ref
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("CLI: unknown migration names both it knows", () => {
+test("CLI: unknown migration names the three it knows", () => {
   const { vault } = tempVault();
   const r = runCli(["migrate", "words", "--project", "ice-house", "--json"], vault);
   expect(r.exitCode).toBe(2);
-  expect(r.stdout).toContain("lines, outputs or track");
+  expect(r.stdout).toContain("lines, outputs, track or style");
   rmSync(vault, { recursive: true, force: true });
 });
 

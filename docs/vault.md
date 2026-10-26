@@ -27,7 +27,7 @@ A work:
 ```
 novels/<slug>/
   pablo.json             the marker that makes this a pablo project
-  QWEN.md                this work's own rules: ground rules, period facts, point of view
+  STYLE.md               this work's own rules: ground rules, period facts, point of view
   README.md              where things stand; `merge` appends a line per chapter
   bible/
     overview.md          the premise; it counts once `## Logline` has text
@@ -84,7 +84,7 @@ before writing, and commits only that file.
   "title": "The Lighthouse",
   "slug": "lighthouse",
   "author": "Your Name",
-  "voice": ["../../style", "QWEN.md"],
+  "voice": ["../../style", "STYLE.md"],
   "neverSend": ["research/", "notes/"],
   "publish": {},
   "outputs": { "novel": { "dir": "chapters", "added": "2026-10-12" } }
@@ -96,7 +96,7 @@ before writing, and commits only that file.
 | `title`, `slug` | yes | | |
 | `outputs` | no | `{}` | The work's outputs: `novel`, `story` or `radio`. Each entry has `added` (YYYY-MM-DD); the novel's `dir` is always `"chapters"` |
 | `author` | no | `"author"` | Free text. `init` writes your git `user.name` |
-| `voice` | no | `["../../style", "QWEN.md"]` | Which voice the screen's voice tools edit. The writer always gets `style/` then the work's `QWEN.md` |
+| `voice` | no | `["../../style", "STYLE.md"]` | Which voice the screen's voice tools edit. The writer always gets `style/` then the work's `STYLE.md` |
 | `neverSend` | no | `["research/", "notes/"]` | Paths that must never reach a model. A prompt that would include one is refused, not silently trimmed |
 | `publish` | no | `{}` | Per-target publish settings |
 | `track` | no | `"fiction"` | The kind of work: `fiction`, `historical-fiction` or `nonfiction`. Any other value is refused, naming the allowed ones. `status` and `resume` report it |
@@ -110,11 +110,14 @@ as the fix, which writes only the marker into an existing work.
 ## Voice: what the writer is told
 
 Every drafting prompt carries, in order: `style/` (both files), then the rule sections
-of the work's `QWEN.md` (its ground rules, point of view and voice). The setting and
+of the work's `STYLE.md` (its ground rules, point of view and voice). The setting and
 period facts section goes in as its own slice. A work's rules add to the shared ones;
 they never remove them.
 
-Sections of `QWEN.md` meant for your agent, not the writer, are left out: any heading
+A work made before the rename keeps its rules in `QWEN.md`, which pablo still reads when there is
+no `STYLE.md`; `pablo migrate style --project <slug>` renames it with `git mv`.
+
+Sections of `STYLE.md` meant for your agent, not the writer, are left out: any heading
 mentioning replies or the agent, and anything from the file map onward. Wrap any other
 section in `<!-- writer-only -->` ... `<!-- /writer-only -->` to keep it *out of the
 agent's* prompt and in the writer's.

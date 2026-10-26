@@ -3,7 +3,7 @@
  * `voice rule --target global|vault|work|output:<type>` append to, the rule ids
  * `voice list` shows, and `voice edit` / `voice remove` / `voice use`.
  *
- * A rule is a `- <text>` bullet under a `## Rules` section (a work's `QWEN.md`
+ * A rule is a `- <text>` bullet under a `## Rules` section (a work's `STYLE.md`
  * may keep it under `## Ground rules ...`), optionally followed by indented
  * lines (the `Flagged: "..."` example). Its id is the first six hex digits of
  * the sha1 of its text, so an id is stable while other rules come and go and
@@ -12,16 +12,16 @@
  * `--target` says which.
  *
  * Layer files: global `<global voices>/default/voice.md`, vault `style/prose.md`,
- * work `QWEN.md`, output `outputs/<type>/RULES.md`; named voices keep theirs in
+ * work `STYLE.md` (`QWEN.md` until migrated), output `outputs/<type>/RULES.md`; named voices keep theirs in
  * `voice.md` (target `voice:<name>`).
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
-import { outputRulesFile } from "@openthink/pablo-core";
+import { WORK_RULES_FILE, outputRulesFile, workRulesFile } from "@openthink/pablo-core";
 import { gitCommit, SLUG_PATTERN } from "./init";
-import { GLOBAL_DEFAULT_VOICE, WORK_RULES_FILE } from "./voice-layers";
+import { GLOBAL_DEFAULT_VOICE } from "./voice-layers";
 import { findVault, resolveProject } from "./project";
 import type { Refusal } from "./project";
 import { markerPath, readMarker } from "./marker";
@@ -74,7 +74,7 @@ export function ruleFileFor(target: LayerTarget, ctx: RuleContext): RuleFile | R
   }
   if (ctx.projectPath === undefined) return refuse(`pablo: voice: --target ${target} needs a project (--project <slug>)`);
   if (target === "work") {
-    const path = join(ctx.projectPath, WORK_RULES_FILE);
+    const path = join(ctx.projectPath, workRulesFile(ctx.projectPath));
     return existsSync(path) ? { ok: true, path, commit: true } : refuse(`pablo: voice rule: the work has no ${WORK_RULES_FILE} (${path})`, [path]);
   }
   return { ok: true, path: join(ctx.projectPath, outputRulesFile(target.slice("output:".length))), commit: true };
@@ -150,7 +150,7 @@ export function listRules(ctx: RuleContext): RuleEntry[] {
   for (const v of subdirs(globalDir, GLOBAL_DEFAULT_VOICE)) out.push(...entriesOf(join(v.path, "voice.md"), `voice:${v.name}`));
 
   if (ctx.projectPath !== undefined) {
-    out.push(...entriesOf(join(ctx.projectPath, WORK_RULES_FILE), "work"));
+    out.push(...entriesOf(join(ctx.projectPath, workRulesFile(ctx.projectPath)), "work"));
     for (const o of subdirs(join(ctx.projectPath, "outputs"), undefined)) out.push(...entriesOf(join(ctx.projectPath, outputRulesFile(o.name)), `output:${o.name}`));
   }
   return out;

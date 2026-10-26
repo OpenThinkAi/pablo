@@ -83,9 +83,9 @@ without one. Esc withdraws the offer before it clears the selection.
 `r` (AGT-1594) opens a one-line input in the content area, like a review comment: typing fills it, Backspace deletes,
 Enter writes, Esc cancels. Tab changes where the rule goes, the two `VOICE_TARGETS` in `keys.ts` (the default first):
 the voice's own rules file (the vault's `style/prose.md` for `fiction`, else the voice's `voice.md`) or this work's
-`QWEN.md`. Either way it is a bullet under a `## Rules` section (a work's `## Ground rules` section is used when it
+`STYLE.md`. Either way it is a bullet under a `## Rules` section (a work's `## Ground rules` section is used when it
 has one), created if missing, and committed. With sentences selected the bullet is followed by `Flagged: "<selection>"`,
-so `pablo check` catches the line (check reads `Flagged:` lines from `style/prose.md`, not from `QWEN.md`: under the
+so `pablo check` catches the line (check reads `Flagged:` lines from `style/prose.md`, not from `STYLE.md`: under the
 work target the line documents the example for the writer and the author). State: `voice` (the offered sentences,
 possibly none) and `voiceRule` (sentences, the targets, which one, the text); the choices and targets reach the model as
 data in `voice.offer` / `voice.rule`, so `state.ts` imports nothing.

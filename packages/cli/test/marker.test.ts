@@ -75,7 +75,7 @@ test("readMarker fills in defaults for optional keys", () => {
   expect(result.ok).toBe(true);
   if (result.ok) {
     expect(result.marker.author).toBe("author");
-    expect(result.marker.voice).toEqual(["../../style", "QWEN.md"]);
+    expect(result.marker.voice).toEqual(["../../style", "STYLE.md"]);
     expect(result.marker.neverSend).toEqual(["research/", "notes/"]);
     expect(result.marker.publish).toEqual({});
   }
@@ -111,7 +111,7 @@ test("writeMarker then readMarker round-trips", () => {
     title: "Round Trip",
     slug: "round-trip",
     author: "matt",
-    voice: ["../../style", "QWEN.md"],
+    voice: ["../../style", "STYLE.md"],
     neverSend: ["research/", "notes/"],
     publish: {},
   };

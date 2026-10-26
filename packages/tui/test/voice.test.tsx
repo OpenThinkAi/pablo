@@ -100,7 +100,7 @@ test("r on the offer opens a one-line input with the first target; typing and Ba
   expect(input.content?.body).toContain("Example: “She did not look up.”");
   expect(input.content?.body).toContain("Use contractions\u258f");
   const other = reduce(input, { type: "voice.rule_target" });
-  expect(other.content?.body).toContain("Into: this work's QWEN.md");
+  expect(other.content?.body).toContain("Into: this work's STYLE.md");
   expect(reduce(other, { type: "voice.rule_target" }).voiceRule?.at).toBe(0); // wraps
   const cancelled = reduce(input, { type: "escape" });
   expect(cancelled.voiceRule).toBeNull();
@@ -134,18 +134,18 @@ test("the key panel lists the voice choices while the offer is up, the rule inpu
   expect(entriesFor(input).map((e) => `${e.keys} ${e.label}`)).toEqual(["Enter write rule", "Tab target", "Esc cancel"]);
 });
 
-test("on the screen: a v r types a rule; Tab picks the work's QWEN.md; Enter hands text, target and selection to the voicer", async () => {
+test("on the screen: a v r types a rule; Tab picks the work's STYLE.md; Enter hands text, target and selection to the voicer", async () => {
   const calls: unknown[] = [];
-  const app = mount(async (kind, sentences, rule) => { calls.push([kind, sentences, rule]); return { ok: true, lines: ["Rule added in QWEN.md."] }; });
+  const app = mount(async (kind, sentences, rule) => { calls.push([kind, sentences, rule]); return { ok: true, lines: ["Rule added in STYLE.md."] }; });
   await select(app);
   app.stdin.write("r"); await sleep(40);
   expect(plain(app.lastFrame())).toContain("Add a rule");
   app.stdin.write("Keep it plain."); await sleep(40);
   app.stdin.write("\t"); await sleep(40);
-  expect(plain(app.lastFrame())).toContain("Into: this work's QWEN.md");
+  expect(plain(app.lastFrame())).toContain("Into: this work's STYLE.md");
   app.stdin.write("\r"); await sleep(60);
   expect(calls).toEqual([["rule", ["The well had been dry since June.", "She did not look up."], { text: "Keep it plain.", target: "work" }]]);
-  expect(plain(app.lastFrame())).toContain("Rule added in QWEN.md.");
+  expect(plain(app.lastFrame())).toContain("Rule added in STYLE.md.");
 });
 
 test("on the screen: with nothing selected a v r still works (no example); Enter on an empty line does nothing; Esc cancels", async () => {

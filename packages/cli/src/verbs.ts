@@ -1084,7 +1084,7 @@ const voiceRuleExampleField = z
 const voiceRuleTargetField = z
   .string()
   .describe(
-    "Where the rule goes: `voice` (default) is the voice's own rules file (style/prose.md for fiction); or a layer: `global` (the global default voice), `vault` (style/prose.md), `work` (the work's QWEN.md, needs `project`), `output:<type>` (that output's RULES.md, needs `project`).",
+    "Where the rule goes: `voice` (default) is the voice's own rules file (style/prose.md for fiction); or a layer: `global` (the global default voice), `vault` (style/prose.md), `work` (the work's STYLE.md, needs `project`), `output:<type>` (that output's RULES.md, needs `project`).",
   );
 const voiceRuleIdField = z.string().describe("A rule's id, as `voice list` shows it (six hex digits).");
 const voiceRuleProjectField = z.string().describe("The work's slug; needed for targets work and output:<type>, and for use.");
@@ -1162,7 +1162,7 @@ function boundVoiceExemplarFile(ctx: VerbContext, file: string): { readonly ok: 
  * `voice rule` (AGT-1594), the one function behind `pablo voice rule`, `runVoiceVerb`'s `rule` branch and the
  * `voice_rule` MCP tool (and so the compose agent's tool). Over MCP (`ctx.caller === "mcp"`) a path-shaped `name` is
  * bounded to the vault like `voice_flag`'s; the CLI's is author-typed and is not. `target: "work"` resolves `project`
- * to the work's own QWEN.md and ignores `name`'s voice.
+ * to the work's own STYLE.md and ignores `name`'s voice.
  */
 export function runVoiceRule(
   args: { readonly name?: string | undefined; readonly text: string; readonly example?: string | undefined; readonly target?: string | undefined; readonly project?: string | undefined },
@@ -1473,7 +1473,7 @@ const VOICE_MCP_TOOLS: readonly McpToolSpec[] = [
   {
     name: "voice_rule",
     description:
-      "Add a rule the author dictated to a voice: a bullet under its `## Rules` section (created if missing; style/prose.md for the fiction voice), committed. `example` adds the sentences it came from as a Flagged line; `target` writes into a layer instead: global, vault, work (the work's QWEN.md) or output:<type> (that output's RULES.md); work and output targets need `project`.",
+      "Add a rule the author dictated to a voice: a bullet under its `## Rules` section (created if missing; style/prose.md for the fiction voice), committed. `example` adds the sentences it came from as a Flagged line; `target` writes into a layer instead: global, vault, work (the work's STYLE.md) or output:<type> (that output's RULES.md); work and output targets need `project`.",
     args: VOICE_RULE_MCP_ARGS,
     run: runVoiceRuleMcp,
   },

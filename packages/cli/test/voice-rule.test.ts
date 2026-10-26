@@ -111,7 +111,7 @@ test("a duplicate bullet changes nothing; empty text, a work with no QWEN.md and
   expect(addRule(undefined, "x", { target: "work" }).ok).toBe(false);
   rmSync(join(project, "QWEN.md"));
   const gone = addRule(undefined, "x", { target: "work", projectPath: project });
-  expect(!gone.ok && gone.message).toContain("no QWEN.md");
+  expect(!gone.ok && gone.message).toContain("no STYLE.md");
 });
 
 test("newlines in text and example are flattened: neither can forge a heading", () => {

@@ -13,7 +13,7 @@
  * | `slug`      | yes      | —                                |
  * | `outputs`   | no       | `{}` (a core with nothing derived yet) |
  * | `author`    | no       | `"author"` (init writes git user.name) |
- * | `voice`     | no       | `["../../style", "QWEN.md"]`     |
+ * | `voice`     | no       | `["../../style", "STYLE.md"]`     |
  * | `neverSend` | no       | `["research/", "notes/"]`        |
  * | `publish`   | no       | `{}`                              |
  * | `policy`    | no       | —  (the harness's minimal default judgement policy) |
@@ -86,7 +86,7 @@ export { NOVEL_DIR };
 const LEGACY_FORMATS = ["novel"] as const;
 
 export const DEFAULT_AUTHOR = "author";
-export const DEFAULT_VOICE: readonly string[] = ["../../style", "QWEN.md"];
+export const DEFAULT_VOICE: readonly string[] = ["../../style", "STYLE.md"];
 export const DEFAULT_NEVER_SEND: readonly string[] = ["research/", "notes/"];
 export const DEFAULT_PUBLISH: Readonly<Record<string, unknown>> = {};
 

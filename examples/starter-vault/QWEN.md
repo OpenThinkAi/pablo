@@ -1,6 +1,6 @@
 # Writing vault
 
-Shared rules for every work in this vault. Each work has its own `QWEN.md` that adds
+Shared rules for every work in this vault. Each work has its own `STYLE.md` that adds
 rules for that work; both apply, and where they conflict the work's file wins.
 
 ## Prose rules that apply everywhere

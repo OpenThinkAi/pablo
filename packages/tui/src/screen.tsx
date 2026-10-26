@@ -25,7 +25,7 @@ export type Writer = (unit: number, progress: (line: string) => void, output?: s
 
 /** What `a v` came to: lines saying where the sentences were written, or why they were not. */
 export type VoiceResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
-/** `a v r` (AGT-1594): the typed rule and the target it goes to (`voice`: the voice's rules file; `work`: the work's QWEN.md). */
+/** `a v r` (AGT-1594): the typed rule and the target it goes to (`voice`: the voice's rules file; `work`: the work's STYLE.md). */
 export interface VoiceRuleRequest { readonly text: string; readonly target: "voice" | "work" }
 export type Voicer = (kind: "flag" | "exemplar" | "rule", sentences: readonly string[], rule?: VoiceRuleRequest) => Promise<VoiceResult>;
 

@@ -14,9 +14,12 @@ export {
   FACTS_FILE,
   LEGACY_BEATS_FILE,
   LEGACY_CONTINUITY_FILE,
+  LEGACY_WORK_RULES_FILE,
   NOVEL_CONTINUITY_FILE,
+  WORK_RULES_FILE,
   beatsFile,
   continuityFile,
   outputContinuityFile,
+  workRulesFile,
 } from "./work-paths";
 export * from "./web/fetch";

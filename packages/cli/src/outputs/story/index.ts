@@ -32,7 +32,7 @@ import {
 /** `outputs/story/RULES.md`'s scaffold: how the one-unit story is written, layered after the work's voice. */
 export const STORY_RULES_TEMPLATE = `# Story rules
 
-Rules for the story output only, layered after the work's voice (\`QWEN.md\`)
+Rules for the story output only, layered after the work's voice (\`STYLE.md\`)
 and before the story's own slices.
 
 - The story is one piece told from start to finish, in the order of the

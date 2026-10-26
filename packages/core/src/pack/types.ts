@@ -110,7 +110,7 @@ export interface SpanEditInputs {
   readonly instruction: string;
   /** `<vault>/style/*.md`, in the order they should appear. */
   readonly style: readonly TextSource[];
-  /** The work's own rules file (`QWEN.md`) when it has one. */
+  /** The work's own rules file (`STYLE.md`) when it has one. */
   readonly workRules?: TextSource | undefined;
   /**
    * Which structured path the adapter will take, so the closing line priced
@@ -170,7 +170,7 @@ export interface DraftingInputs {
   /** `<vault>/style/*.md`. The built-in craft rules are added on top, always. */
   readonly style: readonly TextSource[];
   /**
-   * The work's own rule sections from its `QWEN.md` (ground rules, point of view
+   * The work's own rule sections from its `STYLE.md` (ground rules, point of view
    * and voice), layered after `style`. The period facts are in `periodFacts`.
    */
   readonly workRules?: TextSource | undefined;
@@ -192,7 +192,7 @@ export interface DraftingInputs {
   readonly exemplars?: readonly TextSource[] | undefined;
   /** Which layers `style`, `workRules`, `outputRules`, `never` and `exemplars` came from, for the receipt. */
   readonly voiceLayers?: PackVoice | undefined;
-  /** The work's period and place facts, usually a section of its `QWEN.md`. */
+  /** The work's period and place facts, usually a section of its `STYLE.md`. */
   readonly periodFacts?: TextSource | undefined;
   /** `bible/characters/*`: who exists. */
   readonly cast?: TextSource | undefined;
@@ -276,7 +276,7 @@ export interface ProseInputs {
 export interface ReviseInputs {
   /** `<vault>/style/*.md`, in the order they should appear. */
   readonly style: readonly TextSource[];
-  /** The work's own rules file (`QWEN.md`) when it has one. */
+  /** The work's own rules file (`STYLE.md`) when it has one. */
   readonly workRules?: TextSource | undefined;
   /** The manuscript immediately before the passage, for continuity. */
   readonly before: string;

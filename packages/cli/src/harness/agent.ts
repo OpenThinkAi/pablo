@@ -85,7 +85,7 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   if (!project.ok) return refuse(ctx, args.json, project.code, project.message, project.tried);
   const marker = readMarker(project.path);
   if (!marker.ok) return refuse(ctx, args.json, marker.code, marker.message, marker.tried);
-  // The system prompt's inputs: the work's judgement policy and its QWEN.md (AGT-1553).
+  // The system prompt's inputs: the work's judgement policy and its STYLE.md (AGT-1553).
   const work = loadPromptWork(project.path, marker.marker, args.project);
   if (!work.ok) return refuse(ctx, args.json, work.code, work.message, work.tried);
 

@@ -8,12 +8,12 @@
  *     vault    <vault>/style/, then every named voice the work lists that lives in
  *              <vault>/voices/<name>/
  *     work     any other voice file or directory the work's `pablo.json` `voice`
- *              list names, then the work's own rules file (`QWEN.md`'s rule
- *              sections)
+ *              list names, then the work's own rules file (`STYLE.md`'s rule
+ *              sections; `QWEN.md` on a work not yet migrated)
  *     output   outputs/<type>/RULES.md, when an output is named
  *
  * A `pablo.json` `voice` entry is either a path relative to the work
- * (`../../style`, `QWEN.md`, `../../voices/plain`: the shape `init` writes) or a
+ * (`../../style`, `STYLE.md`, `../../voices/plain`: the shape `init` writes) or a
  * bare voice name (`plain`, `fiction`), resolved like `--voice`: `<vault>/voices/
  * <name>/` first, then the global voices directory; `fiction` is `<vault>/style/`.
  * An entry is placed in the layer of the place it resolves to, never by its
@@ -33,8 +33,8 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { outputRulesFile, readStyle, readWorkRules } from "@openthink/pablo-core";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { LEGACY_WORK_RULES_FILE, WORK_RULES_FILE, outputRulesFile, readStyle, readWorkRules, workRulesFile } from "@openthink/pablo-core";
 import type { PackVoice, PackVoiceMissing, TextSource } from "@openthink/pablo-core";
 import { SLUG_PATTERN } from "./init";
 import { DEFAULT_VOICE, markerPath } from "./marker";
@@ -47,8 +47,8 @@ export const VOICE_LAYER_ORDER: readonly VoiceLayerKind[] = ["global", "vault", 
 /** The global voice every work carries when it exists: `<global voices>/default/`. */
 export const GLOBAL_DEFAULT_VOICE = "default";
 
-/** The work's own rules file, its base work layer (D-15 renames it later with a fallback read). */
-export const WORK_RULES_FILE = "QWEN.md";
+/** The work's own rules file, its base work layer: `STYLE.md`, with `QWEN.md` read when a work has no `STYLE.md` (AGT-2141, D-15). */
+export { LEGACY_WORK_RULES_FILE, WORK_RULES_FILE };
 
 /** One piece of one layer: a voice directory, a one-off file, `style/`, the work's rules or an output's RULES.md. */
 export interface VoiceLayer {
@@ -103,7 +103,8 @@ export function resolveVoiceLayers(options: ResolveVoiceLayersOptions): Resolved
   const globalDir = globalVoicesDir(options.env ?? process.env);
   const vaultVoicesDir = join(vaultRoot, "voices");
   const styleDir = join(vaultRoot, "style");
-  const rulesPath = join(workRoot, WORK_RULES_FILE);
+  const rulesName = workRulesFile(workRoot);
+  const rulesPath = join(workRoot, rulesName);
   const display = (path: string) => labelOf(vaultRoot, path);
 
   const buckets: Record<VoiceLayerKind, VoiceLayer[]> = { global: [], vault: [], work: [], output: [] };
@@ -150,7 +151,7 @@ export function resolveVoiceLayers(options: ResolveVoiceLayersOptions): Resolved
   });
 
   // The work's own rules file is the work layer's last word; the output's RULES.md tops everything.
-  add(rulesPiece(vaultRoot, workRoot, rulesPath), { layer: "work", name: WORK_RULES_FILE, path: rulesPath });
+  add(rulesPiece(vaultRoot, workRoot, rulesPath), { layer: "work", name: rulesName, path: rulesPath });
   if (options.output !== undefined) {
     const outputRules = join(workRoot, outputRulesFile(options.output));
     add(textPiece("output", `RULES.md (${options.output})`, outputRules, display(outputRules)), {
@@ -316,6 +317,9 @@ function locateEntry(entry: string, places: Places): Located {
   const trimmed = entry.trim();
   if (trimmed === "") return { ok: false, layer: undefined, tried: [], reason: "an empty voice entry" };
 
+  // Either name of the work's rules file stands for the rules file the work has (a migrated work may still list QWEN.md).
+  if (trimmed === WORK_RULES_FILE || trimmed === LEGACY_WORK_RULES_FILE) return { ok: true, path: places.rulesPath, layer: "work" };
+
   if (isVoicePathArgument(trimmed) || existsSync(join(places.workRoot, trimmed))) {
     const path = resolve(places.workRoot, trimmed);
     if (!existsSync(path)) return { ok: false, layer: layerOfPath(path, places), tried: [path], reason: `no ${labelOf(places.vaultRoot, path)}` };
@@ -374,7 +378,7 @@ function stylePiece(vaultRoot: string, styleDir: string): VoiceLayer | undefined
 function rulesPiece(vaultRoot: string, workRoot: string, rulesPath: string): VoiceLayer | undefined {
   const source = readWorkRules(vaultRoot, workRoot);
   if (source === undefined || source.text.trim() === "") return undefined;
-  return { layer: "work", name: WORK_RULES_FILE, path: rulesPath, label: source.path, rules: [source], exemplars: [] };
+  return { layer: "work", name: basename(rulesPath), path: rulesPath, label: source.path, rules: [source], exemplars: [] };
 }
 
 function textPiece(layer: VoiceLayerKind, name: string, path: string, label: string): VoiceLayer | undefined {

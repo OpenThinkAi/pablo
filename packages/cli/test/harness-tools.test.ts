@@ -78,6 +78,7 @@ test("read refuses paths outside the work and outside the readable areas", () =>
     ".pablo/receipts.jsonl",
     "notes/1929-01-09-first-session.md",
     "QWEN.md",
+    "STYLE.md",
     ".",
   ]) {
     const result = readTool(dir, path);

@@ -8,7 +8,7 @@
  *   - timeline: a line mentions something before its date in `bible/timeline.md`
  *     (the story date is the chapter's `story_date`; the gate is core's
  *     `timelineAt`, the same code the drafting pack and the `timeline` tool use);
- *   - tells: a voice tell the style guide (`style/*.md`) or the work's own rules (its `QWEN.md`) names.
+ *   - tells: a voice tell the style guide (`style/*.md`) or the work's own rules (its `STYLE.md`) names.
  *
  * Two model passes, both through the one injected `ask` seam: a candidate pass
  * per changed chapter, then a refute pass per candidate with more of the text
@@ -30,7 +30,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { FACTS_FILE, continuityFile, parseDiff, readStyle, timelineAt, workRuleSections } from "@openthink/pablo-core";
+import { FACTS_FILE, continuityFile, parseDiff, readStyle, timelineAt, workRuleSections, workRulesFile } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { BRANCH_KINDS, branchDiff, branchKind, repoRoot } from "./branch";
 import { branchFileName, readComments, type StoredComment } from "./comments";
@@ -192,14 +192,15 @@ interface Candidate {
 }
 
 /**
- * The prose rules the critic checks "tells" against: the shared `style/*.md` first, then the work's own `QWEN.md`
+ * The prose rules the critic checks "tells" against: the shared `style/*.md` first, then the work's own `STYLE.md`
  * rule sections (AGT-1593), each labelled by path. Writer-only fenced text is left out (it is the writer's, not the
- * critic's), as are the agent-only sections `workRuleSections` drops. A work without a `QWEN.md` gets only `style/`.
+ * critic's), as are the agent-only sections `workRuleSections` drops. A work without a `STYLE.md` gets only `style/`.
  */
 export function styleReference(vaultRoot: string, projectPath: string): string {
   const sources = readStyle(vaultRoot).map((s) => ({ path: s.path, text: s.text }));
-  const rules = workRuleSections(stripWriterOnly(readOr(join(projectPath, "QWEN.md"))));
-  if (rules !== "") sources.push({ path: relative(vaultRoot, join(projectPath, "QWEN.md")), text: rules });
+  const rulesPath = join(projectPath, workRulesFile(projectPath));
+  const rules = workRuleSections(stripWriterOnly(readOr(rulesPath)));
+  if (rules !== "") sources.push({ path: relative(vaultRoot, rulesPath), text: rules });
   return sources.map((s) => `## ${s.path}\n${s.text}`).join("\n\n");
 }
 

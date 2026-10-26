@@ -342,7 +342,7 @@ test("AC5: the premise's ## Title names the work: pablo.json, the README and QWE
   expect(marker.title).toBe("The Last Passage");
   expect(body.title).toBe("The Last Passage");
   expect(readFileSync(join(work, "README.md"), "utf8").split("\n")[0]).toBe("# The Last Passage");
-  expect(readFileSync(join(work, "QWEN.md"), "utf8").split("\n")[0]).toBe("# The Last Passage: the work's rules");
+  expect(readFileSync(join(work, "STYLE.md"), "utf8").split("\n")[0]).toBe("# The Last Passage: the work's rules");
   expect(body.project).toMatch(/^a-family-who-lives/);
   expect(git(vault, "status", "--porcelain", "--", work)).toBe("");
   // The published copy carries the premise's title, not the request.

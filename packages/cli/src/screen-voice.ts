@@ -4,12 +4,12 @@
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { addExemplar, addRule, flagLine, resolveVoice } from "./voice";
 import type { RuleTarget } from "./voice";
 
 export type VoiceKind = "flag" | "exemplar" | "rule";
-/** `a v r` (AGT-1594): the typed rule and which file it goes into (the voice's rules file, or the work's QWEN.md). */
+/** `a v r` (AGT-1594): the typed rule and which file it goes into (the voice's rules file, or the work's STYLE.md). */
 export interface ScreenRule { readonly text: string; readonly target: RuleTarget }
 /** What the screen gets back: lines for the content area saying where it was written, or why it was not. */
 export type ScreenVoiceResult =
@@ -46,7 +46,7 @@ export function screenVoicer(vaultRoot: string, projectPath: string, deps: { env
     const env = deps.env ?? process.env;
     const name = projectVoiceName(vaultRoot, projectPath);
     const located = resolveVoice(name, { cwd: projectPath, env });
-    // A rule for the work's own QWEN.md needs no voice to resolve.
+    // A rule for the work's own rules file needs no voice to resolve.
     if (!located.ok && !(kind === "rule" && rule?.target === "work")) return { ok: false, message: located.message };
     const shown = (path: string) => (path.startsWith(vaultRoot + sep) ? relative(vaultRoot, path) : path);
 
@@ -55,7 +55,7 @@ export function screenVoicer(vaultRoot: string, projectPath: string, deps: { env
       const r = addRule(located.ok ? located : undefined, rule.text, { target: rule.target, projectPath, ...(text === "" ? {} : { example: text }) });
       if (!r.ok) return { ok: false, message: r.message };
       if (r.notice?.includes("already a rule")) return { ok: true, lines: [r.notice] };
-      const whose = rule.target === "work" ? "the work's QWEN.md" : `voice ${name}`;
+      const whose = rule.target === "work" ? `the work's ${basename(r.path)}` : `voice ${name}`;
       return { ok: true, lines: [`Rule added in ${shown(r.path)} (${whose})${r.committed ? ", committed" : ""}.`, `- ${rule.text.trim()}`, ...(text === "" ? [] : [`Flagged: "${text}"`]), ...(r.notice ? [r.notice] : [])] };
     }
 

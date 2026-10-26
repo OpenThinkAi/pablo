@@ -12,7 +12,7 @@
  *   2. The judgement policy: when to research, invent, ask or proceed. Named
  *      by `pablo.json`'s `policy` and shipped as `packages/cli/policies/<name>.md`;
  *      a minimal default when the work names none.
- *   3. The work's rules: its `QWEN.md`, minus any `<!-- writer-only -->`
+ *   3. The work's rules: its `STYLE.md`, minus any `<!-- writer-only -->`
  *      section (text meant for the writer's pack alone).
  *
  * `harnessSystemPrompt` is pure: it takes the texts, not paths. `loadPromptWork`
@@ -21,7 +21,8 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { WORK_RULES_FILE, workRulesFile } from "@openthink/pablo-core";
 import { fileURLToPath } from "node:url";
 import { outputsLabel, trackOf, type Marker } from "../marker";
 import type { Refusal } from "../project";
@@ -39,8 +40,10 @@ export interface PromptWork {
   readonly slug: string;
   /** The work's judgement policy; absent means `DEFAULT_POLICY`. */
   readonly policy?: PromptPolicy;
-  /** The work's `QWEN.md` as written (writer-only sections are stripped here); absent when it has none. */
+  /** The work's rules file (`STYLE.md`, else `QWEN.md`) as written (writer-only sections are stripped here); absent when it has none. */
   readonly rules?: string;
+  /** The name of the file `rules` was read from (`STYLE.md` or `QWEN.md`); `STYLE.md` when absent. */
+  readonly rulesFile?: string;
 }
 
 /** Where pablo's shipped judgement policies live (`packages/cli/policies/`). */
@@ -94,13 +97,13 @@ export function harnessSystemPrompt(work: PromptWork): string {
   const policy = work.policy ?? DEFAULT_POLICY;
   const parts = [role(work), "", `<judgement_policy name="${policy.name}">`, policy.text.trim(), "</judgement_policy>"];
   const rules = work.rules === undefined ? "" : stripWriterOnly(work.rules);
-  if (rules !== "") parts.push("", '<work_rules source="QWEN.md">', rules, "</work_rules>");
+  if (rules !== "") parts.push("", `<work_rules source="${work.rulesFile ?? WORK_RULES_FILE}">`, rules, "</work_rules>");
   return parts.join("\n");
 }
 
 /**
  * Reads what the prompt needs for one work: the policy its marker names, else
- * the one its track selects (`TRACKS`), else (a policies dir without it) the default and its `QWEN.md` (or none). A policy name pablo does
+ * the one its track selects (`TRACKS`), else (a policies dir without it) the default and its rules file (`STYLE.md`, else `QWEN.md`; or none). A policy name pablo does
  * not ship is a refusal naming the ones it does.
  */
 export function loadPromptWork(
@@ -123,7 +126,7 @@ export function loadPromptWork(
       tried: [path],
     };
   }
-  const rulesPath = join(projectPath, "QWEN.md");
+  const rulesPath = join(projectPath, workRulesFile(projectPath));
   const rules = existsSync(rulesPath) ? readFileSync(rulesPath, "utf8") : undefined;
   return {
     ok: true,
@@ -132,7 +135,7 @@ export function loadPromptWork(
       format: outputsLabel(marker),
       slug,
       ...(policy === undefined ? {} : { policy }),
-      ...(rules === undefined ? {} : { rules }),
+      ...(rules === undefined ? {} : { rules, rulesFile: basename(rulesPath) }),
     },
   };
 }
