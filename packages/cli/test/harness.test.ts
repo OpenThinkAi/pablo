@@ -56,6 +56,11 @@ test("the session offers pablo's tools by their plain names, and nothing else", 
   for (const tool of tools) expect(tool).not.toStartWith("mcp__");
 });
 
+test("the research checklist tools reach the session by their plain names", () => {
+  const tools = loopSpec(spec()).tools.map((tool) => tool.name);
+  for (const name of ["plan_research", "waive_research_item", "link_research_item", "save_research"]) expect(tools).toContain(name);
+});
+
 test("the system prompt is pablo's", () => {
   const prompt = loopSpec(spec()).system;
   expect(prompt).toStartWith("You are pablo");
