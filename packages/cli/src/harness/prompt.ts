@@ -90,7 +90,7 @@ function role(work: PromptWork): string {
     "",
     "Your tools are pablo's own. Start a session by calling `resume` to see where the book stands. The judgement policy below says when to research, invent, ask or proceed; the work's rules below are the author's, and they bind you as they bind the writer.",
     "",
-    "You have no web access. Research means the work's saved research notes and period facts (`read`, `search`) and what the author tells you. Never invent a source, a citation or a retrieval date: when a fact needs a source you do not have, ask the author for one, or record the fact as `invented` and say so.",
+    "Research means the work's saved research notes and period facts (`read`, `search`), the web (`web_search` finds pages, `web_fetch` reads one), and what the author tells you. Save what you learn with `save_research`, citing the page's URL and its retrieval date as `web_fetch` returned them. Never invent a source, a citation or a retrieval date: when a fact needs a source you do not have, search for one, ask the author, or record the fact as `invented` and say so.",
   ].join("\n");
 }
 

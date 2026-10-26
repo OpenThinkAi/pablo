@@ -92,6 +92,7 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `check` | Tells, banned names and provenance gaps in the drafted text |
 | `critique` | Comment on a change branch: continuity contradictions, things mentioned before their date, voice tells |
 | `read` / `search` | Read a file in the work, or search it |
+| `web_search` / `web_fetch` | Search the web through pablo's configured backend (SearXNG; set `web.search` in the config, see `docs/configuration.md`), and read one page as markdown with its URL and retrieval date. pablo's own tools: an agent does not need its own WebSearch/WebFetch, and `web_search` fails with a clear message when no backend is set |
 | `output` | List or add outputs (novel, story, screenplay, radio) |
 | `publish` | Compile the drafted text into one file |
 | `voice_list` / `voice_show` / `voice_flag` / `voice_exemplar` / `voice_rule` / `voice_edit` / `voice_remove` / `voice_use` | Inspect and grow the voice: list rules with ids, add, edit or remove one, add a named voice to a work |

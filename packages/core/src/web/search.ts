@@ -7,7 +7,7 @@
  * never touch a real server.
  *
  * ```json
- * { "web": { "search": { "backend": "searxng", "url": "http://100.104.97.90:8080" } } }
+ * { "web": { "search": { "backend": "searxng", "url": "http://127.0.0.1:8080" } } }
  * ```
  */
 
