@@ -264,7 +264,7 @@ test("CLI: unknown migration names both it knows", () => {
   const { vault } = tempVault();
   const r = runCli(["migrate", "words", "--project", "ice-house", "--json"], vault);
   expect(r.exitCode).toBe(2);
-  expect(r.stdout).toContain("lines or outputs");
+  expect(r.stdout).toContain("lines, outputs or track");
   rmSync(vault, { recursive: true, force: true });
 });
 

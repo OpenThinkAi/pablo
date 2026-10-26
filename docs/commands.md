@@ -85,9 +85,10 @@ Each change is one commit.
 ```
 pablo migrate lines --project <slug> [--dry-run]
 pablo migrate outputs --project <slug> [--dry-run]
+pablo migrate track --project <slug> --track <t> [--dry-run]
 ```
 
-One-time migrations of older works. Running either twice is safe: the second run
+One-time migrations of older works. Running any twice is safe: the second run
 changes nothing. `--dry-run` lists what would change.
 
 - `lines` splits `chapters/*.md` to one sentence per line, leaving frontmatter
@@ -103,6 +104,13 @@ changes nothing. `--dry-run` lists what would change.
   It never writes `chapters/`, `bible/`, `research/`, `notes/` or `QWEN.md`.
   Having both an old and a new path is a refusal. Returns
   `{ok, dryRun, changes[{op, path, from?}], paths[], committed, notice?}`.
+- `track` writes `track` (`fiction`, `historical-fiction` or `nonfiction`) into
+  `pablo.json` and commits only that file on the vault's current branch, with a
+  `Pablo-Migrate: track=<id>` trailer. Works without a `track` read as `fiction`.
+  Returns `{ok, dryRun, from, track, changes[], paths[], committed, missingStages[], notice?}`;
+  `missingStages` lists the core stages of the new track that the old track's core
+  lacks (fiction to `historical-fiction`: `period`, `period-facts`). An unknown
+  track, or uncommitted changes to `pablo.json`, is a refusal.
 
 Every reader handles both the old and the new layout, so migrating is optional.
 

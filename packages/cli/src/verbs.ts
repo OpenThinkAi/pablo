@@ -69,6 +69,7 @@ import type { Ask } from "./critique";
 import { KNOWN_FORMATS } from "./formats";
 import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
+import { migrateTrack } from "./migrate-track";
 import { mergeDraftInProject } from "./novel/merge";
 import { readMarker } from "./marker";
 import { FACT_KINDS } from "./record-fact";
@@ -873,11 +874,15 @@ async function runBindVerb(args: z.infer<typeof BIND_ARGS>, ctx: VerbContext): P
 
 const MIGRATE_ARGS = z.object({
   sub: z
-    .enum(["lines", "outputs"])
+    .enum(["lines", "outputs", "track"])
     .describe(
-      "The migration to run: `lines` splits chapters to one sentence per line; `outputs` turns a `format: novel` work into a story core plus a novel output (pablo.json `outputs`, outputs/novel/, outline/beats.md, facts.md).",
+      "The migration to run: `lines` splits chapters to one sentence per line; `outputs` turns a `format: novel` work into a story core plus a novel output (pablo.json `outputs`, outputs/novel/, outline/beats.md, facts.md); `track` writes `--track` into pablo.json.",
     ),
   project: projectField,
+  track: z
+    .string()
+    .optional()
+    .describe("`migrate track` only: the track to write into pablo.json (fiction, historical-fiction or nonfiction)."),
   "dry-run": z.boolean().optional().default(false).describe("List the paths that would change; write and commit nothing."),
 });
 
@@ -886,9 +891,11 @@ async function runMigrateVerb(args: z.infer<typeof MIGRATE_ARGS>, ctx: VerbConte
   if (!resolved.ok) return resolved.result;
 
   const outcome =
-    args.sub === "outputs"
-      ? migrateOutputs(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] })
-      : migrateLines(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] });
+    args.sub === "track"
+      ? migrateTrack(resolved.vaultRoot, resolved.projectPath, { track: args.track, dryRun: args["dry-run"] })
+      : args.sub === "outputs"
+        ? migrateOutputs(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] })
+        : migrateLines(resolved.vaultRoot, resolved.projectPath, { dryRun: args["dry-run"] });
   if (!outcome.ok) return { body: outcome, exitCode: outcome.code };
   return { body: outcome, exitCode: 0 };
 }
@@ -1842,7 +1849,7 @@ export const VERBS: readonly Verb[] = [
     description:
       "One-time migrations of a project. `lines` splits " +
       OUTPUTS.novel.artifactDir +
-      "/*.md to one sentence per line (frontmatter untouched) and commits exactly those files. `outputs` rewrites pablo.json's `format` to `outputs.novel`, creates outputs/novel/ (plan.md, RULES.md), moves continuity.md to outputs/novel/continuity.md and outline/chapters.md to outline/beats.md, creates facts.md, and commits exactly those paths. Both are idempotent; `dry-run` lists what would change.",
+      "/*.md to one sentence per line (frontmatter untouched) and commits exactly those files. `outputs` rewrites pablo.json's `format` to `outputs.novel`, creates outputs/novel/ (plan.md, RULES.md), moves continuity.md to outputs/novel/continuity.md and outline/chapters.md to outline/beats.md, creates facts.md, and commits exactly those paths. `track` (with `--track <id>`) writes `track` into pablo.json and commits exactly that file, reporting the new core stages the work lacks. All are idempotent; `dry-run` lists what would change.",
     args: MIGRATE_ARGS,
     run: runMigrateVerb,
     positionalArgs: ["sub"],
