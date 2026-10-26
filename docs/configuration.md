@@ -187,11 +187,6 @@ you pass to `pablo share --reader`; lowercase letters, digits and hyphens.
 `$EDITOR`, then `hx`). `keys` overrides the screen's key bindings by action id; the
 screen's settings view (`\`) edits them for you and writes them here.
 
-## `tray`
-
-`{"tray": {"autoUpdate": false}}` stops the reader's tray from updating pablo by
-itself.
-
 ## Environment variables
 
 | Variable | Effect |
@@ -201,8 +196,6 @@ itself.
 | `XDG_CONFIG_HOME` | Moves the config directory |
 | `XDG_STATE_HOME` | Where a reader's fetched rounds go (default `~/.local/state`) |
 | `XDG_DATA_HOME` | Where the radio tools' Python environment goes |
-| `PABLO_TRAY=0` | Run the tray without its menu-bar icon |
-| `PABLO_TRAY_POLL_SECONDS` | How often the tray checks GitHub, 30 to 60 |
 
 ## The radio tools: `casting.json`
 

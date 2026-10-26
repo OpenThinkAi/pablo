@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/OpenThinkAi/pablo/main/install-reader.sh | sh
 #
 # Sets up a reader's Mac in one go: Xcode Command Line Tools check, Google Chrome check, Bun, the
-# GitHub CLI (gh), pablo itself (from npm), a GitHub sign-in, and pablo's menu-bar tray.
+# GitHub CLI (gh), pablo itself (from npm), and a GitHub sign-in.
 #
 # Safe to run again: it skips what is already there and upgrades pablo.
 # Safe to pipe into sh: everything lives in functions and nothing runs until the very last line,
@@ -138,7 +138,7 @@ install_bun() {
   ok "Bun is installed."
 }
 
-# gh without Homebrew: GitHub's own macOS download, placed beside bun (a folder pablo's tray also searches).
+# gh without Homebrew: GitHub's own macOS download, placed beside bun.
 install_gh_from_release() {
   tag=$(curl -fsSL "$GH_RELEASE_API" | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1)
   case "$tag" in
@@ -226,12 +226,6 @@ sign_in_github() {
   ok "Signed in to GitHub."
 }
 
-start_tray() {
-  step "Starting pablo's menu-bar tray (it tells you when a chapter is ready to read)"
-  must "Starting the tray" pablo tray install
-  ok "The tray is installed and will start whenever you log in."
-}
-
 finish() {
   printf '\nAll done. pablo is installed.\n'
   if [ "$CHROME_MISSING" -eq 1 ]; then
@@ -250,7 +244,6 @@ main() {
   install_gh
   install_pablo
   sign_in_github
-  start_tray
   finish
 }
 

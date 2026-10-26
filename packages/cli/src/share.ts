@@ -15,8 +15,8 @@
  * The PR (head into base) therefore adds every line of every shared chapter,
  * which is what makes every sentence a commentable line on GitHub. The round is
  * then recorded in the vault at `<vault>/.pablo/rounds/<round-id>.json` (see
- * `RoundRecord`): the later tickets (`read`, `notes pull`, round housekeeping,
- * the tray) read it back with `readRound` / `listRounds`.
+ * `RoundRecord`): the later tickets (`read`, `notes pull`, round housekeeping)
+ * read it back with `readRound` / `listRounds`.
  *
  * Every `gh` and git call is an argument array handed to an injected `Runner`;
  * nothing here shells out any other way. Tests pass a fake `gh` and use local
@@ -465,7 +465,7 @@ export function shareRound(options: ShareOptions): ShareOutcome {
     if (access.kind === "invited") {
       notices.push(
         `pablo: share: ${reader.github} was invited to ${repo} (read access); they must accept the invitation GitHub emailed them ` +
-          `(once per book) before the round appears in their tray`,
+          `(once per book) before the round appears for them`,
       );
     } else if (access.kind === "failed") {
       notices.push(`pablo: share: could not invite ${reader.github} to ${repo} (${access.reason}); add them as a collaborator with read access`);

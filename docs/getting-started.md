@@ -11,7 +11,7 @@ open an issue when you hit one.
 
 You need [Bun](https://bun.sh) 1.1 or newer and git. pablo is used daily on macOS;
 the writing commands should also work on Linux (the test suite runs there), but the
-reader's tray and the browser windows are macOS-only.
+browser windows are macOS-only.
 
 ```sh
 curl -fsSL https://bun.sh/install | bash     # if you don't have Bun

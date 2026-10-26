@@ -159,18 +159,8 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 fetches rounds for a reader, `notes.ts` (`notes pull`,
                 AGT-1587) turns a submitted review into a vault branch, and
                 `round-housekeeping.ts` closes a pulled round (AGT-1588).
-                The reader's tray (`pablo tray [install|uninstall]`,
-                AGT-1589, `src/tray/`, CLI-only, no `--project`): a
-                long-lived daemon that polls GitHub for rounds waiting for
-                this reader (`poll.ts`), notifies once per new round
-                (`notify.ts`), keeps `tray-state.json` for the Swift
-                menu-bar helper (`packages/cli/tray/PabloTray.swift`, built
-                and supervised by `bundle.ts`/`supervise.ts`), opens a round
-                through `pablo read <ref>`, and `install` writes a launchd
-                agent (`launchd.ts`). Every side effect is injected; tests
-                never touch launchctl or GitHub. `install-reader.sh` at the
-                repo root is the reader's installer (AGT-1590).
-                The output registry (AGT-1668): `src/outputs/registry.ts`'s
+                `install-reader.sh` at the repo root is the reader's installer
+                (AGT-1590). The output registry (AGT-1668): `src/outputs/registry.ts`'s
                 `OUTPUTS` is the single source of output types, like `VERBS`;
                 each type is a directory (`src/outputs/novel/`) exporting an
                 `OutputDefinition` (`src/outputs/types.ts`: artifact dir,
@@ -552,9 +542,9 @@ config loader) versus what was cut outright (the screen, the CriticMarkup
 parser and renderer, span verbs). The old **review queue** (a JSONL log the
 first `pablo review` read, AGT-1255..1263) and the author's **menu-bar tray**
 that watched it were both retired 2026-10-01 (AGT-1520, AGT-1541; the `screen`
-design doc's decisions supersede them). Two names came back for new things:
-`pablo review` is now the radio review player and `pablo tray` the reader's
-tray (both in `packages/cli` above). Every manuscript change is a git branch,
+design doc's decisions supersede them). One name came back for a new thing:
+`pablo review` is now the radio review player (in `packages/cli` above); the
+reader's `pablo tray` was removed in AGT-2091. Every manuscript change is a git branch,
 the screen's review mode is where the author decides, and `pablo status` /
 `pablo resume` report the branches waiting for review.
 
