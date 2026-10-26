@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   assemblePack,
   createProviders,
+  createScriptedChatAdapter,
   fileReceiptSink,
   parseConfig,
   receiptsPath,
@@ -198,4 +199,80 @@ test("a receipt records the seed beside the temperature, and the prompt hash is 
   expect(log[1]?.params).toEqual({ temperature: 0.3 });
   expect(log[0]?.prompt_hash).toBe(pack.hash);
   expect(log[1]?.prompt_hash).toBe(pack.hash);
+});
+
+// ---------------------------------------------------------------------------
+// chat() through the wrapper (AGT-2120): forwarded, one receipt per turn
+// ---------------------------------------------------------------------------
+
+test("chat() is forwarded through the wrapper and each turn writes a receipt with the reported usage", async () => {
+  let clock = 1000;
+  const now = () => clock;
+  const scripted = createScriptedChatAdapter({
+    id: "local",
+    model: "gemma",
+    turns: [
+      () => {
+        clock += 50; // the endpoint takes 50ms to send its first byte
+        return [
+          { type: "text", text: "Let me look." },
+          { type: "tool_call", call: { id: "c1", name: "status", arguments: { title: "x" } } },
+          { type: "done", usage: { inputTokens: 300, outputTokens: 12 } },
+        ];
+      },
+      [{ type: "text", text: "Done." }],
+    ],
+  });
+  const log: Receipt[] = [];
+  const adapter = withReceipts(scripted, (receipt) => void log.push(receipt), { intent: "agent", now, clock: () => new Date(0) });
+  expect(adapter.chat).toBeDefined();
+
+  const events: string[] = [];
+  const request = { system: "You are pablo", messages: [{ role: "user" as const, content: "hi" }], tools: [], timeoutMs: 5000 };
+  for await (const event of adapter.chat!(request)) {
+    events.push(event.type);
+    clock += 10; // 10ms per event on the way out
+  }
+  expect(events).toEqual(["text", "tool_call", "done"]);
+  expect(scripted.requests).toHaveLength(1);
+
+  await drain(adapter.chat!({ ...request, messages: [...request.messages, { role: "assistant", content: "Let me look." }] }));
+  expect(log).toHaveLength(2);
+  expect(log[0]).toMatchObject({
+    intent: "agent",
+    provider: "local",
+    model: "gemma",
+    measurement: "stream",
+    tokens_read: 300,
+    tokens_written: 12,
+    ttft_ms: 50,
+    wall_ms: 80,
+    gen_tok_s: null,
+    params: { timeout_ms: 5000 },
+    error: null,
+    pack_kind: null,
+    slices: [],
+  });
+  expect(log[0]?.prompt_hash).toMatch(/^[0-9a-f]{64}$/);
+  expect(log[1]?.prompt_hash).not.toBe(log[0]?.prompt_hash); // a different history hashes differently
+  // The scripted fake reports no usage on a turn with no explicit `done`: null, never a guess.
+  expect(log[1]).toMatchObject({ tokens_read: null, tokens_written: null });
+});
+
+test("a chat() turn that throws writes an error receipt and rethrows; a wrapped adapter with no chat() has none", async () => {
+  const scripted = createScriptedChatAdapter({
+    turns: [
+      () => {
+        throw new Error("sent nothing for 60s");
+      },
+    ],
+  });
+  const log: Receipt[] = [];
+  const adapter = withReceipts(scripted, (receipt) => void log.push(receipt));
+  await expect(drain(adapter.chat!({ system: "", messages: [{ role: "user", content: "hi" }], tools: [] }))).rejects.toThrow("sent nothing for 60s");
+  expect(log[0]).toMatchObject({ intent: "chat", measurement: "wall", error: "Error: sent nothing for 60s" });
+
+  const chatless: Adapter = { ...scripted, chat: undefined } as unknown as Adapter;
+  delete (chatless as { chat?: unknown }).chat;
+  expect(withReceipts(chatless, () => {}).chat).toBeUndefined();
 });

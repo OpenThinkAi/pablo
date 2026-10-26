@@ -61,3 +61,5 @@ export type { ClaudeCredential, Planner, PlannerOptions, PlannerRoute } from "./
 export { claudeCredential, createPlanner, PLAN_INTENT } from "./planner";
 export type { ScriptedChatAdapter, ScriptedChatAdapterOptions, ScriptedTurn } from "./scripted";
 export { createScriptedChatAdapter } from "./scripted";
+export type { CostOptions, ModelPrice, PriceTable } from "./prices";
+export { costUsd, DEFAULT_PRICES, priceFor } from "./prices";
