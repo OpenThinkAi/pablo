@@ -13,7 +13,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { beatsFile } from "@openthink/pablo-core";
-import { outputsLabel, readMarker, trackOf } from "./marker";
+import { outputsLabel, readMarker, realNamesOf, trackOf } from "./marker";
 import { DEFAULT_TRACK } from "./tracks/registry";
 import type { TrackId } from "./tracks/registry";
 import { waitingForReview } from "./branch";
@@ -47,6 +47,8 @@ export interface ResumeResult {
   readonly title: string;
   /** The work's track (AGT-2099): `pablo.json` `track`, else `fiction`. */
   readonly track: TrackId;
+  /** `false` when `pablo.json` sets `realNames: false` (AGT-2107); omitted otherwise (real names allowed). */
+  readonly realNames?: false;
   /** The story core's state and stages (AGT-1667). */
   readonly core: CoreReport;
   /** Each output the marker names, with its units. `{}` for a core with nothing derived yet. */
@@ -240,6 +242,8 @@ export async function buildResume(
   const title = markerResult.ok ? markerResult.marker.title : "";
   const track = markerResult.ok ? trackOf(markerResult.marker) : DEFAULT_TRACK;
 
+  const realNamesOff = markerResult.ok && !realNamesOf(markerResult.marker);
+
   const report = readWorkReport(workDir, markerResult.ok ? markerResult.marker.outputs : {});
 
   const last: { note?: NoteSummary; commit?: CommitSummary } = {};
@@ -262,6 +266,7 @@ export async function buildResume(
     open,
     next: report.next,
     track,
+    ...(realNamesOff ? { realNames: false as const } : {}),
   };
   if (briefOutcome.brief !== undefined) return { ...result, brief: briefOutcome.brief };
   if (briefOutcome.notice !== undefined) return { ...result, notices: [briefOutcome.notice] };
@@ -281,6 +286,7 @@ const MAX_BRIEF_LINES = 8;
  */
 export function formatResumeProse(result: ResumeResult): string {
   const body: string[] = [result.title, ...coreLines(result.core), ...outputLines(result.outputs), `track: ${result.track}`];
+  if (result.realNames === false) body.push("real names: kept out of distilled facts (realNames: false)");
   if (result.waiting.length > 0) body.push(`waiting for review: ${result.waiting.join(", ")}`);
 
   if (result.last.note !== undefined) {

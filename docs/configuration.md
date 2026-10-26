@@ -147,6 +147,24 @@ branch, so it is trusted less than this file:
 
 Routing `draft` to a hosted model from a work costs per chapter, as it does here.
 
+### Per-work `realNames`
+
+Distilled period facts are what the drafting model sees of a work's research. By
+default they may name the real people and places in `research/`, so a story about a
+real event can use them. A work that must keep those names out sets `realNames` in its
+`pablo.json`:
+
+```json
+{ "title": "The Ice House", "slug": "ice-house", "realNames": false }
+```
+
+`realNames` is `true` when absent, and anything but `true` or `false` is refused.
+Today the setting is read and reported: `pablo resume` shows `realNames: false` when it
+is set and says nothing when it is not. Acting on it belongs to `distill_facts`
+(AGT-2109), which will swap research names for the bible's invented ones when it is
+`false`; until that verb lands, nothing enforces it, so keep real names out of
+`research/` by hand.
+
 ### Claude for `pablo agent` and `pablo story`
 
 The built-in agent (`pablo agent`, `pablo story`) runs Claude through the Claude Agent

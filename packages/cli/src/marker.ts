@@ -18,6 +18,7 @@
  * | `publish`   | no       | `{}`                              |
  * | `policy`    | no       | —  (the harness's minimal default judgement policy) |
  * | `track`     | no       | `"fiction"` (`fiction`, `historical-fiction`, `nonfiction`) |
+ * | `realNames` | no       | `true` (`false` keeps research names out of distilled facts) |
  * | `providers` | no       | —  (the global config's; merged over it by `loadConfig({ projectDir })`) |
  * | `intents`   | no       | —  (the global config's; merged over it the same way) |
  * | `format`    | deprecated | —  (`"novel"` only; read as `outputs.novel`) |
@@ -47,6 +48,12 @@
  * marker without one reads as `fiction` (`trackOf`), and `Marker.track` stays
  * absent so a rewritten marker is byte-for-byte what it was; an unknown
  * value is refused naming the allowed ids.
+ *
+ * `realNames` (AGT-2107, D-10) is whether distilled period facts may name the
+ * real people and places in `research/`. Absent reads as `true` (`realNamesOf`),
+ * and `Marker.realNames` stays absent so a rewritten marker is unchanged; a
+ * work that keeps research names out sets `false`. A non-boolean value is
+ * refused. Only `resume` reads it so far; `distill_facts` (AGT-2109) acts on it.
  *
  * `providers` and `intents` (AGT-2129, D-13) route this work's model calls
  * over the global config; core's `loadConfig({ projectDir })` reads and
@@ -109,6 +116,8 @@ export interface Marker {
   readonly policy?: string;
   /** The work's track, as written; absent reads as `fiction` (use `trackOf`). */
   readonly track?: TrackId;
+  /** Whether distilled facts may carry real names, as written; absent reads as `true` (use `realNamesOf`). */
+  readonly realNames?: boolean;
   /** The outputs derived from the work's story core; `{}` is a core with nothing derived yet. */
   readonly outputs: Outputs;
 }
@@ -149,6 +158,11 @@ export function outputsLabel(marker: Marker): string {
 /** The work's track: the marker's `track`, else `fiction` (D-6). */
 export function trackOf(marker: Marker): TrackId {
   return marker.track ?? DEFAULT_TRACK;
+}
+
+/** Whether the work lets real names from `research/` into distilled facts: the marker's `realNames`, else `true` (D-10). */
+export function realNamesOf(marker: Marker): boolean {
+  return marker.realNames ?? true;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -266,6 +280,10 @@ export function readMarker(workDir: string): MarkerResult {
   if (track !== undefined && !isTrackId(track)) {
     return refuse(`pablo: ${path} has unknown track ${JSON.stringify(track)} at "track" (allowed: ${trackIds().join(", ")})`, [path]);
   }
+  const realNames = data["realNames"];
+  if (realNames !== undefined && typeof realNames !== "boolean") {
+    return refuse(`pablo: ${path} has an invalid "realNames" (${JSON.stringify(realNames)}); it is true or false`, [path]);
+  }
   const inlineKey = inlineKeyRefusal(data["providers"], path);
   if (inlineKey !== undefined) return inlineKey;
 
@@ -278,6 +296,7 @@ export function readMarker(workDir: string): MarkerResult {
     publish: isObject(data["publish"]) ? data["publish"] : DEFAULT_PUBLISH,
     ...(policy === undefined ? {} : { policy }),
     ...(track === undefined ? {} : { track }),
+    ...(realNames === undefined ? {} : { realNames }),
     outputs,
   };
 
