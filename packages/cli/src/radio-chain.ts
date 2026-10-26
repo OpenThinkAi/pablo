@@ -66,10 +66,10 @@ const outcome = (result: VerbResult): StepOutcome => ({ ok: result.exitCode === 
 const CONTINUITY_INTENT: Intent = { name: "continuity", kind: "extraction" };
 
 /** The extractor the merge rituals run: the given one, else the routed extraction provider (undefined when none is configured). */
-export function routedExtractor(env: Record<string, string | undefined>, given?: Adapter): Adapter | undefined {
+export function routedExtractor(env: Record<string, string | undefined>, given: Adapter | undefined, projectDir: string): Adapter | undefined {
   if (given !== undefined) return given;
   try {
-    const providers = createProviders(loadConfig({ env }));
+    const providers = createProviders(loadConfig({ env, projectDir }));
     return providers.adapter(providers.route(CONTINUITY_INTENT));
   } catch {
     return undefined;
@@ -126,7 +126,7 @@ export async function writeAndAcceptEpisode(chain: RadioChain, unit: number, dep
   const merged = await mergeDraft(chain.work, drafted.branch, {
     slug: chain.slug,
     env: chain.ctx.env,
-    extractor: routedExtractor(chain.ctx.env, deps.extractor ?? deps.writer),
+    extractor: routedExtractor(chain.ctx.env, deps.extractor ?? deps.writer, chain.work),
     ...(deps.now ? { now: deps.now } : {}),
   });
   if (!merged.ok) return { ok: false, exitCode: 1, body: { ok: false, code: 1, message: merged.notice, output: RADIO_ID, unit, branch: drafted.branch } };

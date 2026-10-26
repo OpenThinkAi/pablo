@@ -215,7 +215,7 @@ export function screenFinisher(projectPath: string, deps: { env?: Record<string,
     let extractor = deps.extractor;
     if (extractor === undefined) {
       try {
-        const providers = createProviders(loadConfig());
+        const providers = createProviders(loadConfig({ projectDir: projectPath }));
         extractor = providers.adapter(providers.route(CONTINUITY_INTENT));
       } catch {
         extractor = undefined; // continuity is then skipped ("no extraction adapter"); the merge still lands

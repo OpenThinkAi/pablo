@@ -32,7 +32,9 @@ export {
   DEFAULT_LOCAL_ENDPOINT,
   DEFAULT_LOCAL_MODEL,
   DEFAULT_TIMEOUT_MS,
+  isLoopbackEndpoint,
   loadConfig,
+  mergeProjectConfig,
   parseConfig,
 } from "./config";
 export type { KeyLookup, KeySource } from "./keys";

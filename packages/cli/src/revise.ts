@@ -401,7 +401,7 @@ interface Routed {
 function routeRevise(pack: Pack, ctx: ReviseCoreContext, deps: ReviseDeps): Routed | ReviseOutcome {
   let providers: ReturnType<typeof createProviders>;
   try {
-    providers = createProviders(loadConfig({ env: ctx.env }));
+    providers = createProviders(loadConfig({ env: ctx.env, projectDir: ctx.projectPath }));
   } catch (error) {
     if (error instanceof ProviderConfigError) return refuse(2, error.message);
     throw error;
@@ -602,7 +602,7 @@ export async function runRevise(args: ReviseCliArgs, ctx: ReviseCoreContext, dep
   // `routeRevise` already guards on the send path — guarded the same way here
   // rather than letting it propagate as an uncaught exception.
   try {
-    const providers = createProviders(loadConfig({ env: ctx.env }));
+    const providers = createProviders(loadConfig({ env: ctx.env, projectDir: ctx.projectPath }));
     const providerId = providers.route(REVISE_INTENT);
     console.log(renderPack(outcome.pack as Pack, providers.rates(providerId)).text);
     return outcome.exitCode;

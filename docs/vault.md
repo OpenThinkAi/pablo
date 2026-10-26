@@ -101,6 +101,7 @@ before writing, and commits only that file.
 | `publish` | no | `{}` | Per-target publish settings |
 | `track` | no | `"fiction"` | The kind of work: `fiction`, `historical-fiction` or `nonfiction`. Any other value is refused, naming the allowed ones. `status` and `resume` report it |
 | `policy` | no | a short default | The judgement policy for `pablo agent` (see below) |
+| `providers`, `intents` | no | the global config's | This work's model routing, merged over `~/.config/pablo/config.json` (see [configuration.md](configuration.md#per-work-providers-and-intents)) |
 | `format` | old | | `"format": "novel"` is the pre-outputs form. It still works; `pablo migrate outputs` converts the work |
 
 A directory without `pablo.json` is refused with `pablo init --adopt --project <slug>`

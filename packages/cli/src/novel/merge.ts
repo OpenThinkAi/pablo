@@ -168,7 +168,7 @@ export async function mergeDraftInProject(
   const extractor =
     extractorOverride ??
     (() => {
-      const providers = createProviders(loadConfig());
+      const providers = createProviders(loadConfig({ projectDir: projectPath }));
       return providers.adapter(providers.route(CONTINUITY_INTENT));
     })();
   const merged = await mergeDraft(projectPath, branch, { slug: marker.marker.slug, env, extractor });

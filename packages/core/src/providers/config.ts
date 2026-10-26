@@ -20,6 +20,17 @@
  *   "readers": { "atara": { "github": "atara-login", "name": "Atara Example", "email": "atara@example.com" } }
  * }
  * ```
+ *
+ * A work may route its own models (AGT-2129, decision D-13): its `pablo.json`
+ * may carry `providers` and `intents` in the same shape, and
+ * `loadConfig({ projectDir })` merges them over the global file — a provider
+ * entry over the global one of the same name (fields it does not set are
+ * kept, its key reference included), an intent over the global mapping.
+ * The rule is the same as the global file's: a key is never written there,
+ * only `env:<NAME>` or `keychain:<service>[/<account>]`. pablo.json is
+ * trusted less than the global file: it may add or change providers on this
+ * machine, but on a remote provider only `model`, `timeoutMs`, `temperature`
+ * and `thinking` (`checkWorkProvider`).
  */
 
 import { readFileSync } from "node:fs";
@@ -177,14 +188,63 @@ export interface LoadConfigOptions {
   readonly env?: Record<string, string | undefined>;
   /** Injected so tests never read the real file. Returns undefined when there is none. */
   readonly readFile?: (path: string) => string | undefined;
+  /** The work whose `pablo.json` `providers` and `intents` are merged over the global file; absent means global only. */
+  readonly projectDir?: string;
+  /** Reads `<projectDir>/pablo.json`; injected by tests. Returns undefined when there is none. */
+  readonly readProjectFile?: (path: string) => string | undefined;
 }
 
-/** Reads the config file if there is one, and falls back to the default configuration if not. */
+/**
+ * Reads the config file if there is one, and falls back to the default
+ * configuration if not; with `projectDir`, the work's `pablo.json` routing is
+ * merged over it (`mergeProjectConfig`).
+ */
 export function loadConfig(options: LoadConfigOptions = {}): PabloConfig {
   const path = options.path ?? configPath(options.env ?? process.env);
   const read = options.readFile ?? readFileIfPresent;
   const text = read(path);
-  return text === undefined ? defaultConfig() : parseConfig(text, path);
+  const global = text === undefined ? defaultConfig() : parseConfig(text, path);
+  if (options.projectDir === undefined) return global;
+  const projectPath = join(options.projectDir, "pablo.json");
+  const projectText = (options.readProjectFile ?? readFileIfPresent)(projectPath);
+  return projectText === undefined ? global : mergeProjectConfig(global, projectText, projectPath);
+}
+
+/**
+ * Merges a work's `pablo.json` `providers` and `intents` over `base`. Only
+ * those two keys are read; the rest of the marker is `readMarker`'s. A
+ * provider entry is validated exactly as the global file's are (so an inline
+ * key is refused); an intent must name a provider of the merged set.
+ *
+ * The global file is the author's own; `pablo.json` is committed and can
+ * arrive from a co-author, a clone or a merged branch, so it is trusted less
+ * (`checkWorkProvider`): it decides which provider each intent uses, but only
+ * the global file decides which remote host a credential goes to.
+ */
+export function mergeProjectConfig(base: PabloConfig, text: string, source = "pablo.json"): PabloConfig {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (error) {
+    throw new ProviderConfigError(`pablo: ${source} is not valid JSON (${(error as Error).message})`);
+  }
+  if (!isRecord(raw)) throw new ProviderConfigError(`pablo: ${source} must contain a JSON object`);
+  if (raw["providers"] === undefined && raw["intents"] === undefined) return base;
+
+  const providers = new Map(base.providers);
+  const rawProviders = raw["providers"];
+  if (rawProviders !== undefined) {
+    if (!isRecord(rawProviders)) throw new ProviderConfigError(`pablo: ${source}: "providers" must be an object`);
+    for (const [id, entry] of Object.entries(rawProviders)) {
+      const existing = providers.get(id);
+      const merged = readProvider(id, entry, source, existing);
+      checkWorkProvider(merged, existing, source);
+      providers.set(id, merged);
+    }
+  }
+  const intents = new Map(base.intents);
+  for (const [intent, id] of readIntents(raw["intents"], providers, source)) intents.set(intent, id);
+  return { ...base, providers, intents };
 }
 
 function readFileIfPresent(path: string): string | undefined {
@@ -245,11 +305,57 @@ function readProvider(
     model,
     kind: kind as AdapterKind,
     local,
-    key: keySourceFor(id, rawKey, where),
+    // An entry that names no key keeps the reference of the entry it overrides (a work's
+    // pablo.json changing only a model must not drop the global keychain reference).
+    key: rawKey === undefined && existing !== undefined ? existing.key : keySourceFor(id, rawKey, where),
     timeoutMs: rawTimeout,
     ...(rawTemperature === undefined ? {} : { temperature: rawTemperature }),
     ...(thinking === undefined ? {} : { thinking }),
   };
+}
+
+/** The fields a work may change on a provider whose endpoint is remote: none of them say where a request (and its key) goes. */
+const WORK_SAFE_FIELDS = ["model", "timeoutMs", "temperature", "thinking"] as const;
+
+/** `127.0.0.1` (any `127.x`), `localhost` or `::1`: a request to it never leaves the machine. */
+export function isLoopbackEndpoint(endpoint: string): boolean {
+  const host = new URL(endpoint).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+function sameKey(a: KeySource, b: KeySource): boolean {
+  return a.from === "env" && b.from === "env"
+    ? a.variable === b.variable
+    : a.from === "keychain" && b.from === "keychain" && a.service === b.service && a.account === b.account;
+}
+
+/**
+ * Refuses a work's provider entry that would choose where a credential is
+ * sent: a new provider on a remote endpoint, or a change to a remote
+ * provider's `endpoint`, `kind`, `local` or `key`. Providers on loopback
+ * endpoints (a local model server) are the work's to define and change.
+ */
+function checkWorkProvider(merged: ProviderConfig, existing: ProviderConfig | undefined, source: string): void {
+  const where = `pablo: ${source}: provider "${merged.id}"`;
+  const remote = !isLoopbackEndpoint(merged.endpoint);
+  if (existing === undefined) {
+    if (remote) {
+      throw new ProviderConfigError(
+        `${where}: a work may add only a provider on this machine (127.0.0.1, localhost or ::1), not ${merged.endpoint}. ` +
+          `Declare a remote provider in the global config and route intents to it from pablo.json.`,
+      );
+    }
+    return;
+  }
+  if (!remote && isLoopbackEndpoint(existing.endpoint)) return;
+  const changed =
+    merged.endpoint !== existing.endpoint || merged.kind !== existing.kind || merged.local !== existing.local || !sameKey(merged.key, existing.key);
+  if (changed) {
+    throw new ProviderConfigError(
+      `${where}: a work may change only ${WORK_SAFE_FIELDS.map((f) => `"${f}"`).join(", ")} on a provider that is not on this machine; ` +
+        `"endpoint", "kind", "local" and "key" are set in the global config.`,
+    );
+  }
 }
 
 function readEndpoint(value: unknown, where: string): string {

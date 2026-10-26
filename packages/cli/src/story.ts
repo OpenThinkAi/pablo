@@ -438,7 +438,7 @@ function retitleFromPremise(run: Run): void {
 function harnessAuthFor(run: Run): HarnessAuth | VerbResult {
   if (run.deps.auth !== undefined) return run.deps.auth;
   try {
-    const config = loadConfig({ env: run.ctx.env, readFile: run.deps.readConfig });
+    const config = loadConfig({ env: run.ctx.env, readFile: run.deps.readConfig, projectDir: run.work });
     return harnessAuth(config, run.ctx.env, run.deps.keys ?? { env: run.ctx.env });
   } catch (error) {
     return fail((error as Error).message);
@@ -526,7 +526,7 @@ function extractorFor(run: Run): Adapter | undefined {
   if (run.deps.extractor !== undefined) return run.deps.extractor;
   if (run.deps.writer !== undefined) return run.deps.writer;
   try {
-    const providers = createProviders(loadConfig({ env: run.ctx.env, readFile: run.deps.readConfig }));
+    const providers = createProviders(loadConfig({ env: run.ctx.env, readFile: run.deps.readConfig, projectDir: run.work }));
     return providers.adapter(providers.route(CONTINUITY_INTENT));
   } catch {
     return undefined;
