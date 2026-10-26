@@ -10,13 +10,13 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { defaultConfig } from "@openthink/pablo-core";
+import { createScriptedChatAdapter } from "@openthink/pablo-core";
 import { runAgent } from "../src/harness/agent";
-import { harnessAuth } from "../src/harness/auth";
+import type { LoopSpec } from "../src/harness/loop";
+import { adapterProvider } from "../src/harness/provider";
 import { DEFAULT_POLICY, harnessSystemPrompt, loadPromptWork, POLICIES_DIR, stripWriterOnly } from "../src/harness/prompt";
 import type { PromptWork } from "../src/harness/prompt";
-import { harnessOptions } from "../src/harness/session";
+import { loopSpec } from "../src/harness/session";
 import type { HarnessQuery } from "../src/harness/session";
 import { readMarker } from "../src/marker";
 
@@ -225,22 +225,21 @@ test("a policy pablo does not ship is refused, naming the ones it does", () => {
 // AC 3: the session uses the assembled prompt
 // ---------------------------------------------------------------------------
 
-test("harnessOptions passes the assembled prompt as the session's system prompt", () => {
+test("loopSpec passes the assembled prompt as the session's system prompt", () => {
   const w: PromptWork = { ...base, policy: { name: "p", text: "Ask about the tides." }, rules: RULES };
-  const options = harnessOptions({
+  const spec = loopSpec({
     work: w,
-    projectPath: join(vault, "novels", "ice-house"),
-    auth: harnessAuth(defaultConfig(), BASE_ENV, { env: {} }),
+    provider: adapterProvider(createScriptedChatAdapter({ turns: [] })),
     ctx: { cwd: vault, env: BASE_ENV, stderr: { write: () => {} }, caller: "mcp" },
   });
-  expect(options.systemPrompt).toBe(harnessSystemPrompt(w));
+  expect(spec.system).toBe(harnessSystemPrompt(w));
 });
 
-function recordingQuery(): { query: HarnessQuery; calls: Options[] } {
-  const calls: Options[] = [];
+function recordingQuery(): { query: HarnessQuery; calls: LoopSpec[] } {
+  const calls: LoopSpec[] = [];
   const query: HarnessQuery = async function* (params) {
-    calls.push(params.options);
-    yield { type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, duration_ms: 1, total_cost_usd: 0 } as unknown as SDKMessage;
+    calls.push(params.spec);
+    yield { kind: "result", ok: true, text: "ok", turns: 1, durationMs: 1, costUsd: 0, errors: [] };
   };
   return { query, calls };
 }
@@ -253,7 +252,7 @@ test("pablo agent runs the session on the work's policy and rules", async () => 
   const code = await runAgent({ project: "agent-hf", message: "Where are we?", json: false }, quiet(), { query, readConfig: () => undefined });
 
   expect(code).toBe(0);
-  const prompt = calls[0]!.systemPrompt as string;
+  const prompt = calls[0]!.system;
   expect(prompt).toStartWith("You are pablo");
   expect(prompt).toContain('<judgement_policy name="historical-fiction">');
   expect(prompt).toContain("Research public, checkable facts");

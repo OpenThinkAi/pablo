@@ -10,8 +10,8 @@
  * headless `pablo agent` passes `stdinAskAuthor`, which prints the card and
  * reads one line from stdin. A session with no `AskAuthor` simply has no
  * `ask_author` tool, so the model is never offered a question nobody can
- * answer. The SDK's tool call is the block: it returns only when the promise
- * does, so the session resumes with the answer as the tool's result.
+ * answer. The tool call is the block: the agent loop awaits each tool's
+ * `run()`, so the session resumes with the answer as the tool's result.
  *
  * Recording the answer is the model's next step, not this tool's: the result
  * tells it to file the answer with `record_fact` (kind `author`) or note the

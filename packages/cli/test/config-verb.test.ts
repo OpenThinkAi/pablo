@@ -41,6 +41,8 @@ test("show: merged providers, key as reference only, project overrides", () => {
   expect(r.text).toContain("model=claude-sonnet-x");
   expect(r.text).toContain("draft -> anthropic\n");
   expect(r.text).toContain("research -> anthropic");
+  // The agent loop's intent is listed too; unmapped, it routes by kind to the cloud provider.
+  expect(r.text).toContain("agent -> anthropic (by kind)");
   expect(JSON.stringify(r.body)).not.toContain("sk-secret-value");
   const global = configShow({ env: s.env });
   expect(global.text).toContain("draft -> local (by kind)");

@@ -67,7 +67,7 @@ describe("runLoop", () => {
     const { entries, messages } = await collect("where are we?", { adapter, system: "You are pablo", tools: [status.spec], ctx });
 
     expect(entries.map((entry) => entry.kind)).toEqual(["session", "assistant", "tool_call", "tool_result", "assistant", "result"]);
-    expect(entries[0]).toEqual({ kind: "session", model: "scripted-model", apiKeySource: "none", tools: ["status"], mcpServers: [] });
+    expect(entries[0]).toEqual({ kind: "session", model: "scripted-model", apiKeySource: "none", tools: ["status"] });
     expect(entries[2]).toEqual({ kind: "tool_call", id: "c1", tool: "status", input: { title: "ice-house" } });
     expect(entries[3]).toEqual({ kind: "tool_result", id: "c1", text: JSON.stringify({ core: { premise: true } }), isError: false });
     const result = resultOf(entries);
@@ -214,6 +214,27 @@ describe("runLoop", () => {
     expect(status.runs).toEqual([]);
   });
 
+  test("a provider that refuses a forced choice gets auto on the wire, the requirement in the system prompt, and the re-prompt backing it", async () => {
+    const status = recordingTool("status");
+    const adapter = scripted([
+      [text("Let me think.")],
+      [text('```json\n{"tool": "status", "arguments": {"title": "x"}}\n```')],
+      [text("Done.")],
+    ]);
+    const { entries } = await collect("check in", { adapter, system: "s", tools: [status.spec], ctx, toolChoice: { name: "status" }, forcedToolChoice: false });
+    expect(adapter.requests[0]!.toolChoice).toBe("auto");
+    expect(adapter.requests[0]!.system).toBe("s\n\nThis step needs a tool call: answer by calling `status`.");
+    expect(adapter.requests[1]!.system).toBe("s");
+    expect(adapter.requests[2]!.system).toBe("s");
+    expect(status.runs).toEqual([{ title: "x" }]);
+    expect(resultOf(entries)).toMatchObject({ ok: true, text: "Done." });
+
+    const required = scripted([[call("c", "status", { title: "y" })], [text("ok")]]);
+    await collect("m", { adapter: required, system: "s", tools: [status.spec], ctx, toolChoice: "required", forcedToolChoice: false });
+    expect(required.requests[0]!.toolChoice).toBe("auto");
+    expect(required.requests[0]!.system).toContain("answer by calling one of your tools");
+  });
+
   test("with tool choice auto, a text-only first turn is the final answer", async () => {
     const adapter = scripted([[text("Nothing to do.")]]);
     const { entries } = await collect("hi", { adapter, system: "s", tools: [recordingTool("status").spec], ctx });
@@ -237,6 +258,13 @@ describe("runLoop", () => {
 
     const unknown = await collect("m", { adapter: scripted(turns, "mlx-community/gemma-4-31b-it-4bit"), system: "s", tools, ctx });
     expect(resultOf(unknown.entries)?.costUsd).toBe(0);
+    // Unpriced is not free: the result names the model so the transcript says the cost is incomplete.
+    expect(resultOf(unknown.entries)?.unpricedModel).toBe("mlx-community/gemma-4-31b-it-4bit");
+    expect(formatEntry(resultOf(unknown.entries)!)).toContain("no price for mlx-community/gemma-4-31b-it-4bit");
+    expect(resultOf(local.entries)?.unpricedModel).toBeUndefined();
+    expect(resultOf(priced.entries)?.unpricedModel).toBeUndefined();
+    const silent = await collect("m", { adapter: scripted([[text("ok")]], "house-model"), system: "s", tools, ctx });
+    expect(resultOf(silent.entries)?.unpricedModel).toBeUndefined(); // no usage reported, nothing left out
 
     const custom = await collect("m", { adapter: scripted(turns, "house-model"), system: "s", tools, ctx, prices: { "house-model": { inputPerMillion: 1, outputPerMillion: 1 } } });
     expect(resultOf(custom.entries)?.costUsd).toBeCloseTo(0.0036, 10);
@@ -268,7 +296,7 @@ describe("runLoop", () => {
     };
     const { entries } = await collect("m", { adapter, system: "s", tools: [], ctx });
     expect(entries.map((entry) => entry.kind)).toEqual(["session", "result"]);
-    expect(resultOf(entries)?.errors[0]).toContain('provider "old-local" has no chat()');
+    expect(resultOf(entries)?.errors[0]).toContain('provider "old-local" cannot run an agent session (it has no chat()). Map the "agent" intent');
   });
 
   test("a conversation continues from the returned history", async () => {
@@ -289,7 +317,7 @@ describe("runLoop", () => {
   test("the session entry carries the credential and the model override", async () => {
     const adapter = scripted([[text("ok")]]);
     const { entries } = await collect("m", { adapter, system: "s", tools: [], ctx, credential: "ANTHROPIC_API_KEY", model: "claude-opus-5-5", maxTokens: 4096, temperature: 0.2, timeoutMs: 1000 });
-    expect(entries[0]).toEqual({ kind: "session", model: "claude-opus-5-5", apiKeySource: "ANTHROPIC_API_KEY", tools: [], mcpServers: [] });
+    expect(entries[0]).toEqual({ kind: "session", model: "claude-opus-5-5", apiKeySource: "ANTHROPIC_API_KEY", tools: [] });
     expect(adapter.requests[0]).toMatchObject({ model: "claude-opus-5-5", maxTokens: 4096, temperature: 0.2, timeoutMs: 1000 });
   });
 

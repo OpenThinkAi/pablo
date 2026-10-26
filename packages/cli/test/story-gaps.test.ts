@@ -12,14 +12,9 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { defaultConfig } from "@openthink/pablo-core";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
-import { harnessAuth } from "../src/harness/auth";
-import type { HarnessQuery } from "../src/harness/session";
+import type { HarnessProvider } from "../src/harness/provider";
+import { scriptedAgent } from "./scripted-agent";
 import { mergeChanges } from "../src/novel/merge";
 import { addOutput, mergePlan, planOutput } from "../src/output-verbs";
 import { STORY } from "../src/outputs/story";
@@ -66,9 +61,6 @@ function tempVault(): { vault: string; env: Record<string, string>; ctx: VerbCon
   return { vault, env, ctx: { cwd: vault, env, stderr: { write: (text: string) => void lines.push(text) } }, lines };
 }
 
-const success = (result: string) =>
-  ({ type: "result", subtype: "success", is_error: false, result, num_turns: 2, duration_ms: 10, total_cost_usd: 0 }) as unknown as SDKMessage;
-
 type Call = readonly [string, Record<string, unknown>];
 
 const BEATS = [
@@ -100,29 +92,12 @@ function stageCalls(title: string | undefined): Readonly<Record<string, readonly
   };
 }
 
-function fakeHarness(title: string | null = "The Last Passage"): { query: HarnessQuery; prompts: string[] } {
+const stageOf = (message: string) => /Stage \d of 5, (\w+)\./.exec(message)?.[1] ?? "unknown";
+
+function fakeHarness(title: string | null = "The Last Passage"): { agent: HarnessProvider; prompts: string[] } {
   const calls = stageCalls(title ?? undefined);
-  const prompts: string[] = [];
-  const query: HarnessQuery = async function* (params) {
-    const stage = /Stage \d of 5, (\w+)\./.exec(params.prompt)?.[1] ?? "unknown";
-    prompts.push(params.prompt);
-    const instance = (params.options.mcpServers?.["pablo"] as { instance: McpServer }).instance;
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await instance.connect(serverSide);
-    const client = new Client({ name: "fake-sdk", version: "0.0.0" });
-    await client.connect(clientSide);
-    try {
-      for (const [name, args] of calls[stage] ?? []) {
-        const called = await client.callTool({ name, arguments: args });
-        const body = JSON.parse((called.content as { text: string }[])[0]!.text) as { ok: boolean; message?: string };
-        if (body.ok !== true) throw new Error(`${name} refused: ${body.message}`);
-      }
-    } finally {
-      await client.close();
-    }
-    yield success(`${stage} done`);
-  };
-  return { query, prompts };
+  const { provider, messages } = scriptedAgent((message) => calls[stageOf(message)] ?? []);
+  return { agent: provider, prompts: messages };
 }
 
 const PROSE = ["Rosa read the letter twice at the kitchen table.", "The boat came back light again.", "On the quay the wind came off the sea."].join("\n");
@@ -149,8 +124,8 @@ function fakeWriter(): Adapter {
   return writer as unknown as Adapter;
 }
 
-function depsFor(env: Record<string, string>, query: HarnessQuery, extra: Partial<StoryDeps> = {}): StoryDeps {
-  return { query, writer: fakeWriter(), auth: harnessAuth(defaultConfig(), env, { env: {} }), planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
+function depsFor(agent: HarnessProvider, extra: Partial<StoryDeps> = {}): StoryDeps {
+  return { agent, writer: fakeWriter(), planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
 function receipts(work: string): Record<string, unknown>[] {
@@ -163,7 +138,7 @@ function receipts(work: string): Record<string, unknown>[] {
 /** A finished story run: the work directory and the vault around it. */
 async function finishedRun(output: string[] | undefined, title: string | null = "The Last Passage", args: { title?: string } = {}) {
   const v = tempVault();
-  const result = await runStory({ prompt: SPEC, ...(output ? { output } : {}), ...args }, v.ctx, depsFor(v.env, fakeHarness(title).query));
+  const result = await runStory({ prompt: SPEC, ...(output ? { output } : {}), ...args }, v.ctx, depsFor(fakeHarness(title).agent));
   const body = result.body as Record<string, any>;
   expect(body.message).toBeUndefined();
   expect(result.exitCode).toBe(0);

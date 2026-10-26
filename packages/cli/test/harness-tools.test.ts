@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readTool, searchTool, SEARCH_LIMIT } from "../src/harness-tools";
-import { allowedTools, harnessToolName, harnessTools } from "../src/harness/tools";
+import { harnessTools } from "../src/harness/tools";
 import { VERBS } from "../src/verbs";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/vault/novels/ice-house", import.meta.url));
@@ -153,11 +153,8 @@ test("the read and search verbs resolve the project and carry refusals as exit 2
   expect(found.exitCode).toBe(0);
 });
 
-test("read and search reach the harness: attached as mcp__pablo__ tools and allowed", () => {
+test("read and search reach the harness's tools by their plain names", () => {
   const names = harnessTools().map((tool) => tool.name);
   expect(names).toContain("read");
   expect(names).toContain("search");
-  const allowed = allowedTools(harnessTools());
-  expect(allowed).toContain(harnessToolName("read"));
-  expect(allowed).toContain(harnessToolName("search"));
 });

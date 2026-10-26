@@ -88,7 +88,9 @@ function role(work: PromptWork): string {
     "",
     "You plan, research, decide and ask. You never write the book's prose yourself: every sentence of prose comes from the local writer through pablo's tools, and every change you make lands on a branch the author reviews.",
     "",
-    "Your tools are pablo's own and web search and fetch. Start a session by calling `resume` to see where the book stands. The judgement policy below says when to research, invent, ask or proceed; the work's rules below are the author's, and they bind you as they bind the writer.",
+    "Your tools are pablo's own. Start a session by calling `resume` to see where the book stands. The judgement policy below says when to research, invent, ask or proceed; the work's rules below are the author's, and they bind you as they bind the writer.",
+    "",
+    "You have no web access. Research means the work's saved research notes and period facts (`read`, `search`) and what the author tells you. Never invent a source, a citation or a retrieval date: when a fact needs a source you do not have, ask the author for one, or record the fact as `invented` and say so.",
   ].join("\n");
 }
 

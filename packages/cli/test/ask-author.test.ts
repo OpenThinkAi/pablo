@@ -1,5 +1,5 @@
 /**
- * ask_author (AGT-1560). Every session is a fake `HarnessQuery`; nothing starts Claude.
+ * ask_author (AGT-1560). Every session is pablo's agent loop on a scripted model; nothing reaches a model.
  */
 
 import { afterAll, expect, test } from "bun:test";
@@ -7,19 +7,15 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createScriptedChatAdapter } from "@openthink/pablo-core";
+import type { ScriptedChatAdapter } from "@openthink/pablo-core";
 import { runAgent } from "../src/harness/agent";
 import type { AgentContext } from "../src/harness/agent";
 import { askAuthorTool, formatQuestionCard, lineReader, stdinAskAuthor } from "../src/harness/ask-author";
 import type { AuthorQuestion } from "../src/harness/ask-author";
-import { harnessOptions } from "../src/harness/session";
-import type { HarnessQuery } from "../src/harness/session";
+import { adapterProvider } from "../src/harness/provider";
+import { sessionToolList } from "../src/harness/session";
 import { harnessTools } from "../src/harness/tools";
-import { harnessAuth } from "../src/harness/auth";
-import { defaultConfig } from "@openthink/pablo-core";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "pablo-ask-author-test-"));
@@ -43,12 +39,11 @@ test("the tool is only offered when a front end can ask", () => {
 
   const spec = {
     work: { title: "The Ice House", format: "novel", slug: "ice-house" },
-    projectPath: join(vault, "novels", "ice-house"),
-    auth: harnessAuth(defaultConfig(), BASE_ENV, { env: {} }),
+    provider: adapterProvider(createScriptedChatAdapter({ turns: [] })),
     ctx,
   };
-  expect(harnessOptions(spec).allowedTools).not.toContain("mcp__pablo__ask_author");
-  expect(harnessOptions({ ...spec, ask: async () => "x" }).allowedTools).toContain("mcp__pablo__ask_author");
+  expect(sessionToolList(spec).map((t) => t.name)).not.toContain("ask_author");
+  expect(sessionToolList({ ...spec, ask: async () => "x" }).map((t) => t.name)).toContain("ask_author");
 });
 
 test("the tool blocks until the answer arrives and returns it", async () => {
@@ -104,26 +99,21 @@ test("stdin answers: a number picks an option, text is taken as written, blanks 
 });
 
 // ---------------------------------------------------------------------------
-// A headless session end to end: the fake model calls ask_author through the
-// attached server and the answer comes from stdin.
+// A headless session end to end: the scripted model calls ask_author through
+// pablo's agent loop and the answer comes from stdin.
 // ---------------------------------------------------------------------------
 
-function askingQuery(seen: { answer?: string }): HarnessQuery {
-  return async function* (params: { prompt: string; options: Options }) {
-    const instance = (params.options.mcpServers?.["pablo"] as { instance: McpServer }).instance;
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await instance.connect(serverSide);
-    const client = new Client({ name: "fake-sdk", version: "0.0.0" });
-    await client.connect(clientSide);
-    const called = await client.callTool({
-      name: "ask_author",
-      arguments: { question: q.question, options: [...q.options], why: q.why },
-    });
-    await client.close();
-    seen.answer = (JSON.parse((called.content as { text: string }[])[0]!.text) as { answer: string }).answer;
-    yield { type: "result", subtype: "success", is_error: false, result: "done", num_turns: 1, duration_ms: 1, total_cost_usd: 0 } as unknown as SDKMessage;
-  };
+/** A model that asks one question, then answers; what the tool returned is the second request's last message. */
+function askingModel(args: Record<string, unknown> = { question: q.question, options: [...q.options], why: q.why }): ScriptedChatAdapter {
+  return createScriptedChatAdapter({
+    turns: [[{ type: "tool_call", call: { id: "a1", name: "ask_author", arguments: args } }], [{ type: "text", text: "done" }]],
+  });
 }
+
+const toolResult = (model: ScriptedChatAdapter): string => {
+  const last = model.requests[1]!.messages.at(-1)!;
+  return last.content;
+};
 
 function io(stdin?: AsyncIterable<string>): { ctx: AgentContext; out: () => string; err: () => string } {
   let out = "";
@@ -136,39 +126,28 @@ function io(stdin?: AsyncIterable<string>): { ctx: AgentContext; out: () => stri
 }
 
 test("pablo agent prints the card and resumes with the stdin answer", async () => {
-  const seen: { answer?: string } = {};
+  const model = askingModel();
   const run = io(chunks("1\n"));
-  const code = await runAgent({ project: "ice-house", message: "Go", json: false }, run.ctx, { query: askingQuery(seen), readConfig: noConfig });
+  const code = await runAgent({ project: "ice-house", message: "Go", json: false }, run.ctx, { provider: adapterProvider(model), readConfig: noConfig });
   expect(code).toBe(0);
-  expect(seen.answer).toBe("She stays");
+  expect(JSON.parse(toolResult(model))).toMatchObject({ answer: "She stays" });
   expect(run.out()).toContain("? Does Cora leave?");
   expect(run.out()).toContain("  why: A character's fate.");
 });
 
 test("with --json the card goes to stderr and stdout stays one object", async () => {
-  const seen: { answer?: string } = {};
+  const model = askingModel();
   const run = io(chunks("She leaves\n"));
-  const code = await runAgent({ project: "ice-house", message: "Go", json: true }, run.ctx, { query: askingQuery(seen), readConfig: noConfig });
+  const code = await runAgent({ project: "ice-house", message: "Go", json: true }, run.ctx, { provider: adapterProvider(model), readConfig: noConfig });
   expect(code).toBe(0);
-  expect(seen.answer).toBe("She leaves");
+  expect(JSON.parse(toolResult(model))).toMatchObject({ answer: "She leaves" });
   expect(run.err()).toContain("? Does Cora leave?");
   expect(() => JSON.parse(run.out())).not.toThrow();
 });
 
 test("empty stdin: the tool refuses and the session carries on", async () => {
-  const seen: { answer?: string } = {};
-  const query: HarnessQuery = async function* (params) {
-    const instance = (params.options.mcpServers?.["pablo"] as { instance: McpServer }).instance;
-    const [c, s] = InMemoryTransport.createLinkedPair();
-    await instance.connect(s);
-    const client = new Client({ name: "fake-sdk", version: "0.0.0" });
-    await client.connect(c);
-    const called = await client.callTool({ name: "ask_author", arguments: { question: "Q?", why: "w" } });
-    await client.close();
-    seen.answer = (called.content as { text: string }[])[0]!.text;
-    yield { type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, duration_ms: 1, total_cost_usd: 0 } as unknown as SDKMessage;
-  };
+  const model = askingModel({ question: "Q?", why: "w" });
   const run = io(chunks());
-  expect(await runAgent({ project: "ice-house", message: "Go", json: false }, run.ctx, { query, readConfig: noConfig })).toBe(0);
-  expect(seen.answer).toContain("stdin closed");
+  expect(await runAgent({ project: "ice-house", message: "Go", json: false }, run.ctx, { provider: adapterProvider(model), readConfig: noConfig })).toBe(0);
+  expect(toolResult(model)).toContain("stdin closed");
 });

@@ -67,14 +67,13 @@ import type { OutputDefinition } from "./outputs/types";
 import { startPlanSession } from "./plan";
 import { findVault, resolveProject } from "./project";
 import type { AskAuthor } from "./harness/ask-author";
-import { harnessAuth } from "./harness/auth";
-import type { HarnessAuth } from "./harness/auth";
+import { AGENT_INTENT, harnessProvider, LOCAL_FALLBACK_NOTICE } from "./harness/provider";
+import type { HarnessProvider } from "./harness/provider";
 import { planTools } from "./harness/plan-tools";
 import { loadPromptWork } from "./harness/prompt";
-import { runHarness, sdkQuery } from "./harness/session";
+import { loopQuery, runHarness } from "./harness/session";
 import type { HarnessQuery } from "./harness/session";
 import { harnessTools } from "./harness/tools";
-import { transcriptEntries } from "./harness/transcript";
 import { explicitTrack, inferTrack } from "./tracks/infer";
 import type { TrackChoice } from "./tracks/infer";
 import { isTrackId, trackIds } from "./tracks/registry";
@@ -175,14 +174,14 @@ export interface StoryArgs {
 
 /** What a test injects so no model runs: the harness, the writer, the extractor, the author. */
 export interface StoryDeps {
-  /** The harness session (the Agent SDK's `query`); a fake in tests. */
+  /** The harness session (pablo's agent loop); a fake in tests that do not drive the loop. */
   readonly query?: HarnessQuery;
   /** The writer units are drafted with; absent, the routed drafting provider (`write`). */
   readonly writer?: Adapter;
   /** The continuity extractor the merge rituals run; absent, the routed extraction provider. */
   readonly extractor?: Adapter;
-  /** The harness's credentials; absent, read from pablo's config the way `pablo agent` does. */
-  readonly auth?: HarnessAuth;
+  /** The provider the harness runs on; absent, the config's `agent` intent decides, as for `pablo agent`. Tests pass a scripted adapter. */
+  readonly agent?: HarnessProvider;
   readonly keys?: Partial<KeyLookup>;
   readonly readConfig?: LoadConfigOptions["readFile"];
   /** `--review`'s `ask_author`: the front end's question card. Absent, review runs answer by assumption too. */
@@ -374,7 +373,7 @@ function freeSlug(vault: string, title: string): string {
 
 const STAGE_TEXT: Readonly<Record<StoryCoreStage, string>> = {
   research:
-    "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice) and keep each finding with save_research, with its sources. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
+    "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice). You have no web access: work from the work's saved notes and what you know with confidence, and keep each finding with save_research, citing only sources you can name exactly (author and title); never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
   premise:
     'Stage 2 of 5, premise. Read the research notes (read, search) and propose the premise with propose (stage "premise"): bible/overview.md with ## Title (the work\'s own short title, two to six words, about the story and not the request), ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure.',
   bible:
@@ -428,6 +427,8 @@ interface Run {
   readonly state: StoryState;
   readonly ctx: VerbContext;
   readonly deps: StoryDeps;
+  /** The agent provider, resolved once per run (`agentProviderFor`). */
+  agent?: HarnessProvider;
 }
 
 function waiting(run: Run, step: string, branch: string): VerbResult {
@@ -488,11 +489,14 @@ function retitleFromPremise(run: Run): void {
   run.title = title;
 }
 
-function harnessAuthFor(run: Run): HarnessAuth | VerbResult {
-  if (run.deps.auth !== undefined) return run.deps.auth;
+function agentProviderFor(run: Run): HarnessProvider | VerbResult {
+  if (run.deps.agent !== undefined) return run.deps.agent;
+  if (run.agent !== undefined) return run.agent;
   try {
     const config = loadConfig({ env: run.ctx.env, readFile: run.deps.readConfig, projectDir: run.work });
-    return harnessAuth(config, run.ctx.env, run.deps.keys ?? { env: run.ctx.env });
+    run.agent = harnessProvider(config, { keys: run.deps.keys ?? { env: run.ctx.env } });
+    if (run.agent.local && !config.intents.has(AGENT_INTENT.name)) run.ctx.stderr.write(`${LOCAL_FALLBACK_NOTICE(run.agent.adapter.id)}\n`);
+    return run.agent;
   } catch (error) {
     return fail((error as Error).message);
   }
@@ -504,23 +508,22 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
   if (!marker.ok) return { ok: false, result: refuse(marker.message) };
   const prompt = loadPromptWork(run.work, marker.marker, run.slug);
   if (!prompt.ok) return { ok: false, result: refuse(prompt.message) };
-  const auth = harnessAuthFor(run);
-  if ("body" in auth) return { ok: false, result: auth };
+  const provider = agentProviderFor(run);
+  if ("body" in provider) return { ok: false, result: provider };
 
   const session = startPlanSession(run.vault, run.slug, { env: run.ctx.env });
   const ask = run.state.review && run.deps.ask !== undefined ? run.deps.ask : assumingAsk(stage, run.state.assumptions);
   const spec = {
     work: prompt.work,
-    projectPath: run.work,
-    auth,
+    provider,
     ctx: { ...run.ctx, caller: "mcp" as const },
     tools: harnessTools(ask),
     sessionTools: planTools(session, run.work),
   };
   let finished: { ok: boolean; text: string; errors: readonly string[] } | undefined;
   try {
-    for await (const message of runHarness(stageMessage(stage, run.state, run.title, run.slug), spec, run.deps.query ?? sdkQuery)) {
-      for (const entry of transcriptEntries(message)) if (entry.kind === "result") finished = entry;
+    for await (const entry of runHarness(stageMessage(stage, run.state, run.title, run.slug), spec, run.deps.query ?? loopQuery)) {
+      if (entry.kind === "result") finished = entry;
     }
   } catch (error) {
     return { ok: false, result: fail(`pablo: story: the harness failed in the ${stage} stage (${(error as Error).message})`, { stage }) };

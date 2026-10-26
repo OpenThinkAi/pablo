@@ -108,15 +108,16 @@ packages/tui    @openthink/pablo-tui — the Ink 7 / React 19 screen, a third
                 that. `packages/tui/README.md` says how to add a mode or action.
 packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 dispatch, `--project` resolution, `pablo mcp`, and the
-                harness (`src/harness/`, `pablo agent`, AGT-1552): the
-                Claude Agent SDK configured as pablo (`--doc harness`) —
-                pablo's system prompt in place of Claude Code's (role, the
+                harness (`src/harness/`, `pablo agent`, AGT-1552): pablo's
+                own agent loop configured as pablo (`--doc harness`;
+                `session.ts`'s `loopSpec`) — pablo's system prompt (role, the
                 judgement policy `pablo.json`'s `policy` names from
                 `packages/cli/policies/`, and the work's `STYLE.md` minus
-                `<!-- writer-only -->` sections; AGT-1553), WebSearch
-                and WebFetch the only built-ins, pablo's MCP tools attached
-                in-process, the subscription by default with a config key
-                overriding. A tool added to `VERBS` reaches both `pablo mcp`
+                `<!-- writer-only -->` sections; AGT-1553), pablo's MCP tools
+                by their plain names and nothing else, on the provider the
+                config's `agent` intent routes to (`provider.ts`, AGT-2121:
+                its key resolves like any provider's; the Claude login is not
+                used). A tool added to `VERBS` reaches both `pablo mcp`
                 and the harness. `pablo agent --tag-facts` (AGT-1570) is the one-time
                 catch-up: it tags every untagged bible and continuity fact on a
                 `plan/` branch through `record-fact.ts`'s writer, never a chapter.
@@ -124,11 +125,16 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 front end, so a session gets it only when its spec carries an
                 `AskAuthor` (`pablo agent` reads answers from stdin; the compose
                 view shows a question card). Tests
-                inject a fake `HarnessQuery`; nothing
-                in `bun test` starts Claude. The screen's compose view
+                inject a fake `HarnessQuery`, or keep the real loop and pass a
+                scripted provider (`test/scripted-agent.ts`); nothing in `bun
+                test` reaches a model. The screen's compose view
                 (`a c`, AGT-1566) talks to the harness through a `Composer`
-                seam the cli passes to `runScreen` (`harness/compose.ts`, a
-                streaming-prompt session); the tui never imports the SDK.
+                seam the cli passes to `runScreen` (`harness/compose.ts`: one
+                loop run per message, each given the previous run's returned
+                history); the tui knows nothing of providers. Saved sessions
+                (`sessions.ts`) are still the Agent SDK's format and unused
+                until neutral JSONL lands (AGT-2122): each `pablo agent` run
+                is a fresh conversation.
                 `harness/loop.ts` (AGT-2120, D-12) is pablo's own agent loop
                 on any provider's `chat()`: model -> tool calls -> results ->
                 model to a final answer or the turn cap, emitting the same
@@ -136,10 +142,14 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 it is handed (no built-ins, nothing that writes prose into the
                 book), checks every call's name and arguments
                 (`tool-schema.ts`) before `run()`, re-prompts once with a text
-                protocol when a required call did not come, and prices the
-                turns with core's `costUsd`. `runHarness` and the composer
-                move onto it in AGT-2121; tests drive it with the scripted
-                fake adapter.
+                protocol when a required call did not come (on a provider
+                with `forcedToolChoice: false`, Anthropic, it sends `auto` and
+                asks in the system prompt: the newest Claude models refuse a
+                forced choice with HTTP 400), and prices the turns with
+                core's `costUsd`, naming an unpriced model in the result
+                rather than reading it as free. `runHarness` and the
+                composer run on it (AGT-2121); tests drive it with the
+                scripted fake adapter.
                 The reader's window (`pablo read <round>`, AGT-1586): a ui-leaf
                 view, `packages/cli/views/reader.tsx`, mounted by
                 `src/reader-host.ts`. The view is dumb: it renders what the
@@ -251,7 +261,8 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 written; an unrequested type's `ensure()` is never called.
                 Merges find a draft branch's output by `outputForBranch`, so
                 `draft/story` merges on a work that also has a novel. Tests
-                use a fake `HarnessQuery` that calls pablo's own tools.
+                run the real loop on a scripted model that calls pablo's own
+                tools (`StoryDeps.agent`, `test/scripted-agent.ts`).
                 `--output radio` (AGT-1700) runs the radio chain after the
                 core through `src/radio-chain.ts` (imported only when radio
                 is asked for): on demand, `runProgressive` writes and

@@ -1,72 +1,36 @@
 /**
  * The compose view's session (AGT-1566): one long-lived harness conversation behind the screen's `Composer` seam
- * (packages/tui/src/compose.ts). The tui does not depend on the Agent SDK; the cli builds this and passes it to
- * `runScreen`, the way it passes the project.
+ * (packages/tui/src/compose.ts). The tui knows nothing about providers or the loop; the cli builds this and passes it
+ * to `runScreen`, the way it passes the project.
  *
- * A conversation is one SDK query fed by an async-iterable prompt (streaming input): each message the author sends
- * is pushed into it, and the session keeps its context between turns without persisting anything to disk
- * (`persistSession: false`, as `harnessOptions` sets). `send` yields the events of one turn and ends at its result.
- * The session runs in this process, so leaving the compose view loses nothing; `close` ends it with the screen.
+ * A conversation is pablo's agent loop (AGT-2121) run once per message, each run given the conversation the previous
+ * one returned, so the session keeps its context between turns without persisting anything to disk. `send` yields
+ * the events of one turn and ends at its result. The session runs in this process, so leaving the compose view loses
+ * nothing; `close` ends it with the screen.
  *
- * `ComposeQuery` is `HarnessQuery`'s streaming sibling and the fake seam for the same reason: every test passes a
- * fake, and nothing in `bun test` starts Claude. Saved sessions (AGT-1565) hook in at `session` events (the id) and
- * at the query's `options` (resume).
+ * The seam is `HarnessQuery`, the same as `pablo agent`'s: a test passes a fake query or a scripted provider, and
+ * nothing in `bun test` reaches a model.
  */
 
-import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { randomUUID } from "node:crypto";
+import type { ChatMessage } from "@openthink/pablo-core";
 import type { Composer, ComposeEvent } from "@openthink/pablo-tui";
 import type { AskAuthor } from "./ask-author";
-import { harnessOptions } from "./session";
-import type { HarnessSpec } from "./session";
-import { displayToolName, transcriptEntries } from "./transcript";
+import { providerHint } from "./provider";
+import type { HarnessProvider } from "./provider";
+import { loopQuery, runHarness } from "./session";
+import type { HarnessQuery, HarnessSpec } from "./session";
+import type { TranscriptEntry } from "./transcript";
 
-/** The SDK's `query` with a streaming prompt; a test fake implements this. */
-export type ComposeQuery = (params: { readonly prompt: AsyncIterable<SDKUserMessage>; readonly options: Options }) => AsyncIterable<SDKMessage>;
-
-/** The real session: the Agent SDK's `query`, imported lazily like `sdkQuery`. */
-export const sdkStreamQuery: ComposeQuery = async function* (params) {
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  yield* query({ prompt: params.prompt, options: params.options });
-};
-
-/** A queue the session reads as its prompt: `push` a message, `close` to end the session. */
-function channel<T>(): { push(value: T): void; close(): void; iterable: AsyncIterable<T> } {
-  const queue: T[] = [];
-  let closed = false;
-  let wake: (() => void) | undefined;
-  return {
-    push(value) { queue.push(value); wake?.(); },
-    close() { closed = true; wake?.(); },
-    iterable: {
-      async *[Symbol.asyncIterator]() {
-        for (;;) {
-          const next = queue.shift();
-          if (next !== undefined) { yield next; continue; }
-          if (closed) return;
-          await new Promise<void>((resolve) => { wake = resolve; });
-          wake = undefined;
-        }
-      },
-    },
-  };
-}
-
-const userMessage = (text: string): SDKUserMessage => ({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null });
-
-/** One SDK message as the screen's events: the transcript's entries, plus the session's id. */
-export function composeEvents(message: SDKMessage): ComposeEvent[] {
-  const events: ComposeEvent[] = [];
-  if (message.type === "system" && message.subtype === "init") events.push({ kind: "session", id: message.session_id });
-  for (const entry of transcriptEntries(message)) {
-    switch (entry.kind) {
-      case "session": break;
-      case "assistant": events.push(entry); break;
-      case "tool_call": events.push({ ...entry, tool: displayToolName(entry.tool) }); break;
-      case "tool_result": events.push(entry); break;
-      case "result": events.push({ kind: "result", ok: entry.ok, errors: entry.errors }); break;
-    }
+/** One transcript entry as the screen's event; the loop's own `session` entry is not one (the composer sends its id). */
+export function composeEvent(entry: TranscriptEntry): ComposeEvent | undefined {
+  switch (entry.kind) {
+    case "session": return undefined;
+    case "assistant": return entry;
+    case "tool_call": return entry;
+    case "tool_result": return entry;
+    case "result": return { kind: "result", ok: entry.ok, errors: entry.errors };
   }
-  return events;
 }
 
 /**
@@ -75,11 +39,13 @@ export function composeEvents(message: SDKMessage): ComposeEvent[] {
  * model asks reaches the screen as a `question` event in the turn's stream, and `answer` resolves it (a number picks
  * an option, as in `pablo agent`).
  */
-export function createComposer(spec: HarnessSpec | (() => HarnessSpec), query: ComposeQuery = sdkStreamQuery): Composer {
-  let inbox: ReturnType<typeof channel<SDKUserMessage>> | undefined;
-  let stream: AsyncIterator<SDKMessage> | undefined;
-  let route: HarnessSpec["auth"]["route"] = "subscription";
-  // Events that do not come from the SDK's stream (question cards), and the questions waiting for an answer.
+export function createComposer(spec: HarnessSpec | (() => HarnessSpec), query: HarnessQuery = loopQuery): Composer {
+  // The conversation so far; undefined until the first message starts one.
+  let conversation: { readonly spec: HarnessSpec; history: readonly ChatMessage[] } | undefined;
+  // The turn in flight, kept only so `close` can stop it.
+  let stream: AsyncGenerator<TranscriptEntry, readonly ChatMessage[] | void, undefined> | undefined;
+  let provider: HarnessProvider | undefined;
+  // Events that do not come from the loop's stream (question cards), and the questions waiting for an answer.
   const side: ComposeEvent[] = [];
   let wakeSide: (() => void) | undefined;
   const asked = new Map<string, { options: readonly string[]; resolve: (answer: string) => void; reject: (error: Error) => void }>();
@@ -94,9 +60,8 @@ export function createComposer(spec: HarnessSpec | (() => HarnessSpec), query: C
     });
 
   const reset = () => {
-    inbox?.close();
-    void stream?.return?.();
-    inbox = undefined;
+    void stream?.return(undefined);
+    conversation = undefined;
     stream = undefined;
     for (const waiting of asked.values()) waiting.reject(new Error("the session ended"));
     asked.clear();
@@ -105,30 +70,36 @@ export function createComposer(spec: HarnessSpec | (() => HarnessSpec), query: C
 
   async function* send(message: string): AsyncGenerator<ComposeEvent> {
     try {
-      if (!stream || !inbox) {
+      if (!conversation) {
         const resolved = typeof spec === "function" ? spec() : spec;
-        route = resolved.auth.route;
-        inbox = channel<SDKUserMessage>();
-        stream = query({ prompt: inbox.iterable, options: harnessOptions({ ...resolved, ask }) })[Symbol.asyncIterator]();
+        provider = resolved.provider;
+        conversation = { spec: { ...resolved, ask }, history: [] };
+        yield { kind: "session", id: randomUUID() };
       }
-      inbox.push(userMessage(message));
-      let next = stream.next();
+      const current = conversation;
+      const turn = runHarness(message, current.spec, query, current.history);
+      stream = turn;
+      let next = turn.next();
       for (;;) {
         while (side.length > 0) yield side.shift()!;
-        // The next SDK message, or a question card the model's tool raised while the stream waits on its answer.
+        // The loop's next entry, or a question card the model's tool raised while the loop waits on its answer.
         const woke = new Promise<"side">((resolve) => { wakeSide = () => resolve("side"); });
         const got = await Promise.race([next.then((value) => ({ value })), woke]);
         if (got === "side") continue;
         const result = got.value;
-        if (result.done) { reset(); return; }
-        yield* composeEvents(result.value);
-        if (result.value.type === "result") return;
-        next = stream.next();
+        if (result.done) {
+          stream = undefined;
+          if (result.value) current.history = result.value;
+          return;
+        }
+        const event = composeEvent(result.value);
+        if (event !== undefined) yield event;
+        next = turn.next();
       }
     } catch (error) {
+      const hint = provider === undefined ? "" : ` ${providerHint(provider)}`;
       reset(); // the next message starts a fresh session
-      const hint = route === "subscription" ? "Run `claude` once to log in, or put an Anthropic key in pablo's config." : "Check the Anthropic key in pablo's config.";
-      throw new Error(`pablo's session failed (${(error as Error).message}). ${hint}`);
+      throw new Error(`pablo's session failed (${(error as Error).message}).${hint}`);
     }
   }
 

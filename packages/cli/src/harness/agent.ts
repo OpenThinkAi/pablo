@@ -3,20 +3,22 @@
  * headless, its transcript printed as it arrives.
  *
  * CLI-only, never an MCP tool: the agent is what calls pablo's tools, not one
- * of them. With `--json` the transcript is one JSON object at the end
- * (`{ok, route, entries, result}`) instead of lines as they happen.
+ * of them. The session is pablo's own agent loop (AGT-2121) on the provider
+ * the config's `agent` intent routes to (`provider.ts`). With `--json` the
+ * transcript is one JSON object at the end (`{ok, provider, entries, result}`)
+ * instead of lines as they happen.
  *
  * `ask_author` (AGT-1560) is answered from stdin: the question card is printed
  * and one line is read back (a number picks an option).
  *
- * The conversation is saved per work under `.pablo/sessions/` and resumed on the
- * next run (`sessions.ts`); `--new` starts a fresh session and leaves the old one
- * on disk (AGT-1565).
+ * The conversation lasts one run. Saved sessions (AGT-1565) were the Agent
+ * SDK's format; they come back as neutral JSONL (AGT-2122), and until then
+ * `--new` is accepted and changes nothing.
  *
  * Exit codes follow the CLI's contract: 0 when the session ends in a success
  * result, 2 for a refusal (no project, no marker, no message, a policy pablo
  * does not ship), 1 for anything else (an error result, no result at all, or
- * the SDK failing to start).
+ * the provider failing outside the loop).
  */
 
 import { loadConfig } from "@openthink/pablo-core";
@@ -26,16 +28,15 @@ import { findVault, resolveProject } from "../project";
 import type { ProgressSink, VerbContext } from "../verbs";
 import { startPlanSession } from "../plan";
 import { lineReader, stdinAskAuthor } from "./ask-author";
-import { harnessAuth } from "./auth";
 import { planTools } from "./plan-tools";
-import type { HarnessAuth } from "./auth";
 import { loadPromptWork } from "./prompt";
-import { chooseSession } from "./sessions";
-import { runHarness, sdkQuery } from "./session";
+import { AGENT_INTENT, harnessProvider, LOCAL_FALLBACK_NOTICE, providerHint } from "./provider";
+import type { HarnessProvider } from "./provider";
+import { loopQuery, runHarness } from "./session";
 import { runTagFacts } from "./tag-facts";
 import type { TagFactsDeps } from "./tag-facts";
 import type { HarnessQuery } from "./session";
-import { formatEntry, transcriptEntries } from "./transcript";
+import { formatEntry } from "./transcript";
 import type { TranscriptEntry } from "./transcript";
 
 export interface AgentArgs {
@@ -44,7 +45,7 @@ export interface AgentArgs {
   readonly json: boolean;
   /** AGT-1570: tag every untagged fact on a plan branch instead of running a session. */
   readonly tagFacts?: boolean;
-  /** `--new` (AGT-1565): start a fresh session instead of resuming the work's current one. */
+  /** `--new` (AGT-1565): accepted; every run is a fresh conversation until saved sessions return (AGT-2122). */
   readonly new?: boolean;
 }
 
@@ -57,9 +58,11 @@ export interface AgentContext {
   readonly stdin?: AsyncIterable<string | Uint8Array>;
 }
 
-/** Injected in tests: a fake session, and no real Keychain or config file. */
+/** Injected in tests: a fake session or a scripted provider, and no real Keychain or config file. */
 export interface AgentDeps {
   readonly query?: HarnessQuery;
+  /** The provider the session runs on; absent, the config's `agent` intent decides. */
+  readonly provider?: HarnessProvider;
   readonly keys?: Partial<KeyLookup>;
   readonly readConfig?: LoadConfigOptions["readFile"];
   /** `--tag-facts` (AGT-1570): a fake classifier, no real planner call. */
@@ -89,23 +92,26 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
   const work = loadPromptWork(project.path, marker.marker, args.project);
   if (!work.ok) return refuse(ctx, args.json, work.code, work.message, work.tried);
 
-  let auth: HarnessAuth;
+  let provider: HarnessProvider;
   try {
-    const config = loadConfig({ env: ctx.env, readFile: deps.readConfig, projectDir: project.path });
-    auth = harnessAuth(config, ctx.env, deps.keys ?? { env: ctx.env });
+    if (deps.provider !== undefined) provider = deps.provider;
+    else {
+      const config = loadConfig({ env: ctx.env, readFile: deps.readConfig, projectDir: project.path });
+      provider = harnessProvider(config, { keys: deps.keys ?? { env: ctx.env } });
+      // Before the loop, the agent ran on the Claude login; say so when it now lands on a local model unasked.
+      if (provider.local && !config.intents.has(AGENT_INTENT.name)) ctx.stderr.write(`${LOCAL_FALLBACK_NOTICE(provider.adapter.id)}\n`);
+    }
   } catch (error) {
     return refuse(ctx, args.json, 1, (error as Error).message);
   }
+  if (args.new === true) ctx.stderr.write("pablo: --new: every run is a fresh conversation for now; nothing is saved between runs\n");
 
   // pablo's tools run in this process; their progress goes to stderr, never
   // into the transcript on stdout.
   const verbCtx: VerbContext = { cwd: ctx.cwd, env: ctx.env, stderr: ctx.stderr, caller: "mcp" };
-  const session = chooseSession(project.path, { fresh: args.new === true });
   const spec = {
-    session,
     work: work.work,
-    projectPath: project.path,
-    auth,
+    provider,
     ctx: verbCtx,
     // The card goes where the transcript goes; with --json stdout is one object, so it goes to stderr.
     ...(ctx.stdin === undefined ? {} : { ask: stdinAskAuthor(lineReader(ctx.stdin), args.json ? ctx.stderr : ctx.stdout) }),
@@ -115,26 +121,21 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
 
   const entries: TranscriptEntry[] = [];
   let result: Extract<TranscriptEntry, { kind: "result" }> | undefined;
-  ctx.stderr.write(`pablo: ${session.resume ? "resuming" : "starting"} session ${session.id}\n`);
+  ctx.stderr.write(`pablo: starting a session on ${provider.adapter.id} (${provider.adapter.model})\n`);
   if (!args.json) ctx.stdout.write(`› ${args.message}\n`);
   try {
-    for await (const message of runHarness(args.message, spec, deps.query ?? sdkQuery)) {
-      for (const entry of transcriptEntries(message)) {
-        entries.push(entry);
-        if (entry.kind === "result") result = entry;
-        if (!args.json) ctx.stdout.write(`${formatEntry(entry)}\n`);
-      }
+    for await (const entry of runHarness(args.message, spec, deps.query ?? loopQuery)) {
+      entries.push(entry);
+      if (entry.kind === "result") result = entry;
+      if (!args.json) ctx.stdout.write(`${formatEntry(entry)}\n`);
     }
   } catch (error) {
-    const hint =
-      auth.route === "subscription"
-        ? "Run `claude` once to log in, or put an Anthropic key in pablo's config."
-        : "Check the Anthropic key in pablo's config.";
-    return refuse(ctx, args.json, 1, `pablo: the harness session failed (${(error as Error).message}). ${hint}`);
+    return refuse(ctx, args.json, 1, `pablo: the agent session failed (${(error as Error).message}). ${providerHint(provider)}`);
   }
 
   const ok = result?.ok === true;
-  if (args.json) ctx.stdout.write(`${JSON.stringify({ ok, route: auth.route, session: { id: session.id, resumed: session.resume }, entries, result: result ?? null })}\n`);
+  const used = { id: provider.adapter.id, model: provider.adapter.model, credential: provider.credential };
+  if (args.json) ctx.stdout.write(`${JSON.stringify({ ok, provider: used, entries, result: result ?? null })}\n`);
   else if (result === undefined) ctx.stderr.write("pablo: the session ended without a result\n");
   return ok ? 0 : 1;
 }

@@ -6,11 +6,11 @@ import { fileURLToPath } from "node:url";
 import { afterAll, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { defaultConfig } from "@openthink/pablo-core";
+import { createScriptedChatAdapter } from "@openthink/pablo-core";
 import { planTools } from "../src/harness/plan-tools";
-import { harnessAuth } from "../src/harness/auth";
-import { harnessOptions } from "../src/harness/session";
+import { adapterProvider } from "../src/harness/provider";
+import { loopSpec } from "../src/harness/session";
+import { buildMcpServer } from "../src/mcp";
 import { startPlanSession } from "../src/plan";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
@@ -30,27 +30,28 @@ const work = join(repo, "novels", "ice-house");
 
 async function connect(id = "cd34") {
   const session = startPlanSession(repo, "ice-house", { env, date: "2026-10-01", id });
-  const options = harnessOptions({
+  const ctx = { cwd: repo, env, stderr: { write: () => {} }, caller: "mcp" as const };
+  const spec = loopSpec({
     work: { title: "The Ice House", format: "novel", slug: "ice-house" },
-    projectPath: work,
-    auth: harnessAuth(defaultConfig(), env, { env: {} }),
-    ctx: { cwd: repo, env, stderr: { write: () => {} }, caller: "mcp" },
+    provider: adapterProvider(createScriptedChatAdapter({ turns: [] })),
+    ctx,
     sessionTools: planTools(session, work),
   });
-  const instance = (options.mcpServers?.["pablo"] as { instance: McpServer }).instance;
+  const offered = spec.tools.map((tool) => tool.name);
+  const instance = buildMcpServer(ctx, spec.tools);
   const [c, s] = InMemoryTransport.createLinkedPair();
   await instance.connect(s);
   const client = new Client({ name: "t", version: "0" });
   await client.connect(c);
-  return { session, options, client };
+  return { session, offered, client };
 }
 
 const textOf = (r: unknown) => JSON.parse(((r as { content: { text: string }[] }).content[0]!).text);
 
-test("propose is on the allowed list and callable; it lands on the session's plan branch", async () => {
-  const { session, options, client } = await connect();
+test("propose is among the session's tools and callable; it lands on the session's plan branch", async () => {
+  const { session, offered, client } = await connect();
   try {
-    expect(options.allowedTools).toContain("mcp__pablo__propose");
+    expect(offered).toContain("propose");
     const r = await client.callTool({ name: "propose", arguments: { stage: "premise", content: "A logline." } });
     expect(textOf(r)).toMatchObject({ ok: true, stage: "premise", branch: "plan/2026-10-01-cd34" });
     expect(readFileSync(join(session.worktree as string, "novels/ice-house/bible/overview.md"), "utf8")).toBe("A logline.\n");
@@ -73,9 +74,9 @@ test("an unknown stage is refused over the tool with the valid stages", async ()
 });
 
 test("record_fact shares the session's plan branch with propose; a researched fact needs a source", async () => {
-  const { session, options, client } = await connect("ef56");
+  const { session, offered, client } = await connect("ef56");
   try {
-    expect(options.allowedTools).toContain("mcp__pablo__record_fact");
+    expect(offered).toContain("record_fact");
     const bad = textOf(await client.callTool({ name: "record_fact", arguments: { fact: "Ice cost a cent.", where: "continuity", kind: "researched" } }));
     expect(bad.ok).toBe(false);
     await client.callTool({ name: "propose", arguments: { stage: "premise", content: "A logline." } });

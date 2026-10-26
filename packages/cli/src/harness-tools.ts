@@ -4,8 +4,8 @@
  * and no general file tool, so these two are how it finds what the work has
  * already established.
  *
- * Pure and SDK-independent: input in, result out, no process globals. The
- * Agent SDK registration (AGT-1552) and `verbs.ts` both wrap them.
+ * Pure: input in, result out, no process globals. `verbs.ts` wraps them,
+ * which is how both `pablo mcp` and the harness's agent loop reach them.
  *
  * Both are bounded to the work directory twice over. A path must resolve
  * (symlinks followed) inside the work, and then inside one of the readable
