@@ -220,7 +220,7 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   }
 
   // An output maps its units onto the core's beats: the core must be at beats first.
-  const core = readCoreState(workDir);
+  const core = readCoreState(workDir, trackOf(found.marker));
   const short = coreNext(core);
   if (short !== undefined) {
     const missing = coreStages(core)

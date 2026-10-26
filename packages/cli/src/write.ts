@@ -31,7 +31,8 @@ import type { Adapter, CompletionStats, Intent } from "@openthink/pablo-core";
 import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./branch";
 import { checkFile, loadCheckRules } from "./check";
 import type { Hit } from "./check";
-import { readMarker } from "./marker";
+import { readMarker, trackOf } from "./marker";
+import { readCoreState, trackGate } from "./core/machine";
 import { novelUnitFileName, slugify } from "./outputs/novel/units";
 import { resolveOutput } from "./outputs/registry";
 
@@ -317,6 +318,14 @@ export async function runWrite(
   if (!markerResult.ok) {
     emitError(markerResult.message, undefined, markerResult.code, args.json);
     return markerResult.code;
+  }
+
+  // The work's track gates drafting first (AGT-2100, D-5): a historical work with no period brief,
+  // no sourced research or no period facts is refused, naming the track and the short stage.
+  const gate = trackGate(readCoreState(projectPath, trackOf(markerResult.marker)));
+  if (gate !== undefined) {
+    emitError(`pablo: ${gate.message}`, gate.missing, 2, args.json);
+    return 2;
   }
 
   // The addressed output owns the preconditions, the pack, the file's place and the branch.
