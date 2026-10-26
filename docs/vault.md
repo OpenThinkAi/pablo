@@ -100,7 +100,7 @@ before writing, and commits only that file.
 | `neverSend` | no | `["research/", "notes/"]` | Paths that must never reach a model. A prompt that would include one is refused, not silently trimmed |
 | `publish` | no | `{}` | Per-target publish settings |
 | `track` | no | `"fiction"` | The kind of work: `fiction`, `historical-fiction` or `nonfiction`. Any other value is refused, naming the allowed ones. `status` and `resume` report it |
-| `policy` | no | a short default | The judgement policy for `pablo agent` (see below) |
+| `policy` | no | the track's policy | The judgement policy for `pablo agent` (see below) |
 | `providers`, `intents` | no | the global config's | This work's model routing, merged over `~/.config/pablo/config.json` (see [configuration.md](configuration.md#per-work-providers-and-intents)) |
 | `format` | old | | `"format": "novel"` is the pre-outputs form. It still works; `pablo migrate outputs` converts the work |
 
@@ -126,11 +126,13 @@ the voice exactly as a model sees it.
 
 ## Policies
 
-`"policy": "historical-fiction"` gives `pablo agent` a judgement policy: what to
-research, what to invent, when to ask you and when to proceed. It is the only one
-shipped ([`packages/cli/policies/historical-fiction.md`](../packages/cli/policies/historical-fiction.md)).
-Without one, the agent follows a short default: ask you about plot, motive and open
-`[pick]`s; proceed with stated assumptions on everything else.
+The work's `track` picks its judgement policy automatically: `fiction` loads
+[`fiction.md`](../packages/cli/policies/fiction.md), `historical-fiction` loads
+[`historical-fiction.md`](../packages/cli/policies/historical-fiction.md) and `nonfiction` loads
+[`nonfiction.md`](../packages/cli/policies/nonfiction.md); a work with no `track` reads as `fiction`.
+`pablo agent`, `pablo story` and the screen all use it. The policy says what to research, what to
+invent, when to ask you and when to proceed. `"policy": "<name>"` in `pablo.json` overrides the
+track's choice with any shipped policy.
 
 ## Branches
 

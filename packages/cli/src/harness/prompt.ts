@@ -23,8 +23,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { outputsLabel, type Marker } from "../marker";
+import { outputsLabel, trackOf, type Marker } from "../marker";
 import type { Refusal } from "../project";
+import { TRACKS } from "../tracks/registry";
 
 /** The judgement policy, by name, as loaded from `policies/`. */
 export interface PromptPolicy {
@@ -98,8 +99,8 @@ export function harnessSystemPrompt(work: PromptWork): string {
 }
 
 /**
- * Reads what the prompt needs for one work: the policy its marker names (or
- * none, for the default) and its `QWEN.md` (or none). A policy name pablo does
+ * Reads what the prompt needs for one work: the policy its marker names, else
+ * the one its track selects (`TRACKS`), else (a policies dir without it) the default and its `QWEN.md` (or none). A policy name pablo does
  * not ship is a refusal naming the ones it does.
  */
 export function loadPromptWork(
@@ -108,18 +109,19 @@ export function loadPromptWork(
   slug: string,
   policiesDir: string = POLICIES_DIR,
 ): { ok: true; work: PromptWork } | Refusal {
+  // An explicit `policy` wins; else the work's track picks one (AGT-2102, D-6).
+  const policyName = marker.policy ?? TRACKS[trackOf(marker)].policy;
   let policy: PromptPolicy | undefined;
-  if (marker.policy !== undefined) {
-    const path = join(policiesDir, `${marker.policy}.md`);
-    if (!existsSync(path)) {
-      return {
-        ok: false,
-        code: 2,
-        message: `pablo: ${join(projectPath, "pablo.json")} names policy "${marker.policy}", which pablo does not ship (shipped: ${shippedPolicies(policiesDir).join(", ") || "none"})`,
-        tried: [path],
-      };
-    }
-    policy = { name: marker.policy, text: readFileSync(path, "utf8") };
+  const path = join(policiesDir, `${policyName}.md`);
+  if (existsSync(path)) {
+    policy = { name: policyName, text: readFileSync(path, "utf8") };
+  } else if (marker.policy !== undefined) {
+    return {
+      ok: false,
+      code: 2,
+      message: `pablo: ${join(projectPath, "pablo.json")} names policy "${marker.policy}", which pablo does not ship (shipped: ${shippedPolicies(policiesDir).join(", ") || "none"})`,
+      tried: [path],
+    };
   }
   const rulesPath = join(projectPath, "QWEN.md");
   const rules = existsSync(rulesPath) ? readFileSync(rulesPath, "utf8") : undefined;
