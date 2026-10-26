@@ -46,8 +46,9 @@ novels/<slug>/
 
 A work has one **story core**: premise, research, bible, acts, beats, and decided
 facts. From it pablo derives one or more **outputs**: a `novel` (chapters), a
-`story` (one short piece over the beats), or `radio` (an experimental audio drama,
-see [commands.md](commands.md#radio-experimental)). `pablo output add <type>` adds one;
+`story` (one short piece over the beats), a `screenplay` (one scene per beat, in
+Fountain: `outputs/screenplay/scenes/NN-slug.fountain`, stored line for line), or
+`radio` (an experimental audio drama, see [commands.md](commands.md#radio-experimental)). `pablo output add <type>` adds one;
 outputs other than the novel live under `outputs/<type>/`, each with its own
 `RULES.md`, `plan.md` and continuity ledger.
 
@@ -94,7 +95,7 @@ before writing, and commits only that file.
 | Key | Required | Default | Meaning |
 |---|---|---|---|
 | `title`, `slug` | yes | | |
-| `outputs` | no | `{}` | The work's outputs: `novel`, `story` or `radio`. Each entry has `added` (YYYY-MM-DD); the novel's `dir` is always `"chapters"` |
+| `outputs` | no | `{}` | The work's outputs: `novel`, `story`, `screenplay` or `radio`. Each entry has `added` (YYYY-MM-DD); the novel's `dir` is always `"chapters"` |
 | `author` | no | `"author"` | Free text. `init` writes your git `user.name` |
 | `voice` | no | `["../../style", "QWEN.md"]` | Which voice the screen's voice tools edit. The writer always gets `style/` then the work's `QWEN.md` |
 | `neverSend` | no | `["research/", "notes/"]` | Paths that must never reach a model. A prompt that would include one is refused, not silently trimmed |

@@ -186,7 +186,15 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 names (a chosen act), in `outputs/story/story.md` on
                 `draft/story`; the outline is one pack slice and the length
                 is `--words`, else 600 words a beat.
-                `radio` (AGT-1686, `src/outputs/radio/`) is the third row:
+                `screenplay` (AGT-2132, `src/outputs/screenplay/`): one
+                scene per beat in `outputs/screenplay/scenes/NN-slug.fountain`
+                on `draft/screenplay-scNN`, Fountain with pablo's frontmatter
+                on top; `manuscript: "screenplay"` stores it line for line
+                (the TUI shows it as `lines`); its pack carries the previous
+                scene's summary (`fountain.ts`'s `fountainElements`), never a
+                joined tail; `check` adds `lintFountain` for any
+                `*.fountain` path; publish `fountain` compiles every scene.
+                `radio` (AGT-1686, `src/outputs/radio/`) is another row:
                 one episode per beat in `outputs/radio/episodes/NN-slug.md`
                 on `draft/radio-epNN`, `rulesTemplate` the radio rules
                 (`rules.ts`), stages script -> cast -> perform -> mix -> fix

@@ -177,5 +177,5 @@ test("every output declares at least one track, each a known track, and the trac
     for (const track of def.tracks) expect(isTrackId(track)).toBe(true);
     for (const track of trackIds()) expect((TRACKS[track].outputs as readonly string[]).includes(id)).toBe(def.tracks.includes(track));
   }
-  for (const id of ["novel", "story", "radio"]) expect(outputDefinition(id)?.tracks).toEqual(["fiction", "historical-fiction"]);
+  for (const id of ["novel", "story", "screenplay", "radio"]) expect(outputDefinition(id)?.tracks).toEqual(["fiction", "historical-fiction"]);
 });

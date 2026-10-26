@@ -511,8 +511,10 @@ export async function runWrite(
     direction,
   });
   // One sentence per line on disk (AGT-1531); the model only ever sees paragraphs. A type whose lines are its
-  // structure (a radio script: a speaker, a cue or the CAST: line per line, AGT-1686) is stored as written.
-  const fileContent = `${frontmatter}\n\n${output.manuscript === "lines" ? normalized : splitManuscript(normalized)}\n`;
+  // structure (a radio script: a speaker, a cue or the CAST: line per line, AGT-1686; a screenplay's Fountain,
+  // AGT-2132) is stored as written.
+  const asWritten = output.manuscript === "lines" || output.manuscript === "screenplay";
+  const fileContent = `${frontmatter}\n\n${asWritten ? normalized : splitManuscript(normalized)}\n`;
 
   // The project's path inside the repo, so the file lands at the same place in the worktree.
   const projectInRepo = relative(realpathSync(repo), realpathSync(projectPath));

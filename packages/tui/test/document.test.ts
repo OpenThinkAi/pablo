@@ -130,6 +130,13 @@ test("AGT-2148: a `lines`-stored unit keeps its lines; a `sentences` one still j
   expect(doc.anchors.get(9)).toBe(4);
 });
 
+test("AGT-2132: a `screenplay`-stored unit (Fountain) is shown line for line, its cue never joined to its dialogue", () => {
+  const fountain = "---\nscene: 1\n---\n\nINT. WELL - DAY\n\nANNA\n(low)\nIt is dry. Since June.\n";
+  const doc = displayDoc(fountain, 40, "screenplay");
+  expect(doc.lines).toEqual(["INT. WELL - DAY", "", "ANNA", "(low)", "It is dry. Since June."]);
+  expect(doc.sentences).toEqual([]);
+});
+
 test("AGT-2148: unit:<output>:<n> loads the file its row names; no row or no file is a notice", () => {
   const dir = project();
   mkdirSync(join(dir, "outputs", "radio"), { recursive: true });

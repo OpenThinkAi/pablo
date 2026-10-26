@@ -66,9 +66,9 @@ pablo output plan <type> --project <slug> [--dry-run]
 ```
 
 A work is a **story core** (premise, research, bible, acts, beats, facts) plus
-one or more **outputs** made from it. The output types are `novel`, `story` and
-`radio`. Each output declares the tracks it allows (`novel`, `story` and `radio`:
-`fiction` and `historical-fiction`); `pablo output add <type>` refuses a type the
+one or more **outputs** made from it. The output types are `novel`, `story`,
+`screenplay` and `radio`. Each output declares the tracks it allows (`novel`,
+`story`, `screenplay` and `radio`: `fiction` and `historical-fiction`); `pablo output add <type>` refuses a type the
 work's track does not allow, naming the types it does.
 
 | Sub | What it does |
@@ -439,7 +439,13 @@ refusal) for two things:
 With `--output`, it also runs the core check (`core[]`). That flags mentions dated
 after the unit's year, and names the bible, `facts.md` and the output's continuity
 don't know. On a work with radio scripts it adds a `radio` block: directions outside
-the vocabulary, and roles with no voice. Hits are data: exit is `0` either way.
+the vocabulary, and roles with no voice. A screenplay's scenes (`*.fountain`) also
+get the Fountain lint in `hits[]`: `fountain-no-heading` (the scene does not open
+with a scene heading), `fountain-heading-spacing` (a heading without a blank line
+before and after), `fountain-cue-no-dialogue`, `fountain-stray-parenthetical` (one
+outside a speech), `fountain-colon-dialogue` (`NAME: words` on one line),
+`fountain-markdown` (a code fence) and `fountain-unclosed-boneyard`. Hits are data:
+exit is `0` either way.
 
 ```
 {ok: true, hits[], unprovenanced[], core?[], radio?}
@@ -509,6 +515,7 @@ pablo publish --project <slug> [--output <type>] --target <target>
 |---|---|---|
 | `novel` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-<target>.md`. `draft`: every chapter in order, frontmatter stripped, sentence lines joined into paragraphs, quotes curled. `review`: chapter headings with each source sentence line numbered `[n]` (restarting in every chapter) so a reader can cite a line. `final`: the clean manuscript, same as the draft, plus `<slug>-final.epub` (one XHTML file per chapter; no pandoc needed); `files` lists both. |
 | `story` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-story-<target>.md`: `draft` and `final` are the clean compiled story; `review` adds a "Review copy, N words" line under the title |
+| `screenplay` | `fountain` | `<work>/.pablo/out/<slug>-screenplay.fountain`: a `Title:` page, then every written scene in order, frontmatter stripped, the Fountain copied line for line |
 | `radio` | `bundle`, `stream` | `bundle`: `.pablo/out/<slug>-radio-bundle/` with every script, each mixed episode's newest audio and manifest, and `bundle.json`; unmixed episodes are listed in `notes`. `stream`: each mixed episode to `.pablo/out/stream/`. `player` is refused; use `pablo review`. |
 
 Returns `{ok, output, target, where, chapters, words, files?, notes?}`. Here

@@ -354,7 +354,7 @@ export async function critiqueBranch(opts: CritiqueOptions): Promise<CritiqueRes
 
   const output = outputOfBranch(opts.projectPath, opts.branch);
   const prefix = `${relative(repo, opts.projectPath).split("\\").join("/")}/${output.artifactDir}/`;
-  const files = parseDiff(diff.text).filter((f) => f.status !== "deleted" && !f.binary && f.path.startsWith(prefix) && f.path.endsWith(".md"));
+  const files = parseDiff(diff.text).filter((f) => f.status !== "deleted" && !f.binary && f.path.startsWith(prefix) && /\.(md|fountain)$/.test(f.path));
 
   const ref = {
     continuity: continuityReference(opts.projectPath, output.id),
