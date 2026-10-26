@@ -57,17 +57,6 @@ export interface RuleContext {
   readonly projectPath?: string | undefined;
 }
 
-/** `--project <slug>` to the work's directory, like every project verb. */
-export function projectPathOf(ctx: { cwd: string; env: Env }, slug: string): { ok: true; path: string } | Refusal {
-  const vault = findVault(ctx.cwd, ctx.env);
-  if (!vault.ok) return vault;
-  const project = resolveProject(vault.path, slug);
-  if (!project.ok) return project;
-  const marker = readMarker(project.path);
-  if (!marker.ok) return marker;
-  return { ok: true, path: project.path };
-}
-
 export interface RuleFile {
   readonly ok: true;
   readonly path: string;
@@ -84,7 +73,10 @@ export function ruleFileFor(target: LayerTarget, ctx: RuleContext): RuleFile | R
     return { ok: true, path: join(vault.path, "style", "prose.md"), commit: true };
   }
   if (ctx.projectPath === undefined) return refuse(`pablo: voice: --target ${target} needs a project (--project <slug>)`);
-  if (target === "work") return { ok: true, path: join(ctx.projectPath, WORK_RULES_FILE), commit: true };
+  if (target === "work") {
+    const path = join(ctx.projectPath, WORK_RULES_FILE);
+    return existsSync(path) ? { ok: true, path, commit: true } : refuse(`pablo: voice rule: the work has no ${WORK_RULES_FILE} (${path})`, [path]);
+  }
   return { ok: true, path: join(ctx.projectPath, outputRulesFile(target.slice("output:".length))), commit: true };
 }
 
@@ -138,7 +130,7 @@ function entriesOf(file: string, target: string): RuleEntry[] {
   return parseRules(readFileSync(file, "utf8")).map((r) => ({ id: ruleId(r.text), target, path: file, text: r.text }));
 }
 
-function voiceDirs(dir: string, scopeSkip: string | undefined): { name: string; path: string }[] {
+function subdirs(dir: string, scopeSkip: string | undefined): { name: string; path: string }[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && e.name !== scopeSkip)
@@ -154,12 +146,12 @@ export function listRules(ctx: RuleContext): RuleEntry[] {
 
   const vault = findVault(ctx.cwd, ctx.env);
   if (vault.ok) out.push(...entriesOf(join(vault.path, "style", "prose.md"), "vault"));
-  if (vault.ok) for (const v of voiceDirs(join(vault.path, "voices"), undefined)) out.push(...entriesOf(join(v.path, "voice.md"), `voice:${v.name}`));
-  for (const v of voiceDirs(globalDir, GLOBAL_DEFAULT_VOICE)) out.push(...entriesOf(join(v.path, "voice.md"), `voice:${v.name}`));
+  if (vault.ok) for (const v of subdirs(join(vault.path, "voices"), undefined)) out.push(...entriesOf(join(v.path, "voice.md"), `voice:${v.name}`));
+  for (const v of subdirs(globalDir, GLOBAL_DEFAULT_VOICE)) out.push(...entriesOf(join(v.path, "voice.md"), `voice:${v.name}`));
 
   if (ctx.projectPath !== undefined) {
     out.push(...entriesOf(join(ctx.projectPath, WORK_RULES_FILE), "work"));
-    for (const o of voiceDirs(join(ctx.projectPath, "outputs"), undefined)) out.push(...entriesOf(join(o.path, "RULES.md"), `output:${o.name}`));
+    for (const o of subdirs(join(ctx.projectPath, "outputs"), undefined)) out.push(...entriesOf(join(ctx.projectPath, outputRulesFile(o.name)), `output:${o.name}`));
   }
   return out;
 }
@@ -184,7 +176,8 @@ function locate(id: string, ctx: RuleContext, target: string | undefined): RuleE
   const wanted = id.trim().toLowerCase();
   const all = listRules(ctx).filter((e) => e.id === wanted && (target === undefined || e.target === target));
   if (all.length === 0) {
-    return refuse(`pablo: voice: no rule with id "${id}"${target ? ` in target ${target}` : ""} (see \`pablo voice list\`)`);
+    const hint = ctx.projectPath === undefined ? "; work and output rules need --project <slug>" : "";
+    return refuse(`pablo: voice: no rule with id "${id}"${target ? ` in target ${target}` : ""} (see \`pablo voice list\`${hint})`);
   }
   const first = all[0] as RuleEntry;
   if (all.some((e) => e.path !== first.path)) {
@@ -228,11 +221,6 @@ export function removeRule(id: string, ctx: RuleContext, opts: { readonly target
   return { ok: true, id: found.id, target: found.target, path: found.path, committed, ...(notice ? { notice } : {}) };
 }
 
-/** Creates the parent directory of a rule file a layer target is about to create. */
-export function ensureRuleDir(path: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-}
-
 // ---------------------------------------------------------------------------
 // use
 
@@ -265,7 +253,7 @@ export function useVoice(name: string, ctx: { cwd: string; env: Env }, projectPa
   } catch {
     return refuse(`pablo: voice use: ${path} is not readable JSON`, [path]);
   }
-  const current: string[] = Array.isArray(data["voice"]) ? (data["voice"] as string[]) : [...marker.marker.voice];
+  const current = [...marker.marker.voice];
   if (current.includes(trimmed)) return { ok: true, voice: current, added: false, path, committed: false };
   const next = [...current, trimmed];
   writeFileSync(path, `${JSON.stringify({ ...data, voice: next }, null, 2)}\n`, "utf8");

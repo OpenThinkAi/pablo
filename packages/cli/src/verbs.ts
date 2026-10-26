@@ -58,7 +58,7 @@
  */
 
 import { z } from "zod";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
@@ -93,7 +93,7 @@ import { castingVerbs } from "./casting-verbs";
 import { saveCore } from "./save";
 import { addExemplar, addRule, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { VoiceLocation } from "./voice";
-import { editRule, ensureRuleDir, listRules, parseLayerTarget, projectPathOf, removeRule, ruleFileFor, TARGET_USAGE, useVoice, workFromCwd } from "./voice-rules";
+import { editRule, listRules, parseLayerTarget, removeRule, ruleFileFor, TARGET_USAGE, useVoice, workFromCwd } from "./voice-rules";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
 
@@ -1179,8 +1179,6 @@ export function runVoiceRule(
     }
     const file = ruleFileFor(layer, { cwd: ctx.cwd, env: ctx.env, projectPath });
     if (!file.ok) return { body: refusalBody(file), exitCode: file.code };
-    if (layer === "work" && !existsSync(file.path)) return fail(`pablo: voice rule: the work has no QWEN.md (${file.path})`);
-    if (layer !== "work") ensureRuleDir(file.path);
     return done(addRule(undefined, args.text, { file: { path: file.path, target: layer, commit: file.commit }, ...(args.example ? { example: args.example } : {}) }));
   }
 
@@ -1201,9 +1199,8 @@ export function runVoiceRule(
 /** The work a rule verb looks in: `--project`, else the work `cwd` is inside, else none. */
 function ruleWork(ctx: Pick<VerbContext, "cwd" | "env">, project: string | undefined): { ok: true; projectPath: string | undefined } | { ok: false; result: VerbResult } {
   if (project === undefined) return { ok: true, projectPath: workFromCwd(ctx.cwd) };
-  const resolved = projectPathOf(ctx, project);
-  if (!resolved.ok) return { ok: false, result: { body: refusalBody(resolved), exitCode: resolved.code } };
-  return { ok: true, projectPath: resolved.path };
+  const resolved = resolveVerbProject(ctx, project);
+  return resolved.ok ? { ok: true, projectPath: resolved.projectPath } : resolved;
 }
 
 /** `voice list`: every voice, and every rule with its id (work and output rules need `--project` or a cwd inside the work). */
