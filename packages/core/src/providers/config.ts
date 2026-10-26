@@ -29,8 +29,8 @@
  * The rule is the same as the global file's: a key is never written there,
  * only `env:<NAME>` or `keychain:<service>[/<account>]`. pablo.json is
  * trusted less than the global file: it may add or change providers on this
- * machine, but on a remote provider only `model`, `timeoutMs`, `temperature`
- * and `thinking` (`checkWorkProvider`).
+ * machine, but on a remote provider only `model`, `timeoutMs`, `temperature`,
+ * `thinking` and `tools` (`checkWorkProvider`).
  */
 
 import { readFileSync } from "node:fs";
@@ -69,6 +69,13 @@ export interface ProviderConfig {
    * bake-off measured.
    */
   readonly thinking?: boolean;
+  /**
+   * Whether the endpoint takes native tool calls. `false` makes `chat()` refuse
+   * a turn that offers tools with `ToolsDisabledError` (AGT-2117, D-12), for a
+   * server whose template or parser has no tool support, rather than sending
+   * tools it would ignore or mangle. Absent means tools are sent.
+   */
+  readonly tools?: boolean;
 }
 
 /**
@@ -294,6 +301,11 @@ function readProvider(
     throw new ProviderConfigError(`pablo: ${where}: "thinking" must be true or false`);
   }
 
+  const tools = entry["tools"] ?? existing?.tools;
+  if (tools !== undefined && typeof tools !== "boolean") {
+    throw new ProviderConfigError(`pablo: ${where}: "tools" must be true or false`);
+  }
+
   const rawKey = entry["key"];
   if (rawKey !== undefined && typeof rawKey !== "string") {
     throw new ProviderConfigError(`pablo: ${where}: "key" must be a string`);
@@ -311,11 +323,12 @@ function readProvider(
     timeoutMs: rawTimeout,
     ...(rawTemperature === undefined ? {} : { temperature: rawTemperature }),
     ...(thinking === undefined ? {} : { thinking }),
+    ...(tools === undefined ? {} : { tools }),
   };
 }
 
 /** The fields a work may change on a provider whose endpoint is remote: none of them say where a request (and its key) goes. */
-const WORK_SAFE_FIELDS = ["model", "timeoutMs", "temperature", "thinking"] as const;
+const WORK_SAFE_FIELDS = ["model", "timeoutMs", "temperature", "thinking", "tools"] as const;
 
 /** `127.0.0.1` (any `127.x`), `localhost` or `::1`: a request to it never leaves the machine. */
 export function isLoopbackEndpoint(endpoint: string): boolean {

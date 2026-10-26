@@ -18,13 +18,16 @@ import { resolveAll } from "../markup/spans";
 import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "../pack/closing";
 import { validateProposal } from "../markup/validate";
 import type { ProviderConfig } from "./config";
-import { EndpointHung, NoToolCallError, ProviderResponseError } from "./errors";
+import { EndpointHung, NoToolCallError, ProviderResponseError, ToolsDisabledError } from "./errors";
 import { readFacts } from "./facts";
 import type { Gate } from "./queue";
 import type { RateMeter } from "./rates";
 import { countOf, dataOf, frameSse, measure, reaching, truncate, waitFor } from "./stream";
 import type {
   Adapter,
+  ChatEvent,
+  ChatMessage,
+  ChatRequest,
   CompletionEvent,
   CompletionRequest,
   CompletionStats,
@@ -33,6 +36,8 @@ import type {
   ExtractRequest,
   OutputMode,
   Proposal,
+  ToolCall,
+  ToolChoice,
 } from "./types";
 
 export interface OpenAiAdapterOptions {
@@ -222,6 +227,128 @@ export function createOpenAiAdapter(options: OpenAiAdapterOptions): Adapter {
     }
   }
 
+  /**
+   * One streamed turn of a tool conversation (D-12): system, history and tools
+   * in, text and every tool call out, then usage.
+   *
+   * Tool calls arrive in two shapes and both go through one assembler, keyed on
+   * the call's `index`: mlx_lm (0.31.3) sends each call whole in one chunk, with
+   * its full JSON argument string; OpenAI sends the id and name first and the
+   * argument string in fragments. A call is emitted once it is complete: when a
+   * later call starts, when text follows it, when the choice finishes, or when
+   * the stream ends — so events keep the order the model produced them in.
+   *
+   * Like `complete`, it holds a local endpoint's gate for the whole stream and
+   * turns silence into `EndpointHung`. Nothing is recorded into the rate meter:
+   * a turn that is mostly a tool call measures argument JSON, not prose, and
+   * would skew the wait estimates `write` relies on.
+   */
+  async function* chat(request: ChatRequest): AsyncIterable<ChatEvent> {
+    if (request.tools.length > 0 && provider.tools === false) throw new ToolsDisabledError(provider.id);
+
+    const release = await options.gate?.acquire();
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    request.signal?.addEventListener("abort", abort, { once: true });
+
+    const started = now();
+    let heard = false;
+    let answered = false;
+    let thought = false;
+    let finish: string | undefined;
+    let inputTokens: number | undefined;
+    let outputTokens: number | undefined;
+    const calls = new ToolCallAssembler(provider.endpoint);
+
+    try {
+      const idleMs = request.timeoutMs ?? provider.timeoutMs;
+      const promptChars = request.system.length + request.messages.reduce((sum, message) => sum + message.content.length, 0);
+      const prefillMs = meter.estimatePrefillMs(Math.ceil(promptChars / CHARS_PER_TOKEN)) ?? 0;
+      const firstByteMs = Math.max(idleMs, prefillMs * 2);
+
+      const response = await waitFor(
+        doFetch(url, {
+          method: "POST",
+          headers: headers(options.key?.()),
+          body: JSON.stringify(chatBody(provider, request)),
+          signal: controller.signal,
+        }),
+        firstByteMs,
+        () => {
+          controller.abort();
+          throw new EndpointHung(provider.endpoint, now() - started, firstByteMs);
+        },
+      );
+
+      if (!response.ok) {
+        throw new ProviderResponseError(provider.endpoint, truncate(await response.text()), response.status);
+      }
+      if (!response.body) throw new ProviderResponseError(provider.endpoint, "no response body to stream");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      try {
+        for (;;) {
+          const limit = heard ? idleMs : firstByteMs;
+          const chunk = await waitFor(reader.read(), limit, () => {
+            void reader.cancel();
+            controller.abort();
+            throw new EndpointHung(provider.endpoint, now() - started, limit);
+          });
+          if (chunk.done) break;
+
+          buffer += decoder.decode(chunk.value, { stream: true });
+          const framed = frameSse(buffer);
+          buffer = framed.rest;
+
+          for (const event of framed.events) {
+            const payload = dataOf(event);
+            if (payload === undefined || payload === "[DONE]") continue;
+            heard = true;
+            const parsed = parseChatChunk(provider.endpoint, payload);
+            if (parsed.promptTokens !== undefined) inputTokens = parsed.promptTokens;
+            if (parsed.completionTokens !== undefined) outputTokens = parsed.completionTokens;
+            if (parsed.reasoning) thought = true;
+
+            if (parsed.text !== undefined && parsed.text !== "") {
+              for (const call of calls.flush()) yield { type: "tool_call", call };
+              answered = true;
+              yield { type: "text", text: parsed.text };
+            }
+            for (const delta of parsed.toolCalls) {
+              answered = true;
+              for (const call of calls.add(delta)) yield { type: "tool_call", call };
+            }
+            if (parsed.finish !== undefined) {
+              finish = parsed.finish;
+              for (const call of calls.flush()) yield { type: "tool_call", call };
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      for (const call of calls.flush()) yield { type: "tool_call", call };
+
+      if (!answered && thought) {
+        throw new ProviderResponseError(
+          provider.endpoint,
+          finish === "length"
+            ? `only thinking: it spent its whole budget thinking and never answered (set "thinking": false for this provider)`
+            : `only thinking and no answer (set "thinking": false for this provider)`,
+        );
+      }
+
+      yield { type: "done", usage: { inputTokens, outputTokens } };
+    } finally {
+      request.signal?.removeEventListener("abort", abort);
+      release?.();
+    }
+  }
+
   async function collect(request: CompletionRequest): Promise<string> {
     let text = "";
     for await (const event of complete(request)) {
@@ -318,6 +445,7 @@ export function createOpenAiAdapter(options: OpenAiAdapterOptions): Adapter {
     model: provider.model,
     preferredOutput: PREFERRED_OUTPUT,
     complete,
+    chat,
 
     async proposeEdit(request: EditRequest): Promise<Proposal> {
       const passage = selectionText(request.document, request.span);
@@ -559,6 +687,184 @@ function extractPrompt(request: ExtractRequest): string {
     request.instruction,
     "One per line, in the order they appear. No numbering, no bullets, no commentary.",
   ].join("\n\n");
+}
+
+/**
+ * The chat turn's request body. History maps onto OpenAI's message shape: an
+ * assistant turn's calls become `tool_calls` with their arguments serialized
+ * back to the JSON string the wire carries (mlx_lm parses it again for the
+ * chat template), and a tool result becomes a `tool` message. OpenAI has no
+ * error flag on a tool result, so a failed one says so in its content.
+ */
+function chatBody(provider: ProviderConfig, request: ChatRequest): Record<string, unknown> {
+  const offersTools = request.tools.length > 0;
+  return {
+    model: request.model ?? provider.model,
+    messages: [
+      ...(request.system === "" ? [] : [{ role: "system", content: request.system }]),
+      ...request.messages.map(wireMessage),
+    ],
+    ...(offersTools
+      ? {
+          tools: request.tools.map((tool) => ({
+            type: "function",
+            function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+          })),
+          tool_choice: wireToolChoice(request.toolChoice ?? "auto"),
+        }
+      : {}),
+    stream: true,
+    stream_options: { include_usage: true },
+    ...thinkingField(provider),
+    ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
+    ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+  };
+}
+
+function wireMessage(message: ChatMessage): Record<string, unknown> {
+  switch (message.role) {
+    case "user":
+      return { role: "user", content: message.content };
+    case "assistant": {
+      const calls = message.toolCalls ?? [];
+      if (calls.length === 0) return { role: "assistant", content: message.content };
+      return {
+        role: "assistant",
+        content: message.content === "" ? null : message.content,
+        tool_calls: calls.map((call) => ({
+          id: call.id,
+          type: "function",
+          function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+        })),
+      };
+    }
+    case "tool":
+      return {
+        role: "tool",
+        tool_call_id: message.toolCallId,
+        content: message.isError === true ? `Error: ${message.content}` : message.content,
+      };
+  }
+}
+
+function wireToolChoice(choice: ToolChoice): unknown {
+  return typeof choice === "string" ? choice : { type: "function", function: { name: choice.name } };
+}
+
+/** One entry of a chunk's `delta.tool_calls`, every field checked and optional. */
+interface ToolCallDelta {
+  readonly index: number | undefined;
+  readonly id: string | undefined;
+  readonly name: string | undefined;
+  readonly arguments: string | undefined;
+}
+
+interface PendingCall {
+  readonly index: number;
+  id: string | undefined;
+  name: string | undefined;
+  arguments: string;
+}
+
+/**
+ * Builds whole tool calls from a stream's `tool_calls` entries, whichever way
+ * the server splits them. An entry with no `index` takes the next free slot;
+ * an entry whose `id` differs from the one already at its index is a new call
+ * (a server that numbers every whole call 0), so the earlier one is complete.
+ */
+class ToolCallAssembler {
+  private readonly pending: PendingCall[] = [];
+  private nextIndex = 0;
+  private count = 0;
+
+  constructor(private readonly endpoint: string) {}
+
+  /** Folds one entry in, returning any calls it shows are complete. */
+  add(delta: ToolCallDelta): ToolCall[] {
+    let done: ToolCall[] = [];
+    let index = delta.index ?? this.nextIndex;
+    const current = this.pending.find((call) => call.index === index);
+    if (current !== undefined && delta.id !== undefined && current.id !== undefined && delta.id !== current.id) {
+      done = this.flush();
+      index = this.nextIndex;
+    }
+    let call = this.pending.find((entry) => entry.index === index);
+    if (call === undefined) {
+      // A later call has started, so every earlier one has all its arguments.
+      done = [...done, ...this.flushBelow(index)];
+      call = { index, id: undefined, name: undefined, arguments: "" };
+      this.pending.push(call);
+      this.nextIndex = Math.max(this.nextIndex, index + 1);
+    }
+    if (delta.id !== undefined && call.id === undefined) call.id = delta.id;
+    if (delta.name !== undefined && call.name === undefined) call.name = delta.name;
+    if (delta.arguments !== undefined) call.arguments += delta.arguments;
+    return done;
+  }
+
+  /** Every pending call, complete, in index order. */
+  flush(): ToolCall[] {
+    return this.flushBelow(Number.POSITIVE_INFINITY);
+  }
+
+  private flushBelow(limit: number): ToolCall[] {
+    const ready = this.pending.filter((call) => call.index < limit).sort((a, b) => a.index - b.index);
+    for (const call of ready) this.pending.splice(this.pending.indexOf(call), 1);
+    return ready.map((call) => this.finish(call));
+  }
+
+  private finish(call: PendingCall): ToolCall {
+    this.count += 1;
+    if (call.name === undefined || call.name === "") {
+      throw new ProviderResponseError(this.endpoint, "a tool call with no function name");
+    }
+    const raw = call.arguments.trim();
+    let args: unknown;
+    try {
+      args = raw === "" ? {} : JSON.parse(raw);
+    } catch {
+      throw new ProviderResponseError(this.endpoint, `a ${call.name} call whose arguments are not valid JSON: ${truncate(raw)}`);
+    }
+    if (typeof args !== "object" || args === null || Array.isArray(args)) {
+      throw new ProviderResponseError(this.endpoint, `a ${call.name} call whose arguments are not an object`);
+    }
+    // A server that sends no id still needs one the tool result can echo.
+    return { id: call.id ?? `call_${this.count}`, name: call.name, arguments: args as Record<string, unknown> };
+  }
+}
+
+interface ParsedChatChunk extends ParsedChunk {
+  readonly toolCalls: readonly ToolCallDelta[];
+}
+
+/** `parseChunk` plus the chunk's tool-call entries. Model output is untrusted input. */
+function parseChatChunk(endpoint: string, payload: string): ParsedChatChunk {
+  const base = parseChunk(endpoint, payload);
+  const chunk = JSON.parse(payload) as { choices?: { delta?: { tool_calls?: unknown } }[] };
+  const raw = chunk.choices?.[0]?.delta?.tool_calls;
+  if (raw === undefined || raw === null) return { ...base, toolCalls: [] };
+  if (!Array.isArray(raw)) throw new ProviderResponseError(endpoint, "a stream chunk whose tool_calls is not a list");
+  const toolCalls = raw.map((entry: unknown): ToolCallDelta => {
+    const item = (typeof entry === "object" && entry !== null ? entry : {}) as {
+      index?: unknown;
+      id?: unknown;
+      function?: { name?: unknown; arguments?: unknown };
+    };
+    const fn = typeof item.function === "object" && item.function !== null ? item.function : {};
+    return {
+      index: typeof item.index === "number" && Number.isInteger(item.index) && item.index >= 0 ? item.index : undefined,
+      id: typeof item.id === "string" && item.id !== "" ? item.id : undefined,
+      name: typeof fn.name === "string" && fn.name !== "" ? fn.name : undefined,
+      // mlx_lm always sends a string; a server that sends the object itself is serialized back.
+      arguments:
+        typeof fn.arguments === "string"
+          ? fn.arguments
+          : typeof fn.arguments === "object" && fn.arguments !== null
+            ? JSON.stringify(fn.arguments)
+            : undefined,
+    };
+  });
+  return { ...base, toolCalls };
 }
 
 interface ParsedChunk {

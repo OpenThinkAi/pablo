@@ -21,7 +21,14 @@ export type {
   ToolCall,
   ToolChoice,
 } from "./types";
-export { EndpointHung, EndpointUnreachable, NoToolCallError, ProviderConfigError, ProviderResponseError } from "./errors";
+export {
+  EndpointHung,
+  EndpointUnreachable,
+  NoToolCallError,
+  ProviderConfigError,
+  ProviderResponseError,
+  ToolsDisabledError,
+} from "./errors";
 export type { AdapterKind, LoadConfigOptions, PabloConfig, ProviderConfig, ReaderConfig } from "./config";
 export {
   configDir,
