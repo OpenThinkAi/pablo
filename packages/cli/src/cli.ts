@@ -175,6 +175,9 @@ function helpText(): string {
     "  pablo research save --project <slug> --title T --note N --source URL [--source URL]...",
     "                                            keep a finding with its sources as research/<slug>.md",
     "                                            on a plan/ branch (also the save_research MCP tool)",
+    "  pablo research distill --project <slug>",
+    "                                            research/ notes to short, sourced period facts in",
+    "                                            facts/period.md on a plan/ branch (also distill_facts)",
     "  pablo fact record --project <slug> --fact F --where continuity|<bible file> --kind researched|invented|author",
     "                    [--source CITATION] [--heading H] [--chapter chNN] [--promote --established-by novel/ch03]",
     "                                            one tagged fact on a plan/ branch (also record_fact over MCP)",
@@ -645,6 +648,17 @@ export function acrossText(raw: unknown): string {
 export function researchFactText(raw: unknown): string {
   const body = raw as Record<string, unknown>;
   if (body["ok"] !== true) return String(body["message"]);
+  if (typeof body["facts"] === "number") {
+    // `research distill` (AGT-2109).
+    const rejected = (body["rejected"] ?? []) as { fact: string; reason: string }[];
+    const swapped = (body["swapped"] ?? []) as { from: string; to: string }[];
+    return [
+      `pablo: distilled ${String(body["facts"])} period fact${body["facts"] === 1 ? "" : "s"} -> ${String(body["path"])} on ${String(body["branch"])}`,
+      ...swapped.map((s) => `  swapped ${s.from} -> ${s.to}`),
+      ...rejected.map((r) => `  rejected: ${r.fact || "(empty)"} (${r.reason})`),
+      "  review the branch in the screen (pablo), then merge it",
+    ].join("\n");
+  }
   const what = typeof body["line"] === "string" ? `recorded ${String(body["line"])} ->` : "saved";
   return [`pablo: ${what} ${String(body["path"])} on ${String(body["branch"])}`, "  review the branch in the screen (pablo), then merge it"].join("\n");
 }
@@ -1857,12 +1871,17 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     return await runVerbEntry("promote", args, cwd, promoteText);
   }
 
-  // `research save` and `fact record` (AGT-2106) run off their `VERBS` entries, as `pablo mcp` does.
+  // `research save|distill` (AGT-2106, AGT-2109) and `fact record` (AGT-2106) run off their `VERBS` entries, as `pablo mcp` does.
   if (args.verb === "research" || args.verb === "fact") {
-    const sub = args.verb === "research" ? "save" : "record";
-    const usage = `pablo ${args.verb} ${sub} --project <slug> ...`;
-    if (projectPath === undefined || args.rest[0] !== sub) {
-      const message = args.rest[0] !== sub ? `pablo: ${args.verb}: the only action is "${sub}" (${usage})` : `pablo: ${args.verb} ${sub} requires --project <slug>`;
+    const subs = args.verb === "research" ? ["save", "distill"] : ["record"];
+    const sub = args.rest[0] ?? "";
+    const usage = `pablo ${args.verb} ${subs.join("|")} --project <slug> ...`;
+    if (projectPath === undefined || !subs.includes(sub)) {
+      const message = !subs.includes(sub)
+        ? subs.length === 1
+          ? `pablo: ${args.verb}: the only action is "${subs[0]}" (${usage})`
+          : `pablo: ${args.verb}: the actions are ${subs.map((s) => `"${s}"`).join(" and ")} (${usage})`
+        : `pablo: ${args.verb} ${sub} requires --project <slug>`;
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }

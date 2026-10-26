@@ -88,7 +88,7 @@ places:
 
 ## `default` and `intents`
 
-pablo sends five kinds of request. Each is an *intent*:
+pablo sends six kinds of request. Each is an *intent*:
 
 | Intent | Used by | Goes to, unless mapped |
 |---|---|---|
@@ -97,6 +97,7 @@ pablo sends five kinds of request. Each is an *intent*:
 | `prose` | `prose` | the first local provider |
 | `continuity` | the fact extraction `merge` runs | the first local provider |
 | `plan` | the critic (`critique`, `check --across`) and the built-in agent's helpers | the first non-local provider |
+| `research` | `research distill` (`distill_facts`): research notes to period facts | the first non-local provider |
 
 If no provider of the wanted sort exists, the request goes to `default` (which is
 `"local"` unless you set it). `intents` overrides the choice per intent.
@@ -159,11 +160,11 @@ real event can use them. A work that must keep those names out sets `realNames` 
 ```
 
 `realNames` is `true` when absent, and anything but `true` or `false` is refused.
-Today the setting is read and reported: `pablo resume` shows `realNames: false` when it
-is set and says nothing when it is not. Acting on it belongs to `distill_facts`
-(AGT-2109), which will swap research names for the bible's invented ones when it is
-`false`; until that verb lands, nothing enforces it, so keep real names out of
-`research/` by hand.
+`pablo resume` shows `realNames: false` when it is set and says nothing when it is
+not. With it `false`, `pablo research distill` (the `distill_facts` tool) swaps each
+research name in a distilled fact for the bible's invented one, mapped in
+`research/names.md` (`| Research name | Bible name |`), and refuses, listing the
+names, while any research name has no mapping. See `docs/commands.md`, `research`.
 
 ### Claude for `pablo agent` and `pablo story`
 

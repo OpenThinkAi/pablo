@@ -73,7 +73,7 @@ import { migrateTrack } from "./migrate-track";
 import { mergeDraftInProject } from "./novel/merge";
 import { readMarker } from "./marker";
 import { FACT_KINDS } from "./record-fact";
-import { recordFactInProject, saveResearchInProject } from "./research-verbs";
+import { distillFactsInProject, recordFactInProject, saveResearchInProject } from "./research-verbs";
 import { readTool, searchTool } from "./harness-tools";
 import { addOutput, listOutputs, planOutput, removeOutput } from "./output-verbs";
 import { findVault, resolveProject } from "./project";
@@ -136,6 +136,11 @@ export interface VerbContext {
    * draft never reaches a model; left `undefined`, the routed provider is used, as on the CLI.
    */
   readonly writer?: Adapter;
+  /**
+   * AGT-2109: the research agent `research distill` (`distill_facts`) asks to distil the notes. Tests inject a fake
+   * adapter so distillation never reaches a model; left `undefined`, the `research` intent's routed provider is used.
+   */
+  readonly researcher?: Adapter;
 }
 
 /** `run`'s return: `body` is the exact `--json` object; `exitCode` is the CLI's exit-code contract (0 ok, 2 refused, 1 error). */
@@ -731,17 +736,20 @@ async function runPromoteVerb(args: z.infer<typeof PROMOTE_ARGS>, ctx: VerbConte
 // ---------------------------------------------------------------------------
 
 const RESEARCH_ARGS = z.object({
-  sub: z.enum(["save"]).describe("`save`: keep a research finding with its sources as research/<slug>.md."),
+  sub: z
+    .enum(["save", "distill"])
+    .describe("`save`: keep a research finding with its sources as research/<slug>.md. `distill`: turn research/ into short, sourced period facts in facts/period.md."),
   project: projectField,
   title: z.string().optional().describe("What the note is about, e.g. 'Grape prices, 1919'. Becomes the file name."),
   note: z.string().optional().describe("The finding, in your own words: the checkable facts and what they mean for the story."),
   source: z.array(z.string()).optional().default([]).describe("Where a fact came from: a URL or full citation. Repeatable; at least one."),
 });
 
-/** `pablo research save`: the harness's `save_research`, on a `plan/` branch for the author to review. */
+/** `pablo research save` (the harness's `save_research`) and `research distill` (`distill_facts`), on a `plan/` branch for the author to review. */
 async function runResearchVerb(args: z.infer<typeof RESEARCH_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
+  if (args.sub === "distill") return distillFactsInProject(resolved.projectPath, ctx.env, { researcher: ctx.researcher });
   return saveResearchInProject(resolved.projectPath, { title: args.title ?? "", note: args.note ?? "", sources: args.source ?? [] }, ctx.env);
 }
 
@@ -820,6 +828,21 @@ const SAVE_RESEARCH_MCP: McpToolSpec = {
     const resolved = resolveVerbProject(ctx, args.project);
     if (!resolved.ok) return resolved.result;
     return saveResearchInProject(resolved.projectPath, { title: args.title, note: args.note, sources: args.sources }, ctx.env);
+  },
+};
+
+const DISTILL_FACTS_MCP_ARGS = z.object({ project: projectField });
+
+const DISTILL_FACTS_MCP: McpToolSpec = {
+  name: "distill_facts",
+  description:
+    "Distil the work's research/ notes into short, sourced period facts in facts/period.md (one fact per row with the research note it came from and an optional story date), on a new plan/ branch the author reviews. These facts, never the raw notes, are what reach a draft. A fact with no existing source note is rejected. On a work with realNames: false, research names are swapped for the bible's invented ones mapped in research/names.md, and a name with no mapping refuses the run, listing the names to map.",
+  args: DISTILL_FACTS_MCP_ARGS,
+  run: async (raw, ctx) => {
+    const args = DISTILL_FACTS_MCP_ARGS.parse(raw);
+    const resolved = resolveVerbProject(ctx, args.project);
+    if (!resolved.ok) return resolved.result;
+    return distillFactsInProject(resolved.projectPath, ctx.env, { researcher: ctx.researcher });
   },
 };
 
@@ -1957,11 +1980,11 @@ export const VERBS: readonly Verb[] = [
   {
     name: "research",
     description:
-      "`research save`: keep a research finding with its sources and retrieval date as research/<slug>.md, on a new plan/ branch for the author to review. At least one source is required (--source, repeatable). Over MCP this is the `save_research` tool.",
+      "`research save`: keep a research finding with its sources and retrieval date as research/<slug>.md, on a new plan/ branch for the author to review. At least one source is required (--source, repeatable). Over MCP this is the `save_research` tool. `research distill`: turn research/ into short, sourced period facts in facts/period.md on a plan/ branch (real names swapped for the bible's when the work sets realNames: false); over MCP the `distill_facts` tool.",
     args: RESEARCH_ARGS,
     run: runResearchVerb,
     positionalArgs: ["sub"],
-    mcpTools: [SAVE_RESEARCH_MCP],
+    mcpTools: [SAVE_RESEARCH_MCP, DISTILL_FACTS_MCP],
   },
   {
     name: "fact",

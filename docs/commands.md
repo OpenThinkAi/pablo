@@ -152,7 +152,7 @@ The one call an agent makes to get up to speed on a work. Returns
 | Field | What it holds |
 |---|---|
 | `track` | the work's track (`fiction`, `historical-fiction` or `nonfiction`), as `status` reports it |
-| `realNames` | `false` when the work's `pablo.json` sets `realNames: false` (recorded and reported; `distill_facts` will act on it, AGT-2109); omitted when real names are allowed, the default. See `docs/configuration.md` |
+| `realNames` | `false` when the work's `pablo.json` sets `realNames: false` (`research distill` swaps research names for the bible's); omitted when real names are allowed, the default. See `docs/configuration.md` |
 | `core`, `outputs` | the same two layers as `status` |
 | `last` | the newest dated file in `notes/` and the last commit touching the work |
 | `open` | every `[pick]` placeholder, plus every bullet under a "Decisions" or "Open questions" heading in `bible/` and the beats file |
@@ -480,6 +480,47 @@ the `save_research` tool (sources go in `sources`).
 
 ```
 {ok: true, path, branch, sha?}
+```
+
+```
+pablo research distill --project <slug>
+```
+
+Turns the work's research notes into short, sourced period facts, the only form of
+research the drafting model sees. The research agent (whatever the `research`
+intent routes to; see `docs/configuration.md`) reads every note under `research/`
+and proposes facts; pablo writes the ones that pass to `facts/period.md` on a new
+`plan/` branch for you to review, replacing the file's earlier rows:
+
+```
+| Fact | Source | Story date |
+| --- | --- | --- |
+| Ice sold for four dollars a ton. | ice-prices-1929 | 1929-01 |
+```
+
+One fact per row; the source is a research note id (`research/<source>.md`) and
+the story date (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`) is optional. A proposed fact
+with no source, a source that is not a note, a fact over 280 characters or a bad
+date is rejected and listed under `rejected`, never written. With no notes, or
+no fact left, it is refused (exit 2).
+
+On a work with `realNames: false`, every research name the agent used is
+swapped for its bible counterpart, mapped in `research/names.md` (it stays under
+`research/`, which never reaches a writer):
+
+```
+| Research name | Bible name |
+| --- | --- |
+| Halvorsen Ice Co. | Nadeau Ice |
+```
+
+The bible name must appear in `bible/`. A research name with no counterpart
+refuses the whole run (exit 2) and `names` lists every one to map. Over MCP this
+is the `distill_facts` tool.
+
+```
+{ok: true, path, branch, sha?, facts, rejected: [{fact, source, reason}], swapped?: [{from, to}], provider, model}
+{ok: false, code: 2, message, names?}       realNames: false and unmapped research names
 ```
 
 ### fact
