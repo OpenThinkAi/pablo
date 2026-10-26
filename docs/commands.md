@@ -277,11 +277,23 @@ Before sending anything, it:
 2. Builds the pack: the voice, the work's rules, period facts, cast and places, the timeline up to the beat's date, continuity, the end of the previous unit, and the beat.
    - Any source under one of the marker's `neverSend` prefixes is a refusal, not a silent drop.
    - In the style files, any section whose heading mentions replies or agents is left out.
+   - The voice is layered, lowest first: **global** (`~/.config/pablo/voices/default/`,
+     then any global voice the work's `pablo.json` `voice` list names), **vault**
+     (`style/`, then any vault voice the list names), **work** (any other voice file or
+     directory the list names, then the work's `QWEN.md`), **output**
+     (`outputs/<type>/RULES.md`). Every voice's `never.md` is its own section after the
+     rules, and every voice's exemplars a section after the craft rules (the work's own
+     voices first, each voice's newest first; the first section to give under the
+     budget). Every output (novel, story, radio) builds its voice this way.
 3. Refuses if the unit file already exists, unless you pass `--force`.
 
 `--dry-run` prints each section of the pack with its token count, plus a wait estimate
-when the endpoint has been timed. With `--json` it returns
-`{ok, dryRun: true, output, unit, slices[], totalTokens, expectedOutputTokens, prompt_hash, adjustments}`.
+when the endpoint has been timed, and the voice layers it used, one line each with the
+`pablo.json` entry that named it (the global default is labelled `global default`); a
+voice the list names that was not found is a `missing` line, never silently left out.
+With `--json` it returns
+`{ok, dryRun: true, output, unit, slices[], totalTokens, expectedOutputTokens, prompt_hash, adjustments, voiceLayers}`,
+where `voiceLayers` is `{layers: [{layer, name, source, via?}], missing: [{name, via, reason}]}`.
 The same inputs give the same `prompt_hash`.
 
 Without `--dry-run`, the pack is sent once. While it streams, progress goes to
@@ -295,7 +307,9 @@ The file is committed in its own worktree on a draft branch, authored as the mod
 with the prompt hash as its `Receipt:` line. Branches are `draft/chNN` for a novel,
 `draft/story` for a story and `draft/radio-epNN` for radio; a re-draft gets `-v2`,
 `-v3` and so on. `main` is not touched. A receipt (model, tokens, time to first
-token, wall time, temperature, seed) is appended to `<work>/.pablo/receipts.jsonl`.
+token, wall time, temperature, seed, and the voice layers as `voice_layers`, plus
+`voice_missing` when a listed voice was not found) is appended to
+`<work>/.pablo/receipts.jsonl`.
 The same check as `pablo check` runs on the new text. Its hits are reported but never
 change the exit code.
 
@@ -325,6 +339,11 @@ one. `--draft` with `--instruction` revises an earlier piece instead of starting
 over. A receipt goes to `<vault>/.pablo/receipts.jsonl`, or
 `$XDG_STATE_HOME/pablo/receipts.jsonl` when there is no vault. The voice's own
 flagged lines are checked against the answer.
+
+The voice is layered like `write`'s: the global default
+(`~/.config/pablo/voices/default/`) first, then the `--voice` itself, in the layer of
+where it lives. Their rules, exemplars and `never.md` are merged in that order, and the
+dry run (`voiceLayers` in `--json`) and the receipt (`voice_layers`) list both.
 
 ### revise
 

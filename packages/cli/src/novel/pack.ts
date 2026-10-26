@@ -30,6 +30,7 @@ import {
 } from "@openthink/pablo-core";
 import type { Marker } from "../marker";
 import { NOVEL_ID } from "../outputs/novel/units";
+import { joinSources, layerOf, mergeVoice, packVoice, resolveVoiceLayers } from "../voice-layers";
 
 /** `draft-chapter`'s length target, ported as pablo's default (AC2). */
 export const DEFAULT_WORD_TARGET = 1800;
@@ -70,6 +71,8 @@ export interface BuildChapterPackOptions {
    * a refusal, like a `neverSend` one.
    */
   readonly output?: string | undefined;
+  /** For the global voices directory (`$XDG_CONFIG_HOME`); defaults to `process.env`. */
+  readonly env?: Record<string, string | undefined> | undefined;
 }
 
 /**
@@ -112,18 +115,47 @@ export function buildChapterPack(
 /**
  * The two pablo policies applied to read inputs, then the pack assembled and
  * checked against `neverSend`: shared by every output's pack builder (the
- * novel's chapter, the story's whole piece) so none re-implements them.
+ * novel's chapter, the story's whole piece, the radio episode) so none
+ * re-implements them.
+ *
+ * The voice is the layered one (AGT-2139, D-15), from `resolveVoiceLayers`:
+ * the global and vault layers are the `style` slice, the work layer (the
+ * voices its `pablo.json` lists, then its own rules file) the `workRules`
+ * slice, the output's `RULES.md` the `outputRules` slice, and every voice's
+ * `never.md` and exemplars their own slices. The rules file's text is the
+ * reader's (`inputs.workRules`), which keeps the period facts in their own
+ * slice. Which layers were used rides on the pack to the dry run and receipt.
  */
 export function packFromInputs(
   vaultRoot: string,
   workDir: string,
   inputs: DraftingInputs,
-  options: Pick<BuildChapterPackOptions, "marker" | "direction" | "output">,
+  options: Pick<BuildChapterPackOptions, "marker" | "direction" | "output" | "env">,
 ): ChapterPackOutcome {
   const output = options.output ?? NOVEL_ID;
+  const resolved = resolveVoiceLayers({ vaultRoot, workRoot: workDir, output, voice: options.marker.voice, env: options.env });
+  const below = [...layerOf(resolved, "global"), ...layerOf(resolved, "vault")];
+  const work = layerOf(resolved, "work");
+  // The work layer's only piece no `pablo.json` entry named is its own rules file.
+  const workVoices = work.filter((piece) => piece.via !== undefined);
+  const hasRulesFile = work.some((piece) => piece.via === undefined);
+  // The output layer is one file, `outputs/<type>/RULES.md`: one piece with one rules source.
+  const outputPiece = layerOf(resolved, "output")[0];
+  const all = mergeVoice(resolved.layers);
+  const workRules = joinSources([
+    ...filterVoice(mergeVoice(workVoices).rules),
+    ...(hasRulesFile && inputs.workRules !== undefined ? [inputs.workRules] : []),
+  ]);
+
+  // `inputs.style` (the reader's `style/`) is replaced: the resolver's vault layer reads the same files.
   const filtered: DraftingInputs = {
     ...inputs,
-    style: filterVoice(inputs.style),
+    style: filterVoice(mergeVoice(below).rules),
+    workRules,
+    outputRules: outputPiece?.rules[0],
+    never: all.never,
+    exemplars: all.exemplars,
+    voiceLayers: packVoice(resolved),
     ...(options.direction === undefined ? {} : { direction: options.direction }),
   };
 

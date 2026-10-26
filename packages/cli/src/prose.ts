@@ -46,6 +46,7 @@ import type {
   CompletionStats,
   Intent,
   Pack,
+  PackVoice,
   ReceiptSink,
   SliceAction,
   SliceAdjustment,
@@ -59,6 +60,8 @@ import { parseFrontmatter } from "./novel/machine";
 import { jsonlReceiptSink, stateReceiptsPath } from "./paths";
 import { findVault } from "./project";
 import { readVoice, resolveVoice } from "./voice";
+import { joinSources, mergeVoice, packVoice, resolveProseVoiceLayers } from "./voice-layers";
+import type { ResolvedVoiceLayers } from "./voice-layers";
 import type { Voice } from "./voice";
 import { yamlScalar } from "./write";
 import type { ProgressSink, WriteReceiptSummary } from "./write";
@@ -146,6 +149,8 @@ export interface ProseDryRunBody {
   readonly expectedOutputTokens: number;
   readonly prompt_hash: string;
   readonly adjustments: readonly SliceAdjustment[];
+  /** The layered voice the pack carries (AGT-2139), lowest first. */
+  readonly voiceLayers?: PackVoice;
 }
 
 /**
@@ -245,6 +250,12 @@ export interface BuildProseOptions {
   readonly draft?: TextSource | undefined;
   /** AGT-1244: what to change about `draft`, already sanitized by the caller (see `sanitizeInstruction`). */
   readonly instruction?: string | undefined;
+  /**
+   * The layered voice (AGT-2139, D-15): when given, the pack's voice is these
+   * layers merged (the global default under the named voice) in place of
+   * `voice`'s own material, and the receipt lists them.
+   */
+  readonly layers?: ResolvedVoiceLayers | undefined;
 }
 
 export type BuildProseResult = { readonly ok: true; readonly pack: Pack } | { readonly ok: false; readonly code: 2; readonly message: string };
@@ -264,8 +275,13 @@ export function buildProsePack(voice: Voice, options: BuildProseOptions): BuildP
     };
   }
 
+  const merged = options.layers === undefined ? undefined : mergeVoice(options.layers.layers);
   const pack = assemblePack("prose", {
-    voice: { rules: voice.rules, exemplars: voice.exemplars, never: voice.never },
+    voice:
+      merged === undefined
+        ? { rules: voice.rules, exemplars: voice.exemplars, never: voice.never }
+        : { rules: merged.rules, exemplars: merged.exemplars, never: joinSources(merged.never) },
+    ...(options.layers === undefined ? {} : { voiceLayers: packVoice(options.layers) }),
     format: options.format === undefined ? undefined : FORMAT_STANZAS[options.format],
     context: options.context,
     brief: options.brief,
@@ -333,6 +349,7 @@ function dryRunBody(pack: Pack): ProseDryRunBody {
     expectedOutputTokens: pack.expectedOutputTokens,
     prompt_hash: pack.hash,
     adjustments: pack.adjustments,
+    ...(pack.voiceLayers === undefined ? {} : { voiceLayers: pack.voiceLayers }),
   };
 }
 
@@ -381,6 +398,12 @@ function assembleProse(args: ProseCoreArgs, ctx: ProseCoreContext): AssembleOutc
     });
   }
   const voice = readVoice(resolution.path);
+  const vault = findVault(ctx.cwd, ctx.env);
+  const layers = resolveProseVoiceLayers({
+    voicePath: resolution.path,
+    vaultRoot: vault.ok ? vault.path : undefined,
+    env: ctx.env,
+  });
 
   if (args.brief === undefined) {
     return fail(refuse(2, "pablo: prose requires --brief <file|->"));
@@ -416,7 +439,7 @@ function assembleProse(args: ProseCoreArgs, ctx: ProseCoreContext): AssembleOutc
     instruction = sanitizeInstruction(args.instruction as string);
   }
 
-  const built = buildProsePack(voice, { brief: briefResult.source, context, format: args.format, words: args.words, draft, instruction });
+  const built = buildProsePack(voice, { brief: briefResult.source, context, format: args.format, words: args.words, draft, instruction, layers });
   if (!built.ok) return fail({ body: built, exitCode: built.code });
 
   return { ok: true, pack: built.pack, voice, revisedFrom };

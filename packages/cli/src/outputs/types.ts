@@ -78,6 +78,8 @@ export interface UnitPackOptions {
    * Callers pass the definition's `id`; absent means the novel.
    */
   readonly output?: string | undefined;
+  /** For the global voices directory the layered voice reads (`$XDG_CONFIG_HOME`); defaults to `process.env`. */
+  readonly env?: Record<string, string | undefined> | undefined;
 }
 
 /** The writer's pack for one unit, or a refusal (a `neverSend` violation). */

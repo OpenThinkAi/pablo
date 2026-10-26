@@ -31,6 +31,7 @@ import type {
   DraftingInputs,
   Pack,
   PackKind,
+  PackVoice,
   ProseInputs,
   ReaderNote,
   ReviseInputs,
@@ -106,6 +107,7 @@ export function assemblePack(
           : reviseSpecs(inputs as ReviseInputs);
 
   const fitted = fitToBudget(built.specs, budgetTokens, estimate);
+  const voiceLayers = voiceLayersOf(kind, inputs);
   const prompt = joinSlices(fitted.slices);
   const context = joinSlices(fitted.slices.filter((slice) => !built.tail.has(slice.name)));
 
@@ -120,7 +122,18 @@ export function assemblePack(
     prompt,
     hash: hashPrompt(prompt),
     expectedOutputTokens: built.expectedOutputTokens,
+    ...(voiceLayers === undefined ? {} : { voiceLayers }),
   };
+}
+
+/** The layered voice a drafting or prose caller resolved, for the pack's dry run and receipt (AGT-2139). */
+function voiceLayersOf(
+  kind: PackKind,
+  inputs: SpanEditInputs | DraftingInputs | ProseInputs | ReviseInputs,
+): PackVoice | undefined {
+  if (kind === "drafting") return (inputs as DraftingInputs).voiceLayers;
+  if (kind === "prose") return (inputs as ProseInputs).voiceLayers;
+  return undefined;
 }
 
 /** `sha256`, hex. Exported so a caller can hash a prompt it composed itself. */
@@ -243,7 +256,9 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
 
 /**
  * Drafting: `bin/draft-chapter`'s pack, in its order — the chapter, the prose
- * rules, the craft rules, period facts, cast, places, the timeline gated by the
+ * rules (the layered voice, AGT-2139: global and vault in `style`, the work's
+ * in `workRules`, the output's in `outputRules`, then every voice's `never`),
+ * the craft rules, the voices' exemplars, period facts, cast, places, the timeline gated by the
  * chapter's story date, the promoted facts (`facts.md`), the unit's own
  * output's continuity ledger, the tail of the previous
  * chapter, and the task.
@@ -356,6 +371,17 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       cutOrder: 2,
     },
     {
+      name: "never",
+      heading: "# What this voice never does (binding)",
+      text: concatSources(inputs.never ?? []),
+      source: sourceLabel(inputs.never ?? []),
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 2,
+    },
+    {
       name: "craft",
       heading: "# Craft rules (binding, and the ones models break)",
       text: CRAFT_RULES,
@@ -365,6 +391,20 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       minTokens: 0,
       reducible: false,
       cutOrder: 0,
+    },
+    {
+      // The voice's exemplars (AGT-2139): how it sounds, never what happens. The
+      // first slice to give under budget pressure, oldest and least specific last
+      // in the text so `keep: "head"` drops those first.
+      name: "exemplars",
+      heading: "# Exemplars of the voice (match how they sound; borrow nothing from what they say)",
+      text: concatSources(inputs.exemplars ?? []),
+      source: sourceLabel(inputs.exemplars ?? []),
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 9,
     },
     {
       name: "period",

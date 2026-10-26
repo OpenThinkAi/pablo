@@ -76,13 +76,14 @@ export function renderPack(pack: Pack, rates?: PackRates): PackPreview {
   const table = renderTable(pack);
   const summary = renderSummary(pack, wait, rates);
   const notes = pack.adjustments.map(renderAdjustment);
+  const voice = renderVoice(pack);
 
   return {
     prompt: pack.prompt,
     table,
     summary,
     wait,
-    text: [summary, table, ...(notes.length === 0 ? [] : [notes.join("\n")]), pack.prompt].join("\n\n"),
+    text: [summary, table, ...(voice === undefined ? [] : [voice]), ...(notes.length === 0 ? [] : [notes.join("\n")]), pack.prompt].join("\n\n"),
   };
 }
 
@@ -100,6 +101,19 @@ function renderTable(pack: Pack): string {
   const rule = widths.map((width, index) => "-".repeat(index === 2 ? Math.min(width, 40) : width)).join("  ");
 
   return [line(header), rule, ...rows.map(line), rule, line(total)].join("\n");
+}
+
+/**
+ * The voice layers the pack carries (AGT-2139), lowest precedence first, one
+ * line each, then any voice the work names that was not found. `undefined`
+ * when the caller did not resolve layers.
+ */
+export function renderVoice(pack: Pack): string | undefined {
+  const voice = pack.voiceLayers;
+  if (voice === undefined) return undefined;
+  const lines = voice.layers.map((piece) => `  ${piece.layer.padEnd(6)}  ${piece.source}${piece.via === undefined ? "" : `  [${piece.via}]`}`);
+  const missing = voice.missing.map((m) => `  missing  ${m.name}  [${m.via}]: ${m.reason}`);
+  return ["voice layers (lowest first):", ...(lines.length === 0 ? ["  (none)"] : lines), ...missing].join("\n");
 }
 
 function renderAdjustment(adjustment: SliceAdjustment): string {

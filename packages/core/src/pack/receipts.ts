@@ -35,7 +35,7 @@ import { selectionText } from "../document";
 import { hashPrompt } from "./assemble";
 import type { TokenEstimator } from "./estimate";
 import { estimateTokens } from "./estimate";
-import type { Pack, PackKind } from "./types";
+import type { Pack, PackKind, PackVoiceLayer, PackVoiceMissing } from "./types";
 
 /** How the numbers in a receipt were obtained. */
 export type ReceiptMeasurement = "stream" | "wall";
@@ -78,6 +78,10 @@ export interface Receipt {
   readonly output?: string;
   /** The unit of that output (chapter 3, episode 5); present with `output`. */
   readonly unit?: number;
+  /** The voice layers the pack carried, lowest precedence first (AGT-2139); present when the pack was built from them. */
+  readonly voice_layers?: readonly PackVoiceLayer[];
+  /** Voices the work's `pablo.json` names that were not found; present (and non-empty) only when there were some. */
+  readonly voice_missing?: readonly PackVoiceMissing[];
 }
 
 export type ReceiptSink = (receipt: Receipt) => void | Promise<void>;
@@ -141,6 +145,8 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
       proposal: null,
       error: null,
       ...(options.address === undefined ? {} : { output: options.address.output, unit: options.address.unit }),
+      ...(pack?.voiceLayers === undefined ? {} : { voice_layers: pack.voiceLayers.layers }),
+      ...(pack?.voiceLayers === undefined || pack.voiceLayers.missing.length === 0 ? {} : { voice_missing: pack.voiceLayers.missing }),
     };
   }
 

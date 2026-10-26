@@ -61,6 +61,39 @@ export interface Pack {
   readonly hash: string;
   /** What the answer is expected to cost, for the wait estimate and `maxTokens`. */
   readonly expectedOutputTokens: number;
+  /**
+   * The voice layers the pack was built from (AGT-2139, D-15), when the caller
+   * resolved them: carried to the dry run and the receipt. Not part of the
+   * prompt, so not part of the hash.
+   */
+  readonly voiceLayers?: PackVoice | undefined;
+}
+
+/** One piece of the layered voice a pack carries, as a receipt shows it. */
+export interface PackVoiceLayer {
+  /** `global`, `vault`, `work` or `output`. */
+  readonly layer: string;
+  /** The voice's name (`default`, `plain`, `style`, the rules file, `RULES.md (radio)`). */
+  readonly name: string;
+  /** Where it was read from: vault-relative inside the vault, absolute outside it. */
+  readonly source: string;
+  /** What put it in the pack: the `pablo.json` entry (`voice[2]: plain`), or `global default`. */
+  readonly via?: string | undefined;
+}
+
+/** A voice the work's `pablo.json` names that was not found (or was empty): shown, never silently skipped. */
+export interface PackVoiceMissing {
+  readonly layer?: string | undefined;
+  readonly name: string;
+  /** The `pablo.json` entry that named it. */
+  readonly via: string;
+  readonly reason: string;
+}
+
+/** The layered voice behind a pack, lowest precedence first. */
+export interface PackVoice {
+  readonly layers: readonly PackVoiceLayer[];
+  readonly missing: readonly PackVoiceMissing[];
 }
 
 /** A style or rules file read out of the vault, kept with its path for the table. */
@@ -146,6 +179,19 @@ export interface DraftingInputs {
    * work's rules and before the unit's slices. Its own slice, `outputRules`.
    */
   readonly outputRules?: TextSource | undefined;
+  /**
+   * Every `never.md` of the voices the work carries (AGT-2139), lowest layer
+   * first: its own slice after the output's rules.
+   */
+  readonly never?: readonly TextSource[] | undefined;
+  /**
+   * The exemplars of the voices the work carries (AGT-2139), most specific
+   * layer first and each voice's newest first, so a budget squeeze drops the
+   * global voices' oldest pieces before the work's own.
+   */
+  readonly exemplars?: readonly TextSource[] | undefined;
+  /** Which layers `style`, `workRules`, `outputRules`, `never` and `exemplars` came from, for the receipt. */
+  readonly voiceLayers?: PackVoice | undefined;
   /** The work's period and place facts, usually a section of its `QWEN.md`. */
   readonly periodFacts?: TextSource | undefined;
   /** `bible/characters/*`: who exists. */
@@ -204,6 +250,8 @@ export interface ProseInputs {
   readonly context: readonly TextSource[];
   /** The ask, as markdown (a file, stdin, or MCP text — resolved by the caller). */
   readonly brief: TextSource;
+  /** Which layers `voice` was merged from (AGT-2139), for the receipt. */
+  readonly voiceLayers?: PackVoice | undefined;
   /** Target word count; defaults to 300 (drafting's own default is a chapter, prose's is a short piece). */
   readonly wordTarget?: number | undefined;
   /**
