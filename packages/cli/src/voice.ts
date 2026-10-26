@@ -27,7 +27,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { configDir, readStyle, readTextSource } from "@openthink/pablo-core";
+import { WORK_RULES_FILE, configDir, readStyle, readTextSource, workRulesFile } from "@openthink/pablo-core";
 import type { TextSource } from "@openthink/pablo-core";
 import { gitCommit, SLUG_PATTERN } from "./init";
 import { insertUnderHeading } from "./markdown";
@@ -545,14 +545,14 @@ export function addExemplar(
 /**
  * Where a rule lands. `voice`: the voice's own rules file, the one `flagLine`
  * writes (`style/prose.md` for `fiction`, `voice.md` for a named voice).
- * `work`: the work's own `QWEN.md`, its voice layer after the shared style
+ * `work`: the work's own `STYLE.md`, its voice layer after the shared style
  * (AGT-1593). The screen's picker and `voice rule --target` name these two.
  */
 export type RuleTarget = "voice" | "work";
 export const RULE_TARGETS: readonly RuleTarget[] = ["voice", "work"];
 
 const RULES_HEADING = "## Rules";
-/** A work's QWEN.md keeps its rules under a heading like `## Ground rules (set by Matt, 2026-09-01)`; a rule joins that section when it exists. */
+/** A work's STYLE.md keeps its rules under a heading like `## Ground rules (set by Matt, 2026-09-01)`; a rule joins that section when it exists. */
 const WORK_RULES_HEADING = /^##\s+ground rules\b/i;
 
 /** The heading a rule goes under in `lines`: for the work, an existing "Ground rules" section, else `## Rules`. */
@@ -583,12 +583,12 @@ export type RuleResult = RuleOk | Refusal;
  * indented `Flagged: "<example>"` line, so `check` (which reads every
  * `Flagged:` line of `style/prose.md`, and of a named voice's rules in
  * `prose`) catches the sentence the rule came from. `check` does not read a
- * work's QWEN.md, so a `Flagged:` line under the `work` target documents the
+ * work's STYLE.md, so a `Flagged:` line under the `work` target documents the
  * example for the writer but is not enforced by `check`.
  *
  * `text` and `example` are untrusted (a model supplies them over MCP): flattened to one line each, like `flagLine`'s
  * `line`, so neither can forge a heading. A bullet already present verbatim is not repeated (notice, exit 0).
- * `target: "work"` needs `projectPath` and an existing `QWEN.md` there; `location` is not used then.
+ * `target: "work"` needs `projectPath` and an existing `STYLE.md` there; `location` is not used then.
  */
 export function addRule(
   location: VoiceLocation | undefined,
@@ -612,8 +612,8 @@ export function addRule(
     mkdirSync(dirname(targetPath), { recursive: true });
   } else if (target === "work") {
     if (opts.projectPath === undefined) return refuse("pablo: voice rule: --target work needs a project (--project <slug>)", []);
-    targetPath = join(opts.projectPath, "QWEN.md");
-    if (!existsSync(targetPath)) return refuse(`pablo: voice rule: the work has no QWEN.md (${targetPath})`, [targetPath]);
+    targetPath = join(opts.projectPath, workRulesFile(opts.projectPath));
+    if (!existsSync(targetPath)) return refuse(`pablo: voice rule: the work has no ${WORK_RULES_FILE} (${targetPath})`, [targetPath]);
   } else {
     if (location === undefined) return refuse("pablo: voice rule: no voice to write into", []);
     targetPath = flagTargetPath(location);

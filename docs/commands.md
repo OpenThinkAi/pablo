@@ -86,9 +86,10 @@ Each change is one commit.
 pablo migrate lines --project <slug> [--dry-run]
 pablo migrate outputs --project <slug> [--dry-run]
 pablo migrate track --project <slug> --track <t> [--dry-run]
+pablo migrate style --project <slug> [--dry-run]
 ```
 
-One-time migrations of older works. Running any twice is safe: the second run
+One-time migrations of older works. Running any of them twice is safe: the second run
 changes nothing. `--dry-run` lists what would change.
 
 - `lines` splits `chapters/*.md` to one sentence per line, leaving frontmatter
@@ -96,12 +97,12 @@ changes nothing. `--dry-run` lists what would change.
 - `outputs` converts a `format: "novel"` work to a story core plus a `novel`
   output, in one commit. It:
   - replaces `pablo.json`'s `format` with `outputs.novel`
-  - creates `outputs/novel/plan.md` and `outputs/novel/RULES.md` (`RULES.md` copies the novel-only sections of `QWEN.md`)
+  - creates `outputs/novel/plan.md` and `outputs/novel/RULES.md` (`RULES.md` copies the novel-only sections of the rules file)
   - moves `continuity.md` to `outputs/novel/continuity.md`
   - moves `outline/chapters.md` to `outline/beats.md`
   - creates an empty `facts.md`
 
-  It never writes `chapters/`, `bible/`, `research/`, `notes/` or `QWEN.md`.
+  It never writes `chapters/`, `bible/`, `research/`, `notes/` or the rules file (`STYLE.md`, or `QWEN.md` on an older work).
   Having both an old and a new path is a refusal. Returns
   `{ok, dryRun, changes[{op, path, from?}], paths[], committed, notice?}`.
 - `track` writes `track` (`fiction`, `historical-fiction` or `nonfiction`) into
@@ -111,6 +112,11 @@ changes nothing. `--dry-run` lists what would change.
   `missingStages` lists the core stages of the new track that the old track's core
   lacks (fiction to `historical-fiction`: `period`, `period-facts`). An unknown
   track, or uncommitted changes to `pablo.json`, is a refusal.
+- `style` renames the work's `QWEN.md` to `STYLE.md` with `git mv`, points a `QWEN.md` entry in
+  `pablo.json`'s `voice` list at the new name, and commits both in one commit. Every verb reads
+  `STYLE.md` and falls back to `QWEN.md`, so migrating is optional. It refuses when both files
+  exist. New works (`init`, `story`) are scaffolded with `STYLE.md`.
+  Returns `{ok, dryRun, changes[], committed, notice?}`.
 
 Every reader handles both the old and the new layout, so migrating is optional.
 
@@ -558,17 +564,17 @@ For `rule`, the default target `voice` writes `style/prose.md` for `fiction` and
 `voice.md` for a named voice. `--target` picks a layer instead, and then no voice name
 is needed: `global` writes the global default voice
 (`~/.config/pablo/voices/default/voice.md`, never committed), `vault` writes
-`style/prose.md`, `work` writes the work's `QWEN.md`, and `output:<type>` writes
+`style/prose.md`, `work` writes the work's `STYLE.md`, and `output:<type>` writes
 `outputs/<type>/RULES.md` (created if missing). `work` and `output:<type>` need
 `--project`. `work` joins an existing "Ground rules" section if there is one, and is
-refused when the work has no `QWEN.md`.
+refused when the work has no `STYLE.md`.
 
 A rule's id is six hex digits of the hash of its text, so it stays put while other
 rules come and go and changes only when you `edit` that rule. If the same text is in
 two files, `edit` and `remove` refuse until `--target` (`global`, `vault`, `work`,
 `output:<type>` or `voice:<name>`) says which. `--example` adds a `Flagged: "..."` line
 under the rule. `check` and `write` read those lines from `style/prose.md`, but not
-from `QWEN.md`. Changes are committed by path.
+from `STYLE.md`. Changes are committed by path.
 
 ---
 
@@ -647,7 +653,7 @@ pablo agent --project <slug> --tag-facts
 ```
 
 Runs one session of pablo's own agent: Claude, through the Agent SDK. Its system
-prompt carries the work's policy and `QWEN.md`. Its tools are web search, web fetch
+prompt carries the work's policy and `STYLE.md`. Its tools are web search, web fetch
 and pablo's MCP tools. It uses your Claude subscription unless an Anthropic API key
 is set in pablo's config.
 

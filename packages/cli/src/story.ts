@@ -49,7 +49,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createProviders, loadConfig, receiptsPath } from "@openthink/pablo-core";
+import { WORK_RULES_FILE, createProviders, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
 import type { Adapter, Intent, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
 import { coreStages, readCoreState } from "./core/machine";
@@ -299,7 +299,7 @@ async function ensureOutputs(outputs: readonly string[]): Promise<VerbResult | u
 function scaffold(title: string, prompt: string, date: string): Record<string, string> {
   return {
     "README.md": `# ${title}\n\nAsked for on ${date}:\n\n> ${prompt.replace(/\n/g, "\n> ")}\n\n## Where things stand\n\n- ${date}: created by \`pablo story\`.\n`,
-    "QWEN.md": `# ${title}: the work's rules\n\n## Ground rules\n\n- Tell the story the request asks for, in the vault's voice.\n`,
+    [WORK_RULES_FILE]: `# ${title}: the work's rules\n\n## Ground rules\n\n- Tell the story the request asks for, in the vault's voice.\n`,
     "bible/overview.md": "# Overview\n\n## Logline\n\n## Premise\n\n## Themes\n\n## Tone\n\n## Structure\n",
     "bible/places.md": "# Places\n",
     "bible/timeline.md": "# Timeline\n\n| Year | Real events | In the story |\n|---|---|---|\n",
@@ -422,7 +422,7 @@ function retitleFromPremise(run: Run): void {
   writeFileSync(markerFile, `${JSON.stringify({ ...raw, title }, null, 2)}\n`, "utf8");
   const paths = [markerFile];
   // The headings scaffolded with the working title follow it.
-  for (const [name, suffix] of [["README.md", ""], ["QWEN.md", ": the work's rules"]] as const) {
+  for (const [name, suffix] of [["README.md", ""], [workRulesFile(run.work), ": the work's rules"]] as const) {
     const file = join(run.work, name);
     if (!existsSync(file)) continue;
     const text = readFileSync(file, "utf8");

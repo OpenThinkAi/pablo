@@ -1,6 +1,6 @@
 /**
  * The harness's system prompt (AGT-1553): pablo's role, the work's judgement
- * policy and its `QWEN.md` rules. The assembler is pure; the loader reads a
+ * policy and its `STYLE.md` rules. The assembler is pure; the loader reads a
  * temp copy of the fixture vault and the shipped `policies/`. Every session is
  * a fake `HarnessQuery`: nothing here starts Claude or reaches the network.
  */
@@ -33,8 +33,9 @@ function work(slug: string, marker: Record<string, unknown>, rules?: string): st
   const dir = join(vault, "novels", slug);
   cpSync(join(vault, "novels", "ice-house"), dir, { recursive: true });
   writeFileSync(join(dir, "pablo.json"), JSON.stringify({ format: "novel", title: "The Salt Ledger", slug, ...marker }));
-  if (rules === undefined) rmSync(join(dir, "QWEN.md"));
-  else writeFileSync(join(dir, "QWEN.md"), rules);
+  rmSync(join(dir, "QWEN.md"));
+  if (rules === undefined) rmSync(join(dir, "STYLE.md"), { force: true });
+  else writeFileSync(join(dir, "STYLE.md"), rules);
   return dir;
 }
 
@@ -69,7 +70,7 @@ test("the prompt is role, then the policy, then the work's rules", () => {
   expect(prompt).toStartWith('You are pablo, the agent that writes stories with its author. You are working on "The Salt Ledger"');
   const role = prompt.indexOf("You are pablo");
   const policy = prompt.indexOf('<judgement_policy name="test-policy">\nResearch the tides.\n</judgement_policy>');
-  const rules = prompt.indexOf('<work_rules source="QWEN.md">\n# The Salt Ledger');
+  const rules = prompt.indexOf('<work_rules source="STYLE.md">\n# The Salt Ledger');
   expect(role).toBe(0);
   expect(policy).toBeGreaterThan(role);
   expect(rules).toBeGreaterThan(policy);
@@ -91,7 +92,7 @@ test("the assembler is pure: the same inputs give the same prompt", () => {
   expect(harnessSystemPrompt(input)).toBe(harnessSystemPrompt(input));
 });
 
-test("writer-only sections of QWEN.md never reach the harness", () => {
+test("writer-only sections of STYLE.md never reach the harness", () => {
   const prompt = harnessSystemPrompt({ ...base, rules: RULES });
   expect(prompt).not.toContain("Sentence music");
   expect(prompt).not.toContain("fog");
@@ -148,7 +149,7 @@ test("pablo.json's optional policy is read; a non-name value is refused naming t
   }
 });
 
-test("the loader reads the named policy and the work's QWEN.md", () => {
+test("the loader reads the named policy and the work's STYLE.md", () => {
   const dir = work("loader-hf", { policy: "historical-fiction" }, RULES);
   const marker = readMarker(dir);
   if (!marker.ok) throw new Error(marker.message);
@@ -161,7 +162,18 @@ test("the loader reads the named policy and the work's QWEN.md", () => {
   expect(loaded.work.title).toBe("The Salt Ledger");
 });
 
-test("the loader: no policy and no QWEN.md give the track's policy and no rules", () => {
+test("the loader falls back to QWEN.md and the prompt names the file it read (AGT-2141)", () => {
+  const dir = work("loader-legacy", {}, undefined);
+  writeFileSync(join(dir, "QWEN.md"), RULES);
+  const marker = readMarker(dir);
+  if (!marker.ok) throw new Error(marker.message);
+  const loaded = loadPromptWork(dir, marker.marker, "loader-legacy");
+  if (!loaded.ok) throw new Error(loaded.message);
+  expect(loaded.work.rules).toBe(RULES);
+  expect(harnessSystemPrompt(loaded.work)).toContain('<work_rules source="QWEN.md">');
+});
+
+test("the loader: no policy and no STYLE.md give the track's policy and no rules", () => {
   const dir = work("loader-bare", {});
   const marker = readMarker(dir);
   if (!marker.ok) throw new Error(marker.message);

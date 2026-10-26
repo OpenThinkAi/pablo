@@ -109,7 +109,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 Claude Agent SDK configured as pablo (`--doc harness`) —
                 pablo's system prompt in place of Claude Code's (role, the
                 judgement policy `pablo.json`'s `policy` names from
-                `packages/cli/policies/`, and the work's `QWEN.md` minus
+                `packages/cli/policies/`, and the work's `STYLE.md` minus
                 `<!-- writer-only -->` sections; AGT-1553), WebSearch
                 and WebFetch the only built-ins, pablo's MCP tools attached
                 in-process, the subscription by default with a config key
@@ -151,7 +151,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 outputs`) are one-time migrations. `voice-layers.ts`
                 (AGT-2138, D-15) is the one voice resolver: global
                 (`voices/default` + named) -> vault (`style/`, vault voices)
-                -> work (`pablo.json` `voice` entries + `QWEN.md`) -> output
+                -> work (`pablo.json` `voice` entries + `STYLE.md`) -> output
                 (`outputs/<type>/RULES.md`), each piece labelled with where
                 it came from and absent layers listed in `missing`.
                 Reading rounds: `share.ts` opens a round as a PR on the

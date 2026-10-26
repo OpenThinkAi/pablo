@@ -7,14 +7,14 @@
  *   pablo.json                    `format` dropped, `outputs.novel = {dir: <the novel's artifactDir>, added}`
  *                                 (`added`: the first chapter's `generated` date, else today)
  *   outputs/novel/plan.md         one unit per beat; a unit whose chapter exists carries its status
- *   outputs/novel/RULES.md        the novel-only sections of the work's `QWEN.md` (point of view,
+ *   outputs/novel/RULES.md        the novel-only sections of the work's `STYLE.md` (point of view,
  *                                 chapter length, scene conventions), copied
  *   continuity.md              -> outputs/novel/continuity.md
  *   outline/chapters.md        -> outline/beats.md   (content unchanged; readers shim the old name)
  *   facts.md                      the promoted-facts ledger, header only
  *
- * The novel's chapters, `bible/`, `research/`, `notes/` and the work's `QWEN.md` are
- * never written (the QWEN.md sections stay where they are until the pack layers
+ * The novel's chapters, `bible/`, `research/`, `notes/` and the work's `STYLE.md` are
+ * never written (the STYLE.md sections stay where they are until the pack layers
  * `RULES.md`, pablo-story-core S6, so the writer's voice does not change here).
  *
  * Each step runs only when it is still needed, so a second run (or a run on a
@@ -25,7 +25,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { BEATS_FILE, LEGACY_BEATS_FILE, LEGACY_CONTINUITY_FILE, NOVEL_CONTINUITY_FILE } from "@openthink/pablo-core";
+import { BEATS_FILE, LEGACY_BEATS_FILE, LEGACY_CONTINUITY_FILE, NOVEL_CONTINUITY_FILE, workRulesFile } from "@openthink/pablo-core";
 import { gitCommit } from "./init";
 import { markerPath, readMarker } from "./marker";
 import { dirtyPaths } from "./migrate";
@@ -38,7 +38,7 @@ export const NOVEL_PLAN_FILE = "outputs/novel/plan.md";
 export const NOVEL_RULES_FILE = "outputs/novel/RULES.md";
 export const FACTS_FILE = "facts.md";
 
-/** A `## ` heading of `QWEN.md` whose section is a novel-only rule (moved to `outputs/novel/RULES.md`). */
+/** A `## ` heading of `STYLE.md` whose section is a novel-only rule (moved to `outputs/novel/RULES.md`). */
 export const NOVEL_RULES_HEADING = /point of view|\bpov\b|chapter length|\blength\b|scene/i;
 
 /** One change the migration makes; paths are work-relative. */
@@ -109,7 +109,7 @@ export function novelPlan(workDir: string, beatsText: string): string {
   return renderNovelPlan(novelPlanRows(workDir, beatsText));
 }
 
-/** `outputs/novel/RULES.md`: the intro, then each `## ` section of `QWEN.md` whose heading is a novel-only rule, verbatim. */
+/** `outputs/novel/RULES.md`: the intro, then each `## ` section of `STYLE.md` whose heading is a novel-only rule, verbatim. */
 export function novelRules(qwen: string): string {
   const sections: string[] = [];
   const lines = qwen.split("\n");
@@ -122,7 +122,7 @@ export function novelRules(qwen: string): string {
     i = end - 1;
   }
   return sections.length === 0
-    ? `${OUTPUTS.novel.rulesTemplate}\n(No novel-only section was found in \`QWEN.md\`; add the novel's rules here.)\n`
+    ? `${OUTPUTS.novel.rulesTemplate}\n(No novel-only section was found in \`STYLE.md\`; add the novel's rules here.)\n`
     : `${OUTPUTS.novel.rulesTemplate}\n${sections.join("\n\n")}\n`;
 }
 
@@ -163,7 +163,8 @@ export function migrateOutputs(vaultRoot: string, projectPath: string, opts: Mig
     writes.push({ rel: NOVEL_PLAN_FILE, content: novelPlan(projectPath, beatsText) });
   }
   if (novel && !has(NOVEL_RULES_FILE)) {
-    const qwen = has("QWEN.md") ? readFileSync(join(projectPath, "QWEN.md"), "utf8") : "";
+    const rulesFile = workRulesFile(projectPath);
+    const qwen = has(rulesFile) ? readFileSync(join(projectPath, rulesFile), "utf8") : "";
     changes.push({ op: "create", path: NOVEL_RULES_FILE });
     writes.push({ rel: NOVEL_RULES_FILE, content: novelRules(qwen) });
   }

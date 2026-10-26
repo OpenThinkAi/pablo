@@ -130,7 +130,7 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
 // key panel while it is up, and the key handler all read these. A choice that `needsSelection` is left out when no
 // sentences are selected (a rule can still be typed then). `kind` is what the app hands the voicer (the CLI's
 // `screenVoicer`); a target's `id` is what the voicer takes as `RuleTarget` (`voice`: the voice's own rules file, the
-// vault's style/prose.md for `fiction`; `work`: the work's QWEN.md, its voice layer after the shared style).
+// vault's style/prose.md for `fiction`; `work`: the work's STYLE.md, its voice layer after the shared style).
 
 export interface VoiceChoice extends VoiceChoiceInfo { readonly label: string; readonly needsSelection: boolean }
 export const VOICE_CHOICES: readonly VoiceChoice[] = [
@@ -147,7 +147,7 @@ export interface VoiceTarget extends VoiceTargetInfo { readonly id: "voice" | "w
 /** Where a typed rule goes, the default first; Tab in the rule input cycles. Each is a `## Rules` section (a work's existing "Ground rules" section is used when it has one). */
 export const VOICE_TARGETS: readonly VoiceTarget[] = [
   { id: "voice", label: "the voice's rules (style/prose.md for fiction, else voice.md)" },
-  { id: "work", label: "this work's QWEN.md" },
+  { id: "work", label: "this work's STYLE.md" },
 ];
 /** The rule input's own keys, for the key panel: Enter writes, Tab changes the target, Esc cancels. */
 export const VOICE_RULE_KEYS: readonly { readonly key: string; readonly label: string }[] = [

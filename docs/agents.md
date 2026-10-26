@@ -104,7 +104,7 @@ The rest (`promote`, `migrate`, `bind`, and the radio tools `audition`, `cast`,
 ## The built-in agent
 
 pablo also ships its own agent, Claude configured as pablo: its system prompt is the
-rules above, the work's judgement policy and the work's `QWEN.md`, and its only tools
+rules above, the work's judgement policy and the work's `STYLE.md`, and its only tools
 are pablo's plus web search. It uses your Claude Code login, or an Anthropic key from
 your config (see [configuration.md](configuration.md#claude-for-pablo-agent-and-pablo-story)).
 

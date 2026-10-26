@@ -5,7 +5,7 @@
  *
  * `harnessOptions` is the whole configuration, built as data so a test can pin
  * it: pablo's system prompt in place of Claude Code's (role, the work's
- * judgement policy and its `QWEN.md` rules, `prompt.ts`), WebSearch and WebFetch
+ * judgement policy and its `STYLE.md` rules, `prompt.ts`), WebSearch and WebFetch
  * the only built-ins, pablo's tools attached in-process as the `pablo` MCP
  * server, no settings, CLAUDE.md, user MCP servers or plugins loaded from disk,
  * and `dontAsk` so a tool off the allowed list is refused rather than prompted

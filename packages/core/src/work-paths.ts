@@ -10,6 +10,8 @@
  *                continuity.md                    (unmigrated)
  *                outputs/<type>/continuity.md     (every other output's own ledger, AGT-1671)
  *     facts      facts.md                         (the core's promoted facts, AGT-1671)
+ *     rules      STYLE.md                         (the work's own rules, AGT-2141)
+ *                QWEN.md                          (the old name, read as a fallback)
  *
  * The new name wins whenever it exists; otherwise the old name is returned
  * whether or not it exists, so a message about a missing file names the file
@@ -55,4 +57,19 @@ export function continuityFile(workRoot: string, output = "novel"): string {
 export function outputContinuityFile(output: string): string {
   if (!/^[a-z][a-z0-9-]*$/.test(output)) throw new RangeError(`pablo: "${output}" is not an output type id`);
   return `outputs/${output}/continuity.md`;
+}
+
+/** The work's own rules file (D-15): model-neutral, scaffolded into every new work. Work-relative. */
+export const WORK_RULES_FILE = "STYLE.md";
+/** The rules file's old name, still read when a work has no `STYLE.md` (`pablo migrate style` renames it). */
+export const LEGACY_WORK_RULES_FILE = "QWEN.md";
+
+/**
+ * The work-relative name of the work's rules file: `STYLE.md` when it exists,
+ * else `QWEN.md` when that exists, else `STYLE.md` (what a new work gets, and
+ * what a message about a missing file should name).
+ */
+export function workRulesFile(workRoot: string): string {
+  if (existsSync(join(workRoot, WORK_RULES_FILE))) return WORK_RULES_FILE;
+  return existsSync(join(workRoot, LEGACY_WORK_RULES_FILE)) ? LEGACY_WORK_RULES_FILE : WORK_RULES_FILE;
 }

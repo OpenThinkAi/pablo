@@ -29,11 +29,11 @@ import {
   novelUnitOfPath,
 } from "./units";
 
-/** `outputs/novel/RULES.md`'s heading and intro; `pablo migrate outputs` appends the novel-only sections of `QWEN.md`. */
+/** `outputs/novel/RULES.md`'s heading and intro; `pablo migrate outputs` appends the novel-only sections of `STYLE.md`. */
 export const NOVEL_RULES_TEMPLATE = `# Novel rules
 
-Rules for the novel output only, layered after the work's voice (\`QWEN.md\`)
-and before a chapter's own slices. Copied from the work's \`QWEN.md\` by
+Rules for the novel output only, layered after the work's voice (\`STYLE.md\`)
+and before a chapter's own slices. Copied from the work's \`STYLE.md\` by
 \`pablo migrate outputs\`; the ground rules and period facts stay there as
 core.
 `;

@@ -8,7 +8,7 @@
  * which pablo invented:
  *
  *     <vault>/style/*.md                      the shared prose guide
- *     <work>/QWEN.md                          the work's own rules
+ *     <work>/STYLE.md                         the work's own rules (QWEN.md on an unmigrated work)
  *     <work>/bible/timeline.md                | year | real events | in the novel |
  *     <work>/bible/places.md                  places
  *     <work>/bible/characters/family-tree.md  the cast
@@ -28,13 +28,13 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { joinParagraphs } from "../sentences";
-import { FACTS_FILE, beatsFile, continuityFile } from "../work-paths";
+import { FACTS_FILE, beatsFile, continuityFile, workRulesFile } from "../work-paths";
 import type { BeatRow, DraftingInputs, TextSource, TimelineGate, WorkIdentity } from "./types";
 
 /** Words of the previous chapter carried into a drafting pack, as `draft-chapter` sends. */
 export const DEFAULT_TAIL_WORDS = 500;
 
-/** Where the period-and-place facts live in a work's `QWEN.md`, per the vault's novel template. */
+/** Where the period-and-place facts live in a work's `STYLE.md`, per the vault's novel template. */
 export const PERIOD_FACTS_SECTION = "## Setting and period facts";
 const PERIOD_FACTS_END = "## The files";
 
@@ -42,7 +42,7 @@ const PERIOD_FACTS_END = "## The files";
 export const AGENT_SECTION_HEADING = /repl(y|ies)|agent/i;
 
 /**
- * `QWEN.md` sections that are operating instructions for the agent working in
+ * `STYLE.md` sections that are operating instructions for the agent working in
  * the work (the vault templates' memory-brief, memory-command and session-order
  * sections, pablo's own drafting notes), not prose rules for the writer.
  */
@@ -76,7 +76,7 @@ export interface ReadDraftingOptions {
   readonly castEndsAt?: string | undefined;
   /** Heading the places file starts at, for a file that opens with rejected options. */
   readonly placesStartsAt?: string | undefined;
-  /** Overrides the title parsed from the work's `QWEN.md`. */
+  /** Overrides the title parsed from the work's `STYLE.md`. */
   readonly work?: Partial<WorkIdentity> | undefined;
   /**
    * The output the unit belongs to (AGT-1671), default `novel`: its own ledger
@@ -107,7 +107,7 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
     moreBeats.push(row);
   }
 
-  const workRulesPath = join(workRoot, "QWEN.md");
+  const workRulesPath = join(workRoot, workRulesFile(workRoot));
   const workRules = read(workRulesPath) ?? "";
   // The period facts have their own slice, so the rules slice leaves that section out.
   const ruleText = workRuleSections(workRules, { exclude: [PERIOD_FACTS_SECTION] });
@@ -220,17 +220,17 @@ export function readStyle(vaultRoot: string): readonly TextSource[] {
 }
 
 /**
- * The work's own rules, for a span edit or a revise: `QWEN.md`'s rule sections
+ * The work's own rules, for a span edit or a revise: `STYLE.md`'s rule sections
  * only (see `workRuleSections`), labelled by path. `undefined` when the work
- * has no `QWEN.md` or it holds no rule sections.
+ * has no rules file (`STYLE.md`, else `QWEN.md`) or it holds no rule sections.
  */
 export function readWorkRules(vaultRoot: string, workRoot: string): TextSource | undefined {
-  return sourceOfFile(vaultRoot, join(workRoot, "QWEN.md"), (text) => workRuleSections(text));
+  return sourceOfFile(vaultRoot, join(workRoot, workRulesFile(workRoot)), (text) => workRuleSections(text));
 }
 
 /**
- * The prose rules a work's `QWEN.md` adds to the shared `style/` (AGT-1593: the
- * work's own voice layer is its `QWEN.md`). The `## ` sections kept are the
+ * The prose rules a work's `STYLE.md` adds to the shared `style/` (AGT-1593: the
+ * work's own voice layer is its `STYLE.md`). The `## ` sections kept are the
  * rules (ground rules, setting and period facts, point of view and voice, and
  * any a work adds); dropped are the title/preamble, sections that address the
  * agent (`AGENT_SECTION_HEADING`), the template's agent process sections
@@ -404,7 +404,7 @@ export function chapterTail(chapterText: string, words: number): string {
   return kept.join("\n\n");
 }
 
-/** The title from a work's `QWEN.md` first heading, without the "(working title)" suffix. */
+/** The title from a work's `STYLE.md` first heading, without the "(working title)" suffix. */
 export function parseWorkTitle(workRules: string): string | undefined {
   const match = /^#\s+(.+?)\s*$/m.exec(workRules);
   if (match === null) return undefined;

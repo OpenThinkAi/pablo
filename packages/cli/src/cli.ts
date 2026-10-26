@@ -26,6 +26,7 @@ import { reviewCommentsOf } from "./critique";
 import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
 import { migrateTrack } from "./migrate-track";
+import { migrateStyle } from "./migrate-style";
 import { mergeDraftInProject } from "./novel/merge";
 import { initAdopt, initNovel, vaultAuthor } from "./init";
 import type { InitResult } from "./init";
@@ -190,6 +191,9 @@ function helpText(): string {
     "                                            write the track (fiction, historical-fiction,",
     "                                            nonfiction) into pablo.json, committed on its own;",
     "                                            reports the new core stages the work lacks",
+    "  pablo migrate style --project <slug> [--dry-run]",
+    "                                            rename the work's QWEN.md to STYLE.md with git",
+    "                                            mv (QWEN.md is still read when not migrated)",
     "  pablo merge --project <slug> <draft/chNN>",
     "                                            merge a reviewed draft branch to main, then run",
     "                                            the after-write steps (outline, note, README,",
@@ -236,7 +240,7 @@ function helpText(): string {
     "                                            or the named voice's voice.md",
     '  pablo voice rule "<text>" --target global|vault|work|output:<type> [--project <slug>]',
     "                                            add it to that layer's rules file (work and output",
-    "                                            need --project; work = QWEN.md, output = RULES.md)",
+    "                                            need --project; work = STYLE.md, output = RULES.md)",
     '  pablo voice edit <id> "<text>" [--target <t>] [--project <slug>]',
     "                                            change one rule (ids are in `voice list`)",
     "  pablo voice remove <id> [--target <t>] [--project <slug>]",
@@ -1299,7 +1303,7 @@ export function bareScreenTarget(cwd: string): { title: string; format: string; 
 
 /**
  * The compose view's session spec for the project at `dir` (AGT-1566): the same inputs `pablo agent` builds, so the
- * two run the same agent: the marker, the work's judgement policy and its QWEN.md (`loadPromptWork`), the config's
+ * two run the same agent: the marker, the work's judgement policy and its STYLE.md (`loadPromptWork`), the config's
  * credential. Throws with the refusal's message; the composer calls it on the first message, so a refusal (an unknown
  * policy, no credential) shows in the conversation, not before the screen opens. pablo's tools run in this process;
  * their progress goes nowhere (stderr would draw over the screen).
@@ -1690,8 +1694,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   if (args.verb === "migrate") {
     const [sub] = args.rest;
-    if (sub !== "lines" && sub !== "outputs" && sub !== "track") {
-      const message = `pablo: migrate: unknown migration "${sub ?? ""}" (expected lines, outputs or track)`;
+    if (sub !== "lines" && sub !== "outputs" && sub !== "track" && sub !== "style") {
+      const message = `pablo: migrate: unknown migration "${sub ?? ""}" (expected lines, outputs, track or style)`;
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
@@ -1717,6 +1721,25 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         const verb = result.dryRun ? "would write" : result.changes.length === 0 ? "already on" : "wrote";
         console.log(`pablo: migrate track: ${verb} track ${result.track} (was ${result.from})${result.committed ? " (committed)" : ""}`);
         if (result.missingStages.length > 0) console.log(`  missing new core stages: ${result.missingStages.join(", ")}`);
+        if (result.notice) console.log(result.notice);
+      }
+      return EXIT_OK;
+    }
+    if (sub === "style") {
+      const result = migrateStyle(vaultResult.path, projectPath, { dryRun: args.dryRun });
+      if (!result.ok) {
+        emit({ ok: false, code: result.code, message: result.message }, args.json);
+        return result.code;
+      }
+      if (args.json) {
+        console.log(JSON.stringify(result));
+      } else {
+        console.log(
+          result.changes.length === 0
+            ? "pablo: migrate style: nothing to migrate"
+            : `pablo: migrate style: ${result.dryRun ? "would change" : "changed"} ${result.changes.length} path(s)${result.committed ? " (committed)" : ""}`,
+        );
+        for (const c of result.changes) console.log(`  ${c}`);
         if (result.notice) console.log(result.notice);
       }
       return EXIT_OK;

@@ -73,7 +73,7 @@ test("initNovel scaffolds every template file with placeholders replaced, writes
 
   for (const relFile of [
     "README.md",
-    "QWEN.md",
+    "STYLE.md",
     "continuity.md",
     "bible/overview.md",
     "bible/timeline.md",
@@ -94,7 +94,7 @@ test("initNovel scaffolds every template file with placeholders replaced, writes
   expect(readme).not.toContain("{{TITLE}}");
   expect(readme).not.toContain("{{DATE}}");
 
-  const qwen = readFileSync(join(dest, "QWEN.md"), "utf8");
+  const qwen = readFileSync(join(dest, "STYLE.md"), "utf8");
   expect(qwen).toContain("salt-road");
   expect(qwen).not.toContain("{{SLUG}}");
 
@@ -113,7 +113,7 @@ test("initNovel scaffolds every template file with placeholders replaced, writes
       title: "The Salt Road",
       slug: "salt-road",
       author: "author",
-      voice: ["../../style", "QWEN.md"],
+      voice: ["../../style", "STYLE.md"],
       neverSend: ["research/", "notes/"],
       publish: {},
       outputs: { novel: { dir: "chapters", added: "2026-03-14" } },
