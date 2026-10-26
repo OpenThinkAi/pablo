@@ -78,7 +78,10 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 and `scripted.ts` the fake `chat()` adapter tests drive;
                 `openai.ts`'s `chat()` (AGT-2117) streams text and tool calls,
                 whole as mlx_lm sends them or as OpenAI deltas, and a
-                provider's `"tools": false` refuses a turn that offers tools),
+                provider's `"tools": false` refuses a turn that offers tools;
+                `anthropic.ts`'s `chat()` (AGT-2118) honours the same flag and
+                replays a tool-calling turn's thinking blocks verbatim by
+                tool-call id),
                 `diff/` (the diff parser, move detection and the stitcher that
                 review mode and accept/reject share), `facts.ts` (the fact
                 provenance tag), `work-paths.ts` (migration-aware paths to a

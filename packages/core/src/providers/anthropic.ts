@@ -37,6 +37,20 @@
  *   the interface and ignored here rather than turned into a failed request —
  *   worth knowing when comparing a bench run against a local endpoint, which
  *   does honour it.
+ *
+ * `chat()` (AGT-2118, D-12) is the agent loop's multi-turn path. It maps the
+ * neutral `ChatRequest` onto the Messages API — the system prompt to `system`,
+ * an assistant turn's tool calls to `tool_use` blocks carrying their ids, each
+ * tool result to a `tool_result` block in the next user turn (consecutive
+ * results share one user message, as the API requires) — and streams text and
+ * every completed `tool_use` with its id, then the usage.
+ *
+ * Thinking is on by default on current models, and a tool-use loop must send a
+ * turn's `thinking` blocks (with their signatures) back unchanged. The neutral
+ * history has no slot for them, so the adapter keeps each tool-calling turn's
+ * content blocks, keyed by its tool-call ids, and replays them verbatim when
+ * that same turn comes back as history. A turn it does not remember (another
+ * adapter instance, a resumed session) is rebuilt from the neutral message.
  */
 
 import { selectionText } from "../document";
@@ -44,7 +58,7 @@ import { resolveAll } from "../markup/spans";
 import { validateProposal } from "../markup/validate";
 import { CRITICMARKUP_EDIT_CLOSING, TOOL_EDIT_CLOSING } from "../pack/closing";
 import type { ProviderConfig } from "./config";
-import { EndpointHung, ProviderConfigError, ProviderResponseError } from "./errors";
+import { EndpointHung, ProviderConfigError, ProviderResponseError, ToolsDisabledError } from "./errors";
 import { readFacts } from "./facts";
 import { envVariableFor } from "./keys";
 import type { Gate } from "./queue";
@@ -52,6 +66,10 @@ import type { RateMeter } from "./rates";
 import { countOf, dataOf, frameSse, measure, reaching, truncate, waitFor } from "./stream";
 import type {
   Adapter,
+  ChatEvent,
+  ChatMessage,
+  ChatRequest,
+  ChatUsage,
   CompletionEvent,
   CompletionRequest,
   CompletionStats,
@@ -60,6 +78,7 @@ import type {
   ExtractRequest,
   OutputMode,
   Proposal,
+  ToolChoice,
 } from "./types";
 
 export interface AnthropicAdapterOptions {
@@ -88,6 +107,12 @@ const DEFAULT_MAX_TOKENS = 16_000;
 
 /** Rough enough to size a timeout with; nothing downstream depends on it. */
 const CHARS_PER_TOKEN = 4;
+
+/**
+ * How many tool-calling turns `chat()` remembers for thinking replay. A loop
+ * only ever replays its recent turns, so this bounds memory, not correctness.
+ */
+const REMEMBERED_TURNS = 256;
 
 const PROPOSE_EDIT = "propose_edit";
 const EXTRACT_FACTS = "extract_facts";
@@ -223,12 +248,15 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
     let firstTokenAt: number | undefined;
     let tokensWritten = 0;
     let tokensRead: number | undefined;
+    let outputReported = false;
     let stopReason: string | undefined;
     let refusal: string | undefined;
 
     try {
       const idleMs = request.timeoutMs ?? provider.timeoutMs;
-      const prefillMs = meter.estimatePrefillMs(Math.ceil(request.prompt.length / CHARS_PER_TOKEN)) ?? 0;
+      const promptChars =
+        request.messages === undefined ? (request.prompt ?? "").length : JSON.stringify(request.messages).length;
+      const prefillMs = meter.estimatePrefillMs(Math.ceil(promptChars / CHARS_PER_TOKEN)) ?? 0;
       const firstByteMs = Math.max(idleMs, prefillMs * 2);
 
       const response = await waitFor(
@@ -284,12 +312,35 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
 
               case "message_start":
                 if (event.inputTokens !== undefined) tokensRead = event.inputTokens;
-                if (event.outputTokens !== undefined) tokensWritten = event.outputTokens;
+                if (event.outputTokens !== undefined) {
+                  tokensWritten = event.outputTokens;
+                  outputReported = true;
+                }
                 break;
 
               case "block_start":
-                blocks.set(event.index, { kind: event.kind, name: event.name, json: "" });
+                blocks.set(event.index, {
+                  kind: event.kind,
+                  name: event.name,
+                  id: event.id,
+                  json: "",
+                  thinking: event.thinking ?? "",
+                  signature: event.signature ?? "",
+                  data: event.data,
+                });
                 break;
+
+              case "thinking_delta": {
+                const block = blocks.get(event.index);
+                if (block !== undefined) block.thinking += event.text;
+                break;
+              }
+
+              case "signature_delta": {
+                const block = blocks.get(event.index);
+                if (block !== undefined) block.signature += event.signature;
+                break;
+              }
 
               case "text_delta":
                 if (firstTokenAt === undefined) firstTokenAt = now();
@@ -306,13 +357,32 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
               case "block_stop": {
                 const block = blocks.get(event.index);
                 blocks.delete(event.index);
+                if (block?.kind === "thinking") {
+                  yield {
+                    type: "thinking",
+                    block: { type: "thinking", thinking: block.thinking, signature: block.signature },
+                  };
+                  break;
+                }
+                if (block?.kind === "redacted_thinking" && block.data !== undefined) {
+                  yield { type: "thinking", block: { type: "redacted_thinking", data: block.data } };
+                  break;
+                }
                 if (block?.kind !== "tool_use" || block.name === undefined) break;
-                yield { type: "tool", name: block.name, input: parseToolInput(provider.endpoint, block) };
+                yield {
+                  type: "tool",
+                  id: block.id,
+                  name: block.name,
+                  input: parseToolInput(provider.endpoint, block),
+                };
                 break;
               }
 
               case "message_delta":
-                if (event.outputTokens !== undefined) tokensWritten = event.outputTokens;
+                if (event.outputTokens !== undefined) {
+                  tokensWritten = event.outputTokens;
+                  outputReported = true;
+                }
                 if (event.stopReason !== undefined) stopReason = event.stopReason;
                 if (event.refusal !== undefined) refusal = event.refusal;
                 break;
@@ -336,7 +406,11 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
 
       const stats = measure(started, firstTokenAt ?? now(), now(), tokensRead, tokensWritten);
       meter.record(stats);
-      yield { type: "done", stats };
+      yield {
+        type: "done",
+        stats,
+        usage: { inputTokens: tokensRead, outputTokens: outputReported ? tokensWritten : undefined },
+      };
     } finally {
       request.signal?.removeEventListener("abort", abort);
       release?.();
@@ -425,11 +499,82 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
     return readFacts(provider.endpoint, args);
   }
 
+  /**
+   * Tool-calling turns this adapter produced, by each of their tool-call ids:
+   * the turn's content blocks as the API sent them, thinking and signatures
+   * included, for replay when the turn comes back as history.
+   */
+  const turns = new Map<string, RememberedTurn>();
+
+  function remember(turn: RememberedTurn): void {
+    for (const id of turn.ids) turns.set(id, turn);
+    while (turns.size > REMEMBERED_TURNS * 4) {
+      const oldest = turns.keys().next().value;
+      if (oldest === undefined) break;
+      turns.delete(oldest);
+    }
+  }
+
+  async function* chat(request: ChatRequest): AsyncIterable<ChatEvent> {
+    // The same refusal the OpenAI-compatible adapter makes (AGT-2117), before anything is sent.
+    if (request.tools.length > 0 && provider.tools === false) throw new ToolsDisabledError(provider.id);
+    const tools = request.tools.map(
+      (tool): ToolDefinition => ({ name: tool.name, description: tool.description, input_schema: { ...tool.parameters } }),
+    );
+    const offered = tools.length > 0;
+    const wire: WireRequest = {
+      system: request.system,
+      messages: wireMessages(request.messages, (ids) => turns.get(ids[0] ?? "")),
+      ...(offered ? { tools, toolChoice: wireToolChoice(request.toolChoice ?? "auto") } : {}),
+      model: request.model,
+      maxTokens: request.maxTokens,
+      timeoutMs: request.timeoutMs,
+      signal: request.signal,
+    };
+
+    const content: WireBlock[] = [];
+    const ids: string[] = [];
+    let text = "";
+    for await (const event of send(wire)) {
+      switch (event.type) {
+        case "text":
+          text += event.text;
+          appendText(content, event.text);
+          yield { type: "text", text: event.text };
+          break;
+        case "thinking":
+          content.push(event.block);
+          break;
+        case "tool": {
+          if (event.id === undefined || event.id === "") {
+            throw new ProviderResponseError(provider.endpoint, `a ${truncate(event.name)} call with no tool_use id`);
+          }
+          if (!isRecord(event.input)) {
+            throw new ProviderResponseError(
+              provider.endpoint,
+              `a ${truncate(event.name)} call whose arguments are not an object`,
+            );
+          }
+          ids.push(event.id);
+          content.push({ type: "tool_use", id: event.id, name: event.name, input: event.input });
+          yield { type: "tool_call", call: { id: event.id, name: event.name, arguments: event.input } };
+          break;
+        }
+        case "done":
+          // Remembered before `done` is yielded: a caller may stop reading there.
+          if (ids.length > 0) remember({ ids, text, content });
+          yield { type: "done", usage: event.usage };
+          break;
+      }
+    }
+  }
+
   return {
     id: provider.id,
     model: provider.model,
     preferredOutput: PREFERRED_OUTPUT,
     complete,
+    chat,
 
     async proposeEdit(request: EditRequest): Promise<Proposal> {
       // Throws before anything is sent when the span does not address the document.
@@ -504,26 +649,145 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
 interface OpenBlock {
   readonly kind: string;
   readonly name: string | undefined;
+  readonly id: string | undefined;
   json: string;
+  thinking: string;
+  signature: string;
+  readonly data: string | undefined;
 }
 
-interface WireRequest extends CompletionRequest {
+/** One Messages API content block, in the wire's own shape. */
+type WireBlock =
+  | { readonly type: "text"; text: string }
+  | { readonly type: "thinking"; readonly thinking: string; readonly signature: string }
+  | { readonly type: "redacted_thinking"; readonly data: string }
+  | {
+      readonly type: "tool_use";
+      readonly id: string;
+      readonly name: string;
+      readonly input: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly type: "tool_result";
+      readonly tool_use_id: string;
+      readonly content: string;
+      readonly is_error?: true;
+    };
+
+interface WireMessage {
+  readonly role: "user" | "assistant";
+  readonly content: WireBlock[];
+}
+
+/** A tool-calling turn `chat()` produced, kept so its thinking can be replayed. */
+interface RememberedTurn {
+  readonly ids: readonly string[];
+  /** The turn's text, joined, to tell that the history still holds this exact turn. */
+  readonly text: string;
+  readonly content: readonly WireBlock[];
+}
+
+type WireToolChoice =
+  | { readonly type: "auto" }
+  | { readonly type: "any" }
+  | { readonly type: "none" }
+  | { readonly type: "tool"; readonly name: string };
+
+interface WireRequest extends Omit<CompletionRequest, "prompt"> {
+  /** One user turn, for the single-shot paths; `messages` replaces it for `chat()`. */
+  readonly prompt?: string;
+  readonly messages?: readonly WireMessage[];
   readonly system?: string;
   readonly tools?: readonly ToolDefinition[];
-  readonly toolChoice?: { readonly type: "tool"; readonly name: string };
+  readonly toolChoice?: WireToolChoice;
 }
 
 type WireEvent =
   | { readonly type: "text"; readonly text: string }
-  | { readonly type: "tool"; readonly name: string; readonly input: unknown }
-  | { readonly type: "done"; readonly stats: CompletionStats };
+  | { readonly type: "thinking"; readonly block: WireBlock }
+  | { readonly type: "tool"; readonly id: string | undefined; readonly name: string; readonly input: unknown }
+  | { readonly type: "done"; readonly stats: CompletionStats; readonly usage: ChatUsage };
+
+/**
+ * The neutral history as Messages API turns. Tool results go back as
+ * `tool_result` blocks in a user turn, and consecutive same-role turns are
+ * merged, so every result of one assistant turn lands in one user message
+ * ahead of any text that follows it.
+ */
+function wireMessages(
+  messages: readonly ChatMessage[],
+  recall: (ids: readonly string[]) => RememberedTurn | undefined,
+): WireMessage[] {
+  const out: WireMessage[] = [];
+  const push = (role: WireMessage["role"], blocks: readonly WireBlock[]) => {
+    const last = out.at(-1);
+    if (last?.role === role) last.content.push(...blocks);
+    else out.push({ role, content: [...blocks] });
+  };
+
+  for (const message of messages) {
+    switch (message.role) {
+      case "user":
+        push("user", [{ type: "text", text: message.content }]);
+        break;
+      case "tool":
+        push("user", [
+          {
+            type: "tool_result",
+            tool_use_id: message.toolCallId,
+            content: message.content,
+            ...(message.isError === true ? { is_error: true as const } : {}),
+          },
+        ]);
+        break;
+      case "assistant": {
+        const calls = message.toolCalls ?? [];
+        const ids = calls.map((call) => call.id);
+        const remembered = ids.length > 0 ? recall(ids) : undefined;
+        if (
+          remembered !== undefined &&
+          remembered.text === message.content &&
+          remembered.ids.length === ids.length &&
+          remembered.ids.every((id, at) => id === ids[at])
+        ) {
+          push("assistant", remembered.content);
+          break;
+        }
+        const blocks: WireBlock[] = [
+          ...(message.content === "" ? [] : [{ type: "text" as const, text: message.content }]),
+          ...calls.map((call) => ({ type: "tool_use" as const, id: call.id, name: call.name, input: call.arguments })),
+        ];
+        if (blocks.length === 0) {
+          throw new RangeError("pablo: an assistant turn with no text and no tool calls cannot be sent to Anthropic");
+        }
+        push("assistant", blocks);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** The neutral tool choice as the Messages API's `tool_choice`. */
+function wireToolChoice(choice: ToolChoice): WireToolChoice {
+  if (typeof choice === "object") return { type: "tool", name: choice.name };
+  if (choice === "required") return { type: "any" };
+  return { type: choice };
+}
+
+/** Streamed text extends the turn's current text block, as the API sent it, or starts one. */
+function appendText(content: WireBlock[], text: string): void {
+  const last = content.at(-1);
+  if (last?.type === "text") last.text += text;
+  else content.push({ type: "text", text });
+}
 
 function body(provider: ProviderConfig, request: WireRequest): Record<string, unknown> {
   return {
     model: request.model ?? provider.model,
     max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
     stream: true,
-    messages: [{ role: "user", content: request.prompt }],
+    messages: request.messages ?? [{ role: "user", content: request.prompt ?? "" }],
     ...(request.system === undefined ? {} : { system: request.system }),
     ...(request.tools === undefined ? {} : { tools: request.tools }),
     ...(request.toolChoice === undefined ? {} : { tool_choice: request.toolChoice }),
@@ -595,8 +859,19 @@ function readReplacement(endpoint: string, args: Record<string, unknown>): strin
 
 type ParsedEvent =
   | { readonly type: "message_start"; readonly inputTokens?: number; readonly outputTokens?: number }
-  | { readonly type: "block_start"; readonly index: number; readonly kind: string; readonly name: string | undefined }
+  | {
+      readonly type: "block_start";
+      readonly index: number;
+      readonly kind: string;
+      readonly name: string | undefined;
+      readonly id: string | undefined;
+      readonly thinking: string | undefined;
+      readonly signature: string | undefined;
+      readonly data: string | undefined;
+    }
   | { readonly type: "text_delta"; readonly text: string }
+  | { readonly type: "thinking_delta"; readonly index: number; readonly text: string }
+  | { readonly type: "signature_delta"; readonly index: number; readonly signature: string }
   | { readonly type: "json_delta"; readonly index: number; readonly partial: string }
   | { readonly type: "block_stop"; readonly index: number }
   | {
@@ -632,6 +907,10 @@ function parseEvent(endpoint: string, payload: string): ParsedEvent {
         index,
         kind: typeof block["type"] === "string" ? block["type"] : "unknown",
         name: typeof block["name"] === "string" ? block["name"] : undefined,
+        id: typeof block["id"] === "string" ? block["id"] : undefined,
+        thinking: typeof block["thinking"] === "string" ? block["thinking"] : undefined,
+        signature: typeof block["signature"] === "string" ? block["signature"] : undefined,
+        data: typeof block["data"] === "string" ? block["data"] : undefined,
       };
     }
     case "content_block_delta": {
@@ -642,8 +921,14 @@ function parseEvent(endpoint: string, payload: string): ParsedEvent {
       if (delta["type"] === "input_json_delta" && typeof delta["partial_json"] === "string") {
         return { type: "json_delta", index, partial: delta["partial_json"] };
       }
-      // thinking_delta and signature_delta are streamed and deliberately dropped:
-      // pablo shows the proposal, not the reasoning that produced it.
+      // Thinking is never shown — pablo shows the answer, not the reasoning that
+      // produced it — but it is kept, so `chat()` can send it back unchanged.
+      if (delta["type"] === "thinking_delta" && typeof delta["thinking"] === "string") {
+        return { type: "thinking_delta", index, text: delta["thinking"] };
+      }
+      if (delta["type"] === "signature_delta" && typeof delta["signature"] === "string") {
+        return { type: "signature_delta", index, signature: delta["signature"] };
+      }
       return { type: "other" };
     }
     case "content_block_stop":
