@@ -286,7 +286,7 @@ test("the window may call the four mixer mutations and nothing else", async () =
   const { m, work } = machine();
   const handlers = mixerMutations(host(m, work));
   expect(Object.keys(handlers).sort()).toEqual([...MUTATIONS].sort());
-  expect([...MUTATIONS]).toEqual(["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags"]);
+  expect([...MUTATIONS]).toEqual(["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags", "cueOptions", "regenerateCue"]);
   m.respond = () => ({ code: 2, body: { ok: false, code: 2, message: "nope" } });
   await expect((handlers["loadMix"] as (a: unknown) => Promise<unknown>)({ episode: 1 })).rejects.toThrow("nope");
 });
@@ -305,5 +305,27 @@ test("AGT-2152: renderMix runs the Python side's mixer render on the asked versi
   await expect(host(m, work).renderMix({ episode: 1, base: 1 })).rejects.toThrow("is not the newest");
   const before = m.calls.length;
   await expect(host(m, work).renderMix({ episode: 1 })).rejects.toThrow("base must be");
+  expect(m.calls.length).toBe(before);
+});
+
+test("AGT-2156: cueOptions and regenerateCue relay the cue ops with the clip, description and pick, and check their arguments first", async () => {
+  const { m, work } = machine();
+  const h = host(m, work, "/vault");
+  m.respond = () => ({ code: 0, body: { ok: true, version: 2, clip: "sfx-1", kind: "SFX", desc: "a door", key: KEY(1), options: [{ id: null, label: "generated", generated: true, score: null, words: [], key: KEY(1), made: true, current: true }] } });
+  const options = h.cueOptions({ episode: 1, clip: "sfx-1", describe: "a heavy door" });
+  expect(m.calls.at(-1)).toEqual(["mixer", "cue-options", "--episode", "1", "--clip", "sfx-1", "--describe", "a heavy door", "--vault", "/vault", "--work", work, "--json"]);
+  expect([options.kind, options.options.length]).toEqual(["SFX", 1]);
+
+  m.respond = () => ({ code: 0, body: { ok: true, version: 3, parent: 2, clip: "sfx-1", desc: "a heavy door", key: KEY(2), made: true, trimmed: false, summary: { text: "x" }, document: DOC, versions: [], message: "made" } });
+  const done = await h.regenerateCue({ episode: 1, base: 2, clip: "sfx-1", describe: "a heavy door", sound: "door-slam-1" });
+  expect(m.calls.at(-1)).toEqual(["mixer", "cue", "--episode", "1", "--base", "2", "--clip", "sfx-1", "--describe", "a heavy door", "--sound", "door-slam-1", "--vault", "/vault", "--work", work, "--json"]);
+  expect([done.version, done.parent, done.by, done.made]).toEqual([3, 2, "human", true]);
+  await h.regenerateCue({ episode: 1, base: 2, clip: "sfx-1", generated: true });
+  expect(m.calls.at(-1)).toContain("--generated");
+
+  const before = m.calls.length;
+  expect(() => h.cueOptions({ episode: 1 })).toThrow("clip must be");
+  expect(() => h.cueOptions({ episode: 1, clip: "a", sound: "../x" })).toThrow("sound must be");
+  await expect(h.regenerateCue({ episode: 1, clip: "a" })).rejects.toThrow("base must be");
   expect(m.calls.length).toBe(before);
 });

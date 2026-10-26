@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import Mixer from "../views/mixer";
+import { CuePanel, isCueClip } from "../views/mixer-cue";
 import type { MixDocument, MixPayload } from "../views/mixer-protocol";
 
 /**
@@ -108,7 +109,7 @@ test("the view bundles the way the ui-leaf binary bundles it and calls only load
   expect(result.success).toBe(true);
   const text = (await result.outputs[0]?.text()) ?? "";
   const called = new Set([...text.matchAll(/mutate\(\s*"([A-Za-z]+)"/g)].map((m) => m[1]));
-  expect([...called].sort()).toEqual(["clipAudio", "deleteNote", "exportNotes", "listNotes", "loadMix", "notesToFlags", "peaks", "renderMix", "saveMix", "saveNote"]);
+  expect([...called].sort()).toEqual(["clipAudio", "cueOptions", "deleteNote", "exportNotes", "listNotes", "loadMix", "notesToFlags", "peaks", "regenerateCue", "renderMix", "saveMix", "saveNote"]);
 });
 
 test("AGT-2152: a Render button sits beside Save, and the window says when the audio on disk is older than this mix", () => {
@@ -122,4 +123,19 @@ test("AGT-2152: a Render button sits beside Save, and the window says when the a
 
   const none = renderToStaticMarkup(<Mixer data={{ title: "The Lamp Room", episode: 1 }} mutate={noMutate} preloaded={{ ...PAYLOAD, rendered: { manifest: null, mix: null } }} />);
   expect(none).toContain("Audio on disk is older than this mix:");
+});
+
+test("AGT-2156: the cue regenerate panel starts closed and the host-less view draws no panel", () => {
+  const html = renderToStaticMarkup(<Mixer data={{ title: "The Lamp Room", episode: 1 }} mutate={noMutate} preloaded={PAYLOAD} />);
+  expect(html).not.toContain('class="cue-panel"');
+});
+
+test("AGT-2156: the panel asks the host for a cue's options and offers Regenerate and Use this", () => {
+  const html = renderToStaticMarkup(<CuePanel mutate={noMutate} episode={1} base={2} clip="sfx-1" unsaved={false} onDone={() => undefined} onClose={() => undefined} />);
+  expect(html).toContain("Regenerate cue");
+  expect(html).toMatch(/<button[^>]*>Show variations<\/button>/);
+  expect(isCueClip({ kind: "cue" })).toBe(true);
+  expect(isCueClip({ kind: "take" })).toBe(false);
+  const dirty = renderToStaticMarkup(<CuePanel mutate={noMutate} episode={1} base={2} clip="sfx-1" unsaved={true} onDone={() => undefined} onClose={() => undefined} />);
+  expect(dirty).toContain("Save your edits first");
 });

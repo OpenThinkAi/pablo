@@ -261,3 +261,50 @@ def test_render_refuses_a_stale_base_and_a_document_that_no_longer_fits(work: Pa
     body, code = ask(work, cues_dir, s, "render", "--episode", "1", "--base", "2")
     assert code == 2 and "does not fit" in str(body["message"])
     assert audio_versions(work, 1) == [1] and mix_versions(work, 1) == [1, 2]  # nothing rendered, no auto mix written
+
+
+# --- AGT-2156: regenerate a cue from the mixer ------------------------------------------------------------------
+
+
+def cue_clip(doc: dict[str, object], track: str = "sfx") -> dict[str, object]:
+    return next(iter(doc["tracks"][track]["lanes"].values()))["clips"][0]  # type: ignore[index,no-any-return]
+
+
+def test_cue_options_list_the_generated_asset_for_the_clips_description(work: Path, cues_dir: Path, episode: dict[str, object]) -> None:
+    s, _ = seams()
+    clip = cue_clip(read_mix(work, 1, 1))
+    body, code = ask(work, cues_dir, s, "cue-options", "--episode", "1", "--clip", str(clip["id"]))
+    assert code == 0 and (body["kind"], body["desc"]) == ("SFX", "A door creaks")
+    assert [(o["generated"], o["current"]) for o in body["options"]] == [(True, True)]  # type: ignore[union-attr]
+    edited, _ = ask(work, cues_dir, s, "cue-options", "--episode", "1", "--clip", str(clip["id"]), "--describe", "A heavy door slams")
+    assert edited["options"][0]["key"] == cue_key("SFX", "A heavy door slams") and edited["options"][0]["current"] is False  # type: ignore[index]
+    assert edited["options"][0]["made"] is False  # type: ignore[index]
+
+
+def test_regenerating_a_cue_swaps_the_source_and_keeps_position_fades_and_gain(work: Path, cues_dir: Path, episode: dict[str, object]) -> None:
+    s, cues = seams()
+    old = read_mix(work, 1, 1)
+    clip = cue_clip(old)
+    body, code = ask(work, cues_dir, s, "cue", "--episode", "1", "--base", "1", "--clip", str(clip["id"]), "--describe", "A heavy door slams")
+    assert code == 0 and body["version"] == 2 and body["by"] == "human" and body["made"] is True
+    assert ("SFX", "A heavy door slams") in cues.made
+    new = read_mix(work, 1, 2)
+    swapped = cue_clip(new)
+    assert swapped["source"] == {"kind": "cue", "key": cue_key("SFX", "A heavy door slams")}
+    assert {k: v for k, v in swapped.items() if k != "source"} == {k: v for k, v in clip.items() if k != "source"}
+    assert read_mix(work, 1, 1) == old  # the old version is untouched: it is the undo
+    assert new["by"] == "human" and "regenerated" in str(new["summary"])
+
+
+def test_regenerating_refuses_a_stale_base_a_dialogue_clip_and_an_unchanged_cue(work: Path, cues_dir: Path, episode: dict[str, object]) -> None:
+    s, _ = seams()
+    doc = read_mix(work, 1, 1)
+    cid = str(cue_clip(doc)["id"])
+    body, code = ask(work, cues_dir, s, "cue", "--episode", "1", "--base", "9", "--clip", cid, "--describe", "x")
+    assert code == 2 and "not the newest" in str(body["message"])
+    body, code = ask(work, cues_dir, s, "cue", "--episode", "1", "--base", "1", "--clip", str(first_dialogue_clip(doc)["id"]), "--describe", "x")
+    assert code == 2 and "not a cue clip" in str(body["message"])
+    body, code = ask(work, cues_dir, s, "cue", "--episode", "1", "--base", "1", "--clip", cid)
+    assert code == 2 and "already plays" in str(body["message"])
+    assert ask(work, cues_dir, s, "cue", "--episode", "1", "--base", "1", "--clip", "nope", "--describe", "x")[1] == 2
+    assert mix_versions(work, 1) == [1]  # nothing was written

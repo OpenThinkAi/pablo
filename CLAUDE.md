@@ -351,7 +351,12 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 sounding; `src/mixer-notes-host.ts` writes
                 `renders/epNN/notes.json`, a `punch-list.md` beside it, and
                 turns dialogue markers into `flags.json` entries that
-                `pablo fix` reads.
+                `pablo fix` reads. Regenerate a cue (AGT-2156, D-19):
+                right-click a cue clip, `views/mixer-cue.tsx`'s panel calls
+                the host's `cueOptions`/`regenerateCue`, which run
+                `mixer cue-options|cue` (`mixer_cue.py`): the cue library
+                makes the asset, the next mix version swaps only that
+                clip's source key.
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`

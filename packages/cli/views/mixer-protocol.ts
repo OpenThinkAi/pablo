@@ -9,7 +9,7 @@
  */
 
 /** The mutation names the host registers (and ui-leaf declares); anything else is a 404 from ui-leaf. */
-export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags"] as const;
+export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags", "cueOptions", "regenerateCue"] as const;
 
 export type TrackName = "dialogue" | "sfx" | "beds" | "music";
 export type FadeCurve = "linear" | "scurve" | "log" | "exp";
@@ -250,4 +250,54 @@ export interface ToFlagsPayload {
   readonly written: readonly string[];
   readonly skipped: readonly string[];
   readonly path: string;
+}
+
+// ---------------------------------------------------------------------------
+// Regenerate a cue (AGT-2156, D-19)
+// ---------------------------------------------------------------------------
+
+/** One asset a cue clip could play: a recording from the sound library, or the generator's. */
+export interface CueOption {
+  /** The sound-library id, or null for the generator's asset. */
+  readonly id: string | null;
+  readonly label: string;
+  readonly generated: boolean;
+  readonly score: number | null;
+  readonly words: readonly string[];
+  readonly key: string;
+  /** True when the asset is already in the cue library (picking it makes nothing). */
+  readonly made: boolean;
+  /** True when the clip already plays it. */
+  readonly current: boolean;
+}
+
+/** The answer to `cueOptions({episode, clip, describe?})`. */
+export interface CueOptionsPayload {
+  readonly episode: number;
+  readonly version: number;
+  readonly clip: string;
+  readonly kind: "SFX" | "BED" | "MUSIC";
+  readonly desc: string;
+  readonly key: string;
+  readonly options: readonly CueOption[];
+}
+
+/**
+ * The answer to `regenerateCue({episode, base, clip, describe?, sound?, generated?})`: the next mix version, whose clip
+ * differs from `base`'s only in its source (and an `in`/`out` pulled back to fit a shorter asset).
+ */
+export interface RegeneratedCuePayload {
+  readonly episode: number;
+  readonly version: number;
+  readonly parent: number;
+  readonly by: "human";
+  readonly clip: string;
+  readonly desc: string;
+  readonly key: string;
+  readonly made: boolean;
+  readonly trimmed: boolean;
+  readonly summary: MixDiff;
+  readonly document: MixDocument;
+  readonly versions: readonly MixVersionInfo[];
+  readonly message: string;
 }

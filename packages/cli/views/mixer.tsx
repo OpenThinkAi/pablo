@@ -28,6 +28,8 @@ import { MARKERS_CSS, MarkerPins, MarkersPanel, useMarkers } from "./mixer-marke
 import { dirty, dragEdit, editReducer, initialEdit, isStaleRefusal, moveClip, proposal, setFade, setGain, setTrack, splitClip } from "./mixer-edit";
 import type { GestureKind } from "./mixer-edit";
 import { INSPECTOR_CSS, Inspector } from "./mixer-inspector";
+import { CUE_CSS, CuePanel, isCueClip } from "./mixer-cue";
+import type { RegeneratedCuePayload } from "./mixer-protocol";
 
 /**
  * The mixer view (AGT-1768, `pm project show pablo-mixer`, "The mixer view"): an episode's mix document drawn
@@ -119,7 +121,10 @@ function EnvelopeLine({ members, k, width, height }: { members: readonly PlacedC
 /** Where a press on a clip starts a gesture: its body (move), its edges (trim), or a fade handle. */
 type Grab = (e: React.PointerEvent<HTMLElement>, p: PlacedClip, kind: GestureKind) => void;
 
-function Lane({ row, pps, peaks, label, selected, onGrab }: { row: LaneRow; pps: number; peaks: ReadonlyMap<string, PeaksPayload>; label: (p: PlacedClip) => string; selected: string | null; onGrab: Grab }) {
+/** Right-click on a cue clip opens its regenerate panel (AGT-2156). */
+type CueMenu = (e: React.MouseEvent<HTMLElement>, p: PlacedClip) => void;
+
+function Lane({ row, pps, peaks, label, selected, onGrab, onCueMenu }: { row: LaneRow; pps: number; peaks: ReadonlyMap<string, PeaksPayload>; label: (p: PlacedClip) => string; selected: string | null; onGrab: Grab; onCueMenu: CueMenu }) {
   return (
     <div className={`lane lane-${row.track}`} style={{ height: LANE_H }}>
       {row.clips.map((p, k) => {
@@ -137,6 +142,7 @@ function Lane({ row, pps, peaks, label, selected, onGrab }: { row: LaneRow; pps:
             style={{ left, width }}
             data-clip={p.clip.id}
             onPointerDown={(e) => onGrab(e, p, "move")}
+            onContextMenu={(e) => onCueMenu(e, p)}
             title={`${label(p)}\n${timecode(p.startSeconds, true)}–${timecode(p.endSeconds, true)}${gain !== 0 ? `  ${gain > 0 ? "+" : ""}${gain.toFixed(1)} dB` : ""}`}
           >
             <Waveform peaks={slice} width={width} height={LANE_H - 4} />
@@ -204,6 +210,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
   const [saving, setSaving] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error" | "stale"; text: string } | null>(null);
+  const [cueFor, setCueFor] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
   const [loadKey, setLoadKey] = useState(0);
   const [pps, setPps] = useState(40);
@@ -548,6 +555,21 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
     }
   }, [payload, saving, rendering, unsaved, save, mutate, data.episode]);
 
+  const openCueMenu = useCallback((e: React.MouseEvent<HTMLElement>, p: PlacedClip) => {
+    if (!isCueClip(p.clip.source)) return;
+    e.preventDefault();
+    setSelected(p.clip.id);
+    setCueFor(p.clip.id);
+  }, []);
+
+  /** A cue was regenerated: the next mix version is on disk, so load it (and its audio) afresh. */
+  const cueDone = (done: RegeneratedCuePayload) => {
+    setCueFor(null);
+    setNotice({ kind: "ok", text: `Saved as mix v${done.version}: ${done.message}` });
+    setVersion(undefined);
+    setReloads((n) => n + 1);
+  };
+
   const reload = () => {
     setNotice(null);
     setVersion(undefined);
@@ -615,7 +637,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
 
   return (
     <div className="mixer">
-      <style>{CSS + MARKERS_CSS + INSPECTOR_CSS}</style>
+      <style>{CSS + MARKERS_CSS + INSPECTOR_CSS + CUE_CSS}</style>
       <header className="top">
         <div className="titles">
           <span className="work">{data.title}</span>
@@ -737,6 +759,9 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
           onClose={() => setSelected(null)}
         />
       )}
+      {cueFor !== null && payload.version === payload.newest && (
+        <CuePanel mutate={mutate} episode={data.episode} base={payload.version} clip={cueFor} unsaved={unsaved} onDone={cueDone} onClose={() => setCueFor(null)} />
+      )}
       <div className="body">
         <div className="heads" style={{ width: HEAD_W, paddingTop: RULER_H }}>
           {rows.map((r) => (
@@ -765,7 +790,7 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
               <div key={r.track} className={`track track-${r.track}${mixer[r.track].mute || (soloed && !mixer[r.track].solo) ? " dim" : ""}`} onClick={laneClick}>
                 <div className="track-gap" style={{ height: TRACK_H + 30 }} />
                 {r.lanes.map((l) => (
-                  <Lane key={l.lane} row={l} pps={pps} peaks={peaks} label={label} selected={selected} onGrab={grab} />
+                  <Lane key={l.lane} row={l} pps={pps} peaks={peaks} label={label} selected={selected} onGrab={grab} onCueMenu={openCueMenu} />
                 ))}
               </div>
             ))}

@@ -228,6 +228,9 @@ def _parser() -> _Parser:
     # mixer
     parser.add_argument("--source", help="mixer peaks/audio: take:<key> or cue:<key>")
     parser.add_argument("--stretch", type=float)
+    parser.add_argument("--clip", help="mixer cue / cue-options: the cue clip's id")
+    parser.add_argument("--sound", help="mixer cue: build the cue from this sound-library recording")
+    parser.add_argument("--generated", action="store_true", help="mixer cue: use the generator's asset even when a recording matches")
     parser.add_argument("--base", type=int, help="mixer save: the mix version the edit started from; mixer render: the mix version to render")
     # perform
     parser.add_argument("--engine")
@@ -952,6 +955,16 @@ def run(
         mixer_seams = mixer or real
         assert mixer_seams is not None
         cues_dir = cues_dir_for(work, args.cues, args.library or configured, args.vault)
+        if args.rest and args.rest[0] in ("cue", "cue-options"):
+            from pablo_casting.mixer_cue import cmd_cue, cmd_cue_options
+
+            try:
+                cue_episode = int(args.episode)
+            except (TypeError, ValueError):
+                return refused(f"mixer {args.rest[0]} needs --episode N", missing=["--episode"]), args.json
+            if args.rest[0] == "cue-options":
+                return cmd_cue_options(work, cue_episode, args.clip, args.describe, cues_dir, mixer_seams), args.json
+            return cmd_cue(work, cue_episode, args.base, args.clip, args.describe, args.sound, args.generated, cues_dir, mixer_seams), args.json
         return cmd_mixer(
             args.rest[0] if args.rest else None, work, args.episode, args.mix_version, args.source, args.stretch, args.base, args.from_file, cues_dir, mixer_seams
         ), args.json
