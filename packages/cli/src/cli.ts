@@ -182,9 +182,16 @@ function helpText(): string {
     "  pablo promote --project <slug> --finding <id> --keep <type>",
     "                                            a finding's fact to facts.md on a plan/ branch,",
     "                                            commenting the contradicting units' lines",
-    "  pablo research save --project <slug> --title T --note N --source URL [--source URL]...",
+    "  pablo research save --project <slug> --title T --note N --source URL [--source URL]... [--item N]...",
     "                                            keep a finding with its sources as research/<slug>.md",
-    "                                            on a plan/ branch (also the save_research MCP tool)",
+    "                                            on a plan/ branch (also the save_research MCP tool);",
+    "                                            --item marks those checklist items sourced by it",
+    "  pablo research plan --project <slug>       research/checklist.md from the period brief or thesis",
+    "                                            on a plan/ branch (also plan_research)",
+    "  pablo research waive <#> \"<reason>\" --project <slug>",
+    "                                            close a checklist item with a reason (waive_research_item)",
+    "  pablo research link <#> <note> --project <slug>",
+    "                                            close a checklist item with a saved note (link_research_item)",
     "  pablo research distill --project <slug>",
     "                                            research/ notes to short, sourced period facts in",
     "                                            facts/period.md on a plan/ branch (also distill_facts)",
@@ -664,6 +671,30 @@ export function acrossText(raw: unknown): string {
 export function researchFactText(raw: unknown): string {
   const body = raw as Record<string, unknown>;
   if (body["ok"] !== true) return String(body["message"]);
+  const review = "  review the branch in the screen (pablo), then merge it";
+  if (typeof body["added"] === "number") {
+    // `research plan` (AGT-2111).
+    const items = (body["items"] ?? []) as { number: number; category: string; item: string; status: string }[];
+    const rejected = (body["rejected"] ?? []) as { item: string; reason: string }[];
+    return [
+      `pablo: planned ${String(body["added"])} new checklist item${body["added"] === 1 ? "" : "s"} from ${String(body["from"])} -> ${String(body["path"])} on ${String(body["branch"])}`,
+      ...items.map((i) => `  #${i.number} ${i.category}: ${i.item} (${i.status})`),
+      ...rejected.map((r) => `  rejected: ${r.item || "(empty)"} (${r.reason})`),
+      review,
+    ].join("\n");
+  }
+  if (typeof body["open"] === "number") {
+    // `research waive|link`, or `research save --item` (AGT-2111).
+    const items = (Array.isArray(body["items"]) ? body["items"] : [body["item"]]) as { number: number; category: string; item: string; status: string }[];
+    const saved = body["note"] !== undefined;
+    const head = saved ? `saved ${String(body["path"])} and research/checklist.md` : `updated ${String(body["path"])}`;
+    return [
+      `pablo: ${head} on ${String(body["branch"])}`,
+      ...items.map((i) => `  #${i.number} ${i.category}: ${i.item} -> ${i.status}`),
+      `  ${String(body["open"])} checklist item${body["open"] === 1 ? "" : "s"} still open once merged`,
+      review,
+    ].join("\n");
+  }
   if (typeof body["facts"] === "number") {
     // `research distill` (AGT-2109).
     const rejected = (body["rejected"] ?? []) as { fact: string; reason: string }[];
@@ -1920,16 +1951,16 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     return await runVerbEntry("promote", args, cwd, promoteText);
   }
 
-  // `research save|distill` (AGT-2106, AGT-2109) and `fact record` (AGT-2106) run off their `VERBS` entries, as `pablo mcp` does.
+  // `research save|distill|plan|waive|link` (AGT-2106, AGT-2109, AGT-2111) and `fact record` (AGT-2106) run off their `VERBS` entries, as `pablo mcp` does.
   if (args.verb === "research" || args.verb === "fact") {
-    const subs = args.verb === "research" ? ["save", "distill"] : ["record"];
+    const subs = args.verb === "research" ? ["save", "distill", "plan", "waive", "link"] : ["record"];
     const sub = args.rest[0] ?? "";
     const usage = `pablo ${args.verb} ${subs.join("|")} --project <slug> ...`;
     if (projectPath === undefined || !subs.includes(sub)) {
       const message = !subs.includes(sub)
         ? subs.length === 1
           ? `pablo: ${args.verb}: the only action is "${subs[0]}" (${usage})`
-          : `pablo: ${args.verb}: the actions are ${subs.map((s) => `"${s}"`).join(" and ")} (${usage})`
+          : `pablo: ${args.verb}: the actions are ${subs.slice(0, -1).map((s) => `"${s}"`).join(", ")} and "${subs[subs.length - 1]}" (${usage})`
         : `pablo: ${args.verb} ${sub} requires --project <slug>`;
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;

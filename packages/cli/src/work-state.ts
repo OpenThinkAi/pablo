@@ -16,6 +16,7 @@
 
 import { coreNext, coreStages, readCoreState } from "./core/machine";
 import type { CoreStage, CoreState } from "./core/machine";
+import { itemLabel } from "./core/checklist";
 import { waitingForReview } from "./branch";
 import type { Outputs } from "./marker";
 import { readMarker, trackOf } from "./marker";
@@ -80,6 +81,16 @@ function renderSummary(output: OutputReport): string {
   return `; ${parts.length === 0 ? "none rendered" : parts.join(", ")}${flags > 0 ? `, ${flags} open flag${flags === 1 ? "" : "s"}` : ""}`;
 }
 
+/**
+ * The research checklist's open items (AGT-2111), for `status`'s prose: `open research:` then one bullet per item.
+ * Empty when the work has no checklist or nothing on it is open.
+ */
+export function openResearchLines(core: CoreState): string[] {
+  const open = (core.checklist?.items ?? []).filter((item) => item.status === "open");
+  if (open.length === 0) return [];
+  return [`open research (${core.checklist?.file ?? ""}):`, ...open.map((item) => `  - ${itemLabel(item)}`)];
+}
+
 /** One output's line: `novel: 2 of 24 chapters drafted`, with the drafted units' statuses when `detail` is set. */
 export function outputLine(type: string, output: OutputReport, detail = false): string {
   const line = `${type}: ${output.drafted} of ${output.total} ${output.total === 1 ? output.noun : output.plural} drafted${renderSummary(output)}`;
@@ -128,6 +139,7 @@ export function formatStatusProse(status: WorkStatus): string {
   const { waiting } = status;
   return [
     ...coreLines(status.core),
+    ...openResearchLines(status.core),
     ...outputLines(status.outputs, true),
     `track: ${status.track}`,
     waiting.length === 0 ? "waiting for review: none" : `waiting for review: ${waiting.length} (${waiting.join(", ")})`,

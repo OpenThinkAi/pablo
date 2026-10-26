@@ -18,6 +18,7 @@
  *     premise        as above
  *     period         bible/period.md has text (the period/event brief)
  *     research       research/ has a sourced note (a `## Sources` list); required
+ *                    and every item of research/checklist.md sourced or waived
  *     period facts   facts/period.md has at least one fact row
  *     bible, acts, beats, facts decided   as above
  *
@@ -25,7 +26,7 @@
  * acts or beats (files and parsers in `nonfiction.ts`):
  *
  *     thesis         core/thesis.md has text
- *     research       a sourced note, required as on historical-fiction
+ *     research       a sourced note and a closed checklist, required as on historical-fiction
  *     claims         core/claims.md rows, each citing research note ids that exist
  *     outline        core/outline.md has at least one section row
  *
@@ -48,6 +49,8 @@ import type { BeatRow } from "@openthink/pablo-core";
 import type { TrackId } from "../tracks/registry";
 import { CLAIMS_FILE, hasProse, OUTLINE_FILE, parseClaims, parseSections, researchNoteId, THESIS_FILE } from "./nonfiction";
 import type { ClaimRow, SectionRow } from "./nonfiction";
+import { CHECKLIST_FILE, checklistItems, itemLabel, parseChecklist } from "./checklist";
+import type { ChecklistItem } from "./checklist";
 
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
 export interface BibleFile {
@@ -116,6 +119,11 @@ export interface CoreState {
   readonly research: readonly string[];
   /** The research notes (`.md`) among `research` with at least one entry under `## Sources`. */
   readonly sourcedResearch: readonly string[];
+  /**
+   * `research/checklist.md` (AGT-2111, D-9) with each item's status worked out against the sourced notes;
+   * `undefined` when the work has no checklist yet.
+   */
+  readonly checklist: { readonly file: string; readonly items: readonly ChecklistItem[] } | undefined;
   /** The fact rows in `facts/period.md` (table rows or bullets); 0 when it does not exist. */
   readonly periodFacts: number;
   /** `core/thesis.md` has text other than headings (the nonfiction thesis). */
@@ -277,6 +285,9 @@ export function readCoreState(workDir: string, track: TrackId = "fiction"): Core
   const period = (read(join(workDir, PERIOD_BRIEF_FILE)) ?? "").replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/^#[^\n]*$/gm, "").trim() !== "";
   const research = listFiles(workDir, join(workDir, "research"));
   const sourcedResearch = research.filter((rel) => rel.endsWith(".md") && hasSources(read(join(workDir, rel)) ?? ""));
+  const checklistText = read(join(workDir, CHECKLIST_FILE));
+  const sourcedIds = new Set(sourcedResearch.map((rel) => researchNoteId(rel.split("\\").join("/"))));
+  const checklist = checklistText === undefined ? undefined : { file: CHECKLIST_FILE, items: checklistItems(parseChecklist(checklistText), sourcedIds) };
   const periodFacts = countFactRows(read(join(workDir, PERIOD_FACTS_FILE)) ?? "");
   const thesis = hasProse(read(join(workDir, THESIS_FILE)) ?? "");
   const claims = parseClaims(read(join(workDir, CLAIMS_FILE)) ?? "");
@@ -320,6 +331,7 @@ export function readCoreState(workDir: string, track: TrackId = "fiction"): Core
     period,
     research,
     sourcedResearch,
+    checklist,
     periodFacts,
     thesis,
     claims,
@@ -337,6 +349,14 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** `no checklist`, or `checklist 3 sourced, 1 waived, 2 open`. */
+function checklistSummary(state: CoreState): string {
+  if (state.checklist === undefined) return "no checklist";
+  const items = state.checklist.items;
+  const count = (status: string) => items.filter((i) => i.status === status).length;
+  return `checklist ${count("sourced")} sourced, ${count("waived")} waived, ${count("open")} open`;
+}
+
 /** The stage ids `track`'s core runs, in order. */
 export function coreStageIds(track: TrackId): readonly CoreStageId[] {
   if (track === "historical-fiction") return HISTORICAL_CORE_STAGE_IDS;
@@ -349,7 +369,7 @@ export function coreStageIds(track: TrackId): readonly CoreStageId[] {
  * (a note's id is its path under `research/` without `.md`).
  */
 function claimProblems(state: CoreState): string[] {
-  const ids = new Set(state.research.filter((f) => f.endsWith(".md")).map((f) => researchNoteId(f.split("\\").join("/"))));
+  const ids = new Set(state.research.filter((f) => f.endsWith(".md") && f.split("\\").join("/") !== CHECKLIST_FILE).map((f) => researchNoteId(f.split("\\").join("/"))));
   const problems: string[] = [];
   for (const claim of state.claims) {
     if (claim.sources.length === 0) problems.push(`claim ${claim.number} cites no research note`);
@@ -371,6 +391,14 @@ export function coreStages(state: CoreState): CoreStage[] {
   const bibleFiles = state.bible.files.filter((f) => f.exists).length;
   const picks = state.bible.picks;
   const sourced = state.sourcedResearch.length;
+  const openItems = (state.checklist?.items ?? []).filter((i) => i.status === "open");
+  // Guided research (AGT-2111, D-9): plan the checklist first, then source or waive every item on it.
+  const researchMissing = [
+    ...(state.checklist === undefined ? [`${CHECKLIST_FILE} does not exist yet (pablo research plan)`] : []),
+    ...(state.checklist !== undefined && state.checklist.items.length === 0 ? [`${CHECKLIST_FILE} has no items`] : []),
+    ...(sourced > 0 ? [] : ["research has no sourced notes yet"]),
+    ...openItems.map((i) => `checklist item ${itemLabel(i)} is open`),
+  ];
   const claimIssues = claimProblems(state);
   const claimsDone = state.claims.length > 0 && claimIssues.length === 0;
 
@@ -391,10 +419,10 @@ export function coreStages(state: CoreState): CoreStage[] {
     research: researchRequired
       ? {
           id: "research",
-          done: sourced > 0,
+          done: researchMissing.length === 0,
           gate: true,
-          summary: plural(sourced, "sourced note"),
-          missing: sourced > 0 ? [] : ["research has no sourced notes yet"],
+          summary: `${plural(sourced, "sourced note")}, ${checklistSummary(state)}`,
+          missing: researchMissing,
         }
       : {
           id: "research",
@@ -480,6 +508,10 @@ export function coreNext(state: CoreState): string | undefined {
     case "period":
       return `write the period brief (${PERIOD_BRIEF_FILE})`;
     case "research":
+      if (state.checklist === undefined || state.checklist.items.length === 0) return "plan the research checklist (pablo research plan)";
+      if (state.checklist.items.some((i) => i.status === "open")) {
+        return "source or waive the open checklist items (pablo research save --item N, pablo research waive N \"<reason>\")";
+      }
       return "save sourced research notes (pablo research save)";
     case "thesis":
       return "save the thesis (pablo save --stage thesis)";

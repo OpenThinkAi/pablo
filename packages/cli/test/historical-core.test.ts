@@ -53,6 +53,11 @@ function addPeriodBrief(work: string): void {
 function addSourcedNote(work: string): void {
   writeFileSync(join(work, "research", "ice-harvest.md"), SOURCED_NOTE);
 }
+/** A research checklist (AGT-2111) whose one item is sourced by research/ice-harvest.md once that note exists. */
+const CHECKLIST = "| # | Category | Item | Status | Sources | Waived |\n| --- | --- | --- | --- | --- | --- |\n| 1 | technology | How thick ice had to be to cut | open | ice-harvest | |\n";
+function addChecklist(work: string): void {
+  writeFileSync(join(work, "research", "checklist.md"), CHECKLIST);
+}
 function addPeriodFacts(work: string): void {
   mkdirSync(join(work, "facts"), { recursive: true });
   writeFileSync(join(work, "facts", "period.md"), PERIOD_FACTS);
@@ -83,7 +88,12 @@ test("the period stage needs bible/period.md with text; a heading alone is not a
 test("historical research is required and counts only notes with a ## Sources entry", () => {
   const { work } = tempWork("historical-fiction");
   const stage = () => coreStages(readCoreState(work, "historical-fiction")).find((s) => s.id === "research");
-  expect(stage()).toMatchObject({ done: false, gate: true, summary: "0 sourced notes", missing: ["research has no sourced notes yet"] });
+  expect(stage()).toMatchObject({
+    done: false,
+    gate: true,
+    summary: "0 sourced notes, no checklist",
+    missing: ["research/checklist.md does not exist yet (pablo research plan)", "research has no sourced notes yet"],
+  });
   expect(stage()?.optional).toBeUndefined();
 
   writeFileSync(join(work, "research", "unsourced.md"), "# Unsourced\n\nA hunch.\n\n## Sources\n\n");
@@ -91,7 +101,10 @@ test("historical research is required and counts only notes with a ## Sources en
 
   addSourcedNote(work);
   expect(readCoreState(work, "historical-fiction").sourcedResearch).toEqual(["research/ice-harvest.md"]);
-  expect(stage()).toMatchObject({ done: true, summary: "1 sourced note", missing: [] });
+  // A sourced note alone is not enough: research is guided by the checklist (AGT-2111).
+  expect(stage()).toMatchObject({ done: false, missing: ["research/checklist.md does not exist yet (pablo research plan)"] });
+  addChecklist(work);
+  expect(stage()).toMatchObject({ done: true, summary: "1 sourced note, checklist 1 sourced, 0 waived, 0 open", missing: [] });
 });
 
 test("the period-facts stage counts fact rows in facts/period.md, not its table header", () => {
@@ -112,7 +125,9 @@ test("coreNext names each historical stage in turn, then hands on to the fiction
   const next = () => coreNext(readCoreState(work, "historical-fiction"));
   expect(next()).toBe("write the period brief (bible/period.md)");
   addPeriodBrief(work);
-  expect(next()).toBe("save sourced research notes (pablo research save)");
+  expect(next()).toBe("plan the research checklist (pablo research plan)");
+  addChecklist(work);
+  expect(next()).toBe('source or waive the open checklist items (pablo research save --item N, pablo research waive N "<reason>")');
   addSourcedNote(work);
   expect(next()).toBe("distill the research into sourced period facts (facts/period.md)");
   addPeriodFacts(work);
@@ -126,11 +141,11 @@ test("resume and status read the track from pablo.json and report the historical
 
   const resumed = await buildResume(work, "ice-house", { env: NO_THINK, timeoutMs: 2000 });
   expect(resumed.track).toBe("historical-fiction");
-  expect(resumed.next).toBe("core: save sourced research notes (pablo research save)");
+  expect(resumed.next).toBe("core: plan the research checklist (pablo research plan)");
   expect(resumed.core.stages.map((s) => s.id)).toEqual([...HISTORICAL_CORE_STAGE_IDS]);
 
   const status = readWorkStatus(work);
-  expect(status.next).toBe("core: save sourced research notes (pablo research save)");
+  expect(status.next).toBe("core: plan the research checklist (pablo research plan)");
   expect(status.core.stages.find((s) => s.id === "period")?.done).toBe(true);
 });
 
@@ -144,8 +159,8 @@ test("write on a historical-fiction work with no sourced research refuses naming
   expect(r.exitCode).toBe(2);
   const body = JSON.parse(r.stdout) as { ok: boolean; message: string; missing: string[] };
   expect(body.ok).toBe(false);
-  expect(body.message).toBe("pablo: historical-fiction: research has no sourced notes yet");
-  expect(body.missing).toEqual(["research has no sourced notes yet"]);
+  expect(body.message).toBe("pablo: historical-fiction: research/checklist.md does not exist yet (pablo research plan)");
+  expect(body.missing).toEqual(["research/checklist.md does not exist yet (pablo research plan)", "research has no sourced notes yet"]);
 });
 
 test("write's prose refusal names the period brief first, then the period facts", () => {
@@ -156,6 +171,7 @@ test("write's prose refusal names the period brief first, then the period facts"
 
   addPeriodBrief(work);
   addSourcedNote(work);
+  addChecklist(work);
   r = runCli(["write", "--project", "ice-house", "--chapter", "2", "--dry-run"], vault);
   expect(r.exitCode).toBe(2);
   expect(r.stderr).toContain("historical-fiction: facts/period.md has no sourced period facts yet");
@@ -165,6 +181,7 @@ test("write on a historical-fiction work goes ahead once the period, research an
   const { vault, work } = tempWork("historical-fiction");
   addPeriodBrief(work);
   addSourcedNote(work);
+  addChecklist(work);
   addPeriodFacts(work);
   expect(trackGate(readCoreState(work, "historical-fiction"))).toBeUndefined();
   const r = runCli(["write", "--project", "ice-house", "--chapter", "2", "--dry-run", "--json"], vault);

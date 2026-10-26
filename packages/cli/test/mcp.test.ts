@@ -61,7 +61,7 @@ function parseTextBody(result: unknown): unknown {
 // already an MCP tool before this ticket (AGT-1241); AC1's "five existing
 // tools" are resume/status/write/save/check. AGT-1264 adds `revise`, also
 // project-scoped.
-const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "save_research", "distill_facts", "record_fact"]);
+const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "save_research", "distill_facts", "record_fact", "plan_research", "waive_research_item", "link_research_item"]);
 
 test("listTools returns the project-scoped verbs, prose, and the five narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
@@ -77,10 +77,12 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "draft_chapter",
     "draft_unit",
     "fix", // AGT-1685: fixes a performed radio episode from its flags; project required
+    "link_research_item", // AGT-2111: from the `research` verb
     "migrate",
     "mix", // AGT-1684: mixes a performed radio episode; project required
     "output",
     "perform", // AGT-1683: performs a radio episode; project required
+    "plan_research", // AGT-2111: from the `research` verb
     "promote",
     "prose",
     "publish",
@@ -103,6 +105,7 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "voice_show",
     "voice_use",
     "voices",
+    "waive_research_item", // AGT-2111: from the `research` verb
     "write",
   ]);
   for (const tool of tools) {

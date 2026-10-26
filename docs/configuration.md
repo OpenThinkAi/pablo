@@ -97,7 +97,7 @@ pablo sends six kinds of request. Each is an *intent*:
 | `prose` | `prose` | the first local provider |
 | `continuity` | the fact extraction `merge` runs | the first local provider |
 | `plan` | the critic (`critique`, `check --across`) and the built-in agent's helpers | the first non-local provider |
-| `research` | `research distill` (`distill_facts`): research notes, raw, to period facts | the first non-local provider (map it to a local one to keep notes on this machine) |
+| `research` | `research distill` (`distill_facts`): research notes, raw, to period facts; `research plan` (`plan_research`): the period brief or thesis to a research checklist | the first non-local provider (map it to a local one to keep notes on this machine) |
 
 If no provider of the wanted sort exists, the request goes to `default` (which is
 `"local"` unless you set it). `intents` overrides the choice per intent.
