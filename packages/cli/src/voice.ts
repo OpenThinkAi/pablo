@@ -567,7 +567,8 @@ function rulesHeading(lines: readonly string[], target: RuleTarget): string {
 export interface RuleOk {
   readonly ok: true;
   readonly path: string;
-  readonly target: RuleTarget;
+  /** `voice`, `work`, or (with `opts.file`) the layer target the caller named. */
+  readonly target: string;
   readonly committed: boolean;
   readonly notice?: string;
 }
@@ -592,15 +593,24 @@ export type RuleResult = RuleOk | Refusal;
 export function addRule(
   location: VoiceLocation | undefined,
   text: string,
-  opts: { readonly target?: RuleTarget; readonly projectPath?: string; readonly example?: string } = {},
+  opts: {
+    readonly target?: RuleTarget;
+    readonly projectPath?: string;
+    readonly example?: string;
+    /** AGT-2140: write to this file instead (a layer target: global, vault, work or output:<type>); `location` is not used. */
+    readonly file?: { readonly path: string; readonly target: string; readonly commit: boolean };
+  } = {},
 ): RuleResult {
-  const target = opts.target ?? "voice";
+  const target: string = opts.file?.target ?? opts.target ?? "voice";
   const safeText = text.replace(/[\r\n]+/g, " ").trim();
   if (safeText === "") return refuse("pablo: voice rule: text must not be empty", []);
   const safeExample = (opts.example ?? "").replace(/[\r\n]+/g, " ").trim();
 
   let targetPath: string;
-  if (target === "work") {
+  if (opts.file !== undefined) {
+    targetPath = opts.file.path;
+    mkdirSync(dirname(targetPath), { recursive: true });
+  } else if (target === "work") {
     if (opts.projectPath === undefined) return refuse("pablo: voice rule: --target work needs a project (--project <slug>)", []);
     targetPath = join(opts.projectPath, "QWEN.md");
     if (!existsSync(targetPath)) return refuse(`pablo: voice rule: the work has no QWEN.md (${targetPath})`, [targetPath]);
@@ -617,9 +627,10 @@ export function addRule(
   }
 
   const entry = safeExample === "" ? bullet : `${bullet}\n  Flagged: "${safeExample}"`;
-  const updated = insertUnderHeading(lines, rulesHeading(lines, target), entry);
+  const updated = insertUnderHeading(lines, rulesHeading(lines, target === "work" ? "work" : "voice"), entry);
   writeFileSync(targetPath, updated.join("\n"), "utf8");
 
+  if (opts.file !== undefined && !opts.file.commit) return { ok: true, path: targetPath, target, committed: false };
   const { committed, notice } = commitTouchedFile(targetPath, `voice: add a rule to ${basename(targetPath)}`);
   return { ok: true, path: targetPath, target, committed, ...(notice ? { notice } : {}) };
 }

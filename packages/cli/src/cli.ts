@@ -56,7 +56,7 @@ import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
 import { screenWriter } from "./screen-write";
 import { screenPuller, screenRefresh, screenRounds } from "./screen-reviews";
-import { deriveCliOptions, notesWith, publishOutput, runVoiceRule, shareWith, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
+import { deriveCliOptions, notesWith, publishOutput, runVoiceEdit, runVoiceList, runVoiceRemove, runVoiceRule, runVoiceUse, shareWith, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
 import { realRunner } from "./share";
 import type { Runner } from "./share";
 import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
@@ -67,6 +67,7 @@ import { createNotesHost } from "./mixer-notes-host";
 import { realTrayDeps, runTray } from "./tray/cli";
 import { addExemplar, flagLine, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { Voice } from "./voice";
+import { TARGET_USAGE } from "./voice-rules";
 import { VERSION } from "./version";
 import { runWrite } from "./write";
 
@@ -223,16 +224,24 @@ function helpText(): string {
     "                                            rounds, notify, open one from the menu-bar icon",
     "  pablo tray install|uninstall             install/remove the launchd agent that runs the tray",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
-    "  pablo voice list                         every voice in the vault and the global dir",
+    "  pablo voice list [--project <slug>]      every voice, and every rule with its id",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
     '  pablo voice flag <name> "<line>" [--section <heading>]',
     "                                            record a rejected line under a voice.md/",
     "                                            style/prose.md section (default \"Flagged\")",
     '  pablo voice exemplar <name> <file> [--title "<t>"]',
     "                                            keep a piece as-is under the voice's exemplars/",
-    '  pablo voice rule <name> "<text>" [--example "<s>"] [--target voice|work --project <slug>]',
-    "                                            add a rule under ## Rules of style/prose.md (fiction),",
-    "                                            voice.md, or (--target work) the work's QWEN.md",
+    '  pablo voice rule <name> "<text>" [--example "<s>"]',
+    "                                            add a rule under ## Rules of style/prose.md (fiction)",
+    "                                            or the named voice's voice.md",
+    '  pablo voice rule "<text>" --target global|vault|work|output:<type> [--project <slug>]',
+    "                                            add it to that layer's rules file (work and output",
+    "                                            need --project; work = QWEN.md, output = RULES.md)",
+    '  pablo voice edit <id> "<text>" [--target <t>] [--project <slug>]',
+    "                                            change one rule (ids are in `voice list`)",
+    "  pablo voice remove <id> [--target <t>] [--project <slug>]",
+    "                                            delete one rule",
+    "  pablo voice use <name> --project <slug>  add a named voice to the work's pablo.json voice",
     "  pablo prose --voice <name> --brief <file|-> [--context <file>]...",
     "              [--format email|post|page|reply|note] [--words N]",
     "              [--draft <file> --instruction \"<text>\"]",
@@ -1079,15 +1088,54 @@ function runVoice(args: ParsedArgs, cwd: string): number {
   const env = process.env;
 
   if (sub === "list") {
-    const voices = listVoices({ cwd, env });
+    const { body, exitCode } = runVoiceList({ project: args.project }, { cwd, env });
+    const b = body as { ok: boolean; message?: string; voices?: readonly { name: string; scope: string; path: string }[]; rules?: readonly { id: string; target: string; text: string }[] };
     if (args.json) {
-      console.log(JSON.stringify({ ok: true, voices }));
-    } else if (voices.length === 0) {
-      console.log("pablo: no voices found");
+      console.log(JSON.stringify(body));
+    } else if (!b.ok) {
+      console.error(String(b.message));
     } else {
+      const voices = b.voices ?? [];
+      if (voices.length === 0) console.log("pablo: no voices found");
       for (const v of voices) console.log(`${v.name}\t${v.scope}\t${v.path}`);
+      const rules = b.rules ?? [];
+      if (rules.length > 0) {
+        console.log("");
+        console.log("rules (id, target, text):");
+        for (const r of rules) console.log(`${r.id}\t${r.target}\t${r.text}`);
+      }
     }
-    return EXIT_OK;
+    return exitCode;
+  }
+
+  if (sub === "edit" || sub === "remove" || sub === "use") {
+    const usage = {
+      edit: 'pablo: usage: pablo voice edit <id> "<text>" [--target <t>] [--project <slug>]',
+      remove: "pablo: usage: pablo voice remove <id> [--target <t>] [--project <slug>]",
+      use: "pablo: usage: pablo voice use <name> --project <slug>",
+    }[sub];
+    if (name === undefined || (sub === "edit" && extra === undefined)) {
+      emit({ ok: false, code: EXIT_REFUSED, message: usage }, args.json);
+      return EXIT_REFUSED;
+    }
+    const ctx = { cwd, env };
+    const { body, exitCode } =
+      sub === "edit"
+        ? runVoiceEdit({ id: name, text: extra ?? "", target: args.target, project: args.project }, ctx)
+        : sub === "remove"
+          ? runVoiceRemove({ id: name, target: args.target, project: args.project }, ctx)
+          : runVoiceUse({ name, project: args.project }, ctx);
+    const b = body as { ok: boolean; id?: string; path?: string; committed?: boolean; notice?: string; message?: string; added?: boolean };
+    if (args.json) {
+      console.log(JSON.stringify(body));
+    } else if (!b.ok) {
+      console.error(String(b.message));
+    } else {
+      const verb = sub === "edit" ? `rule is now ${b.id} in` : sub === "remove" ? "rule removed from" : b.added ? "voice added in" : "voice already in";
+      console.log(`pablo: ${verb} ${b.path}${b.committed ? " (committed)" : ""}`);
+      if (b.notice) console.log(b.notice);
+    }
+    return exitCode;
   }
 
   if (sub === "new") {
@@ -1196,18 +1244,17 @@ function runVoice(args: ParsedArgs, cwd: string): number {
   }
 
   if (sub === "rule") {
-    if (name === undefined || extra === undefined) {
-      const message = 'pablo: usage: pablo voice rule <name> "<text>" [--example "<sentences>"] [--target voice|work --project <slug>]';
-      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
-      return EXIT_REFUSED;
-    }
-    if (args.target !== undefined && args.target !== "voice" && args.target !== "work") {
-      const message = `pablo: voice rule: --target must be voice or work (got "${args.target}")`;
+    // With a layer --target the voice name is not needed: `voice rule "<text>" --target global`.
+    const layered = args.target !== undefined && args.target !== "voice";
+    const ruleName = layered && extra === undefined ? undefined : name;
+    const ruleText = layered && extra === undefined ? name : extra;
+    if (ruleText === undefined || (!layered && ruleName === undefined)) {
+      const message = `pablo: usage: pablo voice rule <name> "<text>" [--example "<sentences>"] [--target voice] | pablo voice rule "<text>" --target ${TARGET_USAGE} [--project <slug>]`;
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
     const { body, exitCode } = runVoiceRule(
-      { name, text: extra, example: args.example, target: args.target, project: args.project },
+      { name: ruleName, text: ruleText, example: args.example, target: args.target, project: args.project },
       { cwd, env },
     );
     const b = body as { ok: boolean; path?: string; committed?: boolean; notice?: string; message?: string };
@@ -1222,7 +1269,7 @@ function runVoice(args: ParsedArgs, cwd: string): number {
     return exitCode;
   }
 
-  const message = `pablo: voice: unknown subcommand "${sub ?? ""}" (expected new, list, show, flag, exemplar, or rule)`;
+  const message = `pablo: voice: unknown subcommand "${sub ?? ""}" (expected new, list, show, flag, exemplar, rule, edit, remove, or use)`;
   emit({ ok: false, code: EXIT_ERROR, message }, args.json);
   return EXIT_ERROR;
 }

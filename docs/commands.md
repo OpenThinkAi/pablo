@@ -524,26 +524,42 @@ global `~/.config/pablo/voices/` (respects `XDG_CONFIG_HOME`).
 
 ```
 pablo voice new <name> [--global]
-pablo voice list
+pablo voice list [--project <slug>]
 pablo voice show <name>
 pablo voice flag <name> "<line>" [--section <heading>]
 pablo voice exemplar <name> <file> [--title "<t>"]
-pablo voice rule <name> "<text>" [--example "<sentences>"] [--target voice|work --project <slug>]
+pablo voice rule <name> "<text>" [--example "<sentences>"]
+pablo voice rule "<text>" --target global|vault|work|output:<type> [--project <slug>]
+pablo voice edit <id> "<text>" [--target <t>] [--project <slug>]
+pablo voice remove <id> [--target <t>] [--project <slug>]
+pablo voice use <name> --project <slug>
 ```
 
 | Sub | What it does |
 |---|---|
 | `new` | scaffolds a voice directory in the vault, or the global directory with `--global` |
-| `list` | every voice in the vault and the global directory |
+| `list` | every voice in the vault and the global directory, then every rule with its id (`id`, target, text); a work's own and its outputs' rules show with `--project` or when you run it inside the work |
 | `show` | the assembled voice as a model will see it |
 | `flag` | records a rejected line under a section of `voice.md`, or `style/prose.md` for `fiction` (default section "Flagged") |
 | `exemplar` | keeps a piece as-is under the voice's `exemplars/` |
 | `rule` | adds `- <text>` as the last bullet of the target's `## Rules` (created if missing) |
+| `edit` | changes one rule's text by its id, keeping its `Flagged:` example; prints the rule's new id |
+| `remove` | deletes one rule, with its example lines, by its id |
+| `use` | adds a named voice to the work's `pablo.json` `voice` list (once), so every pack for the work carries it |
 
 For `rule`, the default target `voice` writes `style/prose.md` for `fiction` and
-`voice.md` for a named voice. `--target work` writes the work's `QWEN.md` instead.
-That needs `--project`, joins an existing "Ground rules" section if there is one, and
-is refused when the work has no `QWEN.md`. `--example` adds a `Flagged: "..."` line
+`voice.md` for a named voice. `--target` picks a layer instead, and then no voice name
+is needed: `global` writes the global default voice
+(`~/.config/pablo/voices/default/voice.md`, never committed), `vault` writes
+`style/prose.md`, `work` writes the work's `QWEN.md`, and `output:<type>` writes
+`outputs/<type>/RULES.md` (created if missing). `work` and `output:<type>` need
+`--project`. `work` joins an existing "Ground rules" section if there is one, and is
+refused when the work has no `QWEN.md`.
+
+A rule's id is six hex digits of the hash of its text, so it stays put while other
+rules come and go and changes only when you `edit` that rule. If the same text is in
+two files, `edit` and `remove` refuse until `--target` (`global`, `vault`, `work`,
+`output:<type>` or `voice:<name>`) says which. `--example` adds a `Flagged: "..."` line
 under the rule. `check` and `write` read those lines from `style/prose.md`, but not
 from `QWEN.md`. Changes are committed by path.
 
@@ -608,7 +624,7 @@ It serves:
 | Writing | `write`, `prose`, `revise` (deprecated aliases, removed next release: `draft_unit`, `draft_chapter` for `write`; `revise_passage` for `revise` with `branch`) |
 | Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `record_fact` |
 | Setup and publishing | `output`, `migrate`, `publish` |
-| Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule` |
+| Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule`, `voice_edit`, `voice_remove`, `voice_use` |
 | Reading | `read`, `search` |
 | Radio | `bind`, `audition`, `cast`, `voices`, `describe_voice`, `perform`, `mix`, `fix` |
 

@@ -93,11 +93,14 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "search",
     "status",
     "timeline",
+    "voice_edit",
     "voice_exemplar",
     "voice_flag",
     "voice_list",
+    "voice_remove",
     "voice_rule",
     "voice_show",
+    "voice_use",
     "voices",
     "write",
   ]);
@@ -142,11 +145,14 @@ test("each voice_* tool's input schema carries only its own arguments", async ()
   const propsOf = (name: string): string[] =>
     Object.keys((byName.get(name)!.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}).sort();
 
-  expect(propsOf("voice_list")).toEqual([]);
+  expect(propsOf("voice_list")).toEqual(["project"]);
   expect(propsOf("voice_show")).toEqual(["name"]);
   expect(propsOf("voice_flag")).toEqual(["line", "name", "section"]);
   expect(propsOf("voice_exemplar")).toEqual(["file", "name", "title"]);
   expect(propsOf("voice_rule")).toEqual(["example", "name", "project", "target", "text"]);
+  expect(propsOf("voice_edit")).toEqual(["id", "project", "target", "text"]);
+  expect(propsOf("voice_remove")).toEqual(["id", "project", "target"]);
+  expect(propsOf("voice_use")).toEqual(["name", "project"]);
 
   // The schema itself enforces requiredness structurally (AC1's "honest
   // schema" — no `sub` discriminator, no runtime-only requiredness check).
