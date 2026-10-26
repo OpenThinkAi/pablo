@@ -17,7 +17,8 @@ import { outputsLabel, readMarker, realNamesOf, trackOf } from "./marker";
 import { DEFAULT_TRACK } from "./tracks/registry";
 import type { TrackId } from "./tracks/registry";
 import { waitingForReview } from "./branch";
-import type { CoreState } from "./core/machine";
+import { trackGate } from "./core/machine";
+import type { CoreState, TrackGate } from "./core/machine";
 import { itemLabel } from "./core/checklist";
 import { coreLines, outputLines, readWorkReport } from "./work-state";
 import type { CoreReport, OutputReport } from "./work-state";
@@ -61,6 +62,8 @@ export interface ResumeResult {
     readonly commit?: CommitSummary;
   };
   readonly open: readonly OpenItem[];
+  /** The track's gate while it is shut (AGT-2145): the stage `write` refuses on, naming the track. Omitted when drafting may go ahead. */
+  readonly gate?: TrackGate;
   /** The next action, naming the layer that is short: `core: ...`, `add an output`, or `<type>: ...`. */
   readonly next: string;
   /** The `think brief` output, trimmed, when it landed inside the timeout. */
@@ -265,6 +268,7 @@ export async function buildResume(
   const open = [...checklistToOpen(report.core), ...picksToOpen(report.core), ...bibleAndOutlineOpen(workDir)];
 
   const briefOutcome = await briefPromise;
+  const gate = trackGate(report.core);
 
   const result: ResumeResult = {
     format,
@@ -276,6 +280,7 @@ export async function buildResume(
     open,
     next: report.next,
     track,
+    ...(gate !== undefined ? { gate } : {}),
     ...(realNamesOff ? { realNames: false as const } : {}),
   };
   if (briefOutcome.brief !== undefined) return { ...result, brief: briefOutcome.brief };
@@ -297,6 +302,7 @@ const MAX_BRIEF_LINES = 8;
 export function formatResumeProse(result: ResumeResult): string {
   const body: string[] = [result.title, ...coreLines(result.core), ...outputLines(result.outputs), `track: ${result.track}`];
   if (result.realNames === false) body.push("real names: kept out of distilled facts (realNames: false)");
+  if (result.gate !== undefined) body.push(`gate: ${result.gate.message}`);
   if (result.waiting.length > 0) body.push(`waiting for review: ${result.waiting.join(", ")}`);
 
   if (result.last.note !== undefined) {

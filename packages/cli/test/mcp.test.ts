@@ -450,3 +450,8 @@ test("the mcp server writes nothing but JSON-RPC to stdout", async () => {
 
   proc.kill();
 });
+
+test("MCP instructions cover tracks, guide, story and research (AGT-2145)", async () => {
+  const { MCP_INSTRUCTIONS } = await import("../src/mcp");
+  for (const word of ["track", "`guide`", "story", "research", "gate"]) expect(MCP_INSTRUCTIONS).toContain(word);
+});
