@@ -6,7 +6,7 @@
 
 /** A config file, env var, or Keychain lookup that cannot produce a usable provider. */
 export class ProviderConfigError extends Error {
-  override readonly name = "ProviderConfigError";
+  override readonly name: string = "ProviderConfigError";
 }
 
 /**
@@ -83,5 +83,21 @@ export class NoToolCallError extends ProviderResponseError {
     readonly answer: string,
   ) {
     super(endpoint, `no ${tool} tool call (finish_reason: ${finishReason}) — it answered with ${answer === "" ? "nothing" : answer}`);
+  }
+}
+
+/**
+ * A `chat()` turn offered tools to a provider whose config says `"tools": false`
+ * (AGT-2117, D-12). Refused before any request is sent, so a server with no
+ * tool support never sees a schema it would silently ignore.
+ */
+export class ToolsDisabledError extends ProviderConfigError {
+  override readonly name = "ToolsDisabledError";
+
+  constructor(readonly providerId: string) {
+    super(
+      `pablo: provider "${providerId}" is configured with "tools": false, so it cannot take a chat turn that offers tools — ` +
+        `remove "tools": false from its config if the server supports tool calls, or route this intent to a provider that does.`,
+    );
   }
 }

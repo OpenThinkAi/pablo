@@ -75,7 +75,10 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 `config.ts` the `$XDG_CONFIG_HOME/pablo/config.json` loader;
                 `types.ts` also holds the neutral multi-turn `chat()` vocabulary
                 (`ChatRequest`, `ChatEvent`, `JsonSchemaTool`, AGT-2116, D-12)
-                and `scripted.ts` the fake `chat()` adapter tests drive),
+                and `scripted.ts` the fake `chat()` adapter tests drive;
+                `openai.ts`'s `chat()` (AGT-2117) streams text and tool calls,
+                whole as mlx_lm sends them or as OpenAI deltas, and a
+                provider's `"tools": false` refuses a turn that offers tools),
                 `diff/` (the diff parser, move detection and the stitcher that
                 review mode and accept/reject share), `facts.ts` (the fact
                 provenance tag), `work-paths.ts` (migration-aware paths to a

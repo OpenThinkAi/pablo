@@ -55,6 +55,7 @@ always present; an entry named `local` changes only the fields it sets.
 | `timeoutMs` | How long to wait with no tokens arriving before giving up | `60000` |
 | `temperature` | Sampling temperature, 0 to 2, used by `write` when you don't pass `--temperature` | `0.8` |
 | `thinking` | OpenAI-compatible only: `false` sends the switch that stops a reasoning model (Qwen3 and similar) from thinking before it answers. Set it to `false` if a local model times out with "only thinking" | off for local providers |
+| `tools` | OpenAI-compatible only: `false` for a server that cannot take native tool calls. A chat turn that offers tools is then refused with an error naming the provider, instead of being sent to a server that would ignore them | `true` |
 | `key` | Where the API key is. See below | the environment |
 
 Common local endpoints: LM Studio `http://127.0.0.1:1234/v1`, Ollama
@@ -140,7 +141,7 @@ branch, so it is trusted less than this file:
   refuses a work whose `pablo.json` holds a key until it is removed.
 - A work may add a provider, or change any field of one, only on this machine
   (`127.0.0.1`, `localhost` or `::1`). On a remote provider (Anthropic, a hosted
-  endpoint) it may change only `model`, `timeoutMs`, `temperature` and `thinking`.
+  endpoint) it may change only `model`, `timeoutMs`, `temperature`, `thinking` and `tools`.
   Declare remote providers, and their keys, here, and route intents to them from
   `pablo.json`. That way only this file decides which host a key is sent to.
 
