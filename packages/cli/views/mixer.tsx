@@ -54,6 +54,8 @@ export interface MixerData {
   readonly episode: number;
   /** `--version k`: the mix version to open (the newest when absent). */
   readonly version?: number;
+  /** The performed output, when it is not radio (`--output narrated`, AGT-2158); the host already reads its files. */
+  readonly output?: "narrated";
 }
 
 const LANE_H = 54;

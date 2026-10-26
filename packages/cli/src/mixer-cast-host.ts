@@ -46,6 +46,7 @@ import { SCORERS_EXTRA, ensureProvisioned, runCasting, runPythonStreaming } from
 import type { CastingDeps } from "./casting";
 import { auditionArgv, castArgv, castingVerbs } from "./casting-verbs";
 import { defaultSlug, plural } from "../views/mixer-cast-logic";
+import type { AudioOutput } from "./outputs/audio";
 import { readFlagsFile, writeFlagsFile } from "./review-host";
 import { VERBS } from "./verbs";
 import type { Verb, VerbContext, VerbResult } from "./verbs";
@@ -55,6 +56,8 @@ type Env = Record<string, string | undefined>;
 export interface CastHostOptions {
   /** The work's directory (`<vault>/<kind>/<slug>`). */
   readonly work: string;
+  /** The performed output (default radio; narrated, AGT-2158). `env` already names it to the Python side. */
+  readonly output?: AudioOutput;
   /** The vault the work lives in; the library defaults to `<vault>/casting`. */
   readonly vault?: string;
   /** `--library DIR`: the library root, over the config and the vault. */
@@ -121,6 +124,7 @@ function unwrap(result: VerbResult, what: string): Record<string, unknown> {
 
 export function createCastHost(options: CastHostOptions): CastHost {
   const { work } = options;
+  const output = options.output ?? "radio";
   const stderr = options.stderr ?? { write: () => undefined };
   const ctx = { env: options.env, stderr };
   const now = options.now ?? (() => new Date());
@@ -267,19 +271,19 @@ export function createCastHost(options: CastHostOptions): CastHost {
       if (entry.voice === null) throw new Error(`${role} is not bound to a voice; bind one first`);
       const lines = [...entry.stale];
       if (lines.length === 0) throw new Error(`every line of ${role} is already performed in ${entry.voice.slug}; nothing to re-perform`);
-      const before = readFlagsFile(work);
+      const before = readFlagsFile(work, output);
       const at = now().toISOString();
       const stamp = at.replace(/[^0-9]/g, "");
       const added = lines.map((line) => ({ id: `f-recast-${episode}-${line}-${stamp}`, episode, line, reason: "other", note: `recast ${role} to ${entry.voice?.slug}`, source: "human", by: "mixer", at }));
-      writeFlagsFile(work, before, [...before.flags, ...added]);
+      writeFlagsFile(work, before, [...before.flags, ...added], output);
       let body: Record<string, unknown>;
       try {
-        body = await runVerb("fix", { project, episode, "json-lines": true }, `re-perform ${role}`);
+        body = await runVerb("fix", { project, episode, ...(output === "radio" ? {} : { output }), "json-lines": true }, `re-perform ${role}`);
       } catch (error) {
         // Nothing was fixed: the flags this call added go again, so flags.json is as the author left it.
-        const current = readFlagsFile(work);
+        const current = readFlagsFile(work, output);
         const ours = new Set(added.map((f) => f.id));
-        writeFlagsFile(work, current, current.flags.filter((f) => !ours.has(String(f["id"]))));
+        writeFlagsFile(work, current, current.flags.filter((f) => !ours.has(String(f["id"]))), output);
         throw error;
       }
       return {

@@ -10,8 +10,10 @@
  * source's, unchanged; `pablo check` flags a reading whose words differ from
  * its source unit's (`narration-drift`).
  *
- * The audio side (casting the narrator, perform, mix and the mixer) is W8;
- * this type stops at the script, published as one file by `--target script`.
+ * The audio side (AGT-2158): `cast --auto`, `perform`, `mix`, `fix` and
+ * `mixer` take `--output narrated --unit N` and keep the reading's casting
+ * state in `outputs/narrated/casting/` (`../audio.ts`); publishing stays the
+ * script, as one file, by `--target script`.
  *
  * Allowed on every track (D-7). Only top-level `NARRATED` is evaluated at
  * import: the registry and marker are read inside functions, as the

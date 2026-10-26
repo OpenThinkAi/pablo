@@ -21,6 +21,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { radioScriptDir } from "../../radio";
+import { audioCastingDir, unitNoun } from "../audio";
+import type { AudioOutput } from "../audio";
+import { NARRATED_DIR } from "../narrated/units";
 import { hasCastLine, scriptRoles } from "./script";
 import { RADIO_CASTING_DIR, RADIO_UNIT_FILE, episodeTag } from "./units";
 
@@ -41,9 +44,14 @@ function readJson(path: string): unknown {
   }
 }
 
+/** Where an output's scripts are read from (`binding.py`'s `script_dir`): radio's episodes (else the novel's directory), narrated's readings. */
+export function audioScriptDir(work: string, output: AudioOutput = "radio"): string {
+  return output === "radio" ? radioScriptDir(work) : join(work, NARRATED_DIR);
+}
+
 /** The episode's script, absolute, when one carries a `CAST:` line (`binding.py`'s `episode_files`). */
-export function episodeScript(work: string, episode: number): string | undefined {
-  const dir = radioScriptDir(work);
+export function episodeScript(work: string, episode: number, output: AudioOutput = "radio"): string | undefined {
+  const dir = audioScriptDir(work, output);
   if (!existsSync(dir)) return undefined;
   for (const name of readdirSync(dir).sort()) {
     const m = RADIO_UNIT_FILE.exec(name);
@@ -59,30 +67,32 @@ export function episodeScript(work: string, episode: number): string | undefined
 }
 
 /** `cast.json`, where `binding.py`'s `casting_dir` finds it: the radio output's, else a pre-output work's top-level `casting/`. */
-export function castFile(work: string): string {
+export function castFile(work: string, output: AudioOutput = "radio"): string {
+  // Any other output keeps its own `cast.json`, with no legacy fallback (AGT-2158).
+  if (output !== "radio") return join(audioCastingDir(work, output), "cast.json");
   const radio = join(work, RADIO_CASTING_DIR, "cast.json");
   const legacy = join(work, "casting", "cast.json");
   return !existsSync(radio) && existsSync(legacy) ? legacy : radio;
 }
 
 /** The roles `cast.json` binds; an absent or unreadable file binds none (the Python side reports a broken one). */
-export function boundRoles(work: string): Set<string> {
-  const body = readJson(castFile(work));
+export function boundRoles(work: string, output: AudioOutput = "radio"): Set<string> {
+  const body = readJson(castFile(work, output));
   const roles = isRecord(body) && isRecord(body["roles"]) ? Object.keys(body["roles"]) : [];
   return new Set(roles);
 }
 
 /** The roles of episode N's script that `cast.json` does not bind, in script order; `undefined` without a script. */
-export function unboundRoles(work: string, episode: number): string[] | undefined {
-  const script = episodeScript(work, episode);
+export function unboundRoles(work: string, episode: number, output: AudioOutput = "radio"): string[] | undefined {
+  const script = episodeScript(work, episode, output);
   if (script === undefined) return undefined;
-  const bound = boundRoles(work);
+  const bound = boundRoles(work, output);
   return scriptRoles(readFileSync(script, "utf8")).filter((role) => !bound.has(role));
 }
 
 /** `renders/epNN/` for an episode, absolute. */
-export function renderDir(work: string, episode: number): string {
-  return join(work, RADIO_CASTING_DIR, "renders", episodeTag(episode));
+export function renderDir(work: string, episode: number, output: AudioOutput = "radio"): string {
+  return join(audioCastingDir(work, output), "renders", episodeTag(episode));
 }
 
 /** A manifest's audio is a bare `epNN.v<k>.<ext>` beside it; anything else is never opened. */
@@ -98,8 +108,8 @@ export interface RenderVersion {
 }
 
 /** Every manifest version of an episode, ascending. */
-export function renderVersions(work: string, episode: number): RenderVersion[] {
-  const dir = renderDir(work, episode);
+export function renderVersions(work: string, episode: number, output: AudioOutput = "radio"): RenderVersion[] {
+  const dir = renderDir(work, episode, output);
   if (!existsSync(dir)) return [];
   const versions: RenderVersion[] = [];
   for (const name of readdirSync(dir)) {
@@ -114,14 +124,14 @@ export function renderVersions(work: string, episode: number): RenderVersion[] {
 }
 
 /** The episode's open flags in `flags.json` (the player's and the performer's automatic ones). */
-export function openFlags(work: string, episode: number): number {
-  const body = readJson(join(work, RADIO_CASTING_DIR, "flags.json"));
+export function openFlags(work: string, episode: number, output: AudioOutput = "radio"): number {
+  const body = readJson(join(audioCastingDir(work, output), "flags.json"));
   if (!isRecord(body) || !Array.isArray(body["flags"])) return 0;
   return body["flags"].filter((f) => isRecord(f) && f["episode"] === episode).length;
 }
 
 /** The newest receipt `perform` (or `fix`) left for the episode in `<work>/.pablo/casting/receipts.jsonl`, or undefined. */
-export function lastReceipt(work: string, episode: number, intents: readonly string[] = ["perform", "fix"]): Record<string, unknown> | undefined {
+export function lastReceipt(work: string, episode: number, intents: readonly string[] = ["perform", "fix"], output: AudioOutput = "radio"): Record<string, unknown> | undefined {
   let text: string;
   try {
     text = readFileSync(join(work, ".pablo", "casting", "receipts.jsonl"), "utf8");
@@ -132,7 +142,10 @@ export function lastReceipt(work: string, episode: number, intents: readonly str
     if (line.trim() === "") continue;
     try {
       const receipt = JSON.parse(line) as unknown;
-      if (isRecord(receipt) && intents.includes(String(receipt["intent"])) && receipt["episode"] === episode) return receipt;
+      if (!isRecord(receipt)) continue;
+      // A receipt with no `output` is radio's; any other output's says so (`receipts.py`, AGT-2158).
+      const of = typeof receipt["output"] === "string" ? receipt["output"] : "radio";
+      if (of === output && intents.includes(String(receipt["intent"])) && receipt["episode"] === episode) return receipt;
     } catch {
       // A torn line is skipped.
     }
@@ -146,7 +159,7 @@ export interface StageCheck {
   readonly missing: readonly string[];
 }
 
-const scriptMissing = (episode: number): string => `episode ${episode} has no script (pablo write --output radio --unit ${episode})`;
+const scriptMissing = (episode: number, output: AudioOutput): string => `${unitNoun(output)} ${episode} has no script (pablo write --output ${output} --unit ${episode})`;
 
 /**
  * Whether `stage` may run for `episode`, and what is missing when it may
@@ -158,26 +171,28 @@ const scriptMissing = (episode: number): string => `episode ${episode} has no sc
  *   fix       a performed version and at least one open flag
  *   review    a mixed version
  */
-export function radioStageCheck(work: string, stage: RadioVerbStage, episode: number): StageCheck {
+export function radioStageCheck(work: string, stage: RadioVerbStage, episode: number, output: AudioOutput = "radio"): StageCheck {
   const done = (missing: string[]): StageCheck => ({ ready: missing.length === 0, missing });
-  const unbound = unboundRoles(work, episode);
-  if (unbound === undefined) return done([scriptMissing(episode)]);
+  const unbound = unboundRoles(work, episode, output);
+  if (unbound === undefined) return done([scriptMissing(episode, output)]);
   if (stage === "cast") return done([]);
-  const versions = renderVersions(work, episode);
+  const versions = renderVersions(work, episode, output);
   const latest = versions.at(-1);
+  const noun = unitNoun(output);
+  const unperformed = `${noun} ${episode} is not performed (pablo perform --output ${output} --unit ${episode})`;
   switch (stage) {
     case "perform":
       return done([
         ...unbound.map((role) => `role ${role} is not cast`),
-        ...(latest === undefined ? [] : [`episode ${episode} is already performed (v${latest.version}); re-record flagged lines with pablo fix`]),
+        ...(latest === undefined ? [] : [`${noun} ${episode} is already performed (v${latest.version}); re-record flagged lines with pablo fix`]),
       ]);
     case "mix":
-      return done(latest === undefined ? [`episode ${episode} is not performed (pablo perform --output radio --unit ${episode})`] : []);
+      return done(latest === undefined ? [unperformed] : []);
     case "fix":
-      if (latest === undefined) return done([`episode ${episode} is not performed (pablo perform --output radio --unit ${episode})`]);
-      return done(openFlags(work, episode) === 0 ? [`episode ${episode} has no open flags (flag lines in pablo review)`] : []);
+      if (latest === undefined) return done([unperformed]);
+      return done(openFlags(work, episode, output) === 0 ? [`${noun} ${episode} has no open flags (flag lines in ${output === "radio" ? "pablo review" : "pablo mixer"})`] : []);
     case "review":
-      return done(versions.some((v) => v.audio !== undefined) ? [] : [`episode ${episode} has no mixed audio yet (pablo perform, then pablo mix)`]);
+      return done(versions.some((v) => v.audio !== undefined) ? [] : [`${noun} ${episode} has no mixed audio yet (pablo perform, then pablo mix)`]);
   }
 }
 
@@ -198,12 +213,12 @@ export interface EpisodeState {
 }
 
 /** Reads one episode's state. Pure over the work directory. */
-export function episodeState(work: string, episode: number): EpisodeState {
-  const unbound = unboundRoles(work, episode);
-  const versions = renderVersions(work, episode);
+export function episodeState(work: string, episode: number, output: AudioOutput = "radio"): EpisodeState {
+  const unbound = unboundRoles(work, episode, output);
+  const versions = renderVersions(work, episode, output);
   const latest = versions.at(-1);
   const mixed = [...versions].reverse().find((v) => v.audio !== undefined);
-  const flags = openFlags(work, episode);
+  const flags = openFlags(work, episode, output);
   const render = latest === undefined ? "none" : latest.audio !== undefined ? `mixed v${latest.version}` : `performed v${latest.version}`;
   const stage: RadioStage =
     unbound === undefined ? "script" : unbound.length > 0 ? "cast" : latest === undefined ? "perform" : latest.audio === undefined ? "mix" : flags > 0 ? "fix" : "publish";

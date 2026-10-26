@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Protocol
 
 from pablo_casting import __version__
+from pablo_casting.outputs import output_dir
 from pablo_casting.receipts import append_receipt, now
 from pablo_casting.wav import Audio
 
@@ -52,8 +53,8 @@ JSONScalar = str | int | float | bool | None
 
 
 def casting_dir(work: Path) -> Path:
-    """The radio output's casting state inside a work."""
-    return work / "outputs" / "radio" / "casting"
+    """The current output's casting state inside a work (`outputs/radio/casting`, or narrated's, AGT-2158)."""
+    return output_dir(work) / "casting"
 
 
 def takes_dir(work: Path) -> Path:

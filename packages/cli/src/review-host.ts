@@ -33,7 +33,9 @@ import { mount } from "@openthink/ui-leaf";
 import type { MountOptions, MutationHandler, View } from "@openthink/ui-leaf";
 import { MUTATIONS, REASONS, SEGMENTS_PER_CALL } from "../views/review-protocol";
 import type { ChapterRow, GateValue, ReviewData, ReviewFlag, ReviewLine, SegmentsPayload, TrackPayload, VersionInfo } from "../views/review-protocol";
-import { radioScriptDir } from "./radio";
+import { audioCastingDir } from "./outputs/audio";
+import type { AudioOutput } from "./outputs/audio";
+import { audioScriptDir } from "./outputs/radio/state";
 import { readLiveStream, readSegment, renderedEpisodes, streamedEpisodes } from "./radio-stream";
 import type { LiveStream } from "./radio-stream";
 import { VIEWS_ROOT, findChrome, resolveUiLeafBinary } from "./ui-leaf-host";
@@ -48,16 +50,17 @@ const MIME: Readonly<Record<string, string>> = { ".m4a": "audio/mp4", ".mp4": "a
 /** A manifest's `audio` is a bare `epNN.v<k>.<ext>` beside it; anything else is never opened. */
 const AUDIO_NAME = /^ep\d+\.v\d+\.[a-z0-9]+$/;
 
-export function castingDir(work: string): string {
-  return join(work, "outputs", "radio", "casting");
+/** The output's casting directory: radio's unless `output` names another performed output (narrated, AGT-2158). */
+export function castingDir(work: string, output: AudioOutput = "radio"): string {
+  return audioCastingDir(work, output);
 }
 
-export function episodeDir(work: string, episode: number): string {
-  return join(castingDir(work), "renders", `ep${String(episode).padStart(2, "0")}`);
+export function episodeDir(work: string, episode: number, output: AudioOutput = "radio"): string {
+  return join(castingDir(work, output), "renders", `ep${String(episode).padStart(2, "0")}`);
 }
 
-export function flagsFile(work: string): string {
-  return join(castingDir(work), "flags.json");
+export function flagsFile(work: string, output: AudioOutput = "radio"): string {
+  return join(castingDir(work, output), "flags.json");
 }
 
 interface Manifest {
@@ -88,9 +91,9 @@ function reviewLine(raw: unknown): ReviewLine | undefined {
 }
 
 /** `renders/epNN/v<k>.json`, or undefined when it is missing or not a manifest (never trusted, never thrown). */
-function readManifest(work: string, episode: number, version: number): Manifest | undefined {
+function readManifest(work: string, episode: number, version: number, output: AudioOutput): Manifest | undefined {
   try {
-    const raw: unknown = JSON.parse(readFileSync(join(episodeDir(work, episode), `v${version}.json`), "utf8"));
+    const raw: unknown = JSON.parse(readFileSync(join(episodeDir(work, episode, output), `v${version}.json`), "utf8"));
     if (!isRecord(raw) || !Array.isArray(raw["lines"])) return undefined;
     return {
       version,
@@ -105,9 +108,9 @@ function readManifest(work: string, episode: number, version: number): Manifest 
   }
 }
 
-function versionNumbers(work: string, episode: number): number[] {
+function versionNumbers(work: string, episode: number, output: AudioOutput): number[] {
   try {
-    return readdirSync(episodeDir(work, episode))
+    return readdirSync(episodeDir(work, episode, output))
       .map((name) => /^v(\d+)\.json$/.exec(name)?.[1])
       .filter((n): n is string => n !== undefined)
       .map(Number)
@@ -118,11 +121,11 @@ function versionNumbers(work: string, episode: number): number[] {
 }
 
 /** The versions of an episode that have mixed audio on disk, ascending, with their manifests. */
-function mixedVersions(work: string, episode: number): Manifest[] {
-  const dir = episodeDir(work, episode);
+function mixedVersions(work: string, episode: number, output: AudioOutput = "radio"): Manifest[] {
+  const dir = episodeDir(work, episode, output);
   const out: Manifest[] = [];
-  for (const version of versionNumbers(work, episode)) {
-    const manifest = readManifest(work, episode, version);
+  for (const version of versionNumbers(work, episode, output)) {
+    const manifest = readManifest(work, episode, version, output);
     if (manifest?.audio != null && AUDIO_NAME.test(manifest.audio) && existsSync(join(dir, manifest.audio))) out.push(manifest);
   }
   return out;
@@ -146,10 +149,10 @@ function liveLines(live: LiveStream): ReviewLine[] {
 const versionInfo = (m: Manifest): VersionInfo => ({ version: m.version, duration: m.duration, created: m.created, changedLines: m.changed });
 
 /** The episode's title from its script (`title:` in the frontmatter, else the first `# ` heading), else "Episode N". */
-export function episodeTitle(work: string, episode: number): string {
-  const fallback = `Episode ${episode}`;
+export function episodeTitle(work: string, episode: number, output: AudioOutput = "radio"): string {
+  const fallback = `${output === "radio" ? "Episode" : "Unit"} ${episode}`;
   try {
-    const dir = radioScriptDir(work);
+    const dir = audioScriptDir(work, output);
     const name = readdirSync(dir)
       .sort()
       .find((file) => /^\d+-.*\.md$/.test(file) && Number(/^(\d+)-/.exec(file)?.[1]) === episode);
@@ -178,8 +181,8 @@ export interface FlagsFile {
 }
 
 /** `flags.json` as written, or an empty file when it does not exist. A file that is not JSON is never touched. */
-export function readFlagsFile(work: string): FlagsFile {
-  const path = flagsFile(work);
+export function readFlagsFile(work: string, output: AudioOutput = "radio"): FlagsFile {
+  const path = flagsFile(work, output);
   if (!existsSync(path)) return { raw: {}, flags: [] };
   let parsed: unknown;
   try {
@@ -193,9 +196,9 @@ export function readFlagsFile(work: string): FlagsFile {
   return { raw: parsed, flags: ((parsed["flags"] as unknown[] | undefined) ?? []).filter(isRecord) };
 }
 
-export function writeFlagsFile(work: string, file: FlagsFile, flags: Record<string, unknown>[]): void {
-  const path = flagsFile(work);
-  mkdirSync(castingDir(work), { recursive: true });
+export function writeFlagsFile(work: string, file: FlagsFile, flags: Record<string, unknown>[], output: AudioOutput = "radio"): void {
+  const path = flagsFile(work, output);
+  mkdirSync(castingDir(work, output), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync(tmp, `${JSON.stringify({ ...file.raw, flags }, null, 2)}\n`, "utf8");
   renameSync(tmp, path);
@@ -234,9 +237,9 @@ function flagRows(file: FlagsFile, episode: number, lines: readonly ReviewLine[]
 }
 
 /** The open flags of an episode against its newest mixed version's timings, as the player lists them (the mixer's punch list, AGT-2155). */
-export function episodeFlags(work: string, episode: number): ReviewFlag[] {
-  const mixed = mixedVersions(work, episode);
-  return flagRows(readFlagsFile(work), episode, mixed[mixed.length - 1]?.lines ?? []);
+export function episodeFlags(work: string, episode: number, output: AudioOutput = "radio"): ReviewFlag[] {
+  const mixed = mixedVersions(work, episode, output);
+  return flagRows(readFlagsFile(work, output), episode, mixed[mixed.length - 1]?.lines ?? []);
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +251,8 @@ export interface ReviewHostOptions {
   readonly work: string;
   /** Shown as the window's title; the work's title. */
   readonly title: string;
+  /** The performed output whose casting state this host reads and flags (default radio; narrated for the mixer, AGT-2158). */
+  readonly output?: AudioOutput;
   readonly now?: () => Date;
 }
 
@@ -277,14 +282,27 @@ function lineId(args: unknown): number {
   return value;
 }
 
+/** The units of a non-radio output with a render directory (`renders/epNN/`), ascending. */
+function renderedUnits(work: string, output: AudioOutput): number[] {
+  try {
+    return readdirSync(join(castingDir(work, output), "renders"))
+      .map((name) => /^ep(\d+)$/.exec(name)?.[1])
+      .filter((n): n is string => n !== undefined)
+      .map(Number);
+  } catch {
+    return [];
+  }
+}
+
 export function createReviewHost(options: ReviewHostOptions): ReviewHost {
   const { work } = options;
+  const output = options.output ?? "radio";
   const now = options.now ?? (() => new Date());
 
   const chapterRows = (): ChapterRow[] => {
     const file = (() => {
       try {
-        return readFlagsFile(work);
+        return readFlagsFile(work, output);
       } catch {
         return { raw: {}, flags: [] } as FlagsFile; // a broken flags.json must not hide the chapters
       }
@@ -294,12 +312,13 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
       human: flags.filter((f) => f.source === "human").length,
       auto: flags.filter((f) => f.source === "auto").length,
     });
-    const episodes = [...new Set([...renderedEpisodes(work), ...streamedEpisodes(work)])].sort((a, b) => a - b);
+    // Only radio streams (`perform --stream`); another output's chapters are its rendered units.
+    const episodes = (output === "radio" ? [...new Set([...renderedEpisodes(work), ...streamedEpisodes(work)])] : renderedUnits(work, output)).sort((a, b) => a - b);
     for (const episode of episodes) {
-      const mixed = mixedVersions(work, episode);
+      const mixed = mixedVersions(work, episode, output);
       const newest = mixed[mixed.length - 1];
       if (newest !== undefined) {
-        rows.push({ episode, title: episodeTitle(work, episode), versions: mixed.map(versionInfo), latest: newest.version, flags: counts(flagRows(file, episode, newest.lines)) });
+        rows.push({ episode, title: episodeTitle(work, episode, output), versions: mixed.map(versionInfo), latest: newest.version, flags: counts(flagRows(file, episode, newest.lines)) });
         continue;
       }
       // Not mixed yet: listed once its streamed performance is playable (AGT-1697), with no version to switch.
@@ -307,7 +326,7 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
       if (live === undefined) continue;
       rows.push({
         episode,
-        title: episodeTitle(work, episode),
+        title: episodeTitle(work, episode, output),
         versions: [],
         latest: null,
         flags: counts(flagRows(file, episode, liveLines(live))),
@@ -323,7 +342,7 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
     if (live === undefined) throw new Error(`episode ${episode} is not streaming (it has no playable performance in progress); choose it again from the chapter list, or start one with pablo perform --stream`);
     return {
       episode,
-      title: episodeTitle(work, episode),
+      title: episodeTitle(work, episode, output),
       from,
       segments: live.segments.slice(from, from + SEGMENTS_PER_CALL).map((s) => ({
         n: s.n,
@@ -340,31 +359,31 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
   }
 
   function track(episode: number, version: number | undefined): TrackPayload {
-    const mixed = mixedVersions(work, episode);
+    const mixed = mixedVersions(work, episode, output);
     if (mixed.length === 0) throw new Error(`episode ${episode} has no mixed audio yet (run pablo perform, then pablo mix)`);
     const chosen = version === undefined ? mixed[mixed.length - 1] : mixed.find((m) => m.version === version);
     if (chosen === undefined) throw new Error(`episode ${episode} has no mixed version ${String(version)} (it has ${mixed.map((m) => `v${m.version}`).join(", ")})`);
-    const audio = resolve(episodeDir(work, episode), chosen.audio as string);
+    const audio = resolve(episodeDir(work, episode, output), chosen.audio as string);
     const extension = /\.[a-z0-9]+$/.exec(audio)?.[0] ?? "";
     const lastEnd = chosen.lines.reduce((m, l) => Math.max(m, l.end), 0);
     return {
       episode,
       version: chosen.version,
       versions: mixed.map(versionInfo),
-      title: episodeTitle(work, episode),
+      title: episodeTitle(work, episode, output),
       mime: MIME[extension] ?? "application/octet-stream",
       b64: readFileSync(audio).toString("base64"),
       duration: chosen.duration ?? lastEnd,
       lines: chosen.lines,
-      flags: flagRows(readFlagsFile(work), episode, chosen.lines),
+      flags: flagRows(readFlagsFile(work, output), episode, chosen.lines),
     };
   }
 
   /** The flags of `episode` as the view shows them against the line timings of `version` (default newest). */
   function flagsFor(episode: number, version: number | undefined): ReviewFlag[] {
-    const mixed = mixedVersions(work, episode);
+    const mixed = mixedVersions(work, episode, output);
     const shown = (version === undefined ? mixed[mixed.length - 1] : mixed.find((m) => m.version === version)) ?? mixed[mixed.length - 1];
-    return flagRows(readFlagsFile(work), episode, shown?.lines ?? []);
+    return flagRows(readFlagsFile(work, output), episode, shown?.lines ?? []);
   }
 
   return {
@@ -392,7 +411,7 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
         throw new Error(`reason must be one of: ${REASONS.join(", ")}`);
       }
       const version = positiveInt(args, "version", false);
-      const mixed = mixedVersions(work, episode);
+      const mixed = mixedVersions(work, episode, output);
       const shown = (version === undefined ? mixed[mixed.length - 1] : mixed.find((m) => m.version === version)) ?? mixed[mixed.length - 1];
       if (shown === undefined) throw new Error(`episode ${episode} has no mixed audio yet; there is nothing to flag`);
       const target = shown.lines.find((l) => l.i === line);
@@ -401,21 +420,21 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
       if (timeArg !== undefined && (typeof timeArg !== "number" || !Number.isFinite(timeArg) || timeArg < 0)) throw new Error("time must be a number of seconds, 0 or more");
       const time = Math.round((timeArg ?? target.start) * 100) / 100;
 
-      const file = readFlagsFile(work);
+      const file = readFlagsFile(work, output);
       const stamp = now().toISOString();
       const id = `f-${stamp.replace(/[-:]/g, "").replace(/\.\d+Z$/, "").replace("T", "-")}-ep${String(episode).padStart(2, "0")}-${line}`;
       const isHumanHere = (f: Record<string, unknown>): boolean => f["episode"] === episode && f["line"] === line && f["source"] !== "auto" && f["by"] !== "auto";
       // One listener flag per line: flagging it again updates the reason and time. The performer's stays.
       const kept = file.flags.filter((f) => !isHumanHere(f));
       kept.push({ id, episode, line, reason, time, source: "human", by: "human", at: stamp });
-      writeFlagsFile(work, file, kept);
+      writeFlagsFile(work, file, kept, output);
       return flagsFor(episode, version);
     },
 
     unflag(args) {
       const episode = positiveInt(args, "episode", true);
       const idArg = isRecord(args) ? args["id"] : undefined;
-      const file = readFlagsFile(work);
+      const file = readFlagsFile(work, output);
       let kept: Record<string, unknown>[];
       if (idArg !== undefined) {
         if (typeof idArg !== "string") throw new Error("id must be text");
@@ -424,7 +443,7 @@ export function createReviewHost(options: ReviewHostOptions): ReviewHost {
         const line = lineId(args);
         kept = file.flags.filter((f) => !(f["episode"] === episode && f["line"] === line));
       }
-      if (kept.length !== file.flags.length) writeFlagsFile(work, file, kept);
+      if (kept.length !== file.flags.length) writeFlagsFile(work, file, kept, output);
       return flagsFor(episode, undefined);
     },
 

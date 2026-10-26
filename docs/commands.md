@@ -991,3 +991,28 @@ Rendering uses the GPU.
 
 `perform`, `mix` and `fix` also accept `--output radio --unit N` in place of
 `--episode N`. Check an episode's progress with `pablo status --for "episode N"`.
+
+### Performing a narrated output
+
+The `narrated` output's readings (`pablo write --output narrated --unit N`) are
+performed and mixed by the same verbs, addressed as `--output narrated --unit N`.
+A reading keeps its own casting state in `outputs/narrated/casting/` (`cast.json`,
+`flags.json`, `renders/epNN/`), so a narrated unit never shares a voice binding,
+a flag or a version with a radio episode of the same number.
+
+```
+pablo cast --auto --project <slug> --output narrated [--unit N]
+pablo perform --project <slug> --output narrated --unit N
+pablo mix --project <slug> --output narrated --unit N
+pablo fix --project <slug> --output narrated --unit N [--line I]
+pablo mixer --project <slug> --output narrated --unit N [--version k]
+```
+
+`cast --auto --output narrated` casts the narrator from the voice library (a
+card whose traits list `narrator` scores highest); character voices are cast only
+when a reading gives a character lines (`write --voices characters`). Without a
+unit it casts every reading's roles. `perform` refuses a reading whose narrator
+is not cast yet and names the `cast` command. A reading has no sound cues, so its
+mix is the voices alone. `--stream` and `--all` stay the radio output's: a
+narrated unit is performed one at a time. The pronunciation lexicon is the
+output's own, `outputs/narrated/pronounce.md`.

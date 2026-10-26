@@ -24,6 +24,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from pablo_casting.outputs import output_dir
+
 LEXICON_FILE = Path("outputs") / "radio" / "pronounce.md"
 PARAM = "lexicon"
 
@@ -62,7 +64,8 @@ def parse(text: str) -> list[Entry]:
 
 
 def load(work: Path) -> list[Entry]:
-    path = work / LEXICON_FILE
+    """The current output's lexicon: radio's `outputs/radio/pronounce.md`, narrated's `outputs/narrated/pronounce.md` (AGT-2158)."""
+    path = output_dir(work) / LEXICON_FILE.name
     return parse(path.read_text(encoding="utf-8")) if path.is_file() else []
 
 

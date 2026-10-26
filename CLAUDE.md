@@ -247,6 +247,15 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 stores a derived unit instead of calling the writer, and
                 `check` flags `narration-drift`. Readings live in
                 `outputs/narrated/readings/` on `draft/narrated-NN`.
+                Performing them (AGT-2158): `cast --auto`, `perform`,
+                `mix`, `fix` and `mixer` take `--output narrated --unit N`;
+                `src/outputs/audio.ts` names the performed outputs and
+                sets `PABLO_CASTING_OUTPUT`, which casting's `outputs.py`
+                reads so every path helper (`binding.py`, `takes.py`,
+                the lexicon, receipts tagged `output`) uses
+                `outputs/narrated/casting/`; `state.ts`, `review-host.ts`
+                and the mixer hosts take the output as a parameter
+                (radio the default). `--stream`/`--all` stay radio's.
                 `pablo story "<prompt>"` (AGT-1690, `src/story.ts`, one
                 `VERBS` entry with no MCP tool) creates a work under
                 `stories/` (`novels/` when a novel is asked for), runs each
