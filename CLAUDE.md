@@ -288,8 +288,8 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `$XDG_DATA_HOME/pablo/casting/venv` for an npm install),
                 pulls the configured weights and leaves a receipt. A missing
                 `uv` is a refusal naming `brew install uv`; only `cli.ts`,
-                `radio.ts`, `casting-verbs.ts`, `mixer-host.ts` and
-                `mixer-punch-host.ts` import the runner, and it
+                `radio.ts`, `casting-verbs.ts`, `mixer-host.ts`,
+                `mixer-punch-host.ts` and `mixer-cast-host.ts` import the runner, and it
                 runs only inside a casting verb, so a writing verb on a
                 writing work never touches it. `src/radio.ts` (AGT-1680) is
                 the radio door: `check` (on a work whose scripts carry a
@@ -373,13 +373,22 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `runFix` (`pablo fix --line`) and compare/choose takes with
                 `runTakes` (`takes line`, `takes choose`, `choose.py`): the
                 same functions as the CLI, nothing window-only.
+                The Cast panel (AGT-2157,
+                `views/mixer-cast.tsx`, `src/mixer-cast-host.ts`) runs the
+                casting verbs' own functions (`voices`, `describe_voice`,
+                `bind`, `fix`; `audition`/`cast` through their shared argv
+                builders, asynchronously) plus `castpanel roles|preview`;
+                after a rebind it flags the role's lines performed in the old
+                voice and runs `fix`, which allows a recast once every such
+                line is flagged.
 packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `src/pablo_casting/`, `tests/`), pm project `pablo-casting`.
                 Run only as `python -m pablo_casting <command> --json`
                 (`version`, `doctor`, `pull`, `audition`, `cast`,
                 `describe`, `voices list|show|retire`, `takes`, `manifest`,
                 `script`, `check`, `status`, `bind`, `gate`, `gate
-                calibrate`, `perform`, `mix`, `fix`, `mixer`, `sounds`; the
+                calibrate`, `perform`, `mix`, `fix`, `mixer`, `castpanel`
+                (the mixer's Cast panel reads, AGT-2157), `sounds`; the
                 list is `cli.py`'s `COMMANDS`),
                 never a user-facing binary; same body and exit codes as
                 pablo. The script reader (`script.py`), the direction

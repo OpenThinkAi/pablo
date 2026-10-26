@@ -429,6 +429,61 @@ export async function runFix(r: FixRun): Promise<VerbResult> {
   };
 }
 
+/** The audition fields `auditionArgv` reads (`AUDITION_ARGS` without the library's whereabouts). */
+export interface AuditionFields {
+  readonly role?: string | undefined;
+  readonly describe?: string | undefined;
+  readonly designer?: "qwen3" | "voxcpm2" | undefined;
+  readonly language?: "en" | "es" | undefined;
+  readonly n?: number | undefined;
+  readonly seed?: number | undefined;
+  readonly traits?: string | undefined;
+  readonly slug?: string | undefined;
+}
+
+/**
+ * The Python argv of a real `audition` (no library flags, no `--work`): the `audition` verb's and the mixer's Cast
+ * panel's (AGT-2157, `mixer-cast-host.ts`), so the panel designs a voice exactly as `pablo audition` does.
+ */
+export function auditionArgv(args: AuditionFields): string[] {
+  return [
+    "audition",
+    ...flag("--role", args.role),
+    ...flag("--describe", args.describe),
+    ...flag("--designer", args.designer),
+    ...flag("--language", args.language),
+    ...flag("--n", args.n),
+    ...flag("--seed", args.seed),
+    ...flag("--traits", args.traits),
+    ...flag("--slug", args.slug),
+  ];
+}
+
+/** The fields of a hand cast (`cast --role R --candidate n`) that `castArgv` reads. */
+export interface CastFields {
+  readonly role: string;
+  readonly candidate: number;
+  readonly recast?: boolean | undefined;
+  readonly traits?: string | undefined;
+  readonly notes?: string | undefined;
+  readonly by?: string | undefined;
+  readonly slug?: string | undefined;
+}
+
+/** The Python argv of a hand cast (freeze a candidate into a card): the `cast` verb's and the Cast panel's (AGT-2157). */
+export function castArgv(args: CastFields): string[] {
+  return [
+    "cast",
+    ...flag("--role", args.role),
+    ...flag("--candidate", args.candidate),
+    ...(args.recast === true ? ["--recast"] : []),
+    ...flag("--traits", args.traits),
+    ...flag("--notes", args.notes),
+    ...flag("--by", args.by),
+    ...flag("--slug", args.slug),
+  ];
+}
+
 /** The casting verbs (audition, cast, voices, perform), over `deps` (the real machine by default). */
 export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps): readonly Verb[] {
   const audition: Verb<typeof AUDITION_ARGS.shape> = {
@@ -438,23 +493,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     args: AUDITION_ARGS,
     run: async (args, ctx) => {
       if (args["dry-run"]) return run(["audition", "--dry-run"], args, ctx, deps);
-      return run(
-        [
-          "audition",
-          ...flag("--role", args.role),
-          ...flag("--describe", args.describe),
-          ...flag("--designer", args.designer),
-          ...flag("--language", args.language),
-          ...flag("--n", args.n),
-          ...flag("--seed", args.seed),
-          ...flag("--traits", args.traits),
-          ...flag("--slug", args.slug),
-        ],
-        args,
-        ctx,
-        deps,
-        [SCORERS_EXTRA],
-      );
+      return run(auditionArgv(args), args, ctx, deps, [SCORERS_EXTRA]);
     },
   };
 
@@ -501,22 +540,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       if (args.role === undefined || args.candidate === undefined) {
         return refuse("pablo cast needs --role R and --candidate n (or --auto --project <slug> to match the work's roles from the library)");
       }
-      return run(
-        [
-          "cast",
-          ...flag("--role", args.role),
-          ...flag("--candidate", args.candidate),
-          ...(args.recast ? ["--recast"] : []),
-          ...flag("--traits", args.traits),
-          ...flag("--notes", args.notes),
-          ...flag("--by", args.by),
-          ...flag("--slug", args.slug),
-        ],
-        args,
-        ctx,
-        deps,
-        [SCORERS_EXTRA],
-      );
+      return run(castArgv({ ...args, role: args.role, candidate: args.candidate }), args, ctx, deps, [SCORERS_EXTRA]);
     },
   };
 

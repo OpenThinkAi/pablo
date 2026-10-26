@@ -19,7 +19,7 @@ from pablo_casting.cli import run
 from pablo_casting.engines import DIA, TURBO, Pass, PassLine, VoiceRef, adapt, normalise_reasons, retake_pace
 from pablo_casting.fix import FixRequest, fix, flags_done_path
 from pablo_casting.manifest import episode_dir, flags_path, read_version, versions
-from pablo_casting.takes import read_take
+from pablo_casting.takes import read_take, take_path
 
 LINES = 60
 SCRIPT = (
@@ -300,6 +300,69 @@ def test_a_rebound_role_is_refused_because_it_changes_unflagged_lines(episode: t
     flag(work, (7, "wrong voice"))
     body, code = do_fix(work, library, cues)
     assert code == 2 and "cast changed" in str(body["message"]) and versions(work, 1) == [1]
+
+
+def test_a_rebound_role_with_every_line_flagged_is_re_performed_in_the_new_voice(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    # AGT-2157: the mixer's Cast panel rebinds a role, then flags all of its lines; only those lines change.
+    work, library = episode
+    cues = tmp_path / "cues"
+    performed_and_mixed(work, library, cues)
+    v1 = read_version(work, 1, 1)
+    make_card(library, "fenn")
+    bind(work, library / "voices", "OTTO", "fenn")
+    otto = [line["i"] for line in v1["lines"] if line["speaker"] == "OTTO"]
+    flag(work, *[(i, "other") for i in otto[:-1]])
+    body, code = do_fix(work, library, cues)
+    assert code == 2 and "cast changed" in str(body["message"]) and body["lines"] == [otto[-1]] and versions(work, 1) == [1]
+    flag(work, (otto[-1], "other"))
+    factory = Factory(wps=(3.0,))
+    body, code = do_fix(work, library, cues, factory)
+    assert code == 0, body
+    v2 = read_version(work, 1, 2)
+    assert v2["changed_lines"] == otto and v2["cast_hash"] != v1["cast_hash"]
+    fenn = json.loads((library / "voices" / "fenn" / "card.json").read_text(encoding="utf-8"))
+    assert {tuple(call["voices"]) for call in factory.engine.calls} == {(factory.engine.voices["OTTO"].card_hash,)}  # type: ignore[union-attr]
+    assert factory.engine.voices["OTTO"].slug == "fenn" and fenn["slug"] == "fenn"  # type: ignore[union-attr]
+    assert [line["take"] for line in v2["lines"] if line["speaker"] == "MAVIS"] == [line["take"] for line in v1["lines"] if line["speaker"] == "MAVIS"]
+
+
+def test_one_line_of_a_rebound_role_is_refused_even_with_every_line_flagged(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    # AGT-2155's `--line` composes with AGT-2157's recast rule: only the applied flags count.
+    work, library = episode
+    cues = tmp_path / "cues"
+    performed_and_mixed(work, library, cues)
+    v1 = read_version(work, 1, 1)
+    make_card(library, "fenn")
+    bind(work, library / "voices", "OTTO", "fenn")
+    otto = [line["i"] for line in v1["lines"] if line["speaker"] == "OTTO"]
+    flag(work, *[(i, "other") for i in otto])
+    s, _ = seams()
+    from pablo_casting.mix import cmd_mix
+
+    body, code = fix(
+        FixRequest(work=work, episode=1, voices_dir=library / "voices", lines=(otto[0],)),
+        env={},
+        engine_factory=Factory(wps=(3.0,)),
+        scorer_factory=lambda: fake_scorers(),
+        mixer=lambda version: cmd_mix(work, "1", version, str(cues), None, None, s),
+        err=io.StringIO(),
+    )
+    assert code == 2 and "cast changed" in str(body["message"]) and versions(work, 1) == [1]
+
+
+def test_a_rebound_role_whose_takes_cannot_be_read_is_refused_not_crashed(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    work, library = episode
+    cues = tmp_path / "cues"
+    performed_and_mixed(work, library, cues)
+    v1 = read_version(work, 1, 1)
+    make_card(library, "fenn")
+    bind(work, library / "voices", "OTTO", "fenn")
+    record = take_path(work, v1["lines"][0]["take"]) / "take.json"
+    record.chmod(0o644)
+    record.unlink()
+    flag(work, *[(line["i"], "other") for line in v1["lines"] if line["speaker"] == "OTTO"])
+    body, code = do_fix(work, library, cues)
+    assert code == 2 and "cast changed" in str(body["message"]) and "lines" not in body and versions(work, 1) == [1]
 
 
 def test_a_script_with_a_different_number_of_lines_is_refused(episode: tuple[Path, Path], tmp_path: Path) -> None:

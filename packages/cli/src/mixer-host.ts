@@ -21,6 +21,8 @@
  *    newest or no longer fits the newest manifest's takes. It runs the child asynchronously: a render takes a while
  *    and the window's server must keep answering meanwhile.
  *
+ * The Cast panel's mutations (AGT-2157) are `mixer-cast-host.ts`'s, spread in like the markers'.
+ *
  * The work is done by `python -m pablo_casting mixer <op>` (`packages/casting/.../mixer.py`), which owns the
  * mix document's validation and exclusive write (`mixdoc.py`) and the pacing (`mix.py`); this file validates
  * the shape of each call and relays. A failure is a thrown plain-words `Error`; ui-leaf hands it to the view.
@@ -41,6 +43,8 @@ import { createNotesHost } from "./mixer-notes-host";
 import type { NotesHost } from "./mixer-notes-host";
 import { createPunchHost } from "./mixer-punch-host";
 import type { PunchHost } from "./mixer-punch-host";
+import { castMutations, createCastHost } from "./mixer-cast-host";
+import type { CastHost } from "./mixer-cast-host";
 import { REVIEW_CSP, castingDir, episodeTitle } from "./review-host";
 
 type Env = Record<string, string | undefined>;
@@ -61,7 +65,7 @@ export interface MixerHostOptions {
   readonly stderr?: { write(text: string): unknown };
 }
 
-export interface MixerHost extends NotesHost, PunchHost {
+export interface MixerHost extends NotesHost, PunchHost, CastHost {
   loadMix(args: unknown): MixPayload;
   peaks(args: unknown): PeaksPayload;
   clipAudio(args: unknown): ClipAudioPayload;
@@ -131,6 +135,16 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
     ...(options.vault === undefined ? {} : { vault: options.vault }),
     ...(options.library === undefined ? {} : { library: options.library }),
     ...(options.stderr === undefined ? {} : { stderr: options.stderr }),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  // The Cast panel (AGT-2157): the casting verbs' own functions, through `mixer-cast-host.ts`.
+  const cast = createCastHost({
+    work,
+    env: options.env,
+    casting: options.casting,
+    stderr: ctx.stderr,
+    ...(options.vault === undefined ? {} : { vault: options.vault }),
+    ...(options.library === undefined ? {} : { library: options.library }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 
@@ -205,6 +219,7 @@ export function createMixerHost(options: MixerHostOptions): MixerHost {
       };
     },
 
+    ...cast,
     loadMix(args) {
       const episode = positiveInt(args, "episode", true);
       const version = positiveInt(args, "version", false);
@@ -303,6 +318,7 @@ export function mixerMutations(host: MixerHost): Record<string, MutationHandler>
     retake: async (args) => host.retake(args),
     lineTakes: async (args) => host.lineTakes(args),
     chooseTake: async (args) => host.chooseTake(args),
+    ...castMutations(host),
   };
   return handlers;
 }

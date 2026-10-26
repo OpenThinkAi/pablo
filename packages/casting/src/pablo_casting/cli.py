@@ -158,7 +158,7 @@ Result = tuple[Body, int]
 Downloader = Callable[[str], str]
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix", "mixer", "sounds")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix", "mixer", "castpanel", "sounds")
 VOICES_SUBCOMMANDS = ("list", "show", "retire")
 DEFAULT_CANDIDATES = 6
 
@@ -851,7 +851,7 @@ def run(
         return error(f"a command is required: one of {', '.join(COMMANDS)}"), args.json
     if args.command not in COMMANDS:
         return error(f'unknown command "{args.command}": one of {", ".join(COMMANDS)}'), args.json
-    if args.rest and args.command not in ("takes", "manifest", "gate", "voices", "mixer", "sounds"):
+    if args.rest and args.command not in ("takes", "manifest", "gate", "voices", "mixer", "castpanel", "sounds"):
         return error(f"usage: unexpected argument(s) for {args.command}: {' '.join(args.rest)}"), args.json
 
     work: Path | None = None
@@ -926,6 +926,16 @@ def run(
     assert work is not None
     if args.command == "bind":
         return cmd_bind(env, work, args), args.json
+    if args.command == "castpanel":
+        # The mixer's Cast panel (AGT-2157): the episode's roles and bindings, and a library voice read on one line.
+        from pablo_casting.cast_panel import cmd_castpanel
+
+        try:
+            configured = load_config(env).library
+        except ConfigRefusal as refusal:
+            return refused(str(refusal)), args.json
+        voices_dir = library_dir(Path(args.vault) if args.vault else None, configured, Path(args.library) if args.library else None)
+        return cmd_castpanel(args.rest[0] if args.rest else None, env, work, args.episode, args.line, args.voice, voices_dir, engines or real_engine), args.json
     real: Seams | None = None  # the real cue seams (generators, sound library, loudness targets), when a command mixes
     if mixer is None and (args.command in ("fix", "mixer", "mix") or (args.command == "perform" and args.stream)):
         try:

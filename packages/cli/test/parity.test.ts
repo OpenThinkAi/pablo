@@ -42,11 +42,11 @@ const PARITY: Readonly<Record<string, Entry>> = {
   merge: tui("review.finish"),
   check: tui("go.hit_next"),
   // ---- casting and production -> the mixer
-  audition: gap("mixer", "AGT-2157"),
-  cast: gap("mixer", "AGT-2157"),
-  voices: gap("mixer", "AGT-2157"),
-  describe_voice: gap("mixer", "AGT-2157"),
-  bind: gap("mixer", "AGT-2157"),
+  audition: mixer("auditionVoices", "candidateAudio", "previewVoice"),
+  cast: mixer("castCandidate", "castRoles"),
+  voices: mixer("listVoices"),
+  describe_voice: mixer("describeVoice"),
+  bind: mixer("bindVoice", "reperformRole"),
   perform: mixer("retake"), // a line is performed again from the punch list (AGT-2155); a first performance is the CLI's
   mix: mixer("renderMix"),
   fix: mixer("retake", "flag", "unflag", "listFlags"),
