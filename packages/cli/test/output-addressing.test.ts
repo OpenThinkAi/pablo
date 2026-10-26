@@ -427,7 +427,7 @@ test("output list reports each declared output and the types not yet derived; pl
       ["novel", 2, 4],
       ["radio", 0, 4],
     ]);
-    expect(listed.available).toEqual(["story", "blog"]);
+    expect(listed.available).toEqual(["story", "screenplay", "blog"]);
   }
   const dry = planOutput(vault, work, "radio", { dryRun: true });
   expect(dry).toMatchObject({ ok: true, dryRun: true, changed: true, committed: false, path: "outputs/radio/plan.md" });

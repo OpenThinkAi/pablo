@@ -189,9 +189,12 @@ export interface OutputDefinition {
    * How `write` stores a unit's text: `sentences` (the default: one sentence
    * per line, AGT-1531) or `lines` (as the writer laid it out, line for line:
    * a radio script, where a line is a speaker, a cue or the `CAST:` line and
-   * joining or splitting them would change the script).
+   * joining or splitting them would change the script) or `screenplay`
+   * (Fountain, AGT-2132: stored line for line like `lines`, blank lines
+   * between elements included; readers lay it out as Fountain, never as
+   * sentences).
    */
-  readonly manuscript?: "sentences" | "lines";
+  readonly manuscript?: "sentences" | "lines" | "screenplay";
   /**
    * `status --for "<type> N"` for a type whose units have stages after the
    * write (the radio output): where the unit stands. Absent: the unit's

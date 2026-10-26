@@ -14,6 +14,7 @@
 
 import { joinSentences, splitSentences } from "@openthink/pablo-core";
 import { wrapText } from "./layout";
+import type { Storage } from "./book";
 import { clean } from "./sanitize";
 
 /** A document for the main pane: a heading for it, and its text with the frontmatter already removed or never present. */
@@ -24,8 +25,8 @@ export interface MainDoc {
   readonly file?: string;
   /** The project-relative path of the one file the text is, when `v e` can open it (it exists and the document is not a blend of files). */
   readonly editable?: string;
-  /** How the text is stored: `lines` (a radio script) is shown line for line, never joined into paragraphs. Absent: `sentences`. */
-  readonly storage?: "sentences" | "lines";
+  /** How the text is stored: `lines` (a radio script) and `screenplay` (Fountain) are shown line for line, never joined into paragraphs. Absent: `sentences`. */
+  readonly storage?: Storage;
 }
 
 /** Where a row id's text lives, relative to the project: one file, a chapter by number, the bible's files, or any path. */
@@ -88,12 +89,13 @@ export interface DisplayDoc {
  * a finding on line 12 of the file (checkFile's numbering) belongs under the display line where line 12's sentence
  * ends, even though the sentence lines were joined and wrapped to get there.
  */
-export function displayDoc(text: string, width: number, storage: "sentences" | "lines" = "sentences"): DisplayDoc {
+export function displayDoc(text: string, width: number, storage: Storage = "sentences"): DisplayDoc {
   const w = Math.max(1, width);
   const source = clean(text).replace(/\t/g, "  ").split("\n");
   const close = source[0]?.trim() === "---" ? source.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
   const first = close < 0 ? 0 : close + 1;
-  if (storage === "lines") return linesDoc(source, first, w);
+  // A radio script and a screenplay's Fountain are line-structured: shown line for line, never joined into sentences.
+  if (storage === "lines" || storage === "screenplay") return linesDoc(source, first, w);
   const blocks: { n: number; text: string }[][] = [];
   let run: { n: number; text: string }[] = [];
   for (let i = first; i < source.length; i++) {
@@ -192,7 +194,7 @@ export const displayLines = (text: string, width: number): string[] => displayDo
  * one line whichever row the cursor is on. `rows` is the pane's text and box rows in order (a hit's box is not a line
  * of the file: the cursor on one counts as the line above it). 1 when the file has no line there.
  */
-export function fileLineAt(text: string, width: number, rows: readonly { readonly kind: string }[], cursor: number, storage: "sentences" | "lines" = "sentences"): number {
+export function fileLineAt(text: string, width: number, rows: readonly { readonly kind: string }[], cursor: number, storage: Storage = "sentences"): number {
   const { anchors } = displayDoc(text, width, storage);
   let display = -1;
   for (let i = 0; i <= Math.min(cursor, rows.length - 1); i++) if (rows[i]!.kind === "text") display++;

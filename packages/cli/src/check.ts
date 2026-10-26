@@ -2,7 +2,8 @@
  * `pablo check` (AGT-1234): provenance and mechanical-tells scanning.
  *
  * Two independent checks over the `*.md` units of a work's output (the
- * novel's chapters; the registry's `artifactDir`):
+ * novel's chapters; the registry's `artifactDir`; a screenplay's scenes are
+ * `*.fountain` and also get the Fountain lint, AGT-2132):
  *
  * 1. **Provenance** — a chapter whose frontmatter lacks `model` or
  *    `prompt_hash` is "unprovenanced": prose the model never produced, or
@@ -31,6 +32,8 @@ import { resolveOutput } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
 import { radioCheck, radioCheckLines, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
+import { lintFountain } from "./outputs/screenplay/fountain";
+import { FOUNTAIN_EXT } from "./outputs/screenplay/units";
 
 /** One mechanical-tell or flagged-line match. `detail` disambiguates which stock name matched when `rule` is `"stock-name"`. */
 export interface Hit {
@@ -354,6 +357,8 @@ export function checkFile(text: string, path: string, rules: CheckRules): Hit[] 
     hits.push(...found.sort((a, b) => a.line - b.line));
   }
 
+  // A screenplay scene (AGT-2132) is also linted as Fountain: a malformed heading, cue or parenthetical is a hit.
+  if (path.endsWith(FOUNTAIN_EXT)) hits.push(...lintFountain(text, path));
   return hits;
 }
 
@@ -372,7 +377,7 @@ export function isUnprovenanced(text: string): boolean {
  * `checkFile` + `isUnprovenanced` over each. `file`, when given, may be
  * work-relative or absolute — it must resolve inside `workDir`, or this
  * refuses (exit 2) instead of scanning outside the work. With no `file`,
- * every `*.md` file in the work's output directory (`artifactDir`) is
+ * every `*.md` (or `*.fountain`, a screenplay scene) file in the work's output directory (`artifactDir`) is
  * scanned, sorted by name.
  *
  * Otherwise always succeeds with exit 0 (AC3): a hit, or an unprovenanced
@@ -419,7 +424,7 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     const chaptersDir = join(workDir, artifactDir as string);
     filePaths = existsSync(chaptersDir)
       ? readdirSync(chaptersDir)
-          .filter((name) => name.endsWith(".md"))
+          .filter((name) => name.endsWith(".md") || name.endsWith(FOUNTAIN_EXT))
           .sort()
           .map((name) => join(chaptersDir, name))
       : [];

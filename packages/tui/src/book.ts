@@ -26,7 +26,7 @@ export interface BookStage {
 }
 
 /** How a unit's text is stored: one sentence per line (read as paragraphs), or line for line (a radio script). */
-export type Storage = "sentences" | "lines";
+export type Storage = "sentences" | "lines" | "screenplay";
 
 /** The file behind a unit row and its storage mode, from the rail. */
 export interface UnitRef { readonly file: string; readonly storage: Storage }

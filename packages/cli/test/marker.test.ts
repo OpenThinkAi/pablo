@@ -192,14 +192,14 @@ test("a marker with both format and outputs is a refusal naming both keys", () =
 });
 
 test("an unknown output type is a refusal naming the key", () => {
-  const dir = markerIn({ title: "T", slug: "t", outputs: { screenplay: { added: "2026-10-10" } } });
+  const dir = markerIn({ title: "T", slug: "t", outputs: { podcast: { added: "2026-10-10" } } });
   const result = readMarker(dir);
 
   expect(result.ok).toBe(false);
   if (!result.ok) {
     expect(result.code).toBe(2);
-    expect(result.message).toContain('"screenplay"');
-    expect(result.message).toContain('"outputs.screenplay"');
+    expect(result.message).toContain('"podcast"');
+    expect(result.message).toContain('"outputs.podcast"');
   }
   rmSync(dir, { recursive: true, force: true });
 });

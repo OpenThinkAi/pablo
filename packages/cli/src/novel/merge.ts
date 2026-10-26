@@ -35,14 +35,14 @@ export type MergeDraftOptions = Omit<RitualOptions, "words" | "model" | "receipt
 
 /**
  * The unit's file in the output's artifact directory on the merged tree, or undefined: the file the type's own
- * `unitOfPath` reads as `chapter` (the novel's `NN-*.md`, the story's `story.md`).
+ * `unitOfPath` reads as `chapter` (the novel's `NN-*.md`, the story's `story.md`, the screenplay's `NN-*.fountain`).
  */
 function findChapterFile(output: OutputDefinition, projectPath: string, chapter: number): string | undefined {
   const dir = join(projectPath, output.artifactDir);
   if (!existsSync(dir)) return undefined;
   const name = readdirSync(dir)
     .sort()
-    .find((f) => f.endsWith(".md") && output.unitOfPath(`${output.artifactDir}/${f}`) === chapter);
+    .find((f) => output.unitOfPath(`${output.artifactDir}/${f}`) === chapter);
   return name === undefined ? undefined : join(dir, name);
 }
 

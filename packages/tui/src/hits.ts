@@ -4,6 +4,7 @@
 // screen reads. The box itself is comment-box.ts, shared with review mode.
 
 import { commentBox, type BoxPart, type Comment } from "./comment-box";
+import type { Storage } from "./book";
 import { displayDoc, type Mark, type PaneSentence } from "./document";
 
 /** One `check` finding. `line` counts from 1 in the file, frontmatter included (checkFile's numbering). */
@@ -24,6 +25,13 @@ const RULES: Readonly<Record<string, string>> = {
   foreshadow: "a foreshadowing phrase (little did she, it would be years before, in that moment, ...)",
   "stock-name": "a stock fiction name the style guide bans",
   "flagged-line": "a line the style guide flags, matched word for word",
+  "fountain-no-heading": "a screenplay scene that does not open with a scene heading (INT. or EXT.)",
+  "fountain-heading-spacing": "a scene heading without a blank line before and after it (Fountain reads it as action)",
+  "fountain-cue-no-dialogue": "a character cue with no dialogue directly under it",
+  "fountain-stray-parenthetical": "a parenthetical outside a speech",
+  "fountain-colon-dialogue": "NAME: words on one line; in Fountain the character goes on its own line, the dialogue under it",
+  "fountain-markdown": "a Markdown code fence, which is not Fountain",
+  "fountain-unclosed-boneyard": "a /* never closed, which hides the rest of the scene",
 };
 
 const ruleText = (hit: CheckHit) => RULES[hit.rule] ?? hit.rule;
@@ -59,10 +67,10 @@ const INDENT = 2;
  * does not show (the frontmatter, a blank line) goes under the nearest line before it, or the first line. Hits on
  * one line stack in the order given.
  */
-export const mainRows = (text: string, width: number, hits: readonly CheckHit[], storage?: "sentences" | "lines"): MainRow[] => mainPane(text, width, hits, storage).rows;
+export const mainRows = (text: string, width: number, hits: readonly CheckHit[], storage?: Storage): MainRow[] => mainPane(text, width, hits, storage).rows;
 
 /** The rows (`mainRows`) and the document's sentences with their spans in those rows, so a box between two lines of a sentence is inside its span, never a sentence of its own. */
-export function mainPane(text: string, width: number, hits: readonly CheckHit[], storage: "sentences" | "lines" = "sentences"): { rows: MainRow[]; sentences: PaneSentence[] } {
+export function mainPane(text: string, width: number, hits: readonly CheckHit[], storage: Storage = "sentences"): { rows: MainRow[]; sentences: PaneSentence[] } {
   const { lines, anchors, marks, sentences } = displayDoc(text, width, storage);
   const textRow: number[] = [];
   const withMarks = (line: string, row: number): MainRow => ({ kind: "text", text: line, ...(marks[row]?.length ? { marks: marks[row]! } : {}) });

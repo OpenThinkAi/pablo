@@ -14,8 +14,7 @@
  *   (AGT-2102); an explicit `pablo.json` `policy` still overrides.
  * - `checks`: the checks run on every unit (AGT-2112..2115 add the new ones).
  * - `outputs`: the output types the track allows (D-7). Some are planned and
- *   not in `OUTPUTS` yet (`screenplay`, `narrated`, `essay`); enforcement is
- *   AGT-2105.
+ *   not in `OUTPUTS` yet (`narrated`, `essay`); enforcement is AGT-2105.
  *
  * Plain data, no imports from the output registry or the marker, so the
  * marker can validate against it without an initialisation cycle.
