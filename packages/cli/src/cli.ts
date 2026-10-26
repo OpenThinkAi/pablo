@@ -69,7 +69,7 @@ import { VERSION } from "./version";
 import { runWrite } from "./write";
 
 /** Verbs P0 ships: the manager for novels (see the design doc's build order). */
-export const P0_VERBS = [
+const P0_VERBS = [
   "init",
   "resume",
   "status",
@@ -111,7 +111,7 @@ export const P0_VERBS = [
 /** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
 const LATER_VERBS = ["dry-run"] as const;
 
-const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
+export const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
 
 export const EXIT_OK = 0;
 export const EXIT_REFUSED = 2;

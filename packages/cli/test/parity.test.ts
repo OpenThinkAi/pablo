@@ -9,7 +9,7 @@
 import { expect, test } from "bun:test";
 import { DEFAULT_ACTIONS } from "../../tui/src/keys";
 import { MUTATIONS } from "../views/mixer-protocol";
-import { P0_VERBS } from "../src/cli";
+import { ALL_VERBS } from "../src/cli";
 import { VERBS } from "../src/verbs";
 
 type Entry =
@@ -47,9 +47,9 @@ const PARITY: Readonly<Record<string, Entry>> = {
   voices: gap("mixer", "AGT-2157"),
   describe_voice: gap("mixer", "AGT-2157"),
   bind: gap("mixer", "AGT-2157"),
-  perform: gap("mixer", "AGT-2152"),
-  mix: gap("mixer", "AGT-2152"),
-  fix: gap("mixer", "AGT-2153"),
+  perform: gap("mixer", "AGT-2155"),
+  mix: mixer("renderMix"),
+  fix: gap("mixer", "AGT-2155"),
   takes: gap("mixer", "AGT-2155"),
   // ---- not editing or composing
   init: support("scaffolds a new work; run once"),
@@ -72,7 +72,7 @@ const PARITY: Readonly<Record<string, Entry>> = {
   "dry-run": support("later-verb stub (AGT-2098)"),
 };
 
-const liveVerbs = (): string[] => [...new Set([...P0_VERBS, "dry-run", ...VERBS.map((v) => v.name)])].sort();
+const liveVerbs = (): string[] => [...new Set([...ALL_VERBS, ...VERBS.map((v) => v.name)])].sort();
 
 test("every CLI verb has a parity entry", () => {
   const missing = liveVerbs().filter((v) => !(v in PARITY));
@@ -103,9 +103,9 @@ test("every known gap names the ticket that closes it", () => {
   expect(bad).toEqual([]);
 });
 
+const frontOf = (e: Entry | undefined): string | undefined => (e !== undefined && "front" in e ? e.front : undefined);
+
 test("casting and production verbs route to the mixer, writing verbs to the TUI", () => {
-  const audio = ["audition", "cast", "voices", "describe_voice", "bind", "perform", "mix", "fix", "takes"];
-  for (const v of audio) expect("support" in PARITY[v]!).toBe(false);
-  for (const v of audio) expect((PARITY[v] as { front: string }).front).toBe("mixer");
-  for (const v of ["write", "revise", "voice", "merge"]) expect((PARITY[v] as { front: string }).front).toBe("tui");
+  for (const v of ["audition", "cast", "voices", "describe_voice", "bind", "perform", "mix", "fix", "takes"]) expect(frontOf(PARITY[v])).toBe("mixer");
+  for (const v of ["write", "revise", "voice", "merge"]) expect(frontOf(PARITY[v])).toBe("tui");
 });
