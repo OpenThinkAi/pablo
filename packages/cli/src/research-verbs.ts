@@ -4,7 +4,8 @@
  * facts too. These are the same writers the harness tools call (`saveResearch`, `recordFact`); this module only
  * resolves the work and starts a `plan/` branch for the write, as `promote` does. Every write is staged for the
  * author's review, never applied to main. `research distill` (AGT-2109, `distill_facts`) joins them: research
- * notes become `facts/period.md` (`distill.ts`), on a `plan/` branch the same way.
+ * notes become `facts/period.md` (`distill.ts`), on a `plan/` branch the same way. `research plan|waive|link`
+ * (AGT-2111) keep the research checklist (`research-checklist.ts`), each write on a `plan/` branch too.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -35,6 +36,7 @@ import { readMarker, realNamesOf } from "./marker";
 import { type PlanSession, planWrite, startPlanSession } from "./plan";
 import { type RecordFactArgs, recordFact } from "./record-fact";
 import { saveResearch, type SaveResearchInput } from "./research";
+import { checkSaveItems, linkItemInProject, linkSavedNote, planChecklistInProject, waiveItemInProject } from "./research-checklist";
 import type { VerbResult } from "./verbs";
 
 const REFUSED = 2;
@@ -53,13 +55,43 @@ function planSessionFor(
   return { ok: true, session: startPlanSession(repo, marker.marker.slug, { env }), dir };
 }
 
-/** `save_research` over a project: `research/<slug>.md` on a new `plan/` branch. */
-export function saveResearchInProject(projectPath: string, input: SaveResearchInput, env: NodeJS.ProcessEnv): VerbResult {
+/**
+ * `save_research` over a project: `research/<slug>.md` on a new `plan/` branch. With `items` (AGT-2111, `--item N`)
+ * the note also joins those research checklist items' Sources on the same branch; an unknown item refuses before
+ * anything is written.
+ */
+export function saveResearchInProject(
+  projectPath: string,
+  input: SaveResearchInput,
+  env: NodeJS.ProcessEnv,
+  items: readonly (string | number)[] = [],
+): VerbResult {
+  const checked = checkSaveItems(projectPath, items);
+  if (!checked.ok) return checked.result;
   const planned = planSessionFor(projectPath, env);
   if (!planned.ok) return planned.result;
   const result = saveResearch(planned.session, input, planned.dir ? { dir: planned.dir } : {});
   if (!result.ok) return { body: { ok: false, code: REFUSED, message: result.notice }, exitCode: REFUSED };
-  return { body: { ok: true, path: result.path, branch: planned.session.branch, ...(result.sha ? { sha: result.sha } : {}) }, exitCode: 0 };
+  const base = { ok: true, path: result.path, branch: planned.session.branch, ...(result.sha ? { sha: result.sha } : {}) };
+  if (checked.numbers.length === 0) return { body: base, exitCode: 0 };
+  const linked = linkSavedNote(projectPath, planned.session, planned.dir, result.path, checked.numbers);
+  if (!linked.ok) return { body: { ok: false, code: 1, message: linked.notice, path: result.path, branch: planned.session.branch }, exitCode: 1 };
+  return { body: { ...base, note: linked.id, items: linked.items, open: linked.open }, exitCode: 0 };
+}
+
+/** `research plan` (AGT-2111): the research checklist from the period brief or thesis, on a new `plan/` branch. */
+export function planChecklist(projectPath: string, env: NodeJS.ProcessEnv, deps: DistillDeps = {}): Promise<VerbResult> {
+  return planChecklistInProject(projectPath, env, (p) => planSessionFor(p, env), deps);
+}
+
+/** `research waive <item> "<reason>"` (AGT-2111). */
+export function waiveChecklistItem(projectPath: string, item: string | undefined, reason: string | undefined, env: NodeJS.ProcessEnv): VerbResult {
+  return waiveItemInProject(projectPath, item, reason, (p) => planSessionFor(p, env));
+}
+
+/** `research link <item> <note>` (AGT-2111). */
+export function linkChecklistItem(projectPath: string, item: string | undefined, note: string | undefined, env: NodeJS.ProcessEnv): VerbResult {
+  return linkItemInProject(projectPath, item, note, (p) => planSessionFor(p, env));
 }
 
 /** `record_fact` over a project: one tagged fact on a new `plan/` branch. */

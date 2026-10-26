@@ -18,6 +18,7 @@ import { DEFAULT_TRACK } from "./tracks/registry";
 import type { TrackId } from "./tracks/registry";
 import { waitingForReview } from "./branch";
 import type { CoreState } from "./core/machine";
+import { itemLabel } from "./core/checklist";
 import { coreLines, outputLines, readWorkReport } from "./work-state";
 import type { CoreReport, OutputReport } from "./work-state";
 
@@ -35,7 +36,7 @@ export interface CommitSummary {
   readonly subject: string;
 }
 
-/** One `[pick]` row or one "Decisions"/"Open questions" bullet. */
+/** One open research checklist item, one `[pick]` row or one "Decisions"/"Open questions" bullet. */
 export interface OpenItem {
   readonly source: string;
   readonly text: string;
@@ -115,6 +116,15 @@ function readLastCommit(workDir: string): CommitSummary | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The research checklist's open items (AGT-2111): `#3 people: ... (open in research/checklist.md)`. */
+function checklistToOpen(state: CoreState): OpenItem[] {
+  const checklist = state.checklist;
+  if (checklist === undefined) return [];
+  return checklist.items
+    .filter((item) => item.status === "open")
+    .map((item) => ({ source: checklist.file, text: `${itemLabel(item)} (open in ${checklist.file})` }));
 }
 
 /** Every `[pick]` row the core state already found, as `"<name> ([pick] in <file>)"`. */
@@ -252,7 +262,7 @@ export async function buildResume(
   const commit = readLastCommit(workDir);
   if (commit !== undefined) last.commit = commit;
 
-  const open = [...picksToOpen(report.core), ...bibleAndOutlineOpen(workDir)];
+  const open = [...checklistToOpen(report.core), ...picksToOpen(report.core), ...bibleAndOutlineOpen(workDir)];
 
   const briefOutcome = await briefPromise;
 

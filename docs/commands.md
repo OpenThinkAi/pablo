@@ -189,23 +189,24 @@ The work in two layers: the story core's stages, then each output and its units,
 plus the work's track. Always exits `0`.
 
 ```
-{core: {track, stages[{id, done, summary, missing[], optional?, gate?}], premise, period, research[], sourcedResearch[], periodFacts, bible, acts, beats, outlineFile},
+{core: {track, stages[{id, done, summary, missing[], optional?, gate?}], premise, period, research[], sourcedResearch[], checklist?{file, items[{number, category, item, sources[], waived?, status}]}, periodFacts, bible, acts, beats, outlineFile},
  outputs: {<type>: {noun, plural, dir, units[], drafted, total, next?}},
  waiting[], next, track}
 ```
 
 - **`track`** is `pablo.json`'s `track`, or `fiction` for a work without one. The prose form has it as a `track: <id>` line after the outputs.
+- **`checklist`** is the work's research checklist (`research/checklist.md`, see `research plan`), each item with its `status` (`open`, `sourced` or `waived`); absent when the work has none. The prose form lists the open items under `open research (research/checklist.md):`, and `resume` puts them first in its `open` list.
 - **Core stages** depend on the track. On `fiction` they are `premise`, `research`, `bible`, `acts`, `beats` and `facts`.
   - `premise` means `bible/overview.md` has text under `## Logline`.
   - `research` is optional and never holds the core back.
   - `facts` is checked per unit, so an open `[pick]` blocks only the units whose beat names it.
 - **On `historical-fiction`** they are `premise`, `period`, `research`, `period-facts`, `bible`, `acts`, `beats` and `facts`. The three stages the track adds or makes required carry `gate: true`; `write` refuses while one is short.
   - `period` means `bible/period.md` has text: the brief for the period or event.
-  - `research` is required: at least one note under `research/` with an entry under `## Sources` (what `research save` writes).
+  - `research` is required: a research checklist (`research/checklist.md`, from `research plan`) with every item sourced or waived, and at least one note under `research/` with an entry under `## Sources` (what `research save` writes). Its summary reads `2 sourced notes, checklist 3 sourced, 1 waived, 2 open`, and `missing` names each open item.
   - `period-facts` means `facts/period.md` has at least one fact row.
 - **On `nonfiction`** they are `thesis`, `research`, `claims` and `outline` (no bible, acts or beats stage); each carries `gate: true`, and `write` refuses while one is short. The core JSON adds `thesis`, `claims[{number, claim, sources[]}]` and `sections[{number, section, summary}]`.
   - `thesis` means `core/thesis.md` has text.
-  - `research` is required, as on `historical-fiction`: at least one sourced note under `research/`.
+  - `research` is required, as on `historical-fiction`: a closed research checklist (derived from the thesis) and at least one sourced note under `research/`.
   - `claims` means `core/claims.md` has claim rows, each citing at least one research note id that exists under `research/`.
   - `outline` means `core/outline.md` has at least one section row.
 - **The beats file** is `outline/beats.md`, or `outline/chapters.md` on an unmigrated work (`outlineFile` says which).
@@ -328,9 +329,9 @@ shows the script as the pack's one `source` section. `--words`, `--scenes`,
 Before sending anything, it:
 
 1. Checks the work's track gate. On a `historical-fiction` work it refuses (exit `2`) until the
-   period brief, a sourced research note and the period facts exist, naming the track and the
-   short stage: `historical-fiction: research has no sourced notes yet`.
-   On a `nonfiction` work it refuses until the thesis, a sourced research note, the claims
+   period brief, the research (a closed checklist and a sourced note) and the period facts exist,
+   naming the track and the short stage: `historical-fiction: checklist item #3 people: Who ran the ice houses is open`.
+   On a `nonfiction` work it refuses until the thesis, the research (as above), the claims
    (each citing a note) and at least one outline section exist: `nonfiction: core/outline.md has no section rows`.
    A `fiction` work has no gate.
 2. Runs the same checks as `status --for` and refuses (exit `2`, with `missing[]`) if any fail.
@@ -555,9 +556,68 @@ gets a `-2` suffix). The write lands on a new `plan/` branch for you to review.
 The same writer is the harness's `save_research` tool, and over MCP this verb is
 the `save_research` tool (sources go in `sources`).
 
+With `--item <#>` (repeatable; `items` over MCP) the note also sources those
+research checklist items: its id joins each item's Sources on the same branch,
+so the note and the items it closes are reviewed together. An item number not on
+the checklist, or a work with no checklist, is refused before anything is written.
+
 ```
 {ok: true, path, branch, sha?}
+{ok: true, path, branch, sha?, note, items: [{number, category, item, sources, status}], open}    with --item
 ```
+
+```
+pablo research plan --project <slug>
+```
+
+Derives the work's research checklist, `research/checklist.md`, so an agent knows
+what still needs researching. The research agent (the `research` intent, as for
+`distill`) reads the period brief (`bible/period.md`) and lists what to look up
+under people, places, technology, language, daily life, politics and dates; on a
+`nonfiction` work it reads the thesis (`core/thesis.md`, with `core/claims.md` when
+present) and lists the claims to support (category `claim`). The write lands on a
+new `plan/` branch for you to review:
+
+```
+| # | Category | Item | Status | Sources | Waived |
+| --- | --- | --- | --- | --- | --- |
+| 1 | people | Who ran the Knickerbocker ice houses | sourced | knickerbocker | |
+| 2 | language | Ice-trade slang of the 1880s | waived | | the cutters never speak on the page |
+| 3 | dates | When the river froze in 1888 | open | | |
+```
+
+Every item is `open`, `sourced` (Sources names at least one research note, by
+id, that has a `## Sources` entry) or `waived` (Waived gives a reason). pablo
+works the status out from those two cells, never from the Status cell it writes.
+Running `plan` again keeps every existing row as it is and appends only new
+items. A proposed item in an unknown category, empty, over 200 characters or
+already listed is rejected and listed under `rejected`; a category left with no
+item gets a placeholder to source or waive. With no brief (or thesis) it is
+refused (exit 2); nothing new to add is refused too. Over MCP this is the
+`plan_research` tool.
+
+```
+{ok: true, path, branch, sha?, added, items: [{number, category, item, status}], rejected: [{category, item, reason}], from, provider, model}
+```
+
+```
+pablo research waive <#> "<reason>" --project <slug>
+pablo research link <#> <note> --project <slug>
+```
+
+`waive` closes an item with a reason; `link` closes one with a research note
+already in the work (its id, the path under `research/` without `.md`; a note
+with no `## Sources` entry is refused). Each rewrites the checklist on a new
+`plan/` branch for you to review. Both read the checklist from the work as merged,
+so merge `plan`'s branch first. Over MCP: `waive_research_item` (`item`, `reason`)
+and `link_research_item` (`item`, `note`).
+
+```
+{ok: true, path, branch, sha?, item: {number, category, item, sources, waived?, status}, open}
+```
+
+The research gate on `historical-fiction` and `nonfiction` works passes only when
+every checklist item is sourced or waived; `status` and `resume` list the open ones.
 
 ```
 pablo research distill --project <slug>
@@ -754,7 +814,7 @@ It serves:
 |---|---|
 | Where things stand | `resume`, `status`, `timeline` |
 | Writing | `write`, `prose`, `revise` (deprecated aliases, removed next release: `draft_unit`, `draft_chapter` for `write`; `revise_passage` for `revise` with `branch`) |
-| Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `record_fact` |
+| Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `distill_facts`, `plan_research`, `waive_research_item`, `link_research_item`, `record_fact` |
 | Setup and publishing | `output`, `migrate`, `publish` |
 | Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule`, `voice_edit`, `voice_remove`, `voice_use` |
 | Reading | `read`, `search` |

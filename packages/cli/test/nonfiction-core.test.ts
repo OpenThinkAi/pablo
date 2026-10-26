@@ -50,6 +50,15 @@ function addNote(work: string, id: string): void {
   writeFileSync(join(work, "research", `${id}.md`), `# ${id}\n\nRetrieved: 2026-10-26\n\nA note.\n\n## Sources\n\n- https://example.org/${id}\n`);
 }
 
+/** A closed research checklist (AGT-2111): the one claim it lists is waived. */
+function addChecklist(work: string): void {
+  mkdirSync(join(work, "research"), { recursive: true });
+  writeFileSync(
+    join(work, "research", "checklist.md"),
+    "| # | Category | Item | Status | Sources | Waived |\n| --- | --- | --- | --- | --- | --- |\n| 1 | claim | The town ate ice | waived | | common knowledge |\n",
+  );
+}
+
 const CLAIMS = "| 1 | Ice was cut on the river each winter | ice-harvest |\n| 2 | Sawdust kept it through summer | ice-harvest, research/sawdust.md |\n";
 const OUTLINE = "| # | Section | What it covers |\n|---|---|---|\n| 1 | The river | Where the ice came from |\n| 2 | The house | How it was kept |\n";
 
@@ -80,8 +89,10 @@ test("save --stage thesis|claims|outline writes core/ files and status walks eac
   const thesis = saveCore({ stage: "thesis", file: input(vault, "# Thesis\n\nThe ice house fed a town.\n") }, work);
   expect(thesis.body).toMatchObject({ ok: true, path: "core/thesis.md", stage: "thesis" });
   expect(readFileSync(join(work, "core", "thesis.md"), "utf8")).toContain("fed a town");
-  expect(readWorkStatus(work).next).toBe("core: save sourced research notes (pablo research save)");
+  expect(readWorkStatus(work).next).toBe("core: plan the research checklist (pablo research plan)");
 
+  addChecklist(work);
+  expect(readWorkStatus(work).next).toBe("core: save sourced research notes (pablo research save)");
   addNote(work, "ice-harvest");
   expect(readWorkStatus(work).next).toBe("core: save the claims, each citing a research note (pablo save --stage claims)");
 
@@ -148,9 +159,9 @@ test("resume reports the nonfiction core and its next action", async () => {
   const result = await buildResume(work, "ice-house", NO_THINK);
   expect(result.track).toBe("nonfiction");
   expect(result.core.stages.map((s) => s.id)).toEqual(["thesis", "research", "claims", "outline"]);
-  expect(result.next).toBe("core: save sourced research notes (pablo research save)");
+  expect(result.next).toBe("core: plan the research checklist (pablo research plan)");
   const prose = formatResumeProse(result);
-  expect(prose).toContain("  research: 0 sourced notes");
+  expect(prose).toContain("  research: 0 sourced notes, no checklist");
   expect(prose).not.toMatch(/\b(bible|acts|beats):/);
 });
 
@@ -174,6 +185,7 @@ test("write on a nonfiction work refuses until the outline has a section, naming
   saveCore({ stage: "thesis", file: input(vault, "The ice house fed a town.\n") }, work);
   addNote(work, "ice-harvest");
   addNote(work, "sawdust");
+  addChecklist(work);
   saveCore({ stage: "claims", file: input(vault, CLAIMS) }, work);
 
   const refused = await writeJson(vault, work);

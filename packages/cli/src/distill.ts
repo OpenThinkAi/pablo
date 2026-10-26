@@ -21,6 +21,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Adapter, Intent } from "@openthink/pablo-core";
+import { CHECKLIST_FILE } from "./core/checklist";
 
 /** The intent distillation routes under: a planning-kind call, so an unmapped config sends it to the cloud planner when one exists. */
 export const RESEARCH_INTENT: Intent = { name: "research", kind: "planning" };
@@ -59,7 +60,7 @@ export interface ResearchNote {
 
 const DATE = /^\d{4}(-\d{2}(-\d{2})?)?$/;
 
-/** Every `.md` research note under `<work>/research/`, recursively, sorted by id; the names map is not a note. */
+/** Every `.md` research note under `<work>/research/`, recursively, sorted by id; the names map and the checklist are not notes. */
 export function readResearchNotes(workDir: string): ResearchNote[] {
   const root = join(workDir, "research");
   const notes: ResearchNote[] = [];
@@ -71,7 +72,8 @@ export function readResearchNotes(workDir: string): ResearchNote[] {
       if (entry.isDirectory()) walk(abs);
       else if (entry.isFile() && entry.name.endsWith(".md")) {
         const rel = relative(root, abs).split("\\").join("/");
-        if (`research/${rel}` === NAMES_FILE) continue;
+        // Neither the names map nor the research checklist (AGT-2111) is a source note.
+        if (`research/${rel}` === NAMES_FILE || `research/${rel}` === CHECKLIST_FILE) continue;
         notes.push({ id: rel.slice(0, -".md".length), text: readFileSync(abs, "utf8") });
       }
     }
