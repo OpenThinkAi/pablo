@@ -3,7 +3,7 @@
 import { render } from "ink";
 import type { LineRef } from "@openthink/pablo-core";
 import { App } from "./app";
-import { bookCounts, bookRail, type BookStage } from "./book";
+import { bookCounts, bookRail, type BookStage, type UnitRef } from "./book";
 import type { Round } from "./state";
 import { loadEditor, loadKeymap } from "./key-config";
 import type { Composer } from "./compose";
@@ -121,7 +121,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
   stdout.write(ENTER_ALT);
   try {
     const root = options.dir;
-    const load = root === undefined ? undefined : (id: string) => loadDocument(root, id);
+    const load = root === undefined ? undefined : (id: string, unit?: UnitRef) => loadDocument(root, id, unit);
     // The editor takes the whole terminal: the alternate screen is left while it runs and entered again after.
     const editSession: EditSession | undefined = options.editSession && (async (request) => {
       stdout.write(LEAVE_ALT);

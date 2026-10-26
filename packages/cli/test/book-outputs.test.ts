@@ -4,11 +4,12 @@
  * synthetic fixture work. Nothing here draws the screen or reaches a model.
  */
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bookRail, writeArgv, writeRequest } from "@openthink/pablo-tui";
+import { loadDocument } from "../../tui/src/source";
 import { workBookStages } from "../src/book";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/vault/novels/ice-house", import.meta.url));
@@ -66,4 +67,24 @@ test("`a w` on radio › 3 is `write --output radio --unit 3`; on the novel's ch
   expect(writeRequest(rail, "premise")).toBeUndefined();
   expect(writeRequest(rail, "output:radio")).toBeUndefined();
   expect(writeRequest(rail, undefined)).toBeUndefined();
+});
+
+test("AGT-2148: a drafted unit row carries its file and storage mode, and the TUI loads it from them", () => {
+  const dir = work("units", { novel: { dir: "chapters", added: "2026-09-01" }, story: { added: "2026-10-12" }, radio: { added: "2026-10-12" } });
+  mkdirSync(join(dir, "outputs", "radio", "episodes"), { recursive: true });
+  mkdirSync(join(dir, "outputs", "story"), { recursive: true });
+  writeFileSync(join(dir, "outputs", "radio", "episodes", "03-the-well.md"), "---\nepisode: 3\ntitle: The Well\nstatus: draft\n---\n\nCAST: ANNA, EDWIN\n\nANNA\nIt is dry.\nEDWIN\nSince June.\n");
+  writeFileSync(join(dir, "outputs", "story", "story.md"), "---\nstory: 1\ntitle: The Well\nstatus: draft\n---\n\nThe well was dry.\nShe did not look up.\n");
+  const stages = workBookStages(dir);
+  const radio = stages.find((s) => s.id === "unit:radio:3");
+  const story = stages.find((s) => s.id === "unit:story:1");
+  expect(radio).toMatchObject({ status: "drafted", storage: "lines" });
+  expect(story).toMatchObject({ status: "drafted", storage: "sentences" });
+  const rail = bookRail(stages);
+  const radioDoc = loadDocument(dir, "unit:radio:3", rail.units["unit:radio:3"]);
+  expect(radioDoc).toMatchObject({ storage: "lines", file: radio!.file, editable: radio!.file });
+  expect(radioDoc!.text).toContain("ANNA\nIt is dry.");
+  const storyDoc = loadDocument(dir, "unit:story:1", rail.units["unit:story:1"]);
+  expect(storyDoc).toMatchObject({ storage: "sentences", file: story!.file });
+  expect(storyDoc!.text).toContain("The well was dry.");
 });

@@ -86,7 +86,7 @@ export function outputRailStages(workDir: string, def: OutputDefinition, core: C
     const name = `${u.unit}${u.title ? ` ${u.title}` : ""}`;
     const base = { id: `unit:${def.id}:${u.unit}`, name, depth: 1, output: def.id, unit: u.unit };
     if (u.file !== undefined) {
-      stages.push({ ...base, status: "drafted", missing: [] });
+      stages.push({ ...base, status: "drafted", missing: [], file: u.file, storage: def.manuscript ?? "sentences" });
       continue;
     }
     const draft = waiting.filter((b) => def.unitOfBranch(b) === u.unit).sort().at(-1);

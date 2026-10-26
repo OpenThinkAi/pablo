@@ -59,11 +59,11 @@ const INDENT = 2;
  * does not show (the frontmatter, a blank line) goes under the nearest line before it, or the first line. Hits on
  * one line stack in the order given.
  */
-export const mainRows = (text: string, width: number, hits: readonly CheckHit[]): MainRow[] => mainPane(text, width, hits).rows;
+export const mainRows = (text: string, width: number, hits: readonly CheckHit[], storage?: "sentences" | "lines"): MainRow[] => mainPane(text, width, hits, storage).rows;
 
 /** The rows (`mainRows`) and the document's sentences with their spans in those rows, so a box between two lines of a sentence is inside its span, never a sentence of its own. */
-export function mainPane(text: string, width: number, hits: readonly CheckHit[]): { rows: MainRow[]; sentences: PaneSentence[] } {
-  const { lines, anchors, marks, sentences } = displayDoc(text, width);
+export function mainPane(text: string, width: number, hits: readonly CheckHit[], storage: "sentences" | "lines" = "sentences"): { rows: MainRow[]; sentences: PaneSentence[] } {
+  const { lines, anchors, marks, sentences } = displayDoc(text, width, storage);
   const textRow: number[] = [];
   const withMarks = (line: string, row: number): MainRow => ({ kind: "text", text: line, ...(marks[row]?.length ? { marks: marks[row]! } : {}) });
   const respan = (): PaneSentence[] => sentences.map((x) => ({ ...x, first: textRow[x.first]!, last: textRow[x.last]! }));

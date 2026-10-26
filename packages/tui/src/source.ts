@@ -4,6 +4,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { LEGACY_BEATS_FILE, beatsFile } from "@openthink/pablo-core";
+import type { UnitRef } from "./book";
 import { sourceOf, stripFrontmatter, type MainDoc } from "./document";
 
 const read = (path: string): string | undefined => {
@@ -19,9 +20,19 @@ const markdownUnder = (root: string, dir: string): string[] => {
 };
 
 /** The document the row `id` names in the project at `root`, or undefined for an id that names nothing readable. */
-export function loadDocument(root: string, id: string): MainDoc | undefined {
+export function loadDocument(root: string, id: string, unit?: UnitRef): MainDoc | undefined {
   const source = sourceOf(id);
   switch (source.kind) {
+    case "unit": {
+      // The rail row knows the unit's file and storage mode (the output's own definition); a unit with no file is not drafted yet.
+      const name = `${source.output} ${source.unit}`;
+      if (unit === undefined) return { title: name, text: `${name[0]!.toUpperCase()}${name.slice(1)} has no draft yet.` };
+      const path = resolve(root, unit.file);
+      if (!path.startsWith(resolve(root) + sep)) return undefined;
+      const text = read(path);
+      if (text === undefined) return { title: unit.file, text: `${unit.file} does not exist yet.` };
+      return { title: unit.file, text, file: unit.file, editable: unit.file, storage: unit.storage };
+    }
     case "chapter": {
       const dir = join(root, "chapters");
       const file = existsSync(dir) ? readdirSync(dir).sort().find((f) => f.endsWith(".md") && Number.parseInt(f, 10) === source.number) : undefined;

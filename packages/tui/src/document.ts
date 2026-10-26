@@ -9,6 +9,7 @@
 //   bible                the bible's files, one after another (overview, places, timeline, characters/)
 //   acts, beats, chapters  outline/chapters.md (the chapters group shows the outline)
 //   chapter:N            chapters/NN-*.md (`ch1`, `ch-1` and `chapter-1` are read the same)
+//   unit:<output>:N      the unit's file, named by its rail row (the book rail knows it and its storage mode)
 //   any other id         a path relative to the project, if it names a file in it
 
 import { joinSentences, splitSentences } from "@openthink/pablo-core";
@@ -23,17 +24,22 @@ export interface MainDoc {
   readonly file?: string;
   /** The project-relative path of the one file the text is, when `v e` can open it (it exists and the document is not a blend of files). */
   readonly editable?: string;
+  /** How the text is stored: `lines` (a radio script) is shown line for line, never joined into paragraphs. Absent: `sentences`. */
+  readonly storage?: "sentences" | "lines";
 }
 
 /** Where a row id's text lives, relative to the project: one file, a chapter by number, the bible's files, or any path. */
-export type Source = { readonly kind: "file"; readonly file: string } | { readonly kind: "chapter"; readonly number: number } | { readonly kind: "bible" } | { readonly kind: "path"; readonly path: string };
+export type Source = { readonly kind: "file"; readonly file: string } | { readonly kind: "chapter"; readonly number: number } | { readonly kind: "bible" } | { readonly kind: "unit"; readonly output: string; readonly unit: number } | { readonly kind: "path"; readonly path: string };
 
+const UNIT_ID = /^unit:([^:]+):(\d+)$/;
 const CHAPTER_ID = /^(?:chapter|ch)[:\- ]?(\d+)$/i;
 
 /** The source of the document a rail row id names. */
 export function sourceOf(id: string): Source {
   const chapter = CHAPTER_ID.exec(id);
   if (chapter) return { kind: "chapter", number: Number(chapter[1]) };
+  const unit = UNIT_ID.exec(id);
+  if (unit) return { kind: "unit", output: unit[1]!, unit: Number(unit[2]) };
   switch (id) {
     case "premise": return { kind: "file", file: "bible/overview.md" };
     case "acts": case "beats": case "chapters": return { kind: "file", file: "outline/chapters.md" };
@@ -82,11 +88,12 @@ export interface DisplayDoc {
  * a finding on line 12 of the file (checkFile's numbering) belongs under the display line where line 12's sentence
  * ends, even though the sentence lines were joined and wrapped to get there.
  */
-export function displayDoc(text: string, width: number): DisplayDoc {
+export function displayDoc(text: string, width: number, storage: "sentences" | "lines" = "sentences"): DisplayDoc {
   const w = Math.max(1, width);
   const source = clean(text).replace(/\t/g, "  ").split("\n");
   const close = source[0]?.trim() === "---" ? source.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
   const first = close < 0 ? 0 : close + 1;
+  if (storage === "lines") return linesDoc(source, first, w);
   const blocks: { n: number; text: string }[][] = [];
   let run: { n: number; text: string }[] = [];
   for (let i = first; i < source.length; i++) {
@@ -118,6 +125,21 @@ export function displayDoc(text: string, width: number): DisplayDoc {
   });
   while (marks.length < lines.length) marks.push([]);
   return { lines, anchors, marks, sentences };
+}
+
+/** A `lines`-stored document (a radio script): each stored line is its own display line (wrapped when longer than the pane), blank lines kept, and no sentences: joining lines would change the script. */
+function linesDoc(source: readonly string[], first: number, w: number): DisplayDoc {
+  const lines: string[] = [];
+  const anchors = new Map<number, number>();
+  for (let i = first; i < source.length; i++) {
+    const line = source[i]!;
+    if (line.trim() === "") { if (lines.length > 0) lines.push(""); continue; }
+    lines.push(...(structural(line) ? [line] : wrapText(line, w)));
+    anchors.set(i + 1, lines.length - 1);
+  }
+  // The stored text ends in a newline: drop the empty rows it leaves.
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return { lines, anchors, marks: lines.map(() => []), sentences: [] };
 }
 
 /**
@@ -170,8 +192,8 @@ export const displayLines = (text: string, width: number): string[] => displayDo
  * one line whichever row the cursor is on. `rows` is the pane's text and box rows in order (a hit's box is not a line
  * of the file: the cursor on one counts as the line above it). 1 when the file has no line there.
  */
-export function fileLineAt(text: string, width: number, rows: readonly { readonly kind: string }[], cursor: number): number {
-  const { anchors } = displayDoc(text, width);
+export function fileLineAt(text: string, width: number, rows: readonly { readonly kind: string }[], cursor: number, storage: "sentences" | "lines" = "sentences"): number {
+  const { anchors } = displayDoc(text, width, storage);
   let display = -1;
   for (let i = 0; i <= Math.min(cursor, rows.length - 1); i++) if (rows[i]!.kind === "text") display++;
   const at = Math.max(display, 0);

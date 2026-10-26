@@ -14,7 +14,7 @@ import { configPath } from "@openthink/pablo-core";
 import { tooSmall, useTerminalSize, MIN_COLS, MIN_ROWS } from "./resize";
 import type { Size } from "./resize";
 import { resolve, tokenOf } from "./chord";
-import { bookCounts, bookRail, missingContent, waitingDoc, writeRequest, type BookRail } from "./book";
+import { bookCounts, bookRail, missingContent, waitingDoc, writeRequest, type BookRail, type UnitRef } from "./book";
 import { KeyPanel } from "./key-panel";
 import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, voiceChoiceOf, voiceChoicesFor, VOICE_CHOICES, VOICE_TARGETS, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
@@ -51,7 +51,7 @@ export interface AppProps {
   /** Book mode's stages laid out (book.ts): rows, labels and the missing reasons; overrides `rows`/`labels` when given. */
   readonly book?: BookRail;
   /** The document behind a rail row id (document.ts), shown in the main pane for the row under the rail's cursor. */
-  readonly load?: (id: string) => MainDoc | undefined;
+  readonly load?: (id: string, unit?: UnitRef) => MainDoc | undefined;
   /** Scans a document's raw text for `check` hits, shown as boxes under their lines; run when a chapter (a doc with a `file`) is opened. */
   readonly checks?: (file: string, text: string) => readonly CheckHit[];
   /** The main pane's heading and its document when no row names one (no `load`, or it has nothing for the row). */
@@ -232,7 +232,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     const file = doc?.editable;
     if (!editSession) return void dispatch({ type: "edit.failed", message: "Editing is not available here." });
     if (state.mode.kind !== "book" || !doc || file === undefined) return void dispatch({ type: "edit.failed", message: state.mode.kind !== "book" ? "Edit from the book, not a review." : "Select a chapter or file to edit." });
-    dispatch({ type: "edit.start", file, line: fileLineAt(doc.text, layout.mainInner, paneRows, viewOf(state).main.cursor) });
+    dispatch({ type: "edit.start", file, line: fileLineAt(doc.text, layout.mainInner, paneRows, viewOf(state).main.cursor, doc.storage) });
   }
 
   // `e` in a review (AGT-1591): the editor opens on the change under the cursor, in the review branch's own worktree. What
@@ -419,11 +419,11 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   const waitingBranch = rowId === undefined || review ? undefined : book?.waiting[rowId];
   // A round row (AGT-1640) says where the round stands and what Enter does.
   const round = review ? undefined : roundOf(state.rounds, rowId);
-  const doc = useMemo(() => (round ? roundDoc(round) : waitingBranch !== undefined && rowId !== undefined ? waitingDoc(rowId, waitingBranch) : rowId !== undefined && !review ? load?.(rowId) : undefined), [rowId, load, review, state.finished, waitingBranch, round, snapKey]);
+  const doc = useMemo(() => (round ? roundDoc(round) : waitingBranch !== undefined && rowId !== undefined ? waitingDoc(rowId, waitingBranch) : rowId !== undefined && !review ? load?.(rowId, book?.units[rowId]) : undefined), [rowId, load, book, review, state.finished, waitingBranch, round, snapKey]);
   const hits = useMemo(() => (doc?.file !== undefined && checks ? checks(doc.file, doc.text) : NO_HITS), [doc, checks]);
   const shownTitle = doc ? doc.title : mainTitle;
   // A document's sentences are selectable (their spans are in these rows); lines handed in as plain text are not.
-  const pane = useMemo(() => (doc ? mainPane(doc.text, layout.mainInner, hits) : { rows: textRows(lines), sentences: [] }), [doc, hits, lines, layout.mainInner]);
+  const pane = useMemo(() => (doc ? mainPane(doc.text, layout.mainInner, hits, doc.storage) : { rows: textRows(lines), sentences: [] }), [doc, hits, lines, layout.mainInner]);
   const paneRows: readonly MainRow[] = pane.rows;
   const changes = useMemo(() => (review ? reviewLines(review, rowId, layout.mainInner - 2) : undefined), [review, rowId, layout.mainInner]);
   const mainLength = changes ? changes.rows.length : paneRows.length;
