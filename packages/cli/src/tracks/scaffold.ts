@@ -68,13 +68,10 @@ export function trackCoreFiles(track: TrackId): Record<string, string> {
 }
 
 /**
- * The core files `track` adds over the fiction core: what a fiction-shaped
- * scaffold (the vault's `templates/novel`) needs on top to be a work on
- * `track`. Empty for `fiction`; for `nonfiction` it is the whole nonfiction
- * core (it shares none of fiction's).
+ * The core files a fiction track adds over the fiction core: what a
+ * fiction-shaped scaffold (the vault's `templates/novel`) needs on top to be
+ * a work on `track`. Empty for `fiction`.
  */
-export function trackExtraFiles(track: TrackId): Record<string, string> {
-  if (track === "historical-fiction") return { ...HISTORICAL_EXTRA };
-  if (track === "nonfiction") return { ...NONFICTION_CORE };
-  return {};
+export function trackExtraFiles(track: Exclude<TrackId, "nonfiction">): Record<string, string> {
+  return track === "historical-fiction" ? { ...HISTORICAL_EXTRA } : {};
 }

@@ -66,8 +66,6 @@ export interface MigrateOutputsOptions {
   readonly now?: () => Date;
 }
 
-/** `facts.md`'s header (defined with the track scaffolds; re-exported for the callers that import it from here). */
-export { FACTS_TEXT };
 
 function refuse(message: string): MigrateOutputsResult {
   return { ok: false, code: 2, message: `pablo: migrate outputs: ${message}` };

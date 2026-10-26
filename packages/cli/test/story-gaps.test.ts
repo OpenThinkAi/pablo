@@ -383,6 +383,7 @@ test("AC6: a run prints one stderr line per stage, in order, and nothing else", 
   expect(lines.every((l) => l.startsWith("pablo story: ") && l.endsWith("\n") && l.indexOf("\n") === l.length - 1)).toBe(true);
   expect(lines.map((l) => l.trim())).toEqual([
     // AGT-2103: the track the run chose, and why, before anything is written.
+    "pablo story: choosing a track from the prompt",
     "pablo story: track fiction (inferred: the request names no historical period or event)",
     "pablo story: research (core stage 1 of 5)",
     "pablo story: premise (core stage 2 of 5)",

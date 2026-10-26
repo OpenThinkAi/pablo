@@ -62,7 +62,7 @@ import { radioMachine } from "./outputs/radio/casting-side";
 import { episodeState } from "./outputs/radio/state";
 import { RADIO_ID } from "./outputs/radio/units";
 import { slugify } from "./outputs/novel/units";
-import { outputDefinition, outputIds } from "./outputs/registry";
+import { outputDefinition, outputIds, outputsOnTrack } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
 import { startPlanSession } from "./plan";
 import { findVault, resolveProject } from "./project";
@@ -328,8 +328,14 @@ async function chooseTrack(args: StoryArgs, prompt: string, ctx: VerbContext, de
   const named = args.track?.trim();
   if (named !== undefined && named !== "") {
     if (!isTrackId(named)) return refuse(`pablo: story: unknown track ${JSON.stringify(named)} (allowed: ${trackIds().join(", ")}); nothing was written`, [`--track ${trackIds().join(" | ")}`]);
+    // `story` builds a fiction core (premise, bible, acts, beats); a nonfiction work starts from its own core.
+    if (named === "nonfiction") {
+      return refuse('pablo: story: pablo story writes fiction; start a nonfiction work with `pablo init --track nonfiction <slug> "<Title>"`; nothing was written', ["--track fiction | historical-fiction"]);
+    }
     return explicitTrack(named);
   }
+  // The planner can take seconds (`claude -p`): say what the wait is.
+  ctx.stderr.write("pablo story: choosing a track from the prompt\n");
   let planner = deps.planner;
   if (planner === undefined) {
     try {
@@ -343,9 +349,9 @@ async function chooseTrack(args: StoryArgs, prompt: string, ctx: VerbContext, de
 
 /** Refuses, before anything is written, a requested output the run's track does not allow (D-7). */
 function outputsOffTrack(outputs: readonly string[], track: TrackId): VerbResult | undefined {
-  const off = outputs.filter((id) => !(outputDefinition(id)?.tracks ?? []).includes(track));
+  const allowed = outputsOnTrack(track);
+  const off = outputs.filter((id) => !allowed.includes(id));
   if (off.length === 0) return undefined;
-  const allowed = outputIds().filter((id) => (outputDefinition(id)?.tracks ?? []).includes(track));
   return refuse(
     `pablo: story: the ${off.join(", ")} output${off.length === 1 ? " is" : "s are"} not allowed on the ${track} track (allowed: ${allowed.length === 0 ? "none on this machine yet" : allowed.join(", ")}); nothing was written`,
     off.map((id) => `output ${id} on ${track}`),
@@ -354,7 +360,7 @@ function outputsOffTrack(outputs: readonly string[], track: TrackId): VerbResult
 
 /** The receipt's line for the track: the track, and why. */
 export function trackLine(choice: TrackChoice): string {
-  return choice.inferred ? `${choice.track} (inferred: ${choice.why})` : choice.why === "--track" ? `${choice.track} (--track)` : `${choice.track} (${choice.why})`;
+  return `${choice.track} (${choice.inferred ? `inferred: ${choice.why}` : choice.why})`;
 }
 
 /** The first free slug for `title` across every category of the vault. */

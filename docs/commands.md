@@ -51,7 +51,9 @@ headings only (they satisfy no stage until you fill them). Without `--track` the
 marker has none and the work reads as `fiction`. A track the novel output does not
 allow (`nonfiction`) is refused.
 
-`pablo init --track <t> <slug> "<Title>"` (two positionals) creates a work with only
+`pablo init --track <t> <slug> "<Title>"` (two positionals; a first positional that
+names an output, as in `pablo init novel <slug> --track <t>` with the title left off,
+is a usage error) creates a work with only
 its track's core and no output yet: `README.md`, `STYLE.md`, the core files and a
 `pablo.json` with `track` and empty `outputs`, under `essays/<slug>` for
 `nonfiction` and `stories/<slug>` for the fiction tracks. The core files per track:
@@ -741,14 +743,16 @@ without the casting side) is refused before anything is written.
 The work's track is `--track <t>` when given. Without it, one planner call reads the
 prompt: a prompt that names a historical period or event (a past year or era, a war,
 a named event) is `historical-fiction`, anything else `fiction`; `nonfiction` is never
-inferred. The run writes the track into `pablo.json`, scaffolds that track's core files
-(see `init`), prints `pablo story: track <t> (inferred: <why>)` on stderr before
-anything else, and returns `track: {track, inferred, why}` in its result (`why` is
-`--track` for a named one). If the planner can't be reached or answers with something
-unreadable, the run stays on `fiction` and `why` says so. An unknown track, or a
-requested output the track does not allow (every current output on `nonfiction`), is
-refused before anything is written. A historical-fiction run's drafts still wait on the
-period brief and period facts (`write`'s track gate).
+inferred, and `--track nonfiction` is refused (a story is fiction; start a nonfiction
+work with `pablo init --track nonfiction`). While the planner is asked, the run prints
+`pablo story: choosing a track from the prompt`. Then it prints `pablo story: track <t>
+(inferred: <why>)` on stderr, writes the track into `pablo.json`, scaffolds that
+track's core files (see `init`) and returns `track: {track, inferred, why}` in its
+result (`why` is `--track` for a named one). If the planner can't be reached or answers
+with something unreadable, the run stays on `fiction` and `why` says so. An unknown
+track, or a requested output the track does not allow, is refused before anything is
+written. A historical-fiction run's drafts still wait on the period brief and period
+facts (`write`'s track gate).
 
 By default every branch is accepted as soon as it lands. The agent's questions are
 answered by stated assumptions, which are kept with the run. With `--review`, the run

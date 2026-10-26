@@ -569,7 +569,8 @@ test("AGT-2103: a prompt naming a period is inferred historical-fiction by one p
   expect(planner.asked).toHaveLength(1);
   expect(planner.asked[0]).toContain(SPEC);
   expect(body.track).toEqual({ track: "historical-fiction", inferred: true, why: "the request names 1900 Liguria and the emigration to the United States" });
-  expect(lines[0]).toBe("pablo story: track historical-fiction (inferred: the request names 1900 Liguria and the emigration to the United States)\n");
+  expect(lines[0]).toBe("pablo story: choosing a track from the prompt\n");
+  expect(lines[1]).toBe("pablo story: track historical-fiction (inferred: the request names 1900 Liguria and the emigration to the United States)\n");
 
   const work = join(vault, "stories", body.project as string);
   const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as Record<string, unknown>;
@@ -595,7 +596,9 @@ test("AGT-2103: a plain fiction prompt is inferred fiction, with no period files
 test("AGT-2103: --track always wins: the planner is never asked", async () => {
   const { vault, env, ctx } = tempVault();
   const planner = fakeTrackPlanner(HISTORICAL_ANSWER);
-  const result = await runStory({ prompt: SPEC, review: true, track: "fiction" }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  const lines: string[] = [];
+  const result = await runStory({ prompt: SPEC, review: true, track: "fiction" }, { ...ctx, stderr: { write: (l: string) => void lines.push(l) } }, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+  expect(lines[0]).toBe("pablo story: track fiction (--track)\n");
   const body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);
   expect(planner.asked).toEqual([]);
@@ -623,7 +626,17 @@ test("AGT-2103: an unknown track, or a track no requested output allows, is refu
 
   const nonfiction = await runStory({ prompt: SPEC, track: "nonfiction" }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
   expect(nonfiction.exitCode).toBe(2);
-  expect((nonfiction.body as { message: string }).message).toContain("not allowed on the nonfiction track");
+  expect((nonfiction.body as { message: string }).message).toContain("pablo init --track nonfiction");
+
+  // A requested output the track does not allow (D-7): a test type that only nonfiction allows.
+  const off = registerOutput({ ...STORY, id: "nf-only", tracks: ["nonfiction"] });
+  try {
+    const refused = await runStory({ prompt: SPEC, track: "fiction", output: ["nf-only"] }, ctx, depsFor(env, fakeHarness().query, fakeWriter(), { planner }));
+    expect(refused.exitCode).toBe(2);
+    expect((refused.body as { message: string }).message).toContain("the nf-only output is not allowed on the fiction track");
+  } finally {
+    off();
+  }
 
   expect(planner.asked).toEqual([]);
   expect(git(vault, "rev-parse", "main")).toBe(before);

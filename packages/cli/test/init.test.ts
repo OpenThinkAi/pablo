@@ -359,4 +359,10 @@ test("pablo init --track <t> <slug> <Title> and pablo init novel ... --track <t>
   const novelBody = JSON.parse(novel.text) as Record<string, unknown>;
   expect(novelBody["format"]).toBe("novel");
   expect(novelBody["track"]).toBe("historical-fiction");
+
+  // The title left off a novel init is a usage error, not a core-only work named "novel".
+  const mistyped = await captureConsoleLog(() => main(["init", "novel", "harbour", "--track", "historical-fiction", "--json"], vault));
+  expect(mistyped.exitCode).toBe(1);
+  expect((JSON.parse(mistyped.text) as { message: string }).message).toContain('"novel" is an output, not a slug');
+  expect(existsSync(join(vault, "stories", "novel"))).toBe(false);
 });

@@ -1887,7 +1887,7 @@ const STORY_ARGS = z.object({
     .string()
     .optional()
     .describe(
-      "The work's track (fiction, historical-fiction or nonfiction), written to pablo.json with that track's core files. Default: inferred from the prompt by one planner call, historical-fiction when it names a historical period or event, else fiction.",
+      "The work's track (fiction or historical-fiction), written to pablo.json with that track's core files. nonfiction is refused: story writes fiction (start a nonfiction work with `pablo init --track nonfiction`). Default: inferred from the prompt by one planner call, historical-fiction when it names a historical period or event, else fiction.",
     ),
 });
 
