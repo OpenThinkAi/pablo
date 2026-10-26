@@ -1,5 +1,5 @@
 /**
- * Where a provider's API key comes from. Two places, and no third:
+ * Where a provider's API key comes from: the environment or the Keychain, nowhere else.
  *
  * - the environment: by convention `<PROVIDER>_API_KEY` (`ANTHROPIC_API_KEY`),
  *   or a variable named in the config as `"key": "env:<NAME>"` (AGT-2129, so a

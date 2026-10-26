@@ -133,9 +133,18 @@ global one for that intent. `default`, `readers` and the rest stay global.
 }
 ```
 
-`pablo.json` is committed with the work, so the key rule is the same and checked by
-every command: `key` is `env:<NAME>` or `keychain:...`, never the key itself. A work
-whose `pablo.json` holds a key is refused until it is removed.
+`pablo.json` is committed with the work and can come from a co-author or a merged
+branch, so it is trusted less than this file:
+
+- `key` is `env:<NAME>` or `keychain:...`, never the key itself. Every command
+  refuses a work whose `pablo.json` holds a key until it is removed.
+- A work may add a provider, or change any field of one, only on this machine
+  (`127.0.0.1`, `localhost` or `::1`). On a remote provider (Anthropic, a hosted
+  endpoint) it may change only `model`, `timeoutMs`, `temperature` and `thinking`.
+  Declare remote providers, and their keys, here, and route intents to them from
+  `pablo.json`. That way only this file decides which host a key is sent to.
+
+Routing `draft` to a hosted model from a work costs per chapter, as it does here.
 
 ### Claude for `pablo agent` and `pablo story`
 

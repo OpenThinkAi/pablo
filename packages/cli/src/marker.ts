@@ -60,8 +60,8 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { keySourceFor } from "@openthink/pablo-core";
 import { join, resolve } from "node:path";
+import { keySourceFor } from "@openthink/pablo-core";
 import { NOVEL_DIR } from "./outputs/novel/units";
 import type { OutputId } from "./outputs/registry";
 import { isOutputId, outputIds } from "./outputs/registry";
@@ -298,8 +298,8 @@ function inlineKeyRefusal(providers: unknown, path: string): Refusal | undefined
   for (const [id, entry] of Object.entries(providers)) {
     if (!isObject(entry) || entry["key"] === undefined) continue;
     const key = entry["key"];
+    if (typeof key !== "string") return refuse(`pablo: ${path}: provider "${id}": "key" must be a string`, [path]);
     try {
-      if (typeof key !== "string") throw new Error(`pablo: ${path}: provider "${id}": "key" must be a string`);
       keySourceFor(id, key, `${path}: provider "${id}"`);
     } catch (error) {
       return refuse((error as Error).message, [path]);

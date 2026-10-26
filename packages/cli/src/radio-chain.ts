@@ -66,10 +66,10 @@ const outcome = (result: VerbResult): StepOutcome => ({ ok: result.exitCode === 
 const CONTINUITY_INTENT: Intent = { name: "continuity", kind: "extraction" };
 
 /** The extractor the merge rituals run: the given one, else the routed extraction provider (undefined when none is configured). */
-export function routedExtractor(env: Record<string, string | undefined>, given?: Adapter, projectDir?: string): Adapter | undefined {
+export function routedExtractor(env: Record<string, string | undefined>, given: Adapter | undefined, projectDir: string): Adapter | undefined {
   if (given !== undefined) return given;
   try {
-    const providers = createProviders(loadConfig({ env, ...(projectDir === undefined ? {} : { projectDir }) }));
+    const providers = createProviders(loadConfig({ env, projectDir }));
     return providers.adapter(providers.route(CONTINUITY_INTENT));
   } catch {
     return undefined;

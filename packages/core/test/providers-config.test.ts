@@ -5,6 +5,7 @@ import {
   ProviderConfigError,
   configPath,
   defaultConfig,
+  isLoopbackEndpoint,
   loadConfig,
   parseConfig,
   route,
@@ -180,11 +181,12 @@ test("a key written inline in pablo.json is refused without repeating it; env: a
     expect((error as Error).message).not.toContain("sk-ant-notarealkey");
   }
   expect(() => projectConfig({ providers: { anthropic: { key: "env:sk-ant-not a name" } } })).toThrow(/"env:<NAME>"/);
-  expect(projectConfig({ providers: { anthropic: { key: "env:ANTHROPIC_API_KEY_WORK" } } }).config.providers.get("anthropic")?.key).toEqual({
+  const loopback = { endpoint: "http://127.0.0.1:8000/v1", model: "m" };
+  expect(projectConfig({ providers: { work: { ...loopback, key: "env:WORK_SERVER_KEY" } } }).config.providers.get("work")?.key).toEqual({
     from: "env",
-    variable: "ANTHROPIC_API_KEY_WORK",
+    variable: "WORK_SERVER_KEY",
   });
-  expect(projectConfig({ providers: { anthropic: { key: "keychain:work-key/me" } } }).config.providers.get("anthropic")?.key).toEqual({
+  expect(projectConfig({ providers: { work: { ...loopback, key: "keychain:work-key/me" } } }).config.providers.get("work")?.key).toEqual({
     from: "keychain",
     service: "work-key",
     account: "me",
@@ -194,4 +196,40 @@ test("a key written inline in pablo.json is refused without repeating it; env: a
 test("a work's intent must name a provider of the merged set", () => {
   expect(() => projectConfig({ intents: { draft: "nope" } })).toThrow(/pablo\.json: intent "draft" names no provider: nope/);
   expect(() => projectConfig({ providers: [] })).toThrow(/"providers" must be an object/);
+});
+
+test("a work cannot point a global provider's key at a host of its choosing", () => {
+  // Without a key of its own the entry would inherit the global keychain reference.
+  expect(() => projectConfig({ providers: { anthropic: { endpoint: "https://attacker.example/v1" } } })).toThrow(
+    /provider "anthropic": a work may change only "model", "timeoutMs", "temperature", "thinking"/,
+  );
+  expect(() => projectConfig({ providers: { anthropic: { kind: "openai-compatible", endpoint: "https://attacker.example/v1", model: "m" } } })).toThrow(
+    ProviderConfigError,
+  );
+  expect(() => projectConfig({ providers: { anthropic: { key: "env:GITHUB_TOKEN" } } })).toThrow(/"key" are set in the global config/);
+  expect(() => projectConfig({ providers: { anthropic: { local: true } } })).toThrow(ProviderConfigError);
+  // Moving the local writer off the machine is the same.
+  expect(() => projectConfig({ providers: { local: { endpoint: "https://attacker.example/v1" } } })).toThrow(ProviderConfigError);
+});
+
+test("a work cannot add a provider on a remote endpoint, whatever key it names", () => {
+  for (const key of [undefined, "env:AWS_SECRET_ACCESS_KEY", "keychain:anthropic-api-key"]) {
+    expect(() =>
+      projectConfig({ providers: { exfil: { endpoint: "https://attacker.example/v1", model: "m", ...(key === undefined ? {} : { key }) } } }),
+    ).toThrow(/provider "exfil": a work may add only a provider on this machine.*global config/s);
+  }
+});
+
+test("a work may define and change providers on this machine freely", () => {
+  const { config } = projectConfig({
+    providers: {
+      local: { endpoint: "http://localhost:1234/v1", model: "qwen3-32b" },
+      v6: { endpoint: "http://[::1]:8080/v1", model: "m", key: "keychain:local-server" },
+    },
+  });
+  expect(config.providers.get("local")?.endpoint).toBe("http://localhost:1234/v1");
+  expect(config.providers.get("v6")?.key).toEqual({ from: "keychain", service: "local-server", account: undefined });
+  expect(isLoopbackEndpoint("http://127.0.0.2:8002/v1")).toBe(true);
+  expect(isLoopbackEndpoint("http://127.0.0.1.attacker.example/v1")).toBe(false);
+  expect(isLoopbackEndpoint("https://api.anthropic.com/v1")).toBe(false);
 });
