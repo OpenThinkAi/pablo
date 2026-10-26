@@ -25,9 +25,14 @@ import type { Adapter, Intent } from "./types";
 /** The intent a planner call carries; map it in the config's `intents` to pick a provider. */
 export const PLAN_INTENT: Intent = { name: "plan", kind: "planning" };
 
+/** The intent for checks that judge a branch (`critique`, `check --across`); unmapped, it follows `plan`. */
+export const CHECK_INTENT: Intent = { name: "check", kind: "planning" };
+
 export interface PlannerOptions extends ProvidersOptions {
   /** Where receipts go; omit and the planner is unlogged (tests that do not care). */
   readonly receipts?: ReceiptSink | undefined;
+  /** The intent this planner serves (receipts, and which mapping picks its provider); defaults to `plan`. An unmapped one uses the `plan` mapping. */
+  readonly intent?: Intent | undefined;
   /** The subscription path's settings and injected runner. */
   readonly claude?: ClaudeCliAdapterOptions | undefined;
 }
@@ -40,8 +45,8 @@ export interface Planner {
 }
 
 /** The anthropic-kind provider the planner may use, if the config has one. */
-function planningProviderId(config: PabloConfig): string | undefined {
-  const mapped = config.intents.get(PLAN_INTENT.name);
+function planningProviderId(config: PabloConfig, intent: Intent = PLAN_INTENT): string | undefined {
+  const mapped = config.intents.get(intent.name) ?? config.intents.get(PLAN_INTENT.name);
   if (mapped !== undefined) return config.providers.get(mapped)?.kind === "anthropic" ? mapped : undefined;
   for (const provider of config.providers.values()) if (provider.kind === "anthropic") return provider.id;
   return undefined;
@@ -58,15 +63,15 @@ export type ClaudeCredential =
   | { readonly route: "subscription" }
   | { readonly route: "api-key"; readonly provider: ProviderConfig; readonly key: string };
 
-export function claudeCredential(config: PabloConfig, keys?: Partial<KeyLookup>): ClaudeCredential {
-  const id = planningProviderId(config);
+export function claudeCredential(config: PabloConfig, keys?: Partial<KeyLookup>, intent: Intent = PLAN_INTENT): ClaudeCredential {
+  const id = planningProviderId(config, intent);
   const provider = id === undefined ? undefined : config.providers.get(id);
   const key = provider === undefined ? undefined : resolveKey(provider.key, keys);
   return provider !== undefined && key !== undefined ? { route: "api-key", provider, key } : { route: "subscription" };
 }
 
 export function createPlanner(config: PabloConfig, options: PlannerOptions = {}): Planner {
-  const credential = claudeCredential(config, options.keys);
+  const credential = claudeCredential(config, options.keys, options.intent);
   const route: PlannerRoute = credential.route;
   const adapter: Adapter =
     credential.route === "api-key"
@@ -74,5 +79,5 @@ export function createPlanner(config: PabloConfig, options: PlannerOptions = {})
       : createClaudeCliAdapter(options.claude);
 
   const log = options.receipts;
-  return { route, adapter: log === undefined ? adapter : withReceipts(adapter, log, { intent: PLAN_INTENT.name }) };
+  return { route, adapter: log === undefined ? adapter : withReceipts(adapter, log, { intent: (options.intent ?? PLAN_INTENT).name }) };
 }

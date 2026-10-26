@@ -15,7 +15,8 @@ import type { ScriptedChatAdapter } from "@openthink/pablo-core";
 import { main } from "../src/cli";
 import { runAgent } from "../src/harness/agent";
 import type { AgentContext } from "../src/harness/agent";
-import { adapterProvider, AGENT_INTENT, harnessProvider, providerHint } from "../src/harness/provider";
+import { adapterProvider, AGENT_INTENT, harnessProvider, providerHint, shouldWarnLocal } from "../src/harness/provider";
+import { stageIntent } from "../src/story";
 import { loopSpec } from "../src/harness/session";
 import type { HarnessQuery, HarnessSpec } from "../src/harness/session";
 import { harnessTools } from "../src/harness/tools";
@@ -98,6 +99,30 @@ test("an anthropic provider takes the agent intent; its credential is the key's 
   expect(provider.forcedToolChoice).toBe(false);
 });
 
+test("an anthropic provider with no key is skipped: the agent falls back to the local writer and the skip is reported (AGT-2127)", () => {
+  const config = parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } } }));
+  const told: string[] = [];
+  const provider = harnessProvider(config, { keys: { env: {} }, onSkip: (s, to) => void told.push(`${s.provider}->${to}: ${s.reason}`) });
+  expect(provider.adapter.id).toBe("local");
+  expect(provider.skipped.map((s) => s.provider)).toEqual(["anthropic"]);
+  expect(told).toEqual(["anthropic->local: ANTHROPIC_API_KEY is not set"]);
+  // The registry's skip notice already explained it, so the "no cloud provider" notice stays quiet.
+  expect(shouldWarnLocal(provider, config)).toBe(false);
+  expect(harnessProvider(config, { keys: { env: { ANTHROPIC_API_KEY: "sk-test" } } }).adapter.id).toBe("anthropic");
+});
+
+test("a story stage routes under its own intent: research maps separately from plan and agent (AGT-2127)", () => {
+  const config = parseConfig(
+    JSON.stringify({ providers: { anthropic: { kind: "anthropic" }, other: { kind: "anthropic", model: "m2" } }, intents: { research: "other", plan: "anthropic", agent: "anthropic" } }),
+  );
+  const keys = { keys: { env: { ANTHROPIC_API_KEY: "a", OTHER_API_KEY: "b" } } };
+  expect(stageIntent("research").name).toBe("research");
+  for (const stage of ["premise", "bible", "acts", "beats"] as const) expect(stageIntent(stage).name).toBe("plan");
+  expect(harnessProvider(config, keys, stageIntent("research")).adapter.id).toBe("other");
+  expect(harnessProvider(config, keys, stageIntent("premise")).adapter.id).toBe("anthropic");
+  expect(harnessProvider(config, keys).adapter.id).toBe("anthropic");
+});
+
 test("an explicit agent intent wins over the default route", () => {
   const config = parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, intents: { [AGENT_INTENT.name]: "local" } }));
   expect(harnessProvider(config, { keys: { env: {} } }).adapter.id).toBe("local");
@@ -164,7 +189,8 @@ test("--json prints one object with the provider, entries and result", async () 
 
 test("the config's agent provider is the one the session runs on; a missing key fails the session naming where to put it", async () => {
   const io = capture();
-  const readConfig = () => JSON.stringify({ providers: { anthropic: { kind: "anthropic" } } });
+  // `default` is the anthropic provider, so the route has nowhere else to fall back to and the adapter reports the missing key.
+  const readConfig = () => JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, default: "anthropic" });
   const code = await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { readConfig, keys: { env: {}, keychain: () => "" } });
   expect(code).toBe(1);
   expect(io.out()).toContain("credential env:ANTHROPIC_API_KEY");

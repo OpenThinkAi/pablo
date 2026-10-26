@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ProviderConfigError, createProviders, defaultConfig, parseConfig, route } from "../src/index";
+import { ProviderConfigError, createProviders, defaultConfig, parseConfig, resolveRoute, route } from "../src/index";
 import type { Intent, IntentKind } from "../src/index";
 
 const intent = (kind: IntentKind, name: string = kind): Intent => ({ name, kind });
@@ -39,7 +39,7 @@ test("an intent named in the config overrides its kind's default", () => {
 });
 
 test("the registry answers with the adapter an intent routes to", () => {
-  const providers = createProviders(withCloud());
+  const providers = createProviders(withCloud(), { keys: { env: { ANTHROPIC_API_KEY: "k" } } });
 
   expect(providers.ids).toEqual(["local", "anthropic"]);
   expect(providers.adapterFor(intent("drafting")).id).toBe("local");
@@ -51,4 +51,50 @@ test("asking for a provider that is not configured names the ones that are", () 
   const providers = createProviders(defaultConfig());
   expect(() => providers.adapter("openai")).toThrow(ProviderConfigError);
   expect(() => providers.adapter("openai")).toThrow(/configured providers are local/);
+});
+
+// AGT-2127: route() passes over a provider whose key does not resolve.
+
+const twoClouds = () =>
+  parseConfig(
+    JSON.stringify({
+      providers: { anthropic: { kind: "anthropic" }, backup: { kind: "anthropic", key: "env:BACKUP_KEY" } },
+      intents: { research: "anthropic" },
+    }),
+  );
+
+test("a mapped provider with no key is skipped for the next usable cloud provider, and the skip is named", () => {
+  const providers = createProviders(twoClouds(), { keys: { env: { BACKUP_KEY: "k" } }, onSkip: () => {} });
+  const routed = providers.routed(intent("planning", "research"));
+  expect(routed.provider).toBe("backup");
+  expect(routed.skipped).toEqual([{ provider: "anthropic", intent: "research", reason: "ANTHROPIC_API_KEY is not set" }]);
+});
+
+test("with no cloud key at all the intent falls back to the default, and with a key nothing is skipped", () => {
+  const none = createProviders(twoClouds(), { keys: { env: {} }, onSkip: () => {} });
+  expect(none.route(intent("planning", "research"))).toBe("local");
+  expect(none.routed(intent("planning", "research")).skipped.map((s) => s.provider)).toEqual(["anthropic", "backup"]);
+
+  const keyed = createProviders(twoClouds(), { keys: { env: { ANTHROPIC_API_KEY: "k" } }, onSkip: () => {} });
+  expect(keyed.routed(intent("planning", "research"))).toEqual({ provider: "anthropic", skipped: [] });
+});
+
+test("a local provider needs no key, and a skip is announced once per intent and provider", () => {
+  const told: string[] = [];
+  const providers = createProviders(twoClouds(), { keys: { env: {} }, onSkip: (s, to) => void told.push(`${s.intent}:${s.provider}->${to}`) });
+  expect(providers.route(intent("drafting"))).toBe("local");
+  providers.route(intent("planning", "research"));
+  providers.route(intent("planning", "research"));
+  expect(told).toEqual(["research:anthropic->local", "research:backup->local"]);
+});
+
+test("when every candidate lacks a key the first is returned so the adapter reports the real problem", () => {
+  const config = parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, default: "anthropic" }));
+  const routed = createProviders(config, { keys: { env: {} }, onSkip: () => {} }).routed(intent("planning"));
+  expect(routed).toEqual({ provider: "anthropic", skipped: [] });
+});
+
+test("the pure route() and resolveRoute() without a key check never skip", () => {
+  expect(route(twoClouds(), intent("planning", "research"))).toBe("anthropic");
+  expect(resolveRoute(twoClouds(), intent("planning")).skipped).toEqual([]);
 });

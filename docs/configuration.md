@@ -88,7 +88,7 @@ places:
 
 ## `default` and `intents`
 
-pablo sends seven kinds of request. Each is an *intent*:
+pablo sends eight kinds of request. Each is an *intent*:
 
 | Intent | Used by | Goes to, unless mapped |
 |---|---|---|
@@ -96,12 +96,22 @@ pablo sends seven kinds of request. Each is an *intent*:
 | `revise` | `revise` | the first local provider |
 | `prose` | `prose` | the first local provider |
 | `continuity` | the fact extraction `merge` runs | the first local provider |
-| `plan` | the critic (`critique`, `check --across`) and the built-in agent's helpers | the first non-local provider |
-| `agent` | the built-in agent (`pablo agent`, `pablo story`, the screen's compose view) | the first non-local provider |
-| `research` | `research distill` (`distill_facts`): research notes, raw, to period facts; `research plan` (`plan_research`): the period brief or thesis to a research checklist | the first non-local provider (map it to a local one to keep notes on this machine) |
+| `plan` | `pablo story`'s premise, bible, acts and beats stages, the track choice, and the built-in agent's helpers | the first non-local provider |
+| `agent` | the built-in agent (`pablo agent`, the screen's compose view) | the first non-local provider |
+| `check` | the critic that judges a branch (`critique`, `check --across`) | the first non-local provider (falls back to the `plan` mapping, then the Claude subscription) |
+| `research` | `pablo story`'s research stage; `research distill` (`distill_facts`): research notes, raw, to period facts; `research plan` (`plan_research`): the period brief or thesis to a research checklist | the first non-local provider (map it to a local one to keep notes on this machine) |
 
 If no provider of the wanted sort exists, the request goes to `default` (which is
 `"local"` unless you set it). `intents` overrides the choice per intent.
+
+**A provider whose key does not resolve is skipped.** A non-local provider with no key (its
+environment variable is unset, or its Keychain item is missing) is passed over for the next
+choice: the intent's mapping, then the other providers of the wanted sort, then `default`.
+pablo says which one it skipped once per run, on stderr:
+`pablo: skipped provider "anthropic" for the "research" intent (ANTHROPIC_API_KEY is not set); using "local" instead.`
+A `local` provider needs no key and is never skipped. If every choice lacks a key, the first
+is used anyway and the request fails naming the missing key. A keyless server on another
+machine is not "local", so mark it `"local": true` to keep it from being skipped.
 
 Because the built-in `local` provider always exists, **a setup with no local model
 must map the four writing intents**, or drafting still goes to `127.0.0.1:8002`:
@@ -171,7 +181,9 @@ fails to list is not detected: review the `plan/` branch it writes. See `docs/co
 ### The model behind `pablo agent` and `pablo story`
 
 The built-in agent (`pablo agent`, `pablo story`, the screen's compose view) is pablo's
-own tool loop, and it runs on whichever provider the `agent` intent goes to: Claude
+own tool loop. `pablo agent` and the compose view run on whichever provider the `agent`
+intent goes to; `pablo story` runs its research stage on the `research` intent and its
+premise, bible, acts and beats stages on `plan`. Each can be Claude
 through an `anthropic` provider, or any OpenAI-compatible model with tool calls
 (Gemma 4 behind `mlx_lm` included). It needs that provider's key, the same as any
 other request; your Claude Code login is not used. With no non-local provider

@@ -15,7 +15,7 @@
  */
 
 import { createProviders } from "@openthink/pablo-core";
-import type { Adapter, Intent, PabloConfig, ProvidersOptions } from "@openthink/pablo-core";
+import type { Adapter, Intent, PabloConfig, ProvidersOptions, SkippedProvider } from "@openthink/pablo-core";
 import { keyReference } from "../config-verb";
 
 /** The intent the agent loop's calls carry. */
@@ -34,12 +34,17 @@ export interface HarnessProvider {
    * on an Anthropic provider the loop steers from the prompt instead.
    */
   readonly forcedToolChoice: boolean;
+  /** Providers the route passed over for want of a key (already announced on stderr by the registry). */
+  readonly skipped: readonly SkippedProvider[];
 }
 
-/** The agent intent's provider from pablo's config. Throws the registry's error when the routed provider is not configured. */
-export function harnessProvider(config: PabloConfig, options: ProvidersOptions = {}): HarnessProvider {
+/**
+ * The provider an intent routes to, for a harness session: `agent` by default (AGT-2121), `research` or `plan`
+ * for the story stages that run on those (AGT-2127). Throws the registry's error when the routed provider is not configured.
+ */
+export function harnessProvider(config: PabloConfig, options: ProvidersOptions = {}, intent: Intent = AGENT_INTENT): HarnessProvider {
   const providers = createProviders(config, options);
-  const id = providers.route(AGENT_INTENT);
+  const { provider: id, skipped } = providers.routed(intent);
   // `adapter(id)` throws the registry's error for an id the config lacks, so past it the entry exists.
   const adapter = providers.adapter(id);
   const provider = config.providers.get(id)!;
@@ -48,12 +53,13 @@ export function harnessProvider(config: PabloConfig, options: ProvidersOptions =
     local: provider.local,
     credential: provider.local ? "none" : keyReference(provider),
     forcedToolChoice: provider.kind !== "anthropic",
+    skipped,
   };
 }
 
 /** A provider around an adapter the caller already has (a test's scripted adapter, an injected one). */
 export function adapterProvider(adapter: Adapter, over: Partial<Omit<HarnessProvider, "adapter">> = {}): HarnessProvider {
-  return { adapter, local: false, credential: "none", forcedToolChoice: true, ...over };
+  return { adapter, local: false, credential: "none", forcedToolChoice: true, skipped: [], ...over };
 }
 
 /** What to check when a session fails outside the loop: the provider the `agent` intent routed to. */
@@ -65,6 +71,14 @@ export function providerHint(provider: HarnessProvider): string {
   );
 }
 
+/**
+ * Whether to show the local-fallback notice: the intent routed to a local provider nobody asked for. Not when the
+ * route passed over a cloud provider for want of a key, since the registry's skip notice already said so.
+ */
+export function shouldWarnLocal(provider: HarnessProvider, config: PabloConfig, intent: Intent = AGENT_INTENT): boolean {
+  return provider.local && provider.skipped.length === 0 && !config.intents.has(intent.name);
+}
+
 /** Shown when no provider is mapped for the agent and the route fell to a local one. */
-export const LOCAL_FALLBACK_NOTICE = (id: string): string =>
-  `pablo: no cloud provider is configured, so the agent runs on the local model ("${id}"). To use Claude, add an anthropic provider (docs/configuration.md); to keep the local model and silence this, set intents.agent.`;
+export const LOCAL_FALLBACK_NOTICE = (id: string, intent: string = AGENT_INTENT.name): string =>
+  `pablo: no cloud provider is configured, so the ${intent === AGENT_INTENT.name ? "agent" : `"${intent}" step`} runs on the local model ("${id}"). To use Claude, add an anthropic provider (docs/configuration.md); to keep the local model and silence this, set intents.${intent}.`;
