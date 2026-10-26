@@ -28,6 +28,7 @@ import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
 import { readMarker } from "./marker";
 import { coreCheck } from "./core-check";
+import { narratedDrift } from "./outputs/narrated";
 import { resolveOutput } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
 import { radioCheck, radioCheckLines, realCastingDeps } from "./radio";
@@ -439,6 +440,9 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     const label = relative(workDir, filePath);
     hits.push(...checkFile(text, label, rules));
     if (isUnprovenanced(text)) unprovenanced.push(label);
+    // A narrated reading (AGT-2137) is the source unit's prose word for word: flag the first place it is not.
+    const drift = narratedDrift(workDir, filePath);
+    if (drift !== undefined) hits.push({ path: label, line: drift.line, rule: "narration-drift", excerpt: excerptOf(drift.excerpt), detail: drift.detail });
   }
 
   // `--output <type>` adds the core check (AGT-1671): the units against the bible, the timeline and facts.md.

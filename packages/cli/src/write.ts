@@ -70,6 +70,12 @@ export interface WriteArgs {
   readonly seed?: string | undefined;
   /** `write --direction "<text>"` (AGT-1562): a steer for this chapter, its own pack slice, recorded in the frontmatter as `direction:`. */
   readonly direction?: string | undefined;
+  /**
+   * `write --voices narrator|characters` (AGT-2137): who reads a derived
+   * output's unit (the narrated output). Refused for an output drafted by
+   * the writer.
+   */
+  readonly voices?: string | undefined;
 }
 
 /** A minimal `process.stderr`-shaped sink, so tests can capture progress without a real TTY. */
@@ -99,6 +105,9 @@ const DRAFT_INTENT: Intent = { name: "draft", kind: "drafting" };
  * which makes a second opinion on a chapter, and `--variants`, impossible.
  */
 export const DEFAULT_WRITE_TEMPERATURE = 0.8;
+
+/** The `model` a derived unit (AGT-2137) records: pablo made it from another unit, no model drew it. */
+export const DERIVED_MODEL = "pablo-derived";
 
 /** How often (ms) the streaming progress line refreshes once tokens are flowing. */
 const PROGRESS_INTERVAL_MS = 2000;
@@ -245,12 +254,18 @@ function emitWriteSuccess(
   receipt: UnitReceiptSummary,
   hits: readonly Hit[],
   branch: DraftBranch,
+  /** For a derived unit: the unit file it was made from (no model ran). */
+  from?: string,
 ): void {
   if (json) {
-    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits }));
+    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, ...(from === undefined ? {} : { from }) }));
     return;
   }
   console.log(`wrote ${path} (${receipt.words} words) on branch ${branch.name}`);
+  if (from !== undefined) {
+    console.log(`made from ${from}, word for word; no model ran`);
+    return;
+  }
   const writeMs = receipt.wallMs - receipt.timeToFirstTokenMs;
   console.log(
     `read ${receipt.tokensRead} tokens in ${seconds(receipt.timeToFirstTokenMs)}s, ` +
@@ -335,6 +350,10 @@ export async function runWrite(
     return resolved.code;
   }
   const output = resolved.output;
+  if (args.voices !== undefined && output.derive === undefined) {
+    emitError(`pablo: write: --voices is for the narrated output; the ${output.id} output's ${output.plural} are drafted by the writer`, undefined, 2, args.json);
+    return 2;
+  }
   // An output with one unit (the story) implies it: no --unit needed.
   chapter ??= output.soleUnit;
   if (chapter === undefined) {
@@ -354,6 +373,7 @@ export async function runWrite(
     direction,
     output: output.id,
     ...(deps.env === undefined ? {} : { env: deps.env }),
+    ...(args.voices === undefined ? {} : { voices: args.voices }),
   });
   if (!packResult.ok) {
     emitError(packResult.message, undefined, packResult.code, args.json);
@@ -429,6 +449,46 @@ export async function runWrite(
   const discardBranch = (): void => {
     deleteBranch(repo, markerResult.marker.slug, branchName, { force: true, env });
   };
+
+  // A derived output (the narrated output, AGT-2137) is made from another output's unit with no model.
+  if (output.derive !== undefined) {
+    const derived = output.derive(projectPath, chapter, { voices: args.voices });
+    if (!derived.ok) {
+      discardBranch();
+      emitError(derived.message, undefined, derived.code, args.json);
+      return derived.code;
+    }
+    const text = derived.text.trim();
+    const words = text.split(/\s+/).filter((w) => w !== "").length;
+    const frontmatter = buildFrontmatter({
+      noun: output.noun,
+      chapter,
+      title: packResult.inputs.beat.title,
+      pov: packResult.inputs.beat.pov,
+      storyDate: packResult.inputs.beat.storyDate,
+      words,
+      model: DERIVED_MODEL,
+      generated: (deps.now ?? (() => new Date()))().toISOString(),
+      promptHash: pack.hash,
+    });
+    const projectInRepo = relative(realpathSync(repo), realpathSync(projectPath));
+    const worktreeFile = join(worktree, projectInRepo, output.artifactDir, fileName);
+    mkdirSync(dirname(worktreeFile), { recursive: true });
+    writeFileSync(worktreeFile, `${frontmatter}\n\n${text}\n`, "utf8");
+    const committed = commitAs(worktree, {
+      message: `${markerResult.marker.slug}: ${output.noun} ${chapter} from ${derived.source}`,
+      author: { name: DERIVED_MODEL, email: `${DERIVED_MODEL}@pablo.local` },
+      receipt: pack.hash,
+      paths: [join(projectInRepo, output.artifactDir, fileName)],
+    });
+    if (!committed.ok) {
+      emitError(`${committed.notice}\n  the ${output.noun} is in ${worktree}, uncommitted`, undefined, 1, args.json);
+      return 1;
+    }
+    const receipt: UnitReceiptSummary = { output: output.id, unit: chapter, prompt_hash: pack.hash, model: DERIVED_MODEL, tokensRead: 0, tokensWritten: 0, timeToFirstTokenMs: 0, wallMs: 0, words };
+    emitWriteSuccess(args.json, workRelativePath, receipt, [], { name: branchName, worktree, sha: committed.sha as string }, derived.source);
+    return 0;
+  }
 
   const config = loadConfig({ projectDir: projectPath });
   const providers = createProviders(config);

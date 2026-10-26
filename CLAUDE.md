@@ -227,6 +227,16 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `ensure()` only looks (venv stamp, `uv` on PATH) through
                 `casting-side.ts`'s `radioMachine` seam, which tests
                 replace; the first casting verb still provisions.
+                `narrated` (AGT-2137, `src/outputs/narrated/`, D-7, text
+                side) reads another output's prose: `output add narrated
+                --from <output>` records `outputs.narrated.from`, its units
+                mirror the source's, and its `derive` (a new optional
+                `OutputDefinition` field) makes reading N from source unit N
+                with no model (`narrate.ts`: `CAST:`, `NARRATOR:` lines,
+                speaker lines with `write --voices characters`); `write`
+                stores a derived unit instead of calling the writer, and
+                `check` flags `narration-drift`. Readings live in
+                `outputs/narrated/readings/` on `draft/narrated-NN`.
                 `pablo story "<prompt>"` (AGT-1690, `src/story.ts`, one
                 `VERBS` entry with no MCP tool) creates a work under
                 `stories/` (`novels/` when a novel is asked for), runs each

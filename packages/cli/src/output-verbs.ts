@@ -14,6 +14,10 @@
  *                   deleted: `outputs/<type>/` moves to
  *                   `outputs/_removed/<type>-<date>/` in the same commit (the
  *                   novel's chapters stay where they are)
+ *   add narrated --from <output>
+ *                   a derived output (AGT-2137) records the prose output it
+ *                   reads as `outputs.narrated.from`; its plan is that
+ *                   output's units
  *   plan <type>     rewrites `outputs/<type>/plan.md` from the type's default
  *                   plan over the current beats and commits it
  *
@@ -37,6 +41,7 @@ import type { Marker } from "./marker";
 import { dirtyPaths } from "./migrate";
 import { LEDGER_TEMPLATE } from "./novel/continuity";
 import { renderNovelPlan } from "./outputs/novel/plan";
+import { isNarratableSource } from "./outputs/narrated";
 import { OUTPUTS, outputDefinition, outputIds } from "./outputs/registry";
 import type { OutputDefinition, PlanRow } from "./outputs/types";
 
@@ -98,6 +103,8 @@ export type OutputPlanResult =
 export interface OutputVerbOptions {
   /** The clock for `added` and the archive's date. */
   readonly now?: () => Date;
+  /** `add <type> --from <output>` (AGT-2137): the output a derived type (narrated) reads; refused for any other type. */
+  readonly from?: string | undefined;
 }
 
 function refuse(sub: string, message: string, missing?: readonly string[]): OutputRefusal {
@@ -219,6 +226,20 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
     return refuse("add", `the ${id} output is not allowed on the ${track} track (allowed: ${allowed.length === 0 ? "none" : allowed.join(", ")})`, [`<type>: ${allowed.join(" | ")}`]);
   }
 
+  // A derived output (narrated, AGT-2137) reads another output's units: `--from` names it, and only it takes one.
+  const from = opts.from?.trim() || undefined;
+  if (def.def.derive === undefined && from !== undefined) return refuse("add", `--from is for a derived output (narrated); the ${id} output is drafted from the core`);
+  if (def.def.derive !== undefined) {
+    const prose = Object.keys(found.marker.outputs).filter((o) => {
+      const d = outputDefinition(o);
+      return d !== undefined && isNarratableSource(d);
+    });
+    if (from === undefined) return refuse("add", `the ${id} output reads another output; name it with --from (the work has: ${prose.length === 0 ? "no prose output" : prose.join(", ")})`, [`--from: ${prose.join(" | ")}`]);
+    const source = outputDefinition(from);
+    if (source === undefined || !isNarratableSource(source)) return refuse("add", `--from ${from} is not a prose output the ${id} output can read`, [`--from: ${prose.join(" | ")}`]);
+    if (found.marker.outputs[from] === undefined) return refuse("add", `the work has no ${from} output to read; add it first (pablo output add ${from})`, [`output ${from} (pablo output add ${from})`]);
+  }
+
   // An output maps its units onto the core's beats: the core must be at beats first.
   const core = readCoreState(workDir, trackOf(found.marker));
   const short = coreNext(core);
@@ -231,26 +252,28 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
 
   const plan = planFile(id);
   const rules = rulesFile(id);
-  const writes: { rel: string; content: string }[] = [];
-  if (!existsSync(join(workDir, plan))) writes.push({ rel: plan, content: renderPlan(def.def, def.def.plan(workDir)) });
-  if (!existsSync(join(workDir, rules))) writes.push({ rel: rules, content: def.def.rulesTemplate });
+  // The plan's content is read after pablo.json is rewritten: a derived output's plan is its source's (`outputs.<id>.from`).
+  const writes: { rel: string; content: () => string }[] = [];
+  if (!existsSync(join(workDir, plan))) writes.push({ rel: plan, content: () => renderPlan(def.def, def.def.plan(workDir)) });
+  if (!existsSync(join(workDir, rules))) writes.push({ rel: rules, content: () => def.def.rulesTemplate });
   // The novel's ledger (AGT-1705): continuity extraction skips a work with none, so a novel added to a work gets one now.
   // A work that already has its ledger, at either name, keeps it.
   if (id === OUTPUTS.novel.id && !existsSync(join(workDir, NOVEL_CONTINUITY_FILE)) && !existsSync(join(workDir, LEGACY_CONTINUITY_FILE))) {
-    writes.push({ rel: NOVEL_CONTINUITY_FILE, content: LEDGER_TEMPLATE });
+    writes.push({ rel: NOVEL_CONTINUITY_FILE, content: () => LEDGER_TEMPLATE });
   }
   const paths = ["pablo.json", ...writes.map((w) => w.rel)].sort();
   const dirty = dirtyRefusal("add", vaultRoot, workDir, ["pablo.json"]);
   if (dirty !== undefined) return dirty;
 
   const added = localDate((opts.now ?? (() => new Date()))());
-  const entry = id === OUTPUTS.novel.id ? { dir: def.def.artifactDir, added } : { added };
+  const entry = id === OUTPUTS.novel.id ? { dir: def.def.artifactDir, added } : from !== undefined ? { added, from } : { added };
   const markerText = rewriteOutputs(workDir, (outputs) => ({ ...outputs, [id]: entry }));
+  // pablo.json first: a derived output's plan reads its source from the entry just written.
+  writeFileSync(markerPath(workDir), markerText, "utf8");
   for (const w of writes) {
     mkdirSync(dirname(join(workDir, w.rel)), { recursive: true });
-    writeFileSync(join(workDir, w.rel), w.content, "utf8");
+    writeFileSync(join(workDir, w.rel), w.content(), "utf8");
   }
-  writeFileSync(markerPath(workDir), markerText, "utf8");
 
   const { committed, notice } = gitCommit(vaultRoot, `${found.marker.slug}: add the ${id} output`, paths.map((rel) => join(workDir, rel)));
   return { ok: true, action: "add", type: id, paths, committed, ...(notice ? { notice } : {}) };
@@ -278,6 +301,10 @@ export function removeOutput(vaultRoot: string, workDir: string, type: string | 
     const has = Object.keys(found.marker.outputs);
     return refuse("remove", `the work has no ${id} output (it has: ${has.length === 0 ? "none" : has.join(", ")})`);
   }
+
+  // A narrated output reading this one (AGT-2137) would be left with nothing to read.
+  const readers = Object.entries(found.marker.outputs).filter(([type, entry]) => type !== id && outputDefinition(type)?.derive !== undefined && entry["from"] === id).map(([type]) => type);
+  if (readers.length > 0) return refuse("remove", `the ${readers.join(", ")} output reads the ${id} output; remove it first (pablo output remove ${readers[0]})`);
 
   const from = `${OUTPUTS_DIR}/${id}`;
   const moving = existsSync(join(workDir, from));
