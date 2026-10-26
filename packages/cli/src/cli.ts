@@ -18,7 +18,7 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { workBookStages } from "./book";
 import { configSet, configShow, configTest, realConfigTestDeps } from "./config-verb";
-import { doctorText, gateText, realCastingDeps, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
+import { doctorText, gateText, lineTakesText, realCastingDeps, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
 import { parseForEpisode, radioBind, radioStatus } from "./radio";
 import { branchDiff, fileAt, repoRoot, waitingBranches } from "./branch";
 import { runCheck, screenChecks } from "./check";
@@ -358,17 +358,25 @@ function helpText(): string {
     "  pablo mixer --project <slug> --episode N --export-notes",
     "                                            no window: write renders/epNN/punch-list.md from",
     "                                            the episode's saved markers (notes.json)",
-    "  pablo fix --project <slug> --output radio --unit N (or --episode N) [--json-lines]",
+    "  pablo fix --project <slug> --output radio --unit N (or --episode N) [--line I] [--json-lines]",
     "                                            re-record only the episode's flagged lines",
     "                                            (flags.json; a reason can bump the engine),",
     "                                            write the next manifest version, remix it and",
     "                                            move the flags to flags-done.json; no open",
-    "                                            flags is a refusal. Uses the GPU",
+    "                                            flags is a refusal; --line I fixes only that",
+    "                                            line's flags. Uses the GPU",
     "  pablo takes show <key> --project <slug>  one radio take: inputs, scores, timings and",
     "                                            receipt id (a unique key prefix is enough)",
     "  pablo takes gc --project <slug> [--yes]  list the takes no manifest references, then",
     "                                            ask before archiving them (moved, never",
     "                                            deleted); without a terminal, needs --yes",
+    "  pablo takes line --project <slug> --episode N --line I",
+    "                                            every take a line has had, newest version's",
+    "                                            marked current, with status and gates",
+    "  pablo takes choose <key> --project <slug> --episode N --line I",
+    "                                            put an earlier take back on the line: the",
+    "                                            next manifest version, remixed (a mix saved",
+    "                                            in the mixer is rebased onto it)",
     '  pablo gate <take.wav> --line "<line>" --card <slug|dir> [--centroid <file>]',
     "             [--emotion <class>] [--library DIR] [--vault DIR] [--project <slug>] [--json]",
     "                                            score a take (Whisper WER + tail, aligner",
@@ -1569,8 +1577,12 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // on a terminal; without one (or with --json) it needs --yes.
   if (args.verb === "takes") {
     const interactive = !args.json && process.stdin.isTTY === true && process.stdout.isTTY === true;
+    const whole = (raw: unknown): number | undefined => (typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : undefined);
+    const text = (raw: unknown): string | undefined => (typeof raw === "string" ? resolve(cwd, raw) : undefined);
+    const vaultFound = findVault(cwd, process.env);
+    const where = args.rest[0] === "choose" ? { vault: text(args.values["vault"]) ?? (vaultFound.ok ? vaultFound.path : undefined), library: text(args.values["library"]) } : {};
     const result = await runTakes(
-      { sub: args.rest[0], key: args.rest[1], yes: args.yes },
+      { sub: args.rest[0], key: args.rest[1], yes: args.yes, episode: whole(args.values["episode"]), line: whole(args.values["line"]), ...where },
       { env: process.env, stderr: process.stderr },
       realCastingDeps(process.env),
       projectPath,
@@ -1578,7 +1590,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     );
     const body = result.body as { ok?: boolean; message?: string; unreferenced?: unknown };
     if (args.json) console.log(JSON.stringify(result.body));
-    else if (body.ok) console.log(args.rest[0] === "show" ? takeShowText(result.body) : takesGcText(result.body));
+    else if (body.ok) console.log(args.rest[0] === "show" ? takeShowText(result.body) : args.rest[0] === "line" ? lineTakesText(result.body) : args.rest[0] === "choose" ? String(body.message ?? "") : takesGcText(result.body));
     else {
       if (body.unreferenced !== undefined) console.log(takesGcText(result.body));
       console.error(body.message ?? "pablo: takes failed");

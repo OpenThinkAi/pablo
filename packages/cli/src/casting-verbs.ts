@@ -220,6 +220,12 @@ const FIX_ARGS = z.object({
     .optional()
     .default(false)
     .describe("Also write each re-recorded line's progress event to stdout as a JSON line as it lands; they always go to stderr."),
+  line: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Re-record only this line (its open flags); the episode's other flags stay open. The line must have an open flag."),
 });
 
 const DESCRIBE_ARGS = z.object({
@@ -369,6 +375,58 @@ function run(args: readonly string[], where: Where, ctx: VerbContext, deps: (env
   const vault = where.vault === undefined ? located.vault : resolve(ctx.cwd, where.vault);
   const library = where.library === undefined ? undefined : resolve(ctx.cwd, where.library);
   return runCasting([...args, ...flag("--vault", vault), ...flag("--library", library)], { env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? deps(ctx.env), located.work, extras);
+}
+
+/** One `fix` run, as `pablo fix` and the mixer's re-take (AGT-2155, `mixer-punch-host.ts`) both make it. */
+export interface FixRun {
+  readonly work: string;
+  readonly episode: number;
+  /** Only this line's open flags (`--line`); the rest stay open. */
+  readonly line?: number;
+  readonly vault?: string;
+  readonly library?: string;
+  /** Where each line's progress event is also written as a JSON line (`--json-lines`). */
+  readonly relay?: { write(text: string): unknown };
+  readonly env: Env;
+  readonly stderr: { write(text: string): unknown };
+  readonly casting: CastingDeps;
+}
+
+/**
+ * The body of `pablo fix` after the episode is addressed: the radio stage check, provisioning (the engine, the
+ * gates' scorers, the remix's cue generators), then `python -m pablo_casting fix`. Asynchronous throughout, so a
+ * window's server keeps answering while the GPU works.
+ */
+export async function runFix(r: FixRun): Promise<VerbResult> {
+  const { work, episode } = r;
+  const notReady = stageRefusal(work, "fix", episode, "fix");
+  if (notReady !== undefined) return notReady;
+  const casting = { env: r.env, stderr: r.stderr };
+  const ready = ensureProvisioned(casting, r.casting, work, [SCORERS_EXTRA, MIX_EXTRA]);
+  if (!ready.ok) return ready.result;
+  const relay = r.relay;
+  const pythonArgs = [
+    "fix",
+    ...flag("--episode", episode),
+    ...flag("--line", r.line),
+    ...(relay !== undefined ? ["--json-lines"] : []),
+    ...flag("--vault", r.vault),
+    ...flag("--library", r.library),
+    "--work",
+    work,
+  ];
+  const result = await runPythonStreaming(ready.layout, r.casting, casting, pythonArgs, (line) => {
+    if (relay !== undefined && isProgressEvent(line)) relay.write(`${line}\n`);
+  });
+  return {
+    body: {
+      ...(result.exitCode === 0 ? performedBody(work, episode, "fix") : {}),
+      ...(result.body as object),
+      provisioned: ready.outcome.provisioned,
+      ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}),
+    },
+    exitCode: result.exitCode,
+  };
 }
 
 /** The casting verbs (audition, cast, voices, perform), over `deps` (the real machine by default). */
@@ -618,37 +676,16 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const work = where.work as string;
       const episode = addressedEpisode(args, work, "fix");
       if (typeof episode !== "number") return episode;
-      const notReady = stageRefusal(work, "fix", episode, "fix");
-      if (notReady !== undefined) return notReady;
-      const machine = ctx.casting ?? deps(ctx.env);
-      const casting = { env: ctx.env, stderr: ctx.stderr };
-      // The engine and the gates' scorers, then the remix's cue generators.
-      const ready = ensureProvisioned(casting, machine, work, [SCORERS_EXTRA, MIX_EXTRA]);
-      if (!ready.ok) return ready.result;
-      const relay = args["json-lines"] ? ctx.stdout : undefined;
-      const pythonArgs = [
-        "fix",
-        ...flag("--episode", episode),
-        ...(relay !== undefined ? ["--json-lines"] : []),
-        ...flag("--vault", where.vault),
-        "--work",
+      return runFix({
         work,
-      ];
-      const result =
-        relay === undefined
-          ? runPython(ready.layout, machine, casting, pythonArgs)
-          : await runPythonStreaming(ready.layout, machine, casting, pythonArgs, (line) => {
-              if (isProgressEvent(line)) relay.write(`${line}\n`);
-            });
-      return {
-        body: {
-          ...(result.exitCode === 0 ? performedBody(work, episode, "fix") : {}),
-          ...(result.body as object),
-          provisioned: ready.outcome.provisioned,
-          ...(ready.outcome.receipt ? { receipt: ready.outcome.receipt } : {}),
-        },
-        exitCode: result.exitCode,
-      };
+        episode,
+        ...(args.line === undefined ? {} : { line: args.line }),
+        ...(where.vault === undefined ? {} : { vault: where.vault }),
+        ...(args["json-lines"] ? { relay: ctx.stdout } : {}),
+        env: ctx.env,
+        stderr: ctx.stderr,
+        casting: ctx.casting ?? deps(ctx.env),
+      });
     },
   };
 

@@ -8,7 +8,7 @@ import type { MountOptions, View } from "@openthink/ui-leaf";
 import { parseCliArgs, runMixerView } from "../src/cli";
 import { NO_CHROME_MIXER_MESSAGE, createMixerHost, mixVersionsOnDisk, mixerMutations, openMixer } from "../src/mixer-host";
 import type { OpenMixerRequest } from "../src/mixer-host";
-import { MUTATIONS } from "../views/mixer-protocol";
+import { MUTATIONS, PUNCH_MUTATIONS } from "../views/mixer-protocol";
 import type { ClipAudioPayload, MixPayload, PeaksPayload, RenderedMixPayload, SavedMixPayload } from "../views/mixer-protocol";
 
 /**
@@ -286,7 +286,7 @@ test("the window may call the four mixer mutations and nothing else", async () =
   const { m, work } = machine();
   const handlers = mixerMutations(host(m, work));
   expect(Object.keys(handlers).sort()).toEqual([...MUTATIONS].sort());
-  expect([...MUTATIONS]).toEqual(["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags", "cueOptions", "regenerateCue"]);
+  expect([...MUTATIONS]).toEqual(["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags", "cueOptions", "regenerateCue", ...PUNCH_MUTATIONS]);
   m.respond = () => ({ code: 2, body: { ok: false, code: 2, message: "nope" } });
   await expect((handlers["loadMix"] as (a: unknown) => Promise<unknown>)({ episode: 1 })).rejects.toThrow("nope");
 });

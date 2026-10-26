@@ -32,6 +32,10 @@ retake that still fails the gates is flagged again automatically, in
 `flags.json`, like `perform` does. The player's flags for other episodes are
 left alone.
 
+**One line** (`--line I`, AGT-2155: the mixer's re-take): only the open flags
+on that line are applied and moved; the episode's other flags stay open. A line
+with no open flag is a refusal.
+
 Refusals (exit 2, nothing written): the episode has no manifest, **no open
 flags** (it names the episode), a flag with no id or pointing at a line the
 version does not have, no script, an unbound or changed role, a role cast
@@ -92,6 +96,8 @@ class FixRequest:
     episode: int
     voices_dir: Path
     json_lines: bool = False
+    lines: tuple[int, ...] = ()
+    """Only the open flags on these lines (AGT-2155, the mixer's re-take of one line); empty = every open flag."""
 
 
 def flags_done_path(work: Path) -> Path:
@@ -166,6 +172,16 @@ def fix(
             episode=episode,
             version=parent_version,
         )
+    if request.lines:
+        wanted = set(request.lines)
+        open_flags = [flag for flag in open_flags if flag.get("line") in wanted]
+        if not open_flags:
+            return _refused(
+                f"episode {episode} has no open flag on line(s) {', '.join(map(str, sorted(wanted)))}; flag the line first (nothing to fix)",
+                episode=episode,
+                version=parent_version,
+                lines=sorted(wanted),
+            )
     count = len(parent_lines)
     malformed = [str(flag.get("id")) for flag in open_flags if not isinstance(flag.get("id"), str) or not flag.get("id")]
     if malformed:
@@ -405,6 +421,7 @@ def cmd_fix(
     engine_factory: EngineFactory,
     scorer_factory: Callable[[], Sequence[Scorer]],
     mixer: Callable[[int], Result] | None,
+    line: str | None = None,
 ) -> Result:
     from pablo_casting.binding import library_dir
 
@@ -418,11 +435,19 @@ def cmd_fix(
         return _error(f"--episode must be an integer, got {episode!r}")
     if number < 1:
         return _error(f"--episode must be a positive integer, got {number}")
+    only: tuple[int, ...] = ()
+    if line is not None:
+        try:
+            only = (int(line),)
+        except ValueError:
+            return _error(f"--line must be a line number, got {line!r}")
+        if only[0] < 0:
+            return _error(f"--line must be 0 or more, got {only[0]}")
     voices_dir = library_dir(Path(vault) if vault else None, configured_library, Path(library) if library else None)
     if voices_dir is None:
         return _refused("no voice library: pass --vault or --library, or set `library` in the casting config", missing=["library"])
     return fix(
-        FixRequest(work=work, episode=number, voices_dir=voices_dir, json_lines=json_lines),
+        FixRequest(work=work, episode=number, voices_dir=voices_dir, json_lines=json_lines, lines=only),
         env=env,
         engine_factory=engine_factory,
         scorer_factory=scorer_factory,

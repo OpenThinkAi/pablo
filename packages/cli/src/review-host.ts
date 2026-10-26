@@ -233,6 +233,12 @@ function flagRows(file: FlagsFile, episode: number, lines: readonly ReviewLine[]
   return rows.sort((a, b) => a.line - b.line || Number(b.source === "auto") - Number(a.source === "auto"));
 }
 
+/** The open flags of an episode against its newest mixed version's timings, as the player lists them (the mixer's punch list, AGT-2155). */
+export function episodeFlags(work: string, episode: number): ReviewFlag[] {
+  const mixed = mixedVersions(work, episode);
+  return flagRows(readFlagsFile(work), episode, mixed[mixed.length - 1]?.lines ?? []);
+}
+
 // ---------------------------------------------------------------------------
 // The host
 // ---------------------------------------------------------------------------

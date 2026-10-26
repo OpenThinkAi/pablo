@@ -673,6 +673,17 @@ describe("fix (AGT-1685)", () => {
     expect(calls).toEqual([]);
   });
 
+  test("AGT-2155: --line re-records only that line's flags", async () => {
+    const { deps, calls } = fakeMachine();
+    const vault = vaultCopy();
+    performed(vault, 2, 1);
+    const result = await verbsOver(deps)["fix"]!.run({ project: "ice-house", episode: 2, line: 4, "json-lines": false }, ctxIn(vault));
+    expect(result.exitCode).toBe(0);
+    expect(lastPython(calls)).toEqual(["fix", "--episode=2", "--line=4", `--vault=${vault}`, "--work", work(vault), "--json"]);
+    const parsed = parseCliArgs(["fix", "--project", "ice-house", "--episode", "2", "--line", "4"]);
+    expect(verbArgsFromCli(VERBS.find((v) => v.name === "fix")!, parsed.values, parsed.rest)).toEqual({ ok: true, args: { project: "ice-house", episode: 2, line: 4, "json-lines": false } });
+  });
+
   test("the CLI parses --episode and --json-lines for fix", () => {
     const parsed = parseCliArgs(["fix", "--project", "ice-house", "--episode", "3", "--json-lines"]);
     const built = verbArgsFromCli(VERBS.find((v) => v.name === "fix")!, parsed.values, parsed.rest);

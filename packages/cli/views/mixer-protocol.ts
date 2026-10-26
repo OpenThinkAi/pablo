@@ -4,12 +4,15 @@
  * view (browser bundle) and the host (node) share one definition.
  *
  * The view never reads a file. It calls `loadMix`, `peaks`, `clipAudio`, `saveMix` and `renderMix` (AGT-2152: the
- * Render button), plus the markers' mutations (the in-mixer pablo actions, `retake`, `regenerateCue` and `flag`,
- * come with their own tickets).
+ * Render button), plus the markers' mutations and the punch list's (AGT-2155: `listFlags`, `flag`, `unflag`,
+ * `retake`, `lineTakes`, `chooseTake`) and the cue regeneration's (AGT-2156: `cueOptions`, `regenerateCue`).
  */
 
+/** The punch list's mutations (AGT-2155): open flags, flag/unflag a line, re-take it, compare its takes and choose one. */
+export const PUNCH_MUTATIONS = ["listFlags", "flag", "unflag", "retake", "lineTakes", "chooseTake"] as const;
+
 /** The mutation names the host registers (and ui-leaf declares); anything else is a 404 from ui-leaf. */
-export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags", "cueOptions", "regenerateCue"] as const;
+export const MUTATIONS = ["loadMix", "peaks", "clipAudio", "saveMix", "renderMix", "listNotes", "saveNote", "deleteNote", "exportNotes", "notesToFlags", "cueOptions", "regenerateCue", ...PUNCH_MUTATIONS] as const;
 
 export type TrackName = "dialogue" | "sfx" | "beds" | "music";
 export type FadeCurve = "linear" | "scurve" | "log" | "exp";
@@ -300,4 +303,79 @@ export interface RegeneratedCuePayload {
   readonly document: MixDocument;
   readonly versions: readonly MixVersionInfo[];
   readonly message: string;
+}
+
+// ---------------------------------------------------------------------------
+// The punch list (AGT-2155): flags in `pablo review`'s format, re-take, compare and choose takes
+// ---------------------------------------------------------------------------
+
+/** An open flag exactly as the review player lists it (`flags.json`, human and auto). */
+export type PunchFlag = import("./review-protocol").ReviewFlag;
+
+/** The answer to `listFlags({episode})`, `flag({episode, line, reason?, time?})` and `unflag({episode, line?, id?})`. */
+export interface FlagsPayload {
+  readonly episode: number;
+  readonly flags: readonly PunchFlag[];
+}
+
+/** One take a line has had (`pablo takes line`), oldest first. */
+export interface LineTake {
+  /** The take key (64 hex): play it with `clipAudio({source: {kind: "take", key, stretch}})`. */
+  readonly key: string;
+  /** The manifest versions that used it. */
+  readonly versions: readonly number[];
+  readonly status: string | null;
+  readonly attempt: number | null;
+  readonly seconds: number | null;
+  readonly stretch: number | null;
+  readonly gates: Readonly<Record<string, number | boolean | null>>;
+  readonly failing: readonly string[];
+  /** The flag reasons the `fix` that made it applied; empty for the performance's own take. */
+  readonly reasons: readonly string[];
+  readonly temperature: number | null;
+  /** It was put back on the line by `takes choose` (in a version after the one that made it). */
+  readonly chosen: boolean;
+  /** False once `takes gc` archived it: it can no longer be played or chosen. */
+  readonly stored: boolean;
+  readonly created: string | null;
+  /** The newest manifest version uses it. */
+  readonly current: boolean;
+}
+
+/** The answer to `lineTakes({episode, line})`: every take the line has had. */
+export interface LineTakesPayload {
+  readonly episode: number;
+  readonly line: number;
+  readonly speaker: string;
+  readonly text: string;
+  /** The newest manifest version. */
+  readonly version: number;
+  readonly current: string;
+  readonly takes: readonly LineTake[];
+}
+
+/** The answer to `retake({episode, line, reason?})`: `pablo fix --line` ran (the reason, when given, flagged the line first). */
+export interface RetakePayload {
+  readonly episode: number;
+  readonly line: number;
+  /** The manifest version written. */
+  readonly version: number;
+  readonly fromVersion: number;
+  readonly changedLines: readonly number[];
+  /** Remixed (a mixer-saved mix rebased onto the new take); false when the remix failed after the version was written. */
+  readonly mixed: boolean;
+  readonly message: string;
+  readonly flags: readonly PunchFlag[];
+  readonly takes: LineTakesPayload;
+}
+
+/** The answer to `chooseTake({episode, line, take})`: `pablo takes choose` put that take back and remixed. */
+export interface ChosenTakePayload {
+  readonly episode: number;
+  readonly line: number;
+  readonly take: string;
+  readonly version: number;
+  readonly mixed: boolean;
+  readonly message: string;
+  readonly takes: LineTakesPayload;
 }
