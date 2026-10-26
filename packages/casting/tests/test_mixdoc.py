@@ -17,7 +17,7 @@ from test_mix import FakeCues, cue, cues_dir, fake_pacer, final_audio, mixed, pe
 
 from pablo_casting.cli import run
 from pablo_casting.cues import CueLibrary
-from pablo_casting.manifest import episode_dir, flags_path, read_version, write_version
+from pablo_casting.manifest import episode_dir, flags_path, read_version, versions, write_version
 from pablo_casting.mix import SR, MixRequest, Sources, auto_document, mix, render_document
 from pablo_casting.mixdoc import MixDocError, check_against, mix_path, mix_versions, read_mix, validate, write_mix
 
@@ -378,3 +378,29 @@ def test_the_timeline_streamed_piecewise_equals_the_document_render(work: Path, 
     # two SFX in a row overlap (the second starts 0.4 s early): the auto mix puts it on a second lane, so it sums, never crossfades
     sfx = timeline.document()["tracks"]["sfx"]["lanes"]  # type: ignore[index]
     assert sorted(sfx) == ["2", "main"]
+
+
+def test_a_stream_over_a_human_mix_keeps_its_edits(setup: tuple[Path, Path]) -> None:
+    """`perform --stream` over an episode that has a human mix renders that mix (or rebases it, AGT-2153), never an auto one (AGT-2154)."""
+    work, library = setup
+    body, code, _ = go(work, library, Factory())
+    assert code == 0, body
+    human = copy.deepcopy(read_mix(work, 1, 1))
+    clip(human, "line-1")["gain"] = -6.0
+    write_mix(work, 1, human, by="human")  # mix.v2, by human, of manifest v1
+    for entry in episode_dir(work, 1).iterdir():  # the episode is rendered afresh: its manifest (and audio) go, the mixes stay
+        if entry.name == "v1.json" or entry.suffix == ".m4a" or entry.is_symlink():
+            entry.unlink()
+    assert versions(work, 1) == []
+
+    body, code, _ = go(work, library, Factory())
+    assert code == 0, body
+    # the same takes: the human mix still fits and is the one rendered, never replaced by an auto document
+    assert (body["mixBy"], body["supersededMix"]) == ("human", None)
+    assert mix_versions(work, 1) == [1, 2]
+    doc = read_mix(work, 1, 2)
+    assert doc["by"] == "human" and clip(doc, "line-1")["gain"] == -6.0
+    manifest = read_version(work, 1, versions(work, 1)[-1])
+    final, _ = sf.read(str(episode_dir(work, 1) / str(manifest["audio"])), dtype="float32")
+    again = render_document(manifest, doc, Sources(work, CueLibrary(library / "cues", lambda kind: FakeCues()), fake_pacer))
+    assert len(again.audio) == len(final) and float(np.abs(again.audio - final).max()) < 2 / 32768
