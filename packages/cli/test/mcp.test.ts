@@ -61,7 +61,7 @@ function parseTextBody(result: unknown): unknown {
 // already an MCP tool before this ticket (AGT-1241); AC1's "five existing
 // tools" are resume/status/write/save/check. AGT-1264 adds `revise`, also
 // project-scoped.
-const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "save_research", "record_fact"]);
+const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "save_research", "distill_facts", "record_fact"]);
 
 test("listTools returns the project-scoped verbs, prose, and the five narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
@@ -73,6 +73,7 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "check",
     "critique",
     "describe_voice", // AGT-1699: the CAST: mapper and the traits vocabulary, for the harness
+    "distill_facts", // AGT-2109: also from the `research` verb
     "draft_chapter",
     "draft_unit",
     "fix", // AGT-1685: fixes a performed radio episode from its flags; project required
