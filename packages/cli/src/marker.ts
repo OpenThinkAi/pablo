@@ -52,7 +52,8 @@
  * `realNames` (AGT-2107, D-10) is whether distilled period facts may name the
  * real people and places in `research/`. Absent reads as `true` (`realNamesOf`),
  * and `Marker.realNames` stays absent so a rewritten marker is unchanged; a
- * work like Valley's Shadow sets `false`. A non-boolean value is refused.
+ * work that keeps research names out sets `false`. A non-boolean value is
+ * refused. Only `resume` reads it so far; `distill_facts` (AGT-2109) acts on it.
  *
  * `providers` and `intents` (AGT-2129, D-13) route this work's model calls
  * over the global config; core's `loadConfig({ projectDir })` reads and

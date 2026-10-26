@@ -286,7 +286,7 @@ const MAX_BRIEF_LINES = 8;
  */
 export function formatResumeProse(result: ResumeResult): string {
   const body: string[] = [result.title, ...coreLines(result.core), ...outputLines(result.outputs), `track: ${result.track}`];
-  if (result.realNames === false) body.push("realNames: false");
+  if (result.realNames === false) body.push("real names: kept out of distilled facts (realNames: false)");
   if (result.waiting.length > 0) body.push(`waiting for review: ${result.waiting.join(", ")}`);
 
   if (result.last.note !== undefined) {
