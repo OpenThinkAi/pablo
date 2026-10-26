@@ -72,6 +72,22 @@ test("a clip that cannot be placed is listed by field, and the rest of the mix s
   expect((html.match(/class="clip"/g) ?? []).length).toBe(7);
 });
 
+test("AGT-2153: a mix rebased after a fix lists what could not be carried over, and the rest of the mix still draws", () => {
+  const rebased = {
+    ...DOC,
+    by: "human",
+    manifest_version: 2,
+    summary: "rebased mix.v2 onto manifest v2: line(s) 1 re-taken; 1 item(s) for review",
+    rebase: { from: 2, manifest_from: 1, retaken: [1], review: [{ clip: "cue-0", field: "tracks.sfx.lanes.main.clips[0].anchor", problem: "anchored to line 7, which manifest v2 does not have; pinned at 4.250 s", was: null }] },
+  } as MixDocument;
+  const html = renderToStaticMarkup(<Mixer data={{ title: "t", episode: 1 }} mutate={noMutate} preloaded={{ ...PAYLOAD, document: rebased }} />);
+  expect(html).toContain("Rebased from mix v2 after a fix (manifest v1 to v2): 1 item(s) to review");
+  expect(html).toContain("tracks.sfx.lanes.main.clips[0].anchor: anchored to line 7, which manifest v2 does not have; pinned at 4.250 s");
+  expect((html.match(/class="clip"/g) ?? []).length).toBe(8);
+  const plain = renderToStaticMarkup(<Mixer data={{ title: "t", episode: 1 }} mutate={noMutate} preloaded={PAYLOAD} />);
+  expect(plain).not.toContain("Rebased from");
+});
+
 test("AGT-1769: a loaded mix is editable: every clip has trim edges and fade handles; undo, redo and save start disabled", () => {
   const html = renderToStaticMarkup(<Mixer data={{ title: "The Lamp Room", episode: 1 }} mutate={noMutate} preloaded={PAYLOAD} />);
   expect((html.match(/class="trim trim-in"/g) ?? []).length).toBe(8);

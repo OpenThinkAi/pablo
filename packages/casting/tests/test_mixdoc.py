@@ -100,7 +100,7 @@ def test_a_remix_renders_the_newest_fitting_document_and_writes_no_new_one(work:
     assert (body["cuesGenerated"], body["cuesReused"]) == (0, 1)
 
 
-def test_a_retaken_line_gets_a_new_auto_mix_and_a_human_mix_is_named_not_dropped(work: Path, cues_dir: Path, tmp_path: Path) -> None:
+def test_a_retaken_line_rebases_a_human_mix_and_an_auto_mix_is_remade(work: Path, cues_dir: Path, tmp_path: Path) -> None:
     performed(work)
     mixed(work, cues_dir)
     human = copy.deepcopy(read_mix(work, 1, 1))
@@ -111,24 +111,38 @@ def test_a_retaken_line_gets_a_new_auto_mix_and_a_human_mix_is_named_not_dropped
     retake["lines"][1]["take"] = take_for(work, 1, attempt=1)  # type: ignore[index]
     write_version(work, 1, retake, flags_applied=["f-1"])
 
+    # the human mix is carried onto v2 (AGT-2153; test_rebase.py has the rules), never set aside
     body = mixed(work, cues_dir)
-    assert (body["mixWritten"], body["mixBy"], body["supersededMix"]) == (True, "auto", 2)
-    assert "mix.v2.json (by: human)" in str(body["message"])
+    assert (body["mixWritten"], body["mixBy"], body["rebasedMix"], body["supersededMix"]) == (True, "human", 2, None)
     doc = read_mix(work, 1, 3)
-    assert (doc["parent"], doc["manifest_version"], doc["by"]) == (2, 2, "auto")
+    assert (doc["parent"], doc["manifest_version"], doc["by"]) == (2, 2, "human")
     assert clip(doc, "line-1")["source"]["key"] == retake["lines"][1]["take"]  # type: ignore[index]
+    assert clip(doc, "line-3")["gain"] == -6.0
     assert read_mix(work, 1, 2)["by"] == "human"  # never rewritten
 
+    # an auto mix that no longer fits is simply made again
+    flags_path(work).write_text(json.dumps({"flags": [{"id": "f-2", "episode": 1, "line": 2, "reason": "flat"}]}))
+    again = proposal(work)
+    again["lines"][1]["take"] = retake["lines"][1]["take"]  # type: ignore[index]
+    again["lines"][2]["take"] = take_for(work, 2, attempt=1)  # type: ignore[index]
+    mix_path(work, 1, 3).unlink()
+    write_mix(work, 1, auto_document(read_version(work, 1, 2), Sources(work, CueLibrary(cues_dir, lambda kind: FakeCues()), fake_pacer)), by="auto")  # mix.v3, by auto
+    write_version(work, 1, again, flags_applied=["f-2"])
+    body = mixed(work, cues_dir)
+    assert (body["mixWritten"], body["mixBy"], body["rebasedMix"], body["supersededMix"]) == (True, "auto", None, None)
 
-def test_a_valid_newest_document_anchored_to_a_line_the_manifest_lacks_gives_way_to_the_auto_mix(work: Path, cues_dir: Path) -> None:
+
+def test_a_human_document_anchored_to_a_line_no_manifest_has_sets_that_point_aside_for_review(work: Path, cues_dir: Path) -> None:
     performed(work)
     mixed(work, cues_dir)
     stale = copy.deepcopy(read_mix(work, 1, 1))
     stale["tracks"]["sfx"]["automation"] = [{"anchor": {"line": 42, "edge": "end", "offset": 0.0}, "db": -6.0, "curve": "linear"}]  # type: ignore[index]
     write_mix(work, 1, stale, by="human")
     body = mixed(work, cues_dir)
-    assert (body["mixWritten"], body["mixBy"], body["supersededMix"]) == (True, "auto", 2)
+    assert (body["mixWritten"], body["mixBy"], body["rebasedMix"], body["supersededMix"]) == (True, "human", 2, None)
     assert mix_versions(work, 1) == [1, 2, 3]
+    (item,) = read_mix(work, 1, 3)["rebase"]["review"]  # type: ignore[index]
+    assert item["field"] == "tracks.sfx.automation[0].anchor" and "set aside" in item["problem"] and item["was"]["anchor"]["line"] == 42
 
 
 # --- AC2: refusals name the field ------------------------------------------------------------------

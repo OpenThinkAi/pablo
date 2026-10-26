@@ -672,6 +672,19 @@ export default function MixerView({ data, mutate, preloaded }: ViewProps<MixerDa
           ))}
         </ul>
       )}
+      {payload.document.rebase !== undefined && payload.document.rebase.review.length > 0 && (
+        <ul className="problems review">
+          <li className="head">
+            Rebased from mix v{payload.document.rebase.from} after a fix (manifest v{payload.document.rebase.manifest_from} to v{payload.document.manifest_version}): {payload.document.rebase.review.length}{" "}
+            item(s) to review, then save
+          </li>
+          {payload.document.rebase.review.map((r, k) => (
+            <li key={k}>
+              {r.field}: {r.problem}
+            </li>
+          ))}
+        </ul>
+      )}
       {selectedClip !== undefined && (
         <Inspector
           placed={selectedClip}
@@ -753,6 +766,7 @@ button.play { min-width: 64px; border-color: var(--accent); color: var(--accent)
 .status { display: flex; gap: 16px; padding: 4px 16px; min-height: 24px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .warn { color: var(--warn); }
 .problems { margin: 0; padding: 6px 16px 6px 32px; color: var(--warn); font-size: 12px; background: #2a201c; }
+.problems .head { list-style: none; margin-left: -16px; font-weight: 600; }
 .body { flex: 1; display: flex; align-items: flex-start; min-height: 0; overflow-y: auto; }
 .heads { flex: none; background: var(--panel); border-right: 1px solid var(--line); }
 .track-head { border-bottom: 1px solid var(--line); }

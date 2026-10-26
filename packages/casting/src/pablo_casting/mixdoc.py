@@ -70,7 +70,9 @@ EDGES = ("start", "end")
 BY = ("auto", "human")
 MIX_RE = re.compile(r"^mix\.v(\d+)\.json$")
 # Fields a caller proposes; `write_mix` sets schema, episode, version, parent, by and created itself.
-PROPOSED = ("manifest_version", "tracks", "master", "summary")
+# `rebase` is what `mix.rebase` leaves on a human document carried onto a new manifest (AGT-2153): `{from, manifest_from,
+# retaken, review}`, `review` listing what the mixer should show; the next human save drops it.
+PROPOSED = ("manifest_version", "tracks", "master", "summary", "rebase")
 
 
 @dataclass(frozen=True)
@@ -264,6 +266,8 @@ def validate(doc: object) -> list[Problem]:
         check.add("by", f"must be one of {', '.join(BY)}, got {doc['by']!r}")
     if "manifest_version" in doc and (not _int(doc["manifest_version"]) or int(doc["manifest_version"]) < 1):  # type: ignore[call-overload]
         check.add("manifest_version", f"must be a positive integer, got {doc['manifest_version']!r}")
+    if "rebase" in doc and not (isinstance(doc["rebase"], Mapping) and isinstance(doc["rebase"].get("review"), list)):
+        check.add("rebase", "must be {from, manifest_from, retaken, review: [...]}")
     tracks = doc.get("tracks")
     ids: dict[str, str] = {}
     if not isinstance(tracks, Mapping):
@@ -399,6 +403,7 @@ def write_mix(work: Path, episode: int, proposal: Mapping[str, object], *, by: s
         "by": by,
         "created": now(),
         **({"summary": proposal["summary"]} if "summary" in proposal else {}),
+        **({"rebase": proposal["rebase"]} if "rebase" in proposal else {}),
         "tracks": proposal.get("tracks"),
         "master": proposal.get("master"),
     }

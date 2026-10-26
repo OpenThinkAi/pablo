@@ -647,8 +647,8 @@ Rendering uses the GPU.
 | `pablo voices list [--auto-admitted] \| show <slug> \| retire <slug> [--reason "..."]` | the shared voice library; a retired voice still plays for stories already pinned to it |
 | `pablo bind --project <slug> --role <NAME> --voice <slug>` | pins a script role to a library voice in the work's `cast.json` |
 | `pablo perform --project <slug> --episode N [--engine chatterbox-turbo\|dia] [--json-lines]` | renders an episode's lines in their bound voices, retrying lines that fail the quality gates; refused while a role is uncast. `--stream` (with `--episode N` or `--all`) mixes and publishes as it goes |
-| `pablo mix --project <slug> --episode N [--version k]` | mixes a performed episode with its sound cues into `epNN.m4a` |
-| `pablo fix --project <slug> --episode N` | re-records only the flagged lines, then remixes |
+| `pablo mix --project <slug> --episode N [--version k]` | mixes a performed episode with its sound cues into `epNN.m4a`; a mix saved in the mixer is kept, and after `fix` it is rebased onto the new takes (unchanged lines keep every edit; whatever could not be carried over is listed for review in the mixer, never dropped) |
+| `pablo fix --project <slug> --episode N` | re-records only the flagged lines, then remixes (a mix saved in the mixer keeps its edits: see `mix`) |
 | `pablo gate <take.wav> --line "..." --card <slug>` | scores one take against a card's quality gates; `gate calibrate` fits the thresholds |
 | `pablo takes show <key> \| gc [--yes] --project <slug>` | inspects one take, or archives the takes no manifest uses (moved, never deleted) |
 | `pablo review --project <slug> [--episode N]` | the review player (needs Google Chrome): play episodes, flag lines for `fix` |
