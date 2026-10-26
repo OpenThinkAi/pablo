@@ -212,6 +212,7 @@ function countFactRows(text: string): number {
       continue;
     }
     if (!line.startsWith("|")) continue;
+    // A separator row, or a row of empty cells: neither is a fact.
     if (/^\|[\s:|-]*$/.test(line)) continue;
     // A header row is the one directly above a separator.
     if (/^\|[\s:|-]*$/.test((lines[i + 1] ?? "").trim())) continue;
@@ -247,7 +248,8 @@ function containsPhrase(haystack: string, phrase: string): boolean {
 export function readCoreState(workDir: string, track: TrackId = "fiction"): CoreState {
   const overviewText = read(join(workDir, "bible", "overview.md"));
   const premise = overviewText !== undefined && hasLogline(overviewText);
-  const period = (read(join(workDir, PERIOD_BRIEF_FILE)) ?? "").replace(/^#[^\n]*$/gm, "").trim() !== "";
+  // Frontmatter and headings alone are not a brief.
+  const period = (read(join(workDir, PERIOD_BRIEF_FILE)) ?? "").replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/^#[^\n]*$/gm, "").trim() !== "";
   const research = listFiles(workDir, join(workDir, "research"));
   const sourcedResearch = research.filter((rel) => rel.endsWith(".md") && hasSources(read(join(workDir, rel)) ?? ""));
   const periodFacts = countFactRows(read(join(workDir, PERIOD_FACTS_FILE)) ?? "");
@@ -286,7 +288,6 @@ export function readCoreState(workDir: string, track: TrackId = "fiction"): Core
   const outlineText = read(outlinePath) ?? "";
 
   return {
-    track,
     premise,
     period,
     research,
@@ -296,6 +297,8 @@ export function readCoreState(workDir: string, track: TrackId = "fiction"): Core
     acts: parseActs(outlineText),
     beats: parseBeatRows(outlineText, relative(workDir, outlinePath)),
     outlineFile,
+    // Last, so the JSON a status/resume reader already parses still opens with `premise`.
+    track,
   };
 }
 

@@ -74,6 +74,8 @@ test("the period stage needs bible/period.md with text; a heading alone is not a
   expect(stage()).toMatchObject({ done: false, gate: true, missing: ["bible/period.md has no period brief yet"] });
   writeFileSync(join(work, "bible", "period.md"), "# Period\n");
   expect(stage()?.done).toBe(false);
+  writeFileSync(join(work, "bible", "period.md"), "---\ntitle: Period\n---\n# Period\n");
+  expect(stage()?.done).toBe(false);
   addPeriodBrief(work);
   expect(stage()).toMatchObject({ done: true, summary: "ok", missing: [] });
 });
