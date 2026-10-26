@@ -94,7 +94,7 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `read` / `search` | Read a file in the work, or search it |
 | `output` | List or add outputs (novel, story, radio) |
 | `publish` | Compile the drafted text into one file |
-| `voice_list` / `voice_show` / `voice_flag` / `voice_exemplar` / `voice_rule` | Inspect and grow the voice |
+| `voice_list` / `voice_show` / `voice_flag` / `voice_exemplar` / `voice_rule` / `voice_edit` / `voice_remove` / `voice_use` | Inspect and grow the voice: list rules with ids, add, edit or remove one, add a named voice to a work |
 | `prose` | One-off copy in a named voice, outside any work |
 
 The rest (`promote`, `migrate`, `bind`, and the radio tools `audition`, `cast`,

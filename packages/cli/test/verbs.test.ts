@@ -768,13 +768,13 @@ test("prose.run with no vault resolves a global voice and a brief under ctx.cwd"
 // `mcp.test.ts`'s full stdio round trip for the same tools driven end to end).
 // ---------------------------------------------------------------------------
 
-test("voice exposes exactly five mcpTools, each with a disjoint schema and no sub field", () => {
+test("voice exposes exactly eight mcpTools, each with a disjoint schema and no sub field", () => {
   const tools = verb("voice").mcpTools;
   expect(tools).toBeDefined();
-  expect(tools!.map((t) => t.name).sort()).toEqual(["voice_exemplar", "voice_flag", "voice_list", "voice_rule", "voice_show"]);
+  expect(tools!.map((t) => t.name).sort()).toEqual(["voice_edit", "voice_exemplar", "voice_flag", "voice_list", "voice_remove", "voice_rule", "voice_show", "voice_use"]);
 
   const shapeKeys = (name: string) => Object.keys(voiceMcpTool(name).args.shape).sort();
-  expect(shapeKeys("voice_list")).toEqual([]);
+  expect(shapeKeys("voice_list")).toEqual(["project"]);
   expect(shapeKeys("voice_show")).toEqual(["name"]);
   expect(shapeKeys("voice_flag")).toEqual(["line", "name", "section"]);
   expect(shapeKeys("voice_exemplar")).toEqual(["file", "name", "title"]);

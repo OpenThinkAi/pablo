@@ -58,7 +58,7 @@
  */
 
 import { z } from "zod";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
@@ -93,6 +93,7 @@ import { castingVerbs } from "./casting-verbs";
 import { saveCore } from "./save";
 import { addExemplar, addRule, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { VoiceLocation } from "./voice";
+import { editRule, ensureRuleDir, listRules, parseLayerTarget, projectPathOf, removeRule, ruleFileFor, TARGET_USAGE, useVoice, workFromCwd } from "./voice-rules";
 import { runWrite } from "./write";
 import type { RunWriteDeps, WriteArgs } from "./write";
 
@@ -1074,18 +1075,23 @@ const voiceRuleExampleField = z
   .string()
   .describe('The sentences the rule came from, verbatim: written under the bullet as `Flagged: "<example>"`, so `check` catches them (style/prose.md only).');
 const voiceRuleTargetField = z
-  .enum(["voice", "work"])
-  .describe("Where the rule goes: `voice` (default) is the voice's own rules file (style/prose.md for fiction); `work` is the work's QWEN.md (needs `project`).");
-const voiceRuleProjectField = z.string().describe("The work's slug; needed for target work.");
+  .string()
+  .describe(
+    "Where the rule goes: `voice` (default) is the voice's own rules file (style/prose.md for fiction); or a layer: `global` (the global default voice), `vault` (style/prose.md), `work` (the work's QWEN.md, needs `project`), `output:<type>` (that output's RULES.md, needs `project`).",
+  );
+const voiceRuleIdField = z.string().describe("A rule's id, as `voice list` shows it (six hex digits).");
+const voiceRuleProjectField = z.string().describe("The work's slug; needed for targets work and output:<type>, and for use.");
 const voiceFileField = z.string().describe("The piece to keep, copied verbatim.");
 const voiceTitleField = z.string().describe("The title to file it under (else its first `# ` heading, else its filename).");
 
 const VOICE_ARGS = z.object({
   sub: z
-    .enum(["new", "list", "show", "flag", "exemplar", "rule"])
-    .describe("Which voice action: new (scaffold), list, show, flag (record a rejected line), exemplar (keep a piece), or rule (add a typed rule)."),
+    .enum(["new", "list", "show", "flag", "exemplar", "rule", "edit", "remove", "use"])
+    .describe(
+      "Which voice action: new (scaffold), list (voices and rules with ids), show, flag (record a rejected line), exemplar (keep a piece), rule (add a typed rule), edit (change a rule by id), remove (delete a rule by id), or use (add a named voice to a work).",
+    ),
   name: voiceNameField.optional().describe(
-    'Voice name, or a path (containing "/" or ending ".md") for a one-off voice. Required for new/show/flag/exemplar; ignored for list.',
+    'Voice name, or a path (containing "/" or ending ".md") for a one-off voice. Required for new/show/flag/exemplar/use; for edit/remove it is the rule id; ignored for list.',
   ),
   global: z
     .boolean()
@@ -1098,8 +1104,8 @@ const VOICE_ARGS = z.object({
   title: voiceTitleField.optional().describe("voice exemplar: the title to file it under (else its first `# ` heading, else its filename)."),
   text: voiceRuleTextField.optional().describe("voice rule: the rule, one line."),
   example: voiceRuleExampleField.optional().describe("voice rule: the sentences the rule came from, written as a Flagged line under it."),
-  target: voiceRuleTargetField.optional().describe("voice rule: `voice` (default) or `work` (the work's QWEN.md, with `project`)."),
-  project: voiceRuleProjectField.optional().describe("voice rule: the work's slug, for target work."),
+  target: voiceRuleTargetField.optional().describe(`voice rule/edit/remove: \`voice\` (default for rule) or a layer (${TARGET_USAGE}); for edit/remove it only narrows which file the id is looked up in.`),
+  project: voiceRuleProjectField.optional().describe("voice rule/edit/remove/list/use: the work's slug (needed for work, output:<type> and use)."),
 });
 
 type VoiceLocationLookup =
@@ -1152,21 +1158,33 @@ function boundVoiceExemplarFile(ctx: VerbContext, file: string): { readonly ok: 
  * to the work's own QWEN.md and ignores `name`'s voice.
  */
 export function runVoiceRule(
-  args: { readonly name: string; readonly text: string; readonly example?: string | undefined; readonly target?: "voice" | "work" | undefined; readonly project?: string | undefined },
+  args: { readonly name?: string | undefined; readonly text: string; readonly example?: string | undefined; readonly target?: string | undefined; readonly project?: string | undefined },
   ctx: Pick<VerbContext, "cwd" | "env" | "caller">,
 ): VerbResult {
   const done = (result: ReturnType<typeof addRule>): VerbResult =>
     result.ok
       ? { body: { ok: true, path: result.path, target: result.target, committed: result.committed, ...(result.notice ? { notice: result.notice } : {}) }, exitCode: 0 }
       : { body: refusalBody(result), exitCode: result.code };
+  const fail = (message: string): VerbResult => ({ body: { ok: false, code: 2, message, tried: [] }, exitCode: 2 });
 
-  if (args.target === "work") {
-    if (args.project === undefined) return { body: { ok: false, code: 2, message: "pablo: voice rule: --target work needs --project <slug>" }, exitCode: 2 };
-    const resolved = resolveVerbProject(ctx, args.project);
-    if (!resolved.ok) return resolved.result;
-    return done(addRule(undefined, args.text, { target: "work", projectPath: resolved.projectPath, ...(args.example ? { example: args.example } : {}) }));
+  if (args.target !== undefined && args.target !== "voice") {
+    const layer = parseLayerTarget(args.target);
+    if (layer === undefined) return fail(`pablo: voice rule: --target must be voice or ${TARGET_USAGE} (got "${args.target}")`);
+    let projectPath: string | undefined;
+    if (layer === "work" || layer.startsWith("output:")) {
+      if (args.project === undefined) return fail(`pablo: voice rule: --target ${layer} needs --project <slug>`);
+      const resolved = resolveVerbProject(ctx, args.project);
+      if (!resolved.ok) return resolved.result;
+      projectPath = resolved.projectPath;
+    }
+    const file = ruleFileFor(layer, { cwd: ctx.cwd, env: ctx.env, projectPath });
+    if (!file.ok) return { body: refusalBody(file), exitCode: file.code };
+    if (layer === "work" && !existsSync(file.path)) return fail(`pablo: voice rule: the work has no QWEN.md (${file.path})`);
+    if (layer !== "work") ensureRuleDir(file.path);
+    return done(addRule(undefined, args.text, { file: { path: file.path, target: layer, commit: file.commit }, ...(args.example ? { example: args.example } : {}) }));
   }
 
+  if (args.name === undefined) return fail("pablo: voice rule requires name (or a layer --target)");
   let location: VoiceLocation;
   if (ctx.caller === "mcp") {
     const located = resolveVoiceLocationOrRefusal(ctx, args.name);
@@ -1180,9 +1198,83 @@ export function runVoiceRule(
   return done(addRule(location, args.text, { target: "voice", ...(args.example ? { example: args.example } : {}) }));
 }
 
+/** The work a rule verb looks in: `--project`, else the work `cwd` is inside, else none. */
+function ruleWork(ctx: Pick<VerbContext, "cwd" | "env">, project: string | undefined): { ok: true; projectPath: string | undefined } | { ok: false; result: VerbResult } {
+  if (project === undefined) return { ok: true, projectPath: workFromCwd(ctx.cwd) };
+  const resolved = projectPathOf(ctx, project);
+  if (!resolved.ok) return { ok: false, result: { body: refusalBody(resolved), exitCode: resolved.code } };
+  return { ok: true, projectPath: resolved.path };
+}
+
+/** `voice list`: every voice, and every rule with its id (work and output rules need `--project` or a cwd inside the work). */
+export function runVoiceList(args: { readonly project?: string | undefined }, ctx: Pick<VerbContext, "cwd" | "env">): VerbResult {
+  const work = ruleWork(ctx, args.project);
+  if (!work.ok) return work.result;
+  const rules = listRules({ cwd: ctx.cwd, env: ctx.env, projectPath: work.projectPath });
+  return { body: { ok: true, voices: listVoices({ cwd: ctx.cwd, env: ctx.env }), rules }, exitCode: 0 };
+}
+
+const changedBody = (r: { id: string; target: string; path: string; committed: boolean; notice?: string }) => ({
+  ok: true,
+  id: r.id,
+  target: r.target,
+  path: r.path,
+  committed: r.committed,
+  ...(r.notice ? { notice: r.notice } : {}),
+});
+
+/** `voice edit <id> "<text>"` (the new id comes back). */
+export function runVoiceEdit(
+  args: { readonly id: string; readonly text: string; readonly target?: string | undefined; readonly project?: string | undefined },
+  ctx: Pick<VerbContext, "cwd" | "env">,
+): VerbResult {
+  const work = ruleWork(ctx, args.project);
+  if (!work.ok) return work.result;
+  const r = editRule(args.id, args.text, { cwd: ctx.cwd, env: ctx.env, projectPath: work.projectPath }, { target: args.target });
+  return "code" in r ? { body: refusalBody(r), exitCode: r.code } : { body: changedBody(r), exitCode: 0 };
+}
+
+/** `voice remove <id>`. */
+export function runVoiceRemove(
+  args: { readonly id: string; readonly target?: string | undefined; readonly project?: string | undefined },
+  ctx: Pick<VerbContext, "cwd" | "env">,
+): VerbResult {
+  const work = ruleWork(ctx, args.project);
+  if (!work.ok) return work.result;
+  const r = removeRule(args.id, { cwd: ctx.cwd, env: ctx.env, projectPath: work.projectPath }, { target: args.target });
+  return "code" in r ? { body: refusalBody(r), exitCode: r.code } : { body: changedBody(r), exitCode: 0 };
+}
+
+/** `voice use <name> --project <slug>`: adds a named voice to the work's `pablo.json` `voice`. */
+export function runVoiceUse(args: { readonly name: string; readonly project?: string | undefined }, ctx: Pick<VerbContext, "cwd" | "env">): VerbResult {
+  if (args.project === undefined) return { body: { ok: false, code: 2, message: "pablo: voice use needs --project <slug>", tried: [] }, exitCode: 2 };
+  const resolved = resolveVerbProject(ctx, args.project);
+  if (!resolved.ok) return resolved.result;
+  const r = useVoice(args.name, ctx, resolved.projectPath);
+  if ("code" in r) return { body: refusalBody(r), exitCode: r.code };
+  return { body: { ok: true, voice: r.voice, added: r.added, path: r.path, committed: r.committed, ...(r.notice ? { notice: r.notice } : {}) }, exitCode: 0 };
+}
+
 async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
-  if (args.sub === "list") {
-    return { body: { ok: true, voices: listVoices({ cwd: ctx.cwd, env: ctx.env }) }, exitCode: 0 };
+  if (args.sub === "list") return runVoiceList({ project: args.project }, ctx);
+
+  const needs = (what: string): VerbResult => ({ body: { ok: false, code: 2, message: `pablo: voice ${args.sub} requires ${what}`, tried: [] }, exitCode: 2 });
+  if (args.sub === "edit") {
+    if (args.name === undefined || args.text === undefined) return needs("name (the rule id) and text");
+    return runVoiceEdit({ id: args.name, text: args.text, target: args.target, project: args.project }, ctx);
+  }
+  if (args.sub === "remove") {
+    if (args.name === undefined) return needs("name (the rule id)");
+    return runVoiceRemove({ id: args.name, target: args.target, project: args.project }, ctx);
+  }
+  if (args.sub === "use") {
+    if (args.name === undefined) return needs("name");
+    return runVoiceUse({ name: args.name, project: args.project }, ctx);
+  }
+
+  if (args.sub === "rule") {
+    if (args.text === undefined) return { body: { ok: false, code: 2, message: "pablo: voice rule requires text" }, exitCode: 2 };
+    return runVoiceRule({ name: args.name, text: args.text, example: args.example, target: args.target, project: args.project }, ctx);
   }
 
   if (args.name === undefined) {
@@ -1202,11 +1294,6 @@ async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext):
       },
       exitCode: 0,
     };
-  }
-
-  if (args.sub === "rule") {
-    if (args.text === undefined) return { body: { ok: false, code: 2, message: "pablo: voice rule requires text" }, exitCode: 2 };
-    return runVoiceRule({ name: args.name, text: args.text, example: args.example, target: args.target, project: args.project }, ctx);
   }
 
   // sub is show, flag, or exemplar — all three resolve `name` to a voice location first.
@@ -1254,7 +1341,27 @@ async function runVoiceVerb(args: z.infer<typeof VOICE_ARGS>, ctx: VerbContext):
 // so there is exactly one implementation of each behind both surfaces.
 // ---------------------------------------------------------------------------
 
-const VOICE_LIST_MCP_ARGS = z.object({});
+const VOICE_LIST_MCP_ARGS = z.object({
+  project: voiceRuleProjectField.optional().describe("The work's slug, to include its work and output rules (else the work the server's cwd is inside)."),
+});
+
+const VOICE_EDIT_MCP_ARGS = z.object({
+  id: voiceRuleIdField,
+  text: voiceRuleTextField.describe("The rule's new text, one line."),
+  target: voiceRuleTargetField.optional().describe("Narrows which file the id is looked up in (only needed when two files hold the same rule)."),
+  project: voiceRuleProjectField.optional(),
+});
+
+const VOICE_REMOVE_MCP_ARGS = z.object({
+  id: voiceRuleIdField,
+  target: voiceRuleTargetField.optional().describe("Narrows which file the id is looked up in (only needed when two files hold the same rule)."),
+  project: voiceRuleProjectField.optional(),
+});
+
+const VOICE_USE_MCP_ARGS = z.object({
+  name: z.string().describe("The named voice to add (a voice slug under the vault's voices/ or the global voices directory)."),
+  project: z.string().describe("The work's slug."),
+});
 
 const VOICE_SHOW_MCP_ARGS = z.object({
   name: voiceNameField,
@@ -1275,7 +1382,7 @@ const VOICE_EXEMPLAR_MCP_ARGS = z.object({
 });
 
 const VOICE_RULE_MCP_ARGS = z.object({
-  name: voiceNameField,
+  name: voiceNameField.optional().describe("The voice to write into; not needed when `target` names a layer."),
   text: voiceRuleTextField,
   example: voiceRuleExampleField.optional(),
   target: voiceRuleTargetField.optional(),
@@ -1286,8 +1393,20 @@ async function runVoiceRuleMcp(args: z.infer<typeof VOICE_RULE_MCP_ARGS>, ctx: V
   return runVoiceRule(args, ctx);
 }
 
-async function runVoiceListMcp(_args: z.infer<typeof VOICE_LIST_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
-  return { body: { ok: true, voices: listVoices({ cwd: ctx.cwd, env: ctx.env }) }, exitCode: 0 };
+async function runVoiceListMcp(args: z.infer<typeof VOICE_LIST_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  return runVoiceList({ project: args.project }, ctx);
+}
+
+async function runVoiceEditMcp(args: z.infer<typeof VOICE_EDIT_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  return runVoiceEdit(args, ctx);
+}
+
+async function runVoiceRemoveMcp(args: z.infer<typeof VOICE_REMOVE_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  return runVoiceRemove(args, ctx);
+}
+
+async function runVoiceUseMcp(args: z.infer<typeof VOICE_USE_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  return runVoiceUse(args, ctx);
 }
 
 async function runVoiceShowMcp(args: z.infer<typeof VOICE_SHOW_MCP_ARGS>, ctx: VerbContext): Promise<VerbResult> {
@@ -1324,7 +1443,8 @@ async function runVoiceExemplarMcp(args: z.infer<typeof VOICE_EXEMPLAR_MCP_ARGS>
 const VOICE_MCP_TOOLS: readonly McpToolSpec[] = [
   {
     name: "voice_list",
-    description: "Every voice pablo can find: the fiction alias (if the vault has a style/ directory), every vault voice, and every global voice.",
+    description:
+      "Every voice pablo can find (the fiction alias, every vault voice, every global voice) and every rule with its id, per layer (global, vault, named voices, the work's, each output's). Use the ids with voice_edit and voice_remove.",
     args: VOICE_LIST_MCP_ARGS,
     run: runVoiceListMcp,
   },
@@ -1349,9 +1469,27 @@ const VOICE_MCP_TOOLS: readonly McpToolSpec[] = [
   {
     name: "voice_rule",
     description:
-      "Add a rule the author dictated to a voice: a bullet under its `## Rules` section (created if missing; style/prose.md for the fiction voice), committed. `example` adds the sentences it came from as a Flagged line; `target: work` (with `project`) writes into the work's QWEN.md instead.",
+      "Add a rule the author dictated to a voice: a bullet under its `## Rules` section (created if missing; style/prose.md for the fiction voice), committed. `example` adds the sentences it came from as a Flagged line; `target` writes into a layer instead: global, vault, work (the work's QWEN.md) or output:<type> (that output's RULES.md); work and output targets need `project`.",
     args: VOICE_RULE_MCP_ARGS,
     run: runVoiceRuleMcp,
+  },
+  {
+    name: "voice_edit",
+    description: "Change one rule's text by its id (from voice_list), keeping its example lines. Returns the rule's new id.",
+    args: VOICE_EDIT_MCP_ARGS,
+    run: runVoiceEditMcp,
+  },
+  {
+    name: "voice_remove",
+    description: "Delete one rule (and its example lines) by its id (from voice_list).",
+    args: VOICE_REMOVE_MCP_ARGS,
+    run: runVoiceRemoveMcp,
+  },
+  {
+    name: "voice_use",
+    description: "Add a named voice to a work's pablo.json `voice` list, so every pack for the work carries it.",
+    args: VOICE_USE_MCP_ARGS,
+    run: runVoiceUseMcp,
   },
 ];
 
