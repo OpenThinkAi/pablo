@@ -193,6 +193,9 @@ export interface VoiceTargetInfo { readonly id: string; readonly label: string }
 /** `a v r` (AGT-1594): a rule being typed on one line. `sentences` are the selection it is the example of (maybe none); `at` indexes `targets`. */
 export interface VoiceRule { readonly sentences: readonly string[]; readonly targets: readonly VoiceTargetInfo[]; readonly at: number; readonly text: string }
 
+/** `r c` / `r s` / `r w` / `r l` / `r f` (AGT-2178): a planning or research verb's one-line input, typed until Enter hands it to the planner or Esc cancels. `id` is the key row's id; `title` and `hint` say what to type. */
+export interface Planning { readonly id: string; readonly title: string; readonly hint: string; readonly text: string }
+
 export interface State {
   readonly mode: Mode;
   readonly compose: Compose;
@@ -224,6 +227,8 @@ export interface State {
   readonly voice: readonly string[] | null;
   /** `a v r`: the rule being typed (one line), until Enter hands it to the voicer or Esc cancels; null otherwise. */
   readonly voiceRule: VoiceRule | null;
+  /** `r ...`: the planning or research verb's input being typed (one line), or null. */
+  readonly planning: Planning | null;
   /** `c` in a review: the comment being typed, or null. */
   readonly commenting: Commenting | null;
   /** Counts the comments saved from the screen; a change tells the layer above to read the comment store again. */
@@ -324,6 +329,13 @@ export type Action =
   | { type: "voice.start"; kind: VoiceKind }
   | { type: "voice.done"; lines: readonly string[] }
   | { type: "voice.failed"; message: string }
+  // `r ...` (AGT-2178): a planning or research verb. `plan.open` asks for its one line (Enter is `plan.start`, Esc cancels);
+  // a verb that needs no input goes straight to `plan.start`; then done (what it did) or failed (why not).
+  | { type: "plan.open"; id: string; title: string; hint: string }
+  | { type: "plan.type"; text: string } | { type: "plan.backspace" }
+  | { type: "plan.start"; id: string; title: string }
+  | { type: "plan.done"; title: string; lines: readonly string[] }
+  | { type: "plan.failed"; title: string; message: string }
   // ---- live data (AGT-1640): a tick reads the book again
   | { type: "tick" }
   | { type: "finish.start"; branch: string }
@@ -383,6 +395,9 @@ export function voiceRuleContent(r: VoiceRule): Content {
   };
 }
 
+/** What the content area shows while a planning or research verb's line is typed: what to type, the buffer with its cursor. */
+export const planningContent = (p: Planning): Content => ({ kind: "plan", title: `${p.title}: Enter runs, Esc cancels`, body: `${p.hint}\n\n${withCursor(p.text, [...p.text].length)}` });
+
 /** What the content area shows while a comment is typed: where it goes, the buffer with its cursor, how to go on. */
 export const commentContent = (c: Commenting, note = ""): Content => ({
   kind: "comment", title: `Comment on ${c.path} line ${c.line}: Enter saves, Esc cancels`, body: `${withCursor(c.text, [...c.text].length)}${note ? `\n\n${note}` : ""}`,
@@ -422,7 +437,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
   tick: 0,
 });
 
@@ -643,7 +658,7 @@ export function reduce(s: State, a: Action): State {
       return { ...s, pane: "rail", focus: s.focus === "content" ? "content" : "rail" };
 
     case "content.show": return { ...s, content: a.content, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
-    case "content.close": return { ...s, voice: null, voiceRule: null, content: null, full: false, focus: s.focus === "content" ? s.pane : s.focus, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "content.close": return { ...s, voice: null, voiceRule: null, planning: null, content: null, full: false, focus: s.focus === "content" ? s.pane : s.focus, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "content.down": return { ...s, contentScroll: scrollBy(s.contentScroll, 1) };
     case "content.up": return { ...s, contentScroll: scrollBy(s.contentScroll, -1) };
     case "content.page_down": return { ...s, contentScroll: scrollBy(s.contentScroll, pageStep(s.contentScroll.visible)) };
@@ -813,6 +828,22 @@ export function reduce(s: State, a: Action): State {
     }
     case "voice.done":
       return { ...s, voice: null, voiceRule: null, content: voiceContent("Added to the voice", a.lines.join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "plan.open": {
+      if (s.mode.kind !== "book" || s.planning !== null || s.writing !== null || s.revise !== null || s.editing !== null || s.finishing !== null) return s;
+      const p: Planning = { id: a.id, title: a.title, hint: a.hint, text: "" };
+      return { ...s, planning: p, content: planningContent(p), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 }, focus: s.pane };
+    }
+    case "plan.type": case "plan.backspace": {
+      if (s.planning === null) return s;
+      const next: Planning = { ...s.planning, text: a.type === "plan.type" ? s.planning.text + a.text : [...s.planning.text].slice(0, -1).join("") };
+      return { ...s, planning: next, content: planningContent(next) };
+    }
+    case "plan.start":
+      return { ...s, planning: null, content: { kind: "plan", title: a.title, body: "running…" }, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "plan.done":
+      return { ...s, planning: null, content: { kind: "plan", title: a.title, body: a.lines.join("\n") }, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "plan.failed":
+      return { ...s, planning: null, content: { kind: "plan", title: `${a.title}: not done`, body: a.message }, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "voice.failed":
       return { ...s, voice: null, voiceRule: null, content: voiceContent("Not added to the voice", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "finish.start":
@@ -897,6 +928,7 @@ export function reduce(s: State, a: Action): State {
       if (s.revise) return reduce(s, { type: "revise.cancel" });
       if (s.commenting) return { ...s, commenting: null, content: null, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
       if (s.voiceRule) return { ...s, voiceRule: null, content: null, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      if (s.planning) return { ...s, planning: null, content: null, contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
       if (s.mode.kind === "compose") return s.compose.pick !== null ? reduce(s, { type: "compose.pick" }) : reduce(s, { type: "compose.close" });
       if (s.pending) return reduce(s, { type: "prefix.clear" });
       if (s.full) return reduce(s, { type: "view.full" });

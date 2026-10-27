@@ -16,7 +16,7 @@ import type { Size } from "./resize";
 import { resolve, tokenOf } from "./chord";
 import { bookCounts, bookRail, missingContent, waitingDoc, writeRequest, type BookRail, type UnitRef } from "./book";
 import { KeyPanel } from "./key-panel";
-import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, voiceChoiceOf, voiceChoicesFor, VOICE_CHOICES, VOICE_TARGETS, type Command, type Keymap } from "./keys";
+import { DEFAULT_KEYMAP, effectiveKeys, keyStateOf, planningVerbOf, voiceChoiceOf, voiceChoicesFor, VOICE_CHOICES, VOICE_TARGETS, type Command, type Keymap } from "./keys";
 import { layoutOf, measureOf, wrapText, type Layout } from "./layout";
 import { fileLineAt, type MainDoc } from "./document";
 import { hitAt, hitDetail, mainPane, nextHitRow, textRows, type CheckHit, type MainRow } from "./hits";
@@ -30,10 +30,10 @@ import { branchRows, editTarget, loadReview, reviewLines, type BranchDiff, type 
 import type { CommentSaver, EditSession, Finisher, Refresher, Rejected } from "./screen";
 import { commentAction, isSubmit } from "./comment-input";
 import { voiceRuleAction } from "./voice-input";
-import type { Voicer, Writer } from "./screen";
+import type { Planner, Voicer, Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
-import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Mark, type RailRow, type Revise, type State } from "./state";
+import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Planning, type Mark, type RailRow, type Revise, type State } from "./state";
 
 export interface AppProps {
   /** The project's marker fields the status area shows. */
@@ -62,6 +62,8 @@ export interface AppProps {
   readonly diffOf?: (branch: string) => BranchDiff;
   /** `a w`: writes a chapter and says what came of it (the CLI's `runWrite`, passed in; this package cannot import it). */
   readonly writer?: Writer;
+  /** The planning and research verbs (`r ...`); absent, a key says it is not available here. */
+  readonly planner?: Planner;
   /** `a r`: revises the selected sentences and commits the taken candidate on a `revise/` branch (the CLI's `screenReviser`, passed in). */
   readonly reviser?: Reviser;
   /** `a v`: writes the selected sentences into the voice as a flagged line or an exemplar (the CLI's `screenVoicer`, passed in). */
@@ -106,7 +108,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, voicer, finisher, editSession, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
+export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, planner, reviser, voicer, finisher, editSession, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -141,6 +143,15 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
       if (isSubmit(input, key)) return saveComment();
       const action = commentAction(input, key);
       if (action) dispatch(action);
+      return;
+    }
+    // While a planning or research verb's line is open (`r s`, `r w`, ...) its keys are text; Enter runs it.
+    if (state.planning) {
+      if (isSubmit(input, key)) return runPlanning(state.planning);
+      const a = commentAction(input, key);
+      if (a?.type === "comment.type") dispatch({ type: "plan.type", text: a.text });
+      else if (a?.type === "comment.backspace") dispatch({ type: "plan.backspace" });
+      else if (a) dispatch(a);
       return;
     }
     // While a voice rule is open (`a v r`) its keys are text: the one line, Tab changes the target, Enter writes it.
@@ -194,6 +205,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
       else if (action.id === "ai.write") startWrite();
       else if (action.id === "ai.revise") openRevise(selectedOf(viewOf(state).main, pane.sentences));
       else if (action.id === "ai.voice") { const sentences = selectedOf(viewOf(state).main, pane.sentences)?.sentences ?? []; dispatch({ type: "voice.offer", sentences, choices: voiceChoicesFor(sentences.length) }); }
+      else if (planningVerbOf(action.id)) startPlanning(action.id);
       else if (action.id === "review.finish") startFinish();
       else if (action.id === "review.comment") openComment();
       else if (action.id === "view.editor") startEdit();
@@ -254,6 +266,24 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     writer(target.unit, (line) => dispatch({ type: "write.progress", line }), target.output).then(
       (r) => dispatch(r.ok ? { type: "write.done", branch: r.branch, lines: r.lines } : { type: "write.failed", message: r.message, missing: r.missing }),
       (e: unknown) => dispatch({ type: "write.failed", message: e instanceof Error ? e.message : String(e), missing: [] }),
+    );
+  }
+
+  // `r ...`: a planning or research verb. One that takes a line asks for it in the content area; one that does not runs now.
+  function startPlanning(id: string) {
+    const verb = planningVerbOf(id);
+    if (!verb || state.mode.kind !== "book" || state.planning !== null || state.writing !== null || state.revise !== null || state.editing !== null || state.finishing !== null) return;
+    if (!planner) return void dispatch({ type: "content.show", content: { title: verb.title, body: "This is not available here.", kind: "plan" } });
+    if (verb.hint !== undefined) return void dispatch({ type: "plan.open", id, title: verb.title, hint: verb.hint });
+    runPlanning({ id, title: verb.title, hint: "", text: "" });
+  }
+  function runPlanning(p: Planning) {
+    if (!planner) return;
+    if (p.hint !== "" && p.text.trim() === "") return;
+    dispatch({ type: "plan.start", id: p.id, title: p.title });
+    planner(p.id, p.text.trim()).then(
+      (r) => dispatch(r.ok ? { type: "plan.done", title: p.title, lines: r.lines } : { type: "plan.failed", title: p.title, message: r.message }),
+      (e: unknown) => dispatch({ type: "plan.failed", title: p.title, message: e instanceof Error ? e.message : String(e) }),
     );
   }
 

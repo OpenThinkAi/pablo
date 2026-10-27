@@ -1,8 +1,8 @@
 // The keys, as data. Every action is a row: a stable id, the states it acts in, a primary key, an optional secondary
 // key (the vim/helix spelling), the label the key panel shows, and what it does (`do`: a model action from state.ts, or
 // a command for the layer above it). Arrows move around the screen; letter prefixes hold everything else: `a` AI,
-// `f` filter, `v` view, `g` go to, `r` research and planning. A prefixed row's key is its second key, pressed after the prefix. Copied from
-// prview's keys.ts and adapted (pablo's states are the rail, the main pane and the content area, and a review is a
+// `f` filter, `v` view, `g` go to, `r` research. A prefixed row's key is its second key, pressed after the prefix.
+// Copied from prview's keys.ts and adapted (pablo's states are the rail, the main pane and the content area, and a review is a
 // mode of them); never shared with it, so the two may drift.
 //
 // The key panel (panel.ts) is drawn from these rows and the key handler resolves a keypress through the same rows
@@ -104,7 +104,7 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "ai.revise", states: MAIN, prefix: "a", key: "r", label: "revise", description: "Revise the selected sentences.", do: cmd("ai.revise") },
   { id: "ai.voice", states: MAIN, prefix: "a", key: "v", label: "voice", description: "Add the selected sentences to the voice (flag them, keep them as an exemplar), or type a rule for it.", do: cmd("ai.voice") },
 
-  // ---- r: research and planning (AGT-2178): the planning and research verbs, each its own action (the parity test names them)
+  // ---- r: research (AGT-2178): the planning and research verbs, each its own action (the parity test names them)
   { id: "plan.save", states: OUTSIDE, needs: "book", prefix: "r", key: "c", label: "save core doc", description: "Save a core doc of the work's track (premise, acts, beats, bible, period, or thesis, claims, outline) from a file.", do: cmd("plan.save") },
   { id: "research.plan", states: OUTSIDE, needs: "book", prefix: "r", key: "p", label: "research plan", description: "Draft the work's research checklist.", do: cmd("research.plan") },
   { id: "research.save", states: OUTSIDE, needs: "book", prefix: "r", key: "s", label: "save note", description: "Save a research note with its sources, for the checklist items it covers.", do: cmd("research.save") },
@@ -132,6 +132,24 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "go.hit_prev", states: MAIN, needs: "book", prefix: "g", key: "F", label: "previous hit", description: "Go to the previous check hit in the document, wrapping round at the start.", do: cmd("check.prev") },
   { id: "go.line", states: MAIN, prefix: "g", key: "<n>", label: "line", description: "Type a line number, then close it with the go prefix key again or Enter, to go to that line.", fixed: true },
 ];
+
+// ---------------------------------------------------------------- `r`: the planning and research verbs, as data
+//
+// Each `r` row is a planning or research verb run from the screen (AGT-2178). `hint` is the one line the verb takes (what
+// the content area asks for); absent, the verb takes no input and runs at once. The planner (the CLI's `screenPlanner`)
+// parses the line; this package never imports the CLI.
+
+export interface PlanningVerb { readonly id: string; readonly title: string; readonly hint?: string }
+export const PLANNING_VERBS: readonly PlanningVerb[] = [
+  { id: "plan.save", title: "Save a core doc", hint: "<stage> <file>: stage is premise, acts, beats, bible/<file>, period, or thesis, claims, outline; file is a path in the vault.\nExample: premise drafts/premise.md" },
+  { id: "research.plan", title: "Research plan" },
+  { id: "research.save", title: "Save a research note", hint: "<title> | <note> | <source> [<source>...] | <item numbers, optional>\nExample: Ice houses | Cut in January from the lake. | https://example.org/ice | 1 2" },
+  { id: "research.waive", title: "Waive a research item", hint: "<#> <reason>\nExample: 3 No sources survive for this." },
+  { id: "research.link", title: "Link a research note", hint: "<#> <note>\nExample: 2 research/ice-houses.md" },
+  { id: "research.distill", title: "Distill the research into period facts" },
+  { id: "fact.record", title: "Record a fact", hint: "<researched|invented|author> <continuity|bible file> | <fact> | <source, for researched>\nExample: invented continuity | The well ran dry in June." },
+];
+export const planningVerbOf = (id: string): PlanningVerb | undefined => PLANNING_VERBS.find((v) => v.id === id);
 
 // ---------------------------------------------------------------- `a v`: the voice choices, as data
 //

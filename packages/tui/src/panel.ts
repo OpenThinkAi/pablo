@@ -35,6 +35,7 @@ export function entriesOf(ks: KeyState, pending: Pending | null = null, km: Keym
 export function entriesFor(s: State, km: Keymap = DEFAULT_KEYMAP): Entry[] {
   // `a v` takes the keys while it is up: its choices, or the rule input's (both are data in keys.ts).
   if (s.voiceRule) return VOICE_RULE_KEYS.map((k) => entry(showKey(k.key), "", k.key === "tab" && s.voiceRule!.targets.length < 2 ? "" : k.label)).filter((e) => e.label);
+  if (s.planning) return [entry("Enter", "", "run"), entry("Esc", "", "cancel")];
   if (s.voice) return [...voiceChoicesFor(s.voice.length).map((c) => entry(c.key, "", c.label)), entry("Esc", "", "cancel")];
   return entriesOf(keyStateOf(s), s.pending, km);
 }
