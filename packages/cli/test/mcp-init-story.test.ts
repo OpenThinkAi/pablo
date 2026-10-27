@@ -138,7 +138,7 @@ test("init, output_add, story and merge are served with descriptions", async () 
     expect((tool?.description ?? "").length).toBeGreaterThan(40);
   }
   const outputAdd = tools.find((t) => t.name === "output_add")!.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
-  expect(Object.keys(outputAdd.properties ?? {}).sort()).toEqual(["from", "project", "type"]);
+  expect(Object.keys(outputAdd.properties ?? {}).sort()).toEqual(["from", "project", "thesis", "type"]);
   expect((outputAdd.required ?? []).sort()).toEqual(["project", "type"]);
   // There is one way to add an output over MCP: the `output` tool keeps list, remove and plan.
   const output = tools.find((t) => t.name === "output")!.inputSchema as unknown as { properties: { sub: { enum: string[] } } };

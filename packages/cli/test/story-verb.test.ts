@@ -260,6 +260,21 @@ test("AC1: the spec example leaves research, a bible, an outline, a drafted and 
   expect(git(vault, "status", "--porcelain", "--", `stories/${body.project}`)).toBe("");
 });
 
+test("AGT-2135: --output essay on a fiction story assumes the premise as the essay's thesis and writes every section", async () => {
+  const { vault, ctx } = tempVault();
+  const result = await runStory({ prompt: SPEC, output: ["essay"] }, ctx, depsFor(fakeHarness().agent, fakeWriter()));
+  const body = result.body as Record<string, any>;
+  expect(body.message).toBeUndefined();
+  expect(result.exitCode).toBe(0);
+  const work = join(vault, "stories", body.project);
+  expect(readFileSync(join(work, "outputs", "essay", "thesis.md"), "utf8")).toBe("# Thesis\n\nThe sea is failing them.\n");
+  expect(body.assumptions).toContainEqual(expect.objectContaining({ stage: "output:essay", options: ["The sea is failing them."] }));
+  expect(existsSync(join(work, "outputs", "essay", "outline.md"))).toBe(true);
+  expect(body.drafts.essay.length).toBeGreaterThan(1);
+  expect(existsSync(body.published.essay.where)).toBe(true);
+  expect(changeBranches(vault)).toEqual([]);
+});
+
 // ---------------------------------------------------------------------------
 // AC2: two outputs from one core
 // ---------------------------------------------------------------------------

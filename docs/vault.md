@@ -50,7 +50,8 @@ facts. From it pablo derives one or more **outputs**: a `novel` (chapters), a
 Fountain: `outputs/screenplay/scenes/NN-slug.fountain`, stored line for line), or
 `radio` (an experimental audio drama, see [commands.md](commands.md#radio-experimental)), a `narrated`
 reading of another output, or an `essay` (on a nonfiction work, one section per
-row of `core/outline.md`, all in `outputs/essay/essay.md`). `pablo output add <type>` adds one;
+row of `core/outline.md`; on a fiction work, one per row of `outputs/essay/outline.md`,
+arguing `outputs/essay/thesis.md`; all in `outputs/essay/essay.md`). `pablo output add <type>` adds one;
 outputs other than the novel live under `outputs/<type>/`, each with its own
 `RULES.md`, `plan.md` and continuity ledger.
 

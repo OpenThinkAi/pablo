@@ -250,4 +250,27 @@ export interface OutputDefinition {
    * through it. Absent: the unit's file, frontmatter stripped. Pure over the work directory.
    */
   readonly unitText?: (workDir: string, unit: number) => string | undefined;
+  /**
+   * The output's own files `output add` writes beside `plan.md` and `RULES.md`, before the plan is read (the essay
+   * on a fiction track, AGT-2135: its thesis and outline), or a refusal naming what is missing (the thesis). Each
+   * file is written only when the work does not have it. Absent: none. Pure over the work directory.
+   */
+  readonly scaffold?: (workDir: string, options: ScaffoldOptions) => ScaffoldOutcome;
 }
+
+/** What `output add` passes an output's `scaffold`. */
+export interface ScaffoldOptions {
+  /** `output add essay --thesis "<text>"` (AGT-2135). */
+  readonly thesis?: string | undefined;
+}
+
+/** An output's scaffold files (work-relative path and text), or a refusal with what is missing. */
+export type ScaffoldOutcome =
+  | { readonly ok: true; readonly files: readonly { readonly rel: string; readonly content: string }[] }
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly missing: readonly string[];
+      /** The one value the author can supply to get past the refusal (`--thesis`), so a front end can ask for it. */
+      readonly ask?: "thesis";
+    };

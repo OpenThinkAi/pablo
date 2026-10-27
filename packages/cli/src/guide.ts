@@ -254,6 +254,17 @@ function waitingOn(def: OutputDefinition, track: TrackId): string | undefined {
 function addSteps(def: OutputDefinition, track: TrackId): GuideStep[] {
   if (def.derive === undefined) {
     const plan = `plan.md: ${def.planNote ?? "which units tell which beats"}`;
+    // A fiction track's essay argues a thesis about the story (AGT-2135): the add takes it and scaffolds the outline.
+    if (def.scaffold !== undefined && track !== "nonfiction") {
+      return [
+        {
+          phase: "output",
+          title: `add the ${def.id} output with its thesis (once the core is in)`,
+          command: `pablo output add ${def.id} --thesis "<the one thing it argues about the story>" ${P}`,
+          detail: `scaffolds outputs/${def.id}/ (thesis.md; outline.md, its sections drawn from the story core; ${plan}; RULES.md)`,
+        },
+      ];
+    }
     return [{ phase: "output", title: `add the ${def.id} output (once the core is in)`, command: `pablo output add ${def.id} ${P}`, detail: `scaffolds outputs/${def.id}/ (${plan}; RULES.md)` }];
   }
   const from = `<${proseSources(track).join("|")}>`;

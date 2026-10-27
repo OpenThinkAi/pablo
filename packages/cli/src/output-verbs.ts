@@ -14,6 +14,11 @@
  *                   deleted: `outputs/<type>/` moves to
  *                   `outputs/_removed/<type>-<date>/` in the same commit (the
  *                   novel's chapters stay where they are)
+ *   add essay --thesis "<text>"
+ *                   on a fiction track (AGT-2135) the essay's thesis; with
+ *                   the outline drawn from the core it is written as
+ *                   `outputs/essay/thesis.md` and `outline.md` beside the
+ *                   plan, and an essay added without one is refused
  *   add narrated --from <output>
  *                   a derived output (AGT-2137) records the prose output it
  *                   reads as `outputs.narrated.from`; its plan is that
@@ -69,6 +74,8 @@ export interface OutputRefusal {
   readonly code: 2;
   readonly message: string;
   readonly missing?: readonly string[];
+  /** The value the author can give to get past the refusal (`output add essay`'s thesis, AGT-2135), for a front end to ask for. */
+  readonly ask?: "thesis";
 }
 
 export type OutputListResult = { readonly ok: true; readonly outputs: readonly OutputListEntry[]; readonly available: readonly string[] } | OutputRefusal;
@@ -105,6 +112,8 @@ export interface OutputVerbOptions {
   readonly now?: () => Date;
   /** `add <type> --from <output>` (AGT-2137): the output a derived type (narrated) reads; refused for any other type. */
   readonly from?: string | undefined;
+  /** `add essay --thesis "<text>"` (AGT-2135): a fiction track's essay thesis; refused for a type with no scaffold. */
+  readonly thesis?: string | undefined;
 }
 
 function refuse(sub: string, message: string, missing?: readonly string[]): OutputRefusal {
@@ -252,10 +261,20 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
     return refuse("add", core.track === "nonfiction" ? `the core is not complete yet (${short})` : `the story core is not at beats yet (${short})`, missing);
   }
 
+  // An output's own files (the fiction essay's thesis and outline, AGT-2135), written before the plan reads them.
+  const thesis = opts.thesis?.trim() || undefined;
+  if (thesis !== undefined && def.def.scaffold === undefined) return refuse("add", `--thesis is for the essay output; the ${id} output takes none`);
+  const scaffold = def.def.scaffold?.(workDir, { thesis }) ?? { ok: true as const, files: [] };
+  if (!scaffold.ok) {
+    const refusal = refuse("add", scaffold.message, scaffold.missing.length === 0 ? undefined : scaffold.missing);
+    return scaffold.ask === undefined ? refusal : { ...refusal, ask: scaffold.ask };
+  }
+
   const plan = planFile(id);
   const rules = rulesFile(id);
   // The plan's content is read after pablo.json is rewritten: a derived output's plan is its source's (`outputs.<id>.from`).
   const writes: { rel: string; content: () => string }[] = [];
+  for (const file of scaffold.files) if (!existsSync(join(workDir, file.rel))) writes.push({ rel: file.rel, content: () => file.content });
   if (!existsSync(join(workDir, plan))) writes.push({ rel: plan, content: () => renderPlan(def.def, def.def.plan(workDir)) });
   if (!existsSync(join(workDir, rules))) writes.push({ rel: rules, content: () => def.def.rulesTemplate });
   // The novel's ledger (AGT-1705): continuity extraction skips a work with none, so a novel added to a work gets one now.

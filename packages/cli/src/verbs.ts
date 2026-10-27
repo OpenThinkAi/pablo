@@ -1853,6 +1853,7 @@ const OUTPUT_ARGS = z.object({
     ),
   type: z.string().optional().describe("The output type for add, remove and plan, e.g. \"novel\" or \"radio\"."),
   from: z.string().optional().describe("add narrated: the output the narration reads, a prose output the work has (e.g. \"novel\", \"story\", \"essay\")."),
+  thesis: z.string().max(4000).optional().describe("add essay on a fiction or historical-fiction work: the one thing the essay argues about the story; written to outputs/essay/thesis.md with an outline drawn from the story core. Required there unless the file already has one."),
   project: projectField,
   "dry-run": z.boolean().optional().default(false).describe("plan: show the rows; write and commit nothing."),
 });
@@ -1864,7 +1865,7 @@ async function runOutputVerb(args: z.infer<typeof OUTPUT_ARGS>, ctx: VerbContext
     args.sub === "list"
       ? listOutputs(resolved.projectPath)
       : args.sub === "add"
-        ? addOutput(resolved.vaultRoot, resolved.projectPath, args.type, { from: args.from })
+        ? addOutput(resolved.vaultRoot, resolved.projectPath, args.type, { from: args.from, thesis: args.thesis })
         : args.sub === "remove"
           ? removeOutput(resolved.vaultRoot, resolved.projectPath, args.type)
           : planOutput(resolved.vaultRoot, resolved.projectPath, args.type, { dryRun: args["dry-run"] });
@@ -1873,7 +1874,7 @@ async function runOutputVerb(args: z.infer<typeof OUTPUT_ARGS>, ctx: VerbContext
 
 // AGT-2143 (D-16): over MCP, adding an output is its own tool with a narrow schema, and the `output` tool keeps
 // list, remove and plan, so there is one way to add an output, not two. The CLI's `pablo output add` is unchanged.
-const OUTPUT_MCP_ARGS = OUTPUT_ARGS.extend({
+const OUTPUT_MCP_ARGS = OUTPUT_ARGS.omit({ thesis: true }).extend({
   sub: z
     .enum(["list", "remove", "plan"])
     .describe(
@@ -1893,6 +1894,11 @@ const OUTPUT_ADD_MCP_ARGS = z.object({
   project: projectField,
   type: z.string().describe('The output type to add, e.g. "story", "novel", "screenplay", "radio", "narrated" or "essay"; the work\'s track decides which it allows.'),
   from: z.string().optional().describe('narrated only: the prose output the narration reads, one the work has (e.g. "novel", "story", "essay").'),
+  thesis: z
+    .string()
+    .max(4000)
+    .optional()
+    .describe("essay on a fiction or historical-fiction work only: the one thing the essay argues about the story. Ask the author for it; the add is refused without one."),
 });
 
 const OUTPUT_ADD_MCP: McpToolSpec = {
@@ -1902,7 +1908,7 @@ const OUTPUT_ADD_MCP: McpToolSpec = {
   args: OUTPUT_ADD_MCP_ARGS,
   run: async (raw, ctx) => {
     const args = OUTPUT_ADD_MCP_ARGS.parse(raw);
-    return runOutputVerb({ sub: "add", type: args.type, from: args.from, project: args.project, "dry-run": false }, ctx);
+    return runOutputVerb({ sub: "add", type: args.type, from: args.from, thesis: args.thesis, project: args.project, "dry-run": false }, ctx);
   },
 };
 

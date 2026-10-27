@@ -6,8 +6,10 @@
  * (`core/outline.md`, `| # | Section | What it covers |`), and a section's
  * claims are the claims rows its "What it covers" cell names (`#2`, `#3`), or
  * every claim when it names none. On a fiction track the essay is about the
- * story (D-7: it draws on the story core's research and facts) and has one
- * section, the whole essay.
+ * story (D-7: it draws on the story core's research and facts): its sections
+ * are `outputs/essay/outline.md`'s rows (same table), which `output add essay`
+ * scaffolds from the core with the thesis (AGT-2135, `./scaffold.ts`); a work
+ * without that file has one section, the whole essay.
  *
  * Every section lives in `outputs/essay/essay.md`, under a `## <section
  * title>` heading, in outline order:
@@ -39,7 +41,16 @@ import { ESSAY_DIR, ESSAY_FILE } from "./units";
 /** The essay file, work-relative. */
 export const ESSAY_PATH = `${ESSAY_DIR}/${ESSAY_FILE}`;
 
-/** The one section of an essay on a fiction track. */
+/** A fiction track's essay thesis (AGT-2135), written by `output add essay --thesis`. Work-relative. */
+export const ESSAY_THESIS_FILE = `${ESSAY_DIR}/thesis.md`;
+
+/** A fiction track's essay outline (AGT-2135), `| # | Section | What it covers |`, scaffolded from the core. */
+export const ESSAY_OUTLINE_FILE = `${ESSAY_DIR}/outline.md`;
+
+/**
+ * The one section of an essay on a fiction track that has no `outputs/essay/outline.md` (one added before
+ * AGT-2135 gave the fiction essay a thesis and an outline).
+ */
 export const FICTION_ESSAY_SECTION: EssaySection = { number: 1, title: "The essay", covers: "the story: what it is about, where it comes from and why it is told" };
 
 function read(path: string): string | undefined {
@@ -52,9 +63,16 @@ export function essayTrack(workDir: string): TrackId {
   return marker.ok ? trackOf(marker.marker) : "fiction";
 }
 
-/** The essay's outline: the core outline's sections on nonfiction, the one whole-essay section on a fiction track. */
+/**
+ * The essay's outline: the core outline's sections on nonfiction; on a fiction track the sections of
+ * `outputs/essay/outline.md` (AGT-2135), or the one whole-essay section when the work has no such file.
+ */
 export function essayOutline(workDir: string, track: TrackId = essayTrack(workDir)): { readonly sections: readonly EssaySection[]; readonly source: string } {
-  if (track !== "nonfiction") return { sections: [FICTION_ESSAY_SECTION], source: ESSAY_PATH };
+  if (track !== "nonfiction") {
+    const text = read(join(workDir, ESSAY_OUTLINE_FILE));
+    if (text === undefined) return { sections: [FICTION_ESSAY_SECTION], source: ESSAY_PATH };
+    return { sections: parseSections(text).map((r) => ({ number: r.number, title: r.section, covers: r.summary })), source: ESSAY_OUTLINE_FILE };
+  }
   const rows = parseSections(read(join(workDir, OUTLINE_FILE)) ?? "");
   return { sections: rows.map((r) => ({ number: r.number, title: r.section, covers: r.summary })), source: OUTLINE_FILE };
 }
