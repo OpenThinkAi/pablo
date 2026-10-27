@@ -54,7 +54,7 @@ name past its first word, or a cue such as "according to") is traced by shared w
 
 A citation is a bracket of note ids (`@<id>`) and/or claims row numbers (`#<n>`):
 `[@ice-harvest]`, `[#2]`, `[@ice-harvest; #3]`. The track's check list in the guide is
-`claim-support` and `citations`; the hits you see are the two above, and a citation that
+`claim-support`; the hits you see are the two above, and a citation that
 resolves to nothing is named in the hit. The tracing is by shared words, not a model. `write` runs it
 after each draft and reports hits without rewriting; `--no-check` skips it. See
 [check](../commands.md#check).

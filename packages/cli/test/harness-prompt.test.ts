@@ -127,8 +127,9 @@ test("pablo ships policies/historical-fiction.md with the harness doc's judgemen
   expect(text).toContain("`[pick]`");
   // Otherwise proceed with a stated assumption.
   expect(text).toMatch(/Proceed with a stated assumption/);
-  // Never put research names in anything the writer sees.
-  expect(text).toMatch(/put a name from `research\/` into anything the writer sees/);
+  // Research notes are never sent; realNames: false swaps real names for bible ones.
+  expect(text).toMatch(/send a research note itself to the writer/);
+  expect(text).toMatch(/Real names are allowed by default; on a work with `realNames: false`/);
   expect(text).toMatch(/`invented` fact be presented as history/);
 });
 

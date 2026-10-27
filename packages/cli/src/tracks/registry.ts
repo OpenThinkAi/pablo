@@ -63,7 +63,7 @@ export const TRACKS = {
     id: "nonfiction",
     coreStages: NONFICTION_CORE_STAGE_IDS,
     policy: "nonfiction",
-    checks: ["claim-support", "citations"],
+    checks: ["claim-support"],
     outputs: ["narrated", "essay"],
   },
 } as const satisfies Readonly<Record<TrackId, TrackDefinition>>;
