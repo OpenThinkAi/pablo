@@ -187,7 +187,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 fetches rounds for a reader, `notes.ts` (`notes pull`,
                 AGT-1587) turns a submitted review into a vault branch, and
                 `round-housekeeping.ts` closes a pulled round (AGT-1588).
-                `install-reader.sh` at the repo root is the reader's installer
+                `install-reader.sh` at the repo root is the reader cleanup script
                 (AGT-1590). The output registry (AGT-1668): `src/outputs/registry.ts`'s
                 `OUTPUTS` is the single source of output types, like `VERBS`;
                 each type is a directory (`src/outputs/novel/`) exporting an
