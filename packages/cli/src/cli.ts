@@ -1421,6 +1421,18 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     return EXIT_OK;
   }
 
+  // Reading rounds are gone (AGT-2092, AGT-2094): `read --list` and `read <reader>-<date>` used to mean a round,
+  // and would otherwise fall through to the author's `read <path>` and a project-resolution refusal.
+  if (
+    args.verb === "share" ||
+    args.verb === "notes" ||
+    (args.verb === "read" && (args.values["list"] === true || /^[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}-\d{2}-\d{2}$/.test(args.rest[0] ?? "")))
+  ) {
+    const message = `pablo: reading rounds were removed (${args.verb === "read" ? "`pablo read <path> --project <slug>` still reads a file in the work" : `there is no \`pablo ${args.verb}\``}); share a manuscript outside pablo`;
+    emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+    return EXIT_REFUSED;
+  }
+
   if (!ALL_VERBS.includes(args.verb)) {
     const message = `pablo: unknown verb "${args.verb}" — run "pablo --help" for the list`;
     emit({ ok: false, code: EXIT_ERROR, message }, args.json);
@@ -1438,14 +1450,6 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // `guide` (AGT-2142) reads the track and output registries only: no vault, no project.
   if (args.verb === "guide") {
     return await runVerbEntry("guide", args, cwd, guideText);
-  }
-
-  // Reading rounds are gone (AGT-2092, AGT-2094): `read --list` and `read <reader>-<date>` used to mean a round,
-  // and would otherwise fall through to the author's `read <path>` and a project-resolution refusal.
-  if (args.verb === "read" && (args.values["list"] === true || /^[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}-\d{2}-\d{2}$/.test(args.rest[0] ?? ""))) {
-    const message = "pablo: reading rounds were removed; a reader reviews through a GitHub pull request, and `pablo read <path> --project <slug>` reads a file in the work";
-    emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
-    return EXIT_REFUSED;
   }
 
   // `prose` (AGT-1241) has no `--project` at all — AC4 requires it to work

@@ -38,8 +38,7 @@ part. Expect rough edges, and please [open an issue](https://github.com/OpenThin
 when you hit one.
 
 Also in the box, less mature: one-shot short stories (`pablo story`), a full-terminal
-screen with review mode, reader rounds over GitHub (currently tied to one GitHub
-organization), and an experimental radio-drama pipeline that needs Apple Silicon.
+screen with review mode, and an experimental radio-drama pipeline that needs Apple Silicon.
 
 ## Install
 
@@ -61,7 +60,7 @@ llama.cpp, MLX) or an Anthropic API key.
   checks before it drafts.
 - **[Configuration](docs/configuration.md):** models, keys, routing.
 - **[Command reference](docs/commands.md):** every command and flag.
-- **[Sharing with readers](docs/readers.md):** reading rounds and the reader's installer.
+- **[Reading rounds (removed)](docs/readers.md):** what replaced them, and removing pablo.
 
 A starter vault to copy is in [`examples/starter-vault`](examples/starter-vault).
 

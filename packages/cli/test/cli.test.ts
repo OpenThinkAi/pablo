@@ -486,7 +486,7 @@ test("the removed reading-round forms of `read` and the share/notes verbs point 
   }
   for (const verb of ["share", "notes"]) {
     const r = runCli([verb, "--project", "ice-house"], env);
-    expect(r.exitCode).not.toBe(0);
-    expect(r.stderr + r.stdout).toContain("unknown verb");
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr + r.stdout).toContain("reading rounds were removed");
   }
 });
