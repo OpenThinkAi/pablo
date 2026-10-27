@@ -459,12 +459,14 @@ export async function runWrite(
   }
 
   // No model configured is a refusal before anything is made: no branch, no worktree (AGT-2131).
-  const routed = routeDraft(projectPath);
-  if (!routed.ok) {
-    emitError(routed.message, undefined, 2, args.json);
-    return 2;
+  // A derived output (narrated) is made with no model, so it needs none configured.
+  if (output.derive === undefined) {
+    const early = routeDraft(projectPath);
+    if (!early.ok) {
+      emitError(early.message, undefined, 2, args.json);
+      return 2;
+    }
   }
-  const { config, providers, providerId } = routed;
 
   // The chapter is committed on its own branch, never on main (AGT-1536). The
   // branch and worktree are made before the model is called so a project that
@@ -526,6 +528,14 @@ export async function runWrite(
     emitWriteSuccess(args.json, workRelativePath, receipt, [], { name: branchName, worktree, sha: committed.sha as string }, derived.source);
     return 0;
   }
+
+  const routed = routeDraft(projectPath);
+  if (!routed.ok) {
+    discardBranch();
+    emitError(routed.message, undefined, 2, args.json);
+    return 2;
+  }
+  const { config, providers, providerId } = routed;
 
   // The flag wins, then the routed provider's own config, then the default. The
   // pack (and so `prompt_hash`) never sees any of this: sampling is a property

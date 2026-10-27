@@ -43,6 +43,9 @@ export const STARTER_CONFIG = {
   },
   intents: {
     plan: "anthropic",
+    check: "anthropic",
+    research: "anthropic",
+    agent: "anthropic",
     draft: "local",
     revise: "local",
     prose: "local",

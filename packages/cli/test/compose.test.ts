@@ -18,6 +18,10 @@ import { adapterProvider } from "../src/harness/provider";
 import { loopSpec } from "../src/harness/session";
 import type { HarnessQuery, HarnessSpec } from "../src/harness/session";
 import { harnessTools } from "../src/harness/tools";
+import { writeLocalConfig } from "./local-config";
+
+
+
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "pablo-compose-test-"));
@@ -26,6 +30,7 @@ cpSync(FIXTURE_VAULT, vault, { recursive: true });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const BASE_ENV = { PABLO_VAULT: vault, PATH: "/usr/bin:/bin", HOME: root, XDG_CONFIG_HOME: join(root, "config") };
+writeLocalConfig(join(root, "config"));
 const ctx = { cwd: vault, env: BASE_ENV, stderr: { write: () => {} }, caller: "mcp" as const };
 
 /** A spec on a scripted model; `tools` narrows what is offered (the default is every pablo tool). */

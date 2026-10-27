@@ -38,3 +38,23 @@ export function useLocalConfigHome(): void {
     rmSync(home, { recursive: true, force: true });
   });
 }
+
+const TEST_ANTHROPIC = { endpoint: "https://api.anthropic.com/v1", model: "test-anthropic-model" } as const;
+
+/**
+ * Config text for tests written when pablo had built-in defaults: a `local`
+ * entry is laid over the test local provider, and an `anthropic`-kind entry
+ * without an endpoint or model gets the test ones.
+ */
+export function configTextWithTestDefaults(text: string): string {
+  const raw = JSON.parse(text) as { providers?: Record<string, Record<string, unknown>> };
+  const providers: Record<string, Record<string, unknown>> = { local: { ...TEST_LOCAL_PROVIDER, ...raw.providers?.["local"] } };
+  for (const [id, entry] of Object.entries(raw.providers ?? {})) {
+    if (id !== "local") providers[id] = entry["kind"] === "anthropic" ? { ...TEST_ANTHROPIC, ...entry } : entry;
+  }
+  return JSON.stringify({ ...raw, providers });
+}
+
+export function parseWithTestDefaults(text: string, source?: string): PabloConfig {
+  return parseConfig(configTextWithTestDefaults(text), source);
+}

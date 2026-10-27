@@ -24,6 +24,9 @@ import type { StoryDeps } from "../src/story";
 import { publishOutput } from "../src/verbs";
 import type { VerbContext, VerbResult } from "../src/verbs";
 import { fakeTrackPlanner } from "./track-planner";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");

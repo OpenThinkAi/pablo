@@ -45,6 +45,7 @@ test("the starter parses through the real loader, holds no key, and names no mod
   // Routing works on it: writing goes to the local example, planning to the cloud one.
   expect(route(config, { name: "draft", kind: "drafting" })).toBe("local");
   expect(route(config, { name: "plan", kind: "planning" })).toBe("anthropic");
+  for (const intent of ["plan", "check", "research", "agent", "draft", "revise", "prose", "continuity"]) expect(config.intents.has(intent)).toBe(true);
 });
 
 test("writeStarterConfig creates the file once and never overwrites an existing one", () => {
