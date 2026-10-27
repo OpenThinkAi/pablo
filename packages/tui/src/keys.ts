@@ -154,6 +154,8 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
 
   // ---- the editing pane (`v e`), Helix-style (AGT-2169, D-18): motions in normal and select mode, and the keys that change
   // mode. modal.ts carries each out by id. Insert mode has no rows: keys type there, and Esc goes back to normal.
+  // The word-target prompt (AGT-2175, word-count.ts): in every mode, rebindable like any row.
+  { id: "edit.target", states: PANE, needs: "pane", key: "ctrl-g", label: "word target", description: "Set a word target for this unit (N), for the work (w N), or clear one (0), shown with the live count in the status line.", do: { type: "words.prompt" } },
   { id: "editor.left", states: MODAL, key: "h", secondary: "left", label: "move", description: "Move the cursor a character left (to the end of the previous line at the start of one).", do: cmd("editor.left") },
   { id: "editor.down", states: MODAL, key: "j", secondary: "down", label: "move", description: "Move the cursor down a display row; a wrapped paragraph is several rows.", do: cmd("editor.down") },
   { id: "editor.up", states: MODAL, key: "k", secondary: "up", label: "move", description: "Move the cursor up a display row; a wrapped paragraph is several rows.", do: cmd("editor.up") },

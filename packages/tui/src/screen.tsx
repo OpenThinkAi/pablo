@@ -13,6 +13,7 @@ import type { BranchDiff, ReviewComment } from "./review";
 import type { CheckHit } from "./hits";
 import { loadDocument } from "./source";
 import type { PaneSession } from "./edit-pane";
+import type { TargetStore } from "./word-count";
 
 const ENTER_ALT = "\x1b[?1049h\x1b[H";
 const LEAVE_ALT = "\x1b[?1049l";
@@ -100,6 +101,8 @@ export interface ScreenOptions {
   readonly editSession?: EditSession;
   /** `v e`: the unit edited in place in the screen on the work's `edit/` branch (the CLI's `screenEditPane`, passed in; AGT-2167). */
   readonly paneSession?: PaneSession;
+  /** Where the editor's word targets persist (AGT-2175). */
+  readonly targetStore?: TargetStore;
   /** Reads the book's stages and waiting branches again; the screen calls it every few seconds, so work done outside it shows (AGT-1640). */
   readonly refresh?: Refresher;
   readonly stdout?: NodeJS.WriteStream;
@@ -135,7 +138,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
         stdout.write(ENTER_ALT);
       }
     });
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} {...(options.fileOf ? { fileOf: options.fileOf } : {})} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} modes={loadModes()} load={load} checks={options.checks} writer={options.writer} {...(options.verbRunner ? { verbRunner: options.verbRunner } : {})} {...(options.planner ? { planner: options.planner } : {})} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.paneSession ? { paneSession: options.paneSession } : {})} {...(options.composer ? { composer: options.composer } : {})} {...(options.refresh ? { refresh: options.refresh } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} {...(options.fileOf ? { fileOf: options.fileOf } : {})} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} modes={loadModes()} load={load} checks={options.checks} writer={options.writer} {...(options.verbRunner ? { verbRunner: options.verbRunner } : {})} {...(options.planner ? { planner: options.planner } : {})} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.paneSession ? { paneSession: options.paneSession } : {})} {...(options.targetStore ? { targetStore: options.targetStore } : {})} {...(options.composer ? { composer: options.composer } : {})} {...(options.refresh ? { refresh: options.refresh } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

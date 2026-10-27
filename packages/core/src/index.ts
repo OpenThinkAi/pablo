@@ -6,6 +6,7 @@ export * from "./providers";
 export * from "./diff";
 export * from "./web";
 export { isProseBlock, joinManuscript, joinParagraphs, joinSentences, splitManuscript, splitSentences } from "./sentences";
+export { countWords, fileWords } from "./words";
 export type { FactEntry, FactLine, FactScan, Provenance } from "./facts";
 export { establishedByOf, formatFactLine, formatProvenance, parseFactLine, scanFacts, unitTag, withProvenance } from "./facts";
 export type { PeriodFact } from "./period-facts";

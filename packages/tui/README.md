@@ -30,6 +30,7 @@ src/edit-modes.ts      focus and typewriter modes of the editing pane: paragraph
 src/edit-pane-view.tsx  the editing pane as a component, drawn where the main pane is
 src/modal.ts     the editing pane's Helix-style modes (normal, insert, select) and motions, pure
 src/operators.ts the editing pane's operators (`d c y p P x r`), registers and `u`/`U`, pure
+src/word-count.ts the editor's live word count and word targets (AGT-2175): pure parts and `useWordTargets`, the status line's `words` field
 src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
 src/source.ts    reads the file behind a rail row id from the project (the loader `App` is given as `load`)
 src/index.ts     the package's public surface (`runScreen`); the CLI imports it lazily, only for bare `pablo`
@@ -338,6 +339,14 @@ in the settings view, listed in the key panel while the pane is open); the pane'
 each toggle is written to `editModes` in the config file at once, so the next pane opens the same way. The scroll is the
 model's (`editPane.top`, set by `pane.scroll`), not the buffer's: `paneView` computes it without writing anything.
 
+
+The status line shows a `words` field while the pane is open (`word-count.ts`, AGT-2175): the live count of the buffer,
+core's `countWords`, the counter `pablo status` uses for a unit file (frontmatter left out), so the number for a saved file is
+`status`'s `words`. Ctrl+G (the rebindable `edit.target` row, in every mode) opens a target prompt in that field (`600` is this unit's target, `w 80000` the output's (all its units together), `0` clears;
+Enter sets, Esc cancels) and the field then shows the progress (`412 words · unit 412/500 · 82% · novel 9000/80000 · 11%`).
+An output's total is the other units' saved words (the rail's `words`) plus the live count, over the edited unit's output.
+Targets persist through the `targetStore` the CLI passes in: `<work>/.pablo/targets.json` (gitignored, so a target never
+rides an `edit/` branch).
 `v s` saves it: the same `finisher` a review's `s` uses, with nothing rejected, so the merge into `main` and the
 after-write steps are the ones every branch gets. A document that is not one file (the bible, a missing chapter) has no
 `editable` path and `v e` says so.

@@ -5,10 +5,10 @@
 // No field is cut to make room for another: when the line is too narrow, whole fields drop, in DROP_ORDER. The
 // progress is never dropped (at a width too narrow even for it alone, the line is cut at the edge).
 
-export interface Field { readonly key: "format" | "progress" | "branch" | "comments" | "review"; readonly label: string; readonly value: string; readonly color?: string }
+export interface Field { readonly key: "format" | "progress" | "branch" | "comments" | "review" | "words"; readonly label: string; readonly value: string; readonly color?: string }
 
-/** The order fields leave a narrow line in: the branch first, then the comments, the format, then the review's counts. The progress stays. */
-export const DROP_ORDER: readonly Field["key"][] = ["branch", "comments", "format", "review"];
+/** The order fields leave a narrow line in: the branch first, then the comments, the format, then the review's counts, then the editor's word count. The progress stays. */
+export const DROP_ORDER: readonly Field["key"][] = ["branch", "comments", "format", "review", "words"];
 export const GAP = "   ";
 
 /** What a comment is about: a continuity contradiction, a thing mentioned before its date, a voice tell, a `check` hit. Kinds, not severities. */
@@ -29,6 +29,8 @@ export interface StatusInput {
   readonly comments: Partial<Record<string, number>>;
   /** In a review: the changes accepted, rejected and still pending. */
   readonly review?: { readonly accepted: number; readonly rejected: number; readonly pending: number };
+  /** In the editing pane: the live word count and target progress (word-count.ts). */
+  readonly words?: { readonly value: string; readonly color?: string };
 }
 
 export function statusFields(s: StatusInput): Field[] {
@@ -39,6 +41,7 @@ export function statusFields(s: StatusInput): Field[] {
   const counts = labels.filter((k) => s.comments[k]).map((k) => `${s.comments[k]} ${k}`);
   out.push({ key: "comments", label: "comments", value: counts.length ? `▲ ${counts.join(" · ")}` : "none", color: counts.length ? "yellow" : undefined });
   if (s.review) out.push({ key: "review", label: "review", value: `${s.review.accepted} accepted · ${s.review.rejected} rejected · ${s.review.pending} pending` });
+  if (s.words) out.push({ key: "words", label: "", value: s.words.value, ...(s.words.color ? { color: s.words.color } : {}) });
   return out;
 }
 

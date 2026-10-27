@@ -9,8 +9,9 @@
 // a dependency. The tui cannot import this package, so cli.ts passes `screenEditor` in through runScreen's options.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import type { TargetStore } from "@openthink/pablo-tui";
 import { branchExists, branchIsEmpty, branchKind, createBranch, deleteBranch, ensureWorktree, listBranches, repoRoot, worktreePath } from "./branch";
 import type { Author } from "./branch";
 import { commitAs } from "./branch";
@@ -299,5 +300,27 @@ export function screenEditPane(projectPath: string, deps: EditDeps = {}): EditPa
     open: (file) => openForPane(projectPath, file, deps),
     save: (file, branch, text) => saveFromPane(projectPath, file, branch, text, deps),
     close: (branch) => closePane(projectPath, branch, deps),
+  };
+}
+
+/**
+ * The editor's word targets (AGT-2175), one file per work: `<work>/.pablo/targets.json` (gitignored with the rest of
+ * `.pablo/`, so a target never rides an `edit/` branch into main). `{"outputs": {"novel": 80000}, "units": {"<unit file>": 3000}}`;
+ * a missing or unreadable file is no targets.
+ */
+export function screenTargetStore(projectPath: string): TargetStore {
+  const file = join(projectPath, ".pablo", "targets.json");
+  return {
+    load: () => {
+      try {
+        return JSON.parse(readFileSync(file, "utf8")) as unknown;
+      } catch {
+        return undefined;
+      }
+    },
+    save: (targets) => {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, `${JSON.stringify(targets, null, 2)}\n`);
+    },
   };
 }

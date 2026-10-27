@@ -23,6 +23,8 @@ export interface BookStage {
   /** A drafted unit row's file (work-relative) and how it is stored (`sentences` joins lines into paragraphs; `lines` keeps them line for line). */
   readonly file?: string;
   readonly storage?: Storage;
+  /** A drafted unit's word count as saved (`status`'s `words`): the work's total for a per-work target. */
+  readonly words?: number;
 }
 
 /** How a unit's text is stored: one sentence per line (read as paragraphs), or line for line (a radio script). */
@@ -52,6 +54,8 @@ export interface BookRail {
   /** The file and storage mode of each drafted unit row, by row id. */
   readonly units: Readonly<Record<string, UnitRef>>;
   /** Units drafted of the total, per output: the status line's progress while the cursor is in that output. */
+  /** The saved word count of each drafted unit row, by row id. */
+  readonly words: Readonly<Record<string, number>>;
   readonly counts: Readonly<Record<string, { readonly drafted: number; readonly total: number }>>;
 }
 
@@ -62,7 +66,9 @@ export function bookRail(stages: readonly BookStage[]): BookRail {
   const outputOf: Record<string, string> = {};
   const targets: Record<string, WriteTarget> = {};
   const units: Record<string, UnitRef> = {};
+  const words: Record<string, number> = {};
   for (const s of stages) {
+    if (s.words !== undefined) words[s.id] = s.words;
     if (s.file !== undefined) units[s.id] = { file: s.file, storage: s.storage ?? "sentences" };
     const legacy = /^chapter:(\d+)$/.exec(s.id)?.[1];
     if (s.output !== undefined) outputOf[s.id] = s.output;
@@ -81,6 +87,7 @@ export function bookRail(stages: readonly BookStage[]): BookRail {
     outputOf,
     targets,
     units,
+    words,
     counts: Object.fromEntries([...new Set(Object.values(outputOf))].map((o) => [o, bookCounts(stages, o)])),
   };
 }

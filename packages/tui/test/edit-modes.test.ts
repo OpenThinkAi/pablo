@@ -102,8 +102,8 @@ test("the toggles are key-config rows: Ctrl+F and Ctrl+T by default, rebindable"
   expect(modeOfKey("ctrl-t", DEFAULT_KEYMAP)).toBe("typewriter");
   expect(modeOfKey("x", DEFAULT_KEYMAP)).toBeNull();
   expect(modeOfKey(null, DEFAULT_KEYMAP)).toBeNull();
-  const km = effectiveKeys({ "edit.focus": "ctrl-g" });
-  expect(modeOfKey("ctrl-g", km)).toBe("focus");
+  const km = effectiveKeys({ "edit.focus": "ctrl-b" });
+  expect(modeOfKey("ctrl-b", km)).toBe("focus");
   expect(modeOfKey("ctrl-f", km)).toBeNull();
 });
 

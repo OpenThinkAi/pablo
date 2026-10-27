@@ -244,6 +244,11 @@ export function paneEsc(p: EditPane): "leaves" | "asks" | "ignored" {
   return p.phase === "open" && p.text?.dirty && !p.closing ? "asks" : "leaves";
 }
 
+/** The editor's word targets (word-count.ts, AGT-2175): one per output (its units' total) and one per unit file. */
+export interface WordTargets { readonly outputs: Readonly<Record<string, number>>; readonly units: Readonly<Record<string, number>> }
+/** The word-target prompt: what is being typed (null when closed) and the last thing that went wrong. */
+export interface WordsState { readonly targets: WordTargets; readonly typed: string | null; readonly notice: string | null }
+
 export interface State {
   readonly mode: Mode;
   readonly compose: Compose;
@@ -299,6 +304,8 @@ export interface State {
   readonly editPane: EditPane | null;
   /** Focus and typewriter, as the config sets them and the pane's toggles change them (AGT-2176). */
   readonly modes: EditModes;
+  /** The editor's word targets and the prompt that sets them. */
+  readonly words: WordsState;
 }
 
 /**
@@ -413,6 +420,10 @@ export type Action =
   | { type: "pane.saved"; branch: string; lines: readonly string[]; edit: (text: EditPaneText) => EditPaneText }
   | { type: "pane.save_failed"; message: string }
   | { type: "pane.close" }
+  // ---- the editor's word targets (AGT-2175): loaded once, a prompt typed into, then set (the layer above persists them)
+  | { type: "words.loaded"; targets: WordTargets }
+  | { type: "words.prompt" } | { type: "words.type"; text: string } | { type: "words.back" } | { type: "words.cancel" }
+  | { type: "words.set"; targets: WordTargets } | { type: "words.notice"; message: string | null }
   | { type: "save.start"; branch: string }
   | { type: "save.done"; branch: string; lines: readonly string[] }
   | { type: "save.failed"; message: string }
@@ -445,7 +456,7 @@ const voiceContent = (title: string, body: string): Content => ({ title, body, k
 const writingName = (output: string | undefined, unit: number) => (output === undefined || output === "novel" ? `chapter ${unit}` : `${output} ${unit}`);
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 /** What the editing pane's keys do, shown in the content area while it is open. */
-const PANE_KEYS = "i a o insert · v selects · d c y p P x r edit the selection (or the character), \" names a register · u U undo and redo · Esc back to normal, and in normal closes · Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes · Ctrl+F focus · Ctrl+T typewriter";
+const PANE_KEYS = "i a o insert · v selects · d c y p P x r edit the selection (or the character), \" names a register · u U undo and redo · Esc back to normal, and in normal closes · Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes · Ctrl+G sets a word target · Ctrl+F focus · Ctrl+T typewriter";
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
@@ -507,7 +518,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (modes: EditModes = { focus: false, typewriter: false }): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null, editPane: null, modes,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null, editPane: null, words: { targets: { outputs: {}, units: {} }, typed: null, notice: null }, modes,
   tick: 0,
 });
 
@@ -982,6 +993,13 @@ export function reduce(s: State, a: Action): State {
     }
     case "pane.save_failed":
       return s.editPane?.phase !== "saving" ? s : { ...s, editPane: { ...s.editPane, phase: "open", auto: false }, content: writeContent(s.editPane.auto ? "Not autosaved" : "Not saved", a.message) };
+    case "words.loaded": return { ...s, words: { ...s.words, targets: a.targets } };
+    case "words.prompt": return s.editPane === null || s.editPane.phase === "opening" ? s : { ...s, words: { ...s.words, typed: "", notice: null } };
+    case "words.type": return s.words.typed === null ? s : { ...s, words: { ...s.words, typed: s.words.typed + a.text, notice: null } };
+    case "words.back": return s.words.typed === null ? s : { ...s, words: { ...s.words, typed: s.words.typed.slice(0, -1) } };
+    case "words.cancel": return { ...s, words: { ...s.words, typed: null } };
+    case "words.set": return { ...s, words: { targets: a.targets, typed: null, notice: null } };
+    case "words.notice": return { ...s, words: { ...s.words, notice: a.message } };
     case "pane.close": {
       const p = s.editPane;
       if (p === null) return s;
