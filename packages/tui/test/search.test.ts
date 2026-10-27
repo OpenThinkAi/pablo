@@ -125,3 +125,10 @@ test("typing after a replace is its own undo step", () => {
   t.buffer.undo();
   expect(t.buffer.text()).toBe("hen");
 });
+
+test("the note goes at the next edit or move", () => {
+  let t = run(open("cat"), replace("cat", "hen"));
+  expect(searchStatus(t)).toBe("2 replacements".replace("2", "1").replace("replacements", "replacement"));
+  t = run(t, ["l"]);
+  expect(t.note).toBeNull();
+});

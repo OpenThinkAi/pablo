@@ -43,7 +43,7 @@ export interface EditText extends EditPaneText {
   readonly search?: { readonly query: string } | null;
   /** A one-line prompt being typed (`/` or `R`); it takes every key until Enter or Esc. */
   readonly prompt?: { readonly kind: "search" | "find" | "with"; readonly text: string; readonly find?: string } | null;
-  /** What the last search or replace did, for the title ("3 replaced", "no match"). */
+  /** What the last search or replace did, for the title ("2 replacements", "no match"); any other edit of the text clears it. */
   readonly note?: string | null;
 }
 
@@ -111,7 +111,7 @@ export function openText(raw: string, storage: string, line: number): EditText {
 export function apply(t: EditText, op: (b: TextBuffer) => void): EditText {
   const buffer = t.buffer.clone();
   op(buffer);
-  return { ...t, buffer, dirty: buffer.dirty, empty: blankText(buffer) };
+  return { ...t, buffer, dirty: buffer.dirty, empty: blankText(buffer), note: null };
 }
 
 /** A body with nothing but whitespace: saving it would leave the file its frontmatter alone, so the pane asks first. */
