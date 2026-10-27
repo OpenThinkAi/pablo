@@ -1,5 +1,6 @@
-// `v e` on the screen (AGT-1545): Matt's own edits are always an `edit/<short-id>` branch (the screen doc's "Changes are
-// branches"). The editor opens on the file at the cursor's line inside that branch's worktree, so `main` is never touched;
+// Matt's own edits on the screen (AGT-1545) are always an `edit/<short-id>` branch (the screen doc's "Changes are
+// branches"). `v e` edits in the screen's own pane (`screenEditPane`, at the end, AGT-2167); this launch path was `v e`'s
+// before that and is still `e` in a review (AGT-1591). The editor opens on the file at the cursor's line inside that branch's worktree, so `main` is never touched;
 // when it returns, what it left is committed as Matt. One open edit branch per work: a second `v e` goes back into the
 // same worktree. Saving is not here: it is the review finish path (`screenFinisher`) run on the branch with nothing
 // rejected, so the merge and its after-write steps are the ones every other branch gets.

@@ -945,7 +945,7 @@ export function reduce(s: State, a: Action): State {
       const p = s.editPane;
       if (p === null || p.phase === "saving") return s;
       if (p.text?.dirty && !p.closing) return { ...s, editPane: { ...p, closing: true }, content: writeContent(`Unsaved changes to ${p.file}`, "Esc again closes without saving them; Ctrl+S saves.") };
-      return { ...s, editPane: null, content: s.editBranch === null ? null : writeContent(`Edits on ${s.editBranch}`, "v e opens the editor again; v s saves the branch into main") };
+      return { ...s, editPane: null, content: s.editBranch === null ? null : writeContent(`Edits on ${s.editBranch}`, "v e edits it again; v s saves the branch into main") };
     }
     case "save.start":
       return s.finishing !== null || s.editing !== null || s.mode.kind !== "book" ? s : { ...s, finishing: a.branch, content: writeContent(`Saving ${a.branch}`, "merging…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };

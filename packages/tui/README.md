@@ -302,7 +302,8 @@ never in the buffer: a `sentences` unit is shown one paragraph per line with a b
 or `screenplay` unit line for line, and both are loaded and saved through `edit-save.ts` (AGT-2168: only changed
 paragraphs re-split, the rest byte for byte); `saveText` is the pane's one call into it. Ctrl+S on an emptied pane asks
 first (it would leave the file only its frontmatter); Ctrl+S again saves it. `check` hits are re-run on the text as it would save and drawn as
-boxes under their paragraph. The saved branch then waits in the book like any other. `e` in a review (AGT-1591) still
+boxes under their paragraph. An essay unit (AGT-2134) is a section of the one shared essay file, and its rail row names
+that file: `v e` on it edits the whole essay, the cursor on the section's line. The saved branch then waits in the book like any other. `e` in a review (AGT-1591) still
 opens the configured editor (`editSession`, `screenEditor`) on the review branch, leaving the alternate screen while it
 runs.
 `v s` saves it: the same `finisher` a review's `s` uses, with nothing rejected, so the merge into `main` and the
