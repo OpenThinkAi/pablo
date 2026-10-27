@@ -9,10 +9,15 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { openText } from "../../tui/src/edit-pane";
+import { paneWords } from "../../tui/src/word-count";
+import { readWorkStatus, reportWithWords } from "../src/work-state";
+import { workBookStages } from "../src/book";
+import { screenTargetStore } from "../src/edit-session";
 import { waitingForReview } from "../src/branch";
 import { readNovelState } from "../src/novel/machine";
 
@@ -83,5 +88,47 @@ describe("waitingForReview", () => {
     branchWithChange(work, "draft/ch02");
     git(work, "merge", "-q", "--no-edit", "draft/ch02");
     expect(waitingForReview(work)).toEqual([]);
+  });
+});
+
+describe("unit word counts (AGT-2175)", () => {
+  const CHAPTER = "chapters/01-the-last-full-cut.md";
+
+  test("status reports each drafted unit's words, and the editor's live count for the saved file is that number", () => {
+    const work = tempRepo();
+    const raw = readFileSync(join(work, CHAPTER), "utf8");
+    const unit = readWorkStatus(work).outputs["novel"]!.units.find((u) => u.file === CHAPTER)!;
+    expect(unit.words).toBeGreaterThan(0);
+    // The editor's count: the buffer `v e` opens over the same file.
+    expect(paneWords(openText(raw, "sentences", 1))).toBe(unit.words!);
+    // A file whose frontmatter holds words: the frontmatter is not counted, by either.
+    writeFileSync(join(work, CHAPTER), "---\nchapter: 1\ntitle: A long frontmatter title here\n---\n\nOne two three.\nFour five.\n");
+    const changed = readWorkStatus(work).outputs["novel"]!.units.find((u) => u.file === CHAPTER)!;
+    expect(changed.words).toBe(5);
+    expect(paneWords(openText(readFileSync(join(work, CHAPTER), "utf8"), "sentences", 1))).toBe(5);
+  });
+
+  test("the rail's stages carry the words too, for a per-work target's total", () => {
+    const work = tempRepo();
+    const stage = workBookStages(work).find((s) => s.file === CHAPTER || s.id === "chapter:1");
+    expect(stage?.words).toBe(readWorkStatus(work).outputs["novel"]!.units.find((u) => u.file === CHAPTER)!.words);
+  });
+
+  test("targets persist in <work>/.pablo/targets.json, and a missing file is no targets", () => {
+    const work = tempRepo();
+    const store = screenTargetStore(work);
+    expect(store.load()).toBeUndefined();
+    store.save({ outputs: { novel: 80000 }, units: { [CHAPTER]: 3000 } });
+    expect(existsSync(join(work, ".pablo", "targets.json"))).toBe(true);
+    expect(screenTargetStore(work).load()).toEqual({ outputs: { novel: 80000 }, units: { [CHAPTER]: 3000 } });
+  });
+});
+
+describe("shared-file units (AGT-2175)", () => {
+  test("units that share one file report no words, so a section is never given the whole essay's count", () => {
+    const report = { noun: "section", plural: "sections", dir: "x", drafted: 2, total: 2, units: [{ unit: 1, status: "draft", file: "chapters/01-the-last-full-cut.md" }, { unit: 2, status: "draft", file: "chapters/01-the-last-full-cut.md" }] };
+    const work = tempRepo();
+    expect(reportWithWords(work, report).units.map((u) => u.words)).toEqual([undefined, undefined]);
+    expect(reportWithWords(work, { ...report, units: [report.units[0]!] }).units[0]!.words).toBeGreaterThan(0);
   });
 });

@@ -14,6 +14,9 @@
  * with no change to this file.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileWords } from "@openthink/pablo-core";
 import { coreNext, coreStages, readCoreState } from "./core/machine";
 import type { CoreStage, CoreState } from "./core/machine";
 import { itemLabel } from "./core/checklist";
@@ -51,13 +54,37 @@ export function workNext(core: CoreState, outputs: Readonly<Record<string, Outpu
   return "all outputs drafted";
 }
 
+/** Words in the work-relative unit `file` (core's `fileWords`), or undefined when it cannot be read. */
+export function unitWords(workDir: string, file: string): number | undefined {
+  try {
+    return fileWords(readFileSync(join(workDir, file), "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `report` with each drafted unit's `words`, the count the TUI editor shares with `status`. Units that share one file (the
+ * essay's sections are all one file) get none: the file's count is not any one section's.
+ */
+export function reportWithWords(workDir: string, report: OutputReport): OutputReport {
+  const files = report.units.map((u) => u.file).filter((f): f is string => f !== undefined);
+  return {
+    ...report,
+    units: report.units.map((u) => {
+      const words = u.file === undefined || files.filter((f) => f === u.file).length > 1 ? undefined : unitWords(workDir, u.file);
+      return words === undefined ? u : { ...u, words };
+    }),
+  };
+}
+
 /** Reads `workDir`'s core (on `track`'s stage list) and every output in `declared` (the marker's `outputs`) into one report. */
 export function readWorkReport(workDir: string, declared: Outputs, track: TrackId = DEFAULT_TRACK): WorkReport {
   const core = readCoreState(workDir, track);
   const outputs: Record<string, OutputReport> = {};
   for (const type of Object.keys(declared)) {
     const def = outputDefinition(type);
-    if (def !== undefined) outputs[type] = def.report(workDir, core);
+    if (def !== undefined) outputs[type] = reportWithWords(workDir, def.report(workDir, core));
   }
   return { core: { ...core, stages: coreStages(core) }, outputs, next: workNext(core, outputs) };
 }

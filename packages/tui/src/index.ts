@@ -10,3 +10,4 @@ export type { Composer } from "./compose";
 export type { PaneOpenResult, PaneSaveResult, PaneSession } from "./edit-pane";
 export type { ComposeEvent } from "./state";
 export type { ReviseRequest, ReviseResult, Reviser, TakeRequest, TakeResult } from "./revise";
+export type { TargetStore, Targets } from "./word-count";

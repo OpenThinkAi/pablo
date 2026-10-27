@@ -169,7 +169,7 @@ test("the modal keys are keymap rows: rebinding one moves the key, a clash in a 
   expect(normal).toEqual(expect.arrayContaining(["editor.left", "editor.down", "editor.up", "editor.right", "editor.word_next", "editor.word_prev", "editor.word_end", "editor.line_start", "editor.line_end", "editor.bottom", "editor.insert", "editor.append", "editor.open_below", "editor.select"]));
   // Select mode has the same rows but insert and append (`i` and `a` start text objects there, AGT-2170) and the text objects.
   expect(rowsOf({ state: "select" }).map((a) => a.id).filter((id) => !id.startsWith("editor.inner_") && !id.startsWith("editor.around_"))).toEqual(normal.filter((id) => id !== "editor.insert" && id !== "editor.append"));
-  expect(rowsOf({ state: "insert" })).toEqual([]);
+  expect(rowsOf({ state: "insert" }).map((a) => a.id).filter((id) => id !== "edit.target" && !id.startsWith("edit."))).toEqual([]);
   expect(prefixRows({ state: "normal" }, "g").map((a) => a.id)).toEqual(["editor.top"]);
   // None of the editor rows act outside the pane.
   for (const s of ["rail", "main", "content"] as const) expect(rowsOf({ state: s, content: true }).some((a) => a.id.startsWith("editor."))).toBe(false);
@@ -183,7 +183,7 @@ test("while the pane is open the key panel lists its mode's keys and is titled b
   const normal = entriesFor(s).map((e) => `${e.keys} ${e.label}`);
   expect(normal).toEqual(expect.arrayContaining(["h/j/k/l ←/↓/↑/→ move", "w/b/e word", "0/$ Home/End line", "i insert", "v select", "g go to…", "Esc close", "ctrl-s save"]));
   const ins = reduce(s, { type: "pane.edit", edit: (t) => run(t as EditText, ["i"]).text });
-  expect(entriesFor(ins).map((e) => `${e.keys} ${e.label}`)).toEqual(["ctrl-f focus mode", "ctrl-t typewriter mode", "Esc normal", "ctrl-s save", "ctrl-z undo", "ctrl-y redo"]);
+  expect(entriesFor(ins).map((e) => `${e.keys} ${e.label}`)).toEqual(["ctrl-f focus mode", "ctrl-t typewriter mode", "ctrl-g word target", "Esc normal", "ctrl-s save", "ctrl-z undo", "ctrl-y redo"]);
   expect(panelTitle(keyStateOf(ins))).toBe("edit: insert");
   // A rebinding shows in the panel.
   expect(entriesFor(s, effectiveKeys({ "editor.select": "s" })).map((e) => `${e.keys} ${e.label}`)).toContain("s select");

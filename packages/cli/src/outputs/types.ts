@@ -26,6 +26,8 @@ export interface OutputUnit {
   readonly status: string;
   /** The unit file, work-relative, when it is drafted. */
   readonly file?: string;
+  /** Words in the drafted unit file's body (frontmatter left out), the one count `status` and the editor share (core's `fileWords`). Absent when undrafted. */
+  readonly words?: number;
   /**
    * For an output that is performed after it is written (the radio output,
    * AGT-1686): `none`, `performed vK` or `mixed vK`. Absent for written-only types.

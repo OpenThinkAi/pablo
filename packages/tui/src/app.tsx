@@ -38,6 +38,7 @@ import { EditPaneView } from "./edit-pane-view";
 import type { AutosaveOptions } from "./autosave";
 import { NO_MODES, saveModes, type Modes } from "./edit-modes";
 import type { PaneSession } from "./edit-pane";
+import { useWordTargets, type TargetStore } from "./word-count";
 import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Planning, type Mark, type RailRow, type Revise, type State } from "./state";
 
 export interface AppProps {
@@ -89,6 +90,8 @@ export interface AppProps {
   readonly paneSession?: PaneSession;
   /** The editing pane's autosave wait and clock (AGT-2173); tests pass a fake clock. */
   readonly autosave?: AutosaveOptions;
+  /** Where the editor's word targets persist (the CLI's `<work>/.pablo/targets.json`; AGT-2175). Without it targets last the session. */
+  readonly targetStore?: TargetStore;
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
   readonly keymap?: Keymap;
   /** The editor command the config sets ("" for none); what the settings screen opens with. */
@@ -121,7 +124,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", modes: givenModes = NO_MODES, configFile, onCommand, load, checks, writer, planner, verbRunner, reviser, voicer, finisher, editSession, paneSession, autosave, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
+export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", modes: givenModes = NO_MODES, configFile, onCommand, load, checks, writer, planner, verbRunner, reviser, voicer, finisher, editSession, paneSession, targetStore, autosave, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, givenModes, initialState);
@@ -421,6 +424,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   // What was loaded and what the layout measured reach the model as actions; neither is state of this component.
   useEffect(() => { dispatch({ type: "rail.loaded", rows, ...(book && !review ? { folded: book.folded } : {}) }); }, [rows]);
   // A stage that is not ready says why in the content area while the cursor is on it, and takes it down when it leaves.
+  const wordsField = useWordTargets(state.words, dispatch, state.editPane, targetStore, book, state.mode.kind === "book" ? viewOf(state).rail.rows[viewOf(state).rail.cursor]?.id : undefined, keymap);
   const stageId = state.mode.kind === "book" ? viewOf(state).rail.rows[viewOf(state).rail.cursor]?.id : undefined;
   const reasons = stageId === undefined ? undefined : book?.missing[stageId];
   useEffect(() => {
@@ -512,7 +516,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   const shownComments = hits.length ? { ...comments, check: hits.length } : comments;
   // The status line names the output the cursor is in (its group row or one of its units); on a core stage it names the work's format.
   const inOutput = review || stageId === undefined ? undefined : book?.outputOf[stageId];
-  const fields = fitFields(statusFields({ format: inOutput ?? format, ...(inOutput !== undefined && book?.counts[inOutput] ? book.counts[inOutput] : { drafted, total }), branch: reviewBranch ?? branch, comments: review ? { ...shownComments, ...review.counts } : shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}) }), size.cols - 4);
+  const fields = fitFields(statusFields({ format: inOutput ?? format, ...(inOutput !== undefined && book?.counts[inOutput] ? book.counts[inOutput] : { drafted, total }), branch: reviewBranch ?? branch, comments: review ? { ...shownComments, ...review.counts } : shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}), ...(wordsField ? { words: wordsField } : {}) }), size.cols - 4);
   return (
     <Box flexDirection="column" width={size.cols} height={size.rows}>
       <Box flexDirection="column" borderStyle="single" paddingX={1} height={4}>
@@ -533,7 +537,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
           {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} marks={state.marks} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
           {state.editPane && paneSession
-            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} keymap={keymap} modes={state.modes} onModes={saveModesNow} pending={state.pending} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} {...(autosave ? { autosave } : {})} />
+            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} keymap={keymap} modes={state.modes} onModes={saveModesNow} pending={state.pending} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} {...(autosave ? { autosave } : {})} held={wordsField?.typing === true} />
             : <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />}
         </Box>
       )}

@@ -36,11 +36,13 @@ export interface EditPaneViewProps {
   /** Focus and typewriter (edit-modes.ts) and what the app does when one is toggled (writes the config). */
   readonly modes?: Modes;
   readonly onModes?: (modes: Modes) => void;
+  /** Another layer holds the keys (the word-target prompt, AGT-2175): the pane reads none. */
+  readonly held?: boolean;
 }
 
 const fail = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT_KEYMAP, pending = null, width, height, inner, rows, autosave, modes = NO_MODES, onModes }: EditPaneViewProps) {
+export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT_KEYMAP, pending = null, width, height, inner, rows, autosave, modes = NO_MODES, onModes, held = false }: EditPaneViewProps) {
   const { file, storage, line, phase, branch, saveSeq, top } = pane;
   const text = pane.text as EditText | null;
   // Opening: the branch, its worktree and the file there. Once per pane (a new `v e` mounts a new one). `live` goes false
@@ -77,6 +79,7 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
   }, [saveSeq]);
 
   useInput((input, key) => {
+    if (held) return; // the word-target prompt has the keys (word-count.ts)
     const token = tokenOf(input, key);
     if (token === "ctrl-s") return void dispatch({ type: "pane.save" });
     if (token === "esc" && (phase === "opening" || text === null)) {

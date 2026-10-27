@@ -163,7 +163,9 @@ test("status --project ice-house --json exits 0 with the core's state, then the 
     storyDate: body.core.beats[0].storyDate,
     status: "draft",
     file: "chapters/01-the-last-full-cut.md",
+    words: expect.any(Number), // AGT-2175: the count the editor shares
   });
+  expect(body.outputs.novel.units[0].words).toBeGreaterThan(0);
   expect(body.waiting).toEqual([]); // the temp vault is no git repository: no branches to wait on
 
   rmSync(vault, { recursive: true, force: true });

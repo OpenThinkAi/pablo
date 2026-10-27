@@ -11,6 +11,7 @@ import { chapterPreconditions, readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
 import { outputDefinition } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
+import { reportWithWords, unitWords } from "./work-state";
 
 /**
  * The newest draft branch waiting for review for chapter `n`: `draft/chNN`, or the highest `draft/chNN-vK` (a re-draft;
@@ -67,7 +68,7 @@ export function workBookStages(workDir: string, waiting: readonly string[] = [])
   const stages: BookStage[] = coreRailStages(state);
   for (const type of types) {
     if (type === "novel") {
-      stages.push(...novelRailStages(state, waiting));
+      stages.push(...novelRailStages(state, waiting, workDir));
       continue;
     }
     const def = outputDefinition(type);
@@ -78,7 +79,7 @@ export function workBookStages(workDir: string, waiting: readonly string[] = [])
 
 /** One non-novel output's group: its units from the type's own report, each ready or missing by the type's preconditions. */
 export function outputRailStages(workDir: string, def: OutputDefinition, core: CoreState, waiting: readonly string[] = []): BookStage[] {
-  const report = def.report(workDir, core);
+  const report = reportWithWords(workDir, def.report(workDir, core));
   const stages: BookStage[] = [
     { id: `output:${def.id}`, name: `${def.id} (${report.drafted}/${report.total})`, depth: 0, group: true, status: report.total > 0 ? "ready" : "missing", missing: report.total > 0 ? [] : [`${def.id} has no units yet`], output: def.id },
   ];
@@ -86,7 +87,7 @@ export function outputRailStages(workDir: string, def: OutputDefinition, core: C
     const name = `${u.unit}${u.title ? ` ${u.title}` : ""}`;
     const base = { id: `unit:${def.id}:${u.unit}`, name, depth: 1, output: def.id, unit: u.unit };
     if (u.file !== undefined) {
-      stages.push({ ...base, status: "drafted", missing: [], file: u.file, storage: def.manuscript ?? "sentences" });
+      stages.push({ ...base, status: "drafted", missing: [], file: u.file, storage: def.manuscript ?? "sentences", ...(u.words !== undefined ? { words: u.words } : {}) });
       continue;
     }
     const draft = waiting.filter((b) => def.unitOfBranch(b) === u.unit).sort().at(-1);
@@ -101,7 +102,7 @@ export function outputRailStages(workDir: string, def: OutputDefinition, core: C
 }
 
 /** The novel output's group: the chapters, each drafted, waiting, ready or missing. */
-function novelRailStages(state: NovelState, waiting: readonly string[]): BookStage[] {
+function novelRailStages(state: NovelState, waiting: readonly string[], workDir?: string): BookStage[] {
   const stages: BookStage[] = [];
   const numbers = [...new Set([...state.beats.map((b) => b.chapter), ...state.chapters.map((c) => c.number)])].sort((a, b) => a - b);
   const drafted = state.chapters.length;
@@ -112,7 +113,8 @@ function novelRailStages(state: NovelState, waiting: readonly string[]): BookSta
     const name = `${n}${file?.title ? ` ${file.title}` : ""}`;
     const base = { id: `chapter:${n}`, name, depth: 1, output: "novel", unit: n };
     if (file) {
-      stages.push({ ...base, status: "drafted", missing: [] });
+      const words = workDir === undefined ? undefined : unitWords(workDir, file.file);
+      stages.push({ ...base, status: "drafted", missing: [], ...(words !== undefined ? { words } : {}) });
       continue;
     }
     const draft = waitingDraft(waiting, n);

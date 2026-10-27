@@ -317,6 +317,7 @@ plus the work's track. Always exits `0`.
   - `claims` means `core/claims.md` has claim rows, each citing at least one research note id that exists under `research/`.
   - `outline` means `core/outline.md` has at least one section row.
 - **The beats file** is `outline/beats.md`, or `outline/chapters.md` on an unmigrated work (`outlineFile` says which).
+- **`units[].words`** is a drafted unit's word count (absent for units that share one file, like the essay's sections): the unit file's body (frontmatter left out) split on whitespace. The screen's editor counts the same way, so its live count for a saved file equals this number.
 - **`waiting`** lists the change branches with commits that `main` lacks.
 - **`next`** is one of:
   - `core: <action>` while the core is short
