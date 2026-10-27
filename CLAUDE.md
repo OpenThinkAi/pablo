@@ -105,7 +105,7 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 model never sees the splits (AGT-1531).
                 `review-map.ts` maps a reader's paragraph selections to
                 sentence lines and marks to a GitHub review payload and back
-                (AGT-1584, `--doc readers`); the reader view, `share`'s
+                (AGT-1584, `--doc readers`); `share`'s
                 transport and `notes pull` call it, never re-derive it.
 packages/tui    @openthink/pablo-tui — the Ink 7 / React 19 screen, a third
                 front end on `verbs.ts` beside the CLI and MCP. Terminal and
@@ -163,15 +163,6 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 rather than reading it as free. `runHarness` and the
                 composer run on it (AGT-2121); tests drive it with the
                 scripted fake adapter.
-                The reader's window (`pablo read <round>`, AGT-1586): a ui-leaf
-                view, `packages/cli/views/reader.tsx`, mounted by
-                `src/reader-host.ts`. The view is dumb: it renders what the
-                host sends and posts marks back (`saveDraft`, `submit`); the
-                host maps them with core's `review-map` and sends them with
-                `submit.ts`. `views/` is type-checked with everything else
-                (the root tsconfig carries the DOM lib for it) and ships in
-                the package's `files`. It needs real Google Chrome; tests
-                use a fake `mount`, never a window.
                 Any new dependency the CLI needs
                 goes here; core stays dependency-free.
                 Other modules, briefly: `src/core/machine.ts` is the story
@@ -196,7 +187,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 fetches rounds for a reader, `notes.ts` (`notes pull`,
                 AGT-1587) turns a submitted review into a vault branch, and
                 `round-housekeeping.ts` closes a pulled round (AGT-1588).
-                `install-reader.sh` at the repo root is the reader's installer
+                `install-reader.sh` at the repo root is the reader cleanup script
                 (AGT-1590). The output registry (AGT-1668): `src/outputs/registry.ts`'s
                 `OUTPUTS` is the single source of output types, like `VERBS`;
                 each type is a directory (`src/outputs/novel/`) exporting an

@@ -14,8 +14,7 @@ work has no valid `pablo.json` marker, and points you at `pablo init --adopt`. P
 | `2` | refused: a precondition is unmet (no project, no marker, a missing beat, a file that already exists...). The message names what is missing. |
 | `1` | error: something broke, or the verb is not implemented |
 
-`config` takes `--project` only to pick a work's `pablo.json` instead of the global file. These verbs take no `--project`: `guide`, `prose`, `doctor`, `read --list` and
-`read <round>`. `init` and `story` take a slug in other ways, described below.
+`config` takes `--project` only to pick a work's `pablo.json` instead of the global file. These verbs take no `--project`: `guide`, `prose` and `doctor`. `init` and `story` take a slug in other ways, described below.
 `pablo --version` (or `-v`) prints the installed version. `pablo --help` lists
 the verbs; a verb has no help page of its own, so `pablo <verb> --help` prints
 the same list.
@@ -1002,20 +1001,6 @@ refused by name.
 | `open` | not yet reviewed |
 | `submitted` | reviewed, waiting for `notes pull` |
 | `pulled` | pulled into the vault |
-
-### read (reader's side)
-
-```
-pablo read --list
-pablo read <slug>-reading#<pr> [--no-open]
-```
-
-For the reader, on a machine with no vault. `--list` shows open rounds that request
-your review, plus rounds this machine already sent. `read <round>` fetches the
-round's chapters at the pull request's head commit into
-`$XDG_STATE_HOME/pablo/rounds/...` (default `~/.local/state/pablo/rounds/`). It then
-opens the reader window, which needs Google Chrome. In the window you mark lines,
-suggest edits, and submit everything as one review. `--no-open` only fetches.
 
 ### notes pull
 

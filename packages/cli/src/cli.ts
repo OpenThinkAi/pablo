@@ -65,8 +65,6 @@ import { deriveCliOptions, notesWith, publishOutput, runVoiceEdit, runVoiceList,
 import { guideText } from "./guide";
 import { realRunner } from "./share";
 import type { Runner } from "./share";
-import { fetchRound, listReaderRounds, parseRoundRef, roundRefLabel } from "./read";
-import { openReader } from "./reader-host";
 import { openReview } from "./review-host";
 import { openMixer } from "./mixer-host";
 import { createNotesHost } from "./mixer-notes-host";
@@ -243,13 +241,6 @@ function helpText(): string {
     "                                            PR, request the reader's review, record the round",
     "  pablo share --list --project <slug>       the work's rounds: open, submitted (waiting to",
     "                                            pull), pulled",
-    "  pablo read --list [--json]               the reading rounds waiting for you on GitHub (and",
-    "                                            those you have sent); no vault or project needed",
-    "  pablo read <slug>-reading#<pr> [--no-open]",
-    "                                            fetch a round's chapters at its head commit into",
-    "                                            $XDG_STATE_HOME/pablo/rounds/<repo>/<pr>/ and open",
-    "                                            the reader window on it (needs Google Chrome);",
-    "                                            --no-open only fetches",
     "  pablo notes pull --project <slug>        each reader's submitted review becomes a",
     "                                            reader/<round> branch: one commit per suggestion,",
     "                                            authored as the reader; comments for review mode",
@@ -516,10 +507,8 @@ interface ParsedArgs {
   readonly chapters: string | undefined;
   /** `agent --new` (AGT-1565): start a fresh harness session; the old one stays on disk. */
   readonly new: boolean;
-  /** `read --list` (AGT-1583): the reader's open rounds. */
+  /** `share --list`: the work's rounds. */
   readonly list: boolean;
-  /** `read <round> --no-open` (AGT-1586): fetch the round into the cache without opening the reader window. */
-  readonly noOpen: boolean;
   /** Every parsed flag, raw (AGT-1679): the casting verbs build their args from it with `verbArgsFromCli`. */
   readonly values: Readonly<Record<string, unknown>>;
 }
@@ -553,7 +542,6 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       "tag-facts": { type: "boolean", default: false },
       new: { type: "boolean", default: false },
       list: { type: "boolean", default: false },
-      "no-open": { type: "boolean", default: false },
       yes: { type: "boolean", default: false },
       // `audition -n 6` (AGT-1679): the derived `n` option, with its short form.
       n: { type: "string", short: "n" },
@@ -578,7 +566,6 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     tagFacts: values["tag-facts"] === true,
     new: values["new"] === true,
     list: values["list"] === true,
-    noOpen: values["no-open"] === true,
     for: typeof values["for"] === "string" ? values["for"] : undefined,
     role: typeof values["role"] === "string" ? values["role"] : undefined,
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
@@ -987,67 +974,6 @@ function formatVoice(voice: Voice): string {
     parts.push(["Exemplars:", ...voice.exemplars.map((ex) => `- ${ex.path}`)].join("\n"));
   }
   return parts.join("\n\n");
-}
-
-/**
- * `pablo read --list` / `pablo read <repo>#<pr>` (AGT-1583): the reader's rounds on GitHub, with the
- * `gh` runner and environment injectable so tests never reach GitHub.
- */
-export function runReadRounds(args: ParsedArgs, run: Runner = realRunner, env: Record<string, string | undefined> = process.env): number {
-  if (args.list) {
-    const listed = listReaderRounds({ run, env });
-    if (!listed.ok) {
-      emit({ ok: false, code: listed.code, message: listed.message }, args.json);
-      return listed.code;
-    }
-    if (args.json) {
-      console.log(JSON.stringify({ ok: true, rounds: listed.rounds, notices: listed.notices }));
-    } else {
-      if (listed.rounds.length === 0) console.log("pablo: no reading rounds waiting for you");
-      for (const round of listed.rounds) {
-        const chapters = round.chapters.map((c) => (c.number > 0 ? String(c.number) : c.path)).join(", ") || "-";
-        const sent = round.status === "sent" ? "  [sent]" : "";
-        console.log(`${round.ref}  chapters ${chapters}  from ${round.sender || "?"}  ${round.date.slice(0, 10)}${sent}`);
-      }
-      for (const notice of listed.notices) console.error(notice);
-    }
-    return EXIT_OK;
-  }
-  const ref = parseRoundRef(args.rest[0] ?? "");
-  if (ref === undefined) {
-    emit({ ok: false, code: EXIT_REFUSED, message: "pablo: read requires a round like <slug>-reading#<pr>" }, args.json);
-    return EXIT_REFUSED;
-  }
-  const fetched = fetchRound({ run, env, ref });
-  if (!fetched.ok) {
-    emit({ ok: false, code: fetched.code, message: fetched.message }, args.json);
-    return fetched.code;
-  }
-  if (args.json) console.log(JSON.stringify({ ok: true, reused: fetched.reused, dir: fetched.dir, ...fetched.round }));
-  else console.log(`pablo: ${fetched.reused ? "already have" : "fetched"} ${fetched.round.repo}#${fetched.round.pr} at ${fetched.round.commit.slice(0, 7)}: ${fetched.dir}`);
-  return EXIT_OK;
-}
-
-/**
- * `pablo read <repo>#<pr>` (AGT-1586): fetch the round, then open the reader window on it and hold the
- * process until the window closes. `--no-open` is the fetch alone (`runReadRounds`). `open` is injectable
- * so tests never start a window.
- */
-export async function runReadView(args: ParsedArgs, open: typeof openReader = openReader): Promise<number> {
-  const ref = parseRoundRef(args.rest[0] ?? "");
-  if (ref === undefined) {
-    emit({ ok: false, code: EXIT_REFUSED, message: "pablo: read requires a round like <slug>-reading#<pr>" }, args.json);
-    return EXIT_REFUSED;
-  }
-  const opened = await open(ref);
-  if (!opened.ok) {
-    emit({ ok: false, code: opened.code, message: opened.message }, args.json);
-    return opened.code;
-  }
-  if (args.json) console.log(JSON.stringify({ ok: true, ref: roundRefLabel(ref), url: opened.view.url }));
-  else console.log(`pablo: opened ${roundRefLabel(ref)} in the reader window; close it when you are done`);
-  await opened.closed;
-  return EXIT_OK;
 }
 
 /**
@@ -1571,12 +1497,6 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
   // `story` (AGT-1690) creates its work, or resumes one with --project: it resolves both itself.
   if (args.verb === "story") {
     return await runStoryCli(args, argv, cwd);
-  }
-
-  // The reader's `read` (AGT-1583) lists/fetches reading rounds from GitHub: no vault, no project.
-  // `read <path> --project <slug>` (a file in a work) is the author's, below.
-  if (args.verb === "read" && args.project === undefined && (args.list || parseRoundRef(args.rest[0] ?? "") !== undefined)) {
-    return args.list || args.noOpen ? runReadRounds(args) : await runReadView(args);
   }
 
   // `doctor` (AGT-1678) reports the machine, not a work: no vault, no project.
