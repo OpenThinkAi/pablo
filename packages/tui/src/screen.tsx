@@ -4,7 +4,6 @@ import { render } from "ink";
 import type { LineRef } from "@openthink/pablo-core";
 import { App } from "./app";
 import { bookCounts, bookRail, type BookStage, type UnitRef } from "./book";
-import type { Round } from "./state";
 import { loadEditor, loadKeymap } from "./key-config";
 import type { Composer } from "./compose";
 import type { Reviser } from "./revise";
@@ -55,14 +54,6 @@ export type EditSession = (request: EditRequest) => Promise<EditResult>;
 export interface BookSnapshot { readonly stages: readonly BookStage[]; readonly branches: readonly string[] }
 export type Refresher = () => BookSnapshot | undefined;
 
-/** One poll for the work's reading rounds: the ones still with a reader or with a review in, or why GitHub could not be asked. */
-export type RoundsResult = { readonly ok: true; readonly rounds: readonly Round[]; /** A round GitHub could not be asked about: listed as still reading, with this said in the footer. */ readonly note?: string } | { readonly ok: false; readonly message: string };
-export type RoundsPoller = () => Promise<RoundsResult>;
-
-/** Enter on a submitted round (AGT-1641): its review pulled into a `reader/` branch, with lines for the content area, or why not. */
-export type PullResult = { readonly ok: true; readonly branch: string; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
-export type Puller = (round: string) => Promise<PullResult>;
-
 export interface ScreenOptions {
   readonly title: string;
   readonly format: string;
@@ -96,10 +87,6 @@ export interface ScreenOptions {
   readonly editSession?: EditSession;
   /** Reads the book's stages and waiting branches again; the screen calls it every few seconds, so work done outside it shows (AGT-1640). */
   readonly refresh?: Refresher;
-  /** Polls GitHub for the work's reading rounds, on open and every minute: the Reviews group (AGT-1640). */
-  readonly rounds?: RoundsPoller;
-  /** Pulls a submitted round's review into a `reader/` branch: Enter on its row (AGT-1641). */
-  readonly puller?: Puller;
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
 }
@@ -133,7 +120,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
         stdout.write(ENTER_ALT);
       }
     });
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} {...(options.fileOf ? { fileOf: options.fileOf } : {})} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} {...(options.refresh ? { refresh: options.refresh } : {})} {...(options.rounds ? { rounds: options.rounds } : {})} {...(options.puller ? { puller: options.puller } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} {...(options.fileOf ? { fileOf: options.fileOf } : {})} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} {...(options.refresh ? { refresh: options.refresh } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),

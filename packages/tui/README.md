@@ -35,7 +35,6 @@ src/comment-input.ts  `c` in a review: a keypress while a comment is being typed
 src/voice-input.ts  `a v r`: a keypress while a voice rule is being typed, as an action
 src/activity.ts  a tool call and a duration as short phrases for the busy line and the compose view
 src/review.ts    review mode's data: a branch's diff (handed over by the CLI) as rail rows and pane lines
-src/reviews.ts   book mode's Reviews group: reading rounds still with a reader or with a review in
 src/stitch.ts    re-exports core's stitcher (`packages/core/src/diff/stitch.ts`) so review mode has one import path
 ```
 
