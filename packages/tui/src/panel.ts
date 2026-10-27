@@ -7,7 +7,7 @@
 // columns as fit that height; when the grid is too wide it drops the secondary keys (the primaries still name every
 // action), and when even that is too wide it flows the entries along the rows.
 
-import { groups, keyStateOf, voiceChoicesFor, PANE_FIXED_KEYS, VOICE_RULE_KEYS, prefixesOf, prefixRows, rowsOf, showKey, isPrefix, PREFIXES, DEFAULT_KEYMAP, type KeyAction, type KeyState, type Keymap } from "./keys";
+import { groups, keyStateOf, voiceChoicesFor, PANE_FIXED_KEYS, VOICE_RULE_KEYS, prefixesOf, prefixRows, rowsOf, showKey, isPrefix, prefixLabel, DEFAULT_KEYMAP, type KeyAction, type KeyState, type Keymap } from "./keys";
 import type { Pending, State } from "./state";
 
 /** `keys` is how a listing reads (`↓/↑ j/k`); `prim` and `sec` are its two halves, the secondary drawn dim. */
@@ -28,7 +28,7 @@ const keysOfGroup = (g: KeyAction[]): Entry => {
 export function entriesOf(ks: KeyState, pending: Pending | null = null, km: Keymap = DEFAULT_KEYMAP): Entry[] {
   if (pending?.digits !== undefined) return [entry("0-9", "", "line number"), entry(pending.prefix, "Enter", "go"), entry("Esc", "", "cancel")];
   if (pending && isPrefix(pending.prefix)) return groups(prefixRows(ks, pending.prefix, km)).map((g) => (g[0]!.id === "go.line" ? entry("0-9", "", g[0]!.label) : keysOfGroup(g)));
-  return [...groups(rowsOf(ks, km)).map(keysOfGroup), ...prefixesOf(ks, km).map((p) => entry(p, "", `${PREFIXES[p]}…`))];
+  return [...groups(rowsOf(ks, km)).map(keysOfGroup), ...prefixesOf(ks, km).map((p) => entry(p, "", `${prefixLabel(p, ks.state)}…`))];
 }
 
 /** The panel's entries for the screen's state, with its pending prefix: what the layout draws. */
@@ -46,7 +46,7 @@ export function entriesFor(s: State, km: Keymap = DEFAULT_KEYMAP): Entry[] {
 /** The panel's title: the pending prefix and its meaning, else where the keys act. */
 export function panelTitle(ks: KeyState, pending: Pending | null = null, voice = false): string {
   if (voice) return "voice";
-  if (pending) return isPrefix(pending.prefix) ? `${pending.prefix} ${PREFIXES[pending.prefix]}` : pending.prefix;
+  if (pending) return isPrefix(pending.prefix) ? `${pending.prefix} ${prefixLabel(pending.prefix, ks.state)}` : pending.prefix;
   if (ks.state === "normal" || ks.state === "insert" || ks.state === "select") return `edit: ${ks.state}`;
   return ks.state === "rail" ? (ks.review ? "changes" : "contents") : ks.state === "main" ? "keys" : "content";
 }

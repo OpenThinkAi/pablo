@@ -13,6 +13,7 @@ import { resolve, tokenOf, type InkKey } from "./chord";
 import { apply, paneKey, type EditText } from "./edit-pane";
 import type { Keymap } from "./keys";
 import type { Action, EditMode, EditPaneText, Pending } from "./state";
+import { selectObject, TEXT_MOTIONS } from "./text-objects";
 
 /** The mode as the pane's title shows it, as Helix's status line does. */
 export const MODE_TAG: Readonly<Record<EditMode, string>> = { normal: "NOR", insert: "INS", select: "SEL" };
@@ -124,6 +125,7 @@ export const MOTIONS: Readonly<Record<string, Motion>> = {
   "editor.line_end": (b) => { b.cursor = { row: b.cursor.row, col: lastChar(b.lines[b.cursor.row]!) }; },
   "editor.top": (b) => { b.cursor = { row: 0, col: 0 }; },
   "editor.bottom": (b) => { b.cursor = { row: b.lines.length - 1, col: 0 }; },
+  ...TEXT_MOTIONS,
 };
 
 type Edit = (t: EditPaneText) => EditPaneText;
@@ -142,7 +144,9 @@ export function modalEdit(id: string, c: MotionContext): Edit | null {
   const motion = MOTIONS[id];
   if (motion) return (t) => apply(t as EditText, (b) => motion(b, c));
   const mode = MODE_KEYS[id];
-  return mode ? (t) => mode(t as EditText) : null;
+  if (mode) return (t) => mode(t as EditText);
+  const object = selectObject(id);
+  return object ? (t) => object(t as EditText) : null;
 }
 
 /** Back to normal mode from insert or select (the selection goes). */
