@@ -253,7 +253,8 @@ function waitingOn(def: OutputDefinition, track: TrackId): string | undefined {
 /** The steps that add `def` to a work on `track`; a derived output (narrated) first needs a written prose output to read. */
 function addSteps(def: OutputDefinition, track: TrackId): GuideStep[] {
   if (def.derive === undefined) {
-    return [{ phase: "output", title: `add the ${def.id} output (once the core is in)`, command: `pablo output add ${def.id} ${P}`, detail: `scaffolds outputs/${def.id}/ (plan.md: which units tell which beats; RULES.md)` }];
+    const plan = `plan.md: ${def.planNote ?? "which units tell which beats"}`;
+    return [{ phase: "output", title: `add the ${def.id} output (once the core is in)`, command: `pablo output add ${def.id} ${P}`, detail: `scaffolds outputs/${def.id}/ (${plan}; RULES.md)` }];
   }
   const from = `<${proseSources(track).join("|")}>`;
   return [

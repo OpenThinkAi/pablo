@@ -155,6 +155,20 @@ export type EnsureOutcome =
   | { readonly ok: true }
   | { readonly ok: false; readonly message: string; readonly missing?: readonly string[] };
 
+/**
+ * For an output whose units are sections of one file (the essay, AGT-2134): how `write` puts a unit into the file
+ * and tells whether it is already there. `unitFileName` names the file for every unit.
+ */
+export interface SharedUnitFile {
+  /** Whether `content` (the file's text) already has text for `unit`. Pure over the work directory. */
+  readonly has: (workDir: string, content: string, unit: number) => boolean;
+  /**
+   * `content` (undefined: no file yet) with `unit` set to `body` (replacing its text, or inserted in its place), and
+   * `frontmatter` (the write's provenance block) replacing the file's. Pure over the work directory.
+   */
+  readonly put: (workDir: string, content: string | undefined, unit: number, body: string, frontmatter: string) => string;
+}
+
 export interface OutputDefinition {
   /** The key in `pablo.json`'s `outputs` and in `OUTPUTS`. */
   readonly id: string;
@@ -223,4 +237,17 @@ export interface OutputDefinition {
    * work directory.
    */
   readonly derive?: (workDir: string, unit: number, options: Pick<UnitPackOptions, "voices">) => DeriveOutcome;
+  /**
+   * What the plan's rows map onto, for `plan.md`'s header and the guide (the essay: the outline's sections). Absent:
+   * the core beats.
+   */
+  readonly planNote?: string;
+  /** Units that are sections of one shared file (the essay, AGT-2134). Absent: one file per unit. */
+  readonly shared?: SharedUnitFile;
+  /**
+   * Unit N's prose as a listener hears it, when a unit's file holds more than that unit or carries what is not
+   * read aloud (the essay: its section, citations removed, AGT-2134). The narrated output reads a source unit
+   * through it. Absent: the unit's file, frontmatter stripped. Pure over the work directory.
+   */
+  readonly unitText?: (workDir: string, unit: number) => string | undefined;
 }

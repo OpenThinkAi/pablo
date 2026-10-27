@@ -3,6 +3,9 @@ export type {
   BeatRow,
   DistilledFacts,
   DraftingInputs,
+  EssayBrief,
+  EssayClaim,
+  EssaySection,
   Pack,
   PackKind,
   PackVoice,
@@ -27,6 +30,7 @@ export { fitToBudget, PACK_BUDGETS, renderSlice, TRUNCATION_MARKER } from "./bud
 export {
   assemblePack,
   CRAFT_RULES,
+  ESSAY_CRAFT_RULES,
   DEFAULT_MIN_SCENES,
   DEFAULT_NEIGHBORHOOD_PARAGRAPHS,
   hashPrompt,

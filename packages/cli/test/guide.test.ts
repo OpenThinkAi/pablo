@@ -73,20 +73,21 @@ test("output-specific verbs: story has no --unit, radio casts and mixes by episo
   expect(radio).toContain("pablo cast --auto --project <slug> --episode N");
   expect(radio).toContain("pablo mix --project <slug> --episode N");
   const narrated = ok("fiction", "narrated").steps.filter((s) => s.phase === "output").map((s) => s.command);
-  expect(narrated).toEqual(["pablo output add <novel|story> --project <slug>", "pablo output add narrated --from <novel|story> --project <slug>"]);
+  expect(narrated).toEqual(["pablo output add <novel|story|essay> --project <slug>", "pablo output add narrated --from <novel|story|essay> --project <slug>"]);
 });
 
-test("narrated on nonfiction is refused until a prose output is built, and the index lists it as waiting", () => {
-  const outcome = buildGuide("nonfiction", "narrated");
-  expect(outcome.ok).toBe(false);
-  if (!outcome.ok) {
-    expect(outcome.code).toBe(2);
-    expect(outcome.message).toContain("the nonfiction track has none built yet (planned: essay)");
-  }
+test("essay is built on every track; narrated on nonfiction reads the essay (AGT-2134)", () => {
+  for (const track of trackIds()) expect(guideIndex(track).tracks[0]!.outputs).toContain("essay");
+  const essay = ok("nonfiction", "essay");
+  expect(essay.steps.find((s) => s.phase === "write")!.command).toBe("pablo write --project <slug> --output essay --unit N");
+  expect(essay.steps.find((s) => s.phase === "output")!.detail).toContain("core/outline.md");
+  expect(essay.steps.at(-1)!.detail).toBe("targets: draft, final");
+  const narrated = ok("nonfiction", "narrated").steps.filter((s) => s.phase === "output").map((s) => s.command);
+  expect(narrated).toEqual(["pablo output add <essay> --project <slug>", "pablo output add narrated --from <essay> --project <slug>"]);
   const t = guideIndex("nonfiction").tracks[0]!;
-  expect(t.outputs).not.toContain("narrated");
-  expect(t.waiting).toEqual(["narrated"]);
-  expect(guideText(guideIndex("nonfiction"))).toContain("waiting on a prose output: narrated");
+  expect(t.outputs).toEqual(["narrated", "essay"]);
+  expect(t.waiting).toEqual([]);
+  expect(t.planned).toEqual([]);
 });
 
 test("refusals name what to pick: unknown track, unknown output, a disallowed output, a planned one not built", () => {
@@ -94,7 +95,6 @@ test("refusals name what to pick: unknown track, unknown output, a disallowed ou
     ["romance", "novel", /unknown track "romance"/],
     ["fiction", "podcast", /unknown output "podcast"/],
     ["nonfiction", "novel", /not allowed on the nonfiction track/],
-    ["fiction", "essay", /planned for the fiction track and not built yet/],
   ];
   for (const [t, o, re] of cases) {
     const outcome = buildGuide(t, o);
@@ -110,10 +110,10 @@ test("no flags lists every track and output; --track alone scopes it; --output a
   const index = guideIndex();
   expect(index.tracks.map((t) => t.id)).toEqual(trackIds());
   expect(index.outputs.map((o) => o.id)).toContain("novel");
-  expect(index.tracks.find((t) => t.id === "nonfiction")!.planned).toContain("essay");
+  expect(index.outputs.map((o) => o.id)).toContain("essay");
   const scoped = guide({ track: "nonfiction" });
   expect(scoped.ok && "tracks" in scoped ? scoped.outputs.map((o) => o.id) : []).toEqual(outputsOnTrack("nonfiction"));
-  expect(scoped.ok && "tracks" in scoped ? scoped.tracks[0]!.outputs : ["x"]).toEqual([]);
+  expect(scoped.ok && "tracks" in scoped ? scoped.tracks[0]!.outputs : ["x"]).toEqual(["narrated", "essay"]);
   const novel = guide({ output: "novel" });
   expect(novel.ok && "steps" in novel ? novel.track : undefined).toBe("fiction");
   expect(guideText(guideIndex())).toContain("Tracks:");

@@ -99,7 +99,7 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `web_search` / `web_fetch` | Search the web through pablo's configured backend (SearXNG; set `web.search` in the config, see `docs/configuration.md`), and read one page as markdown with its URL and retrieval date. pablo's own tools: an agent does not need its own WebSearch/WebFetch, and `web_search` fails with a clear message when no backend is set |
 | `init` | Start a new work: a slug, a title, and a track (core only) or the novel output |
 | `story` | Write a whole story from a prompt, end to end (or resume a run with `project`) |
-| `output` / `output_add` | List, remove or re-plan outputs / add one (novel, story, screenplay, radio) once the core is at beats |
+| `output` / `output_add` | List, remove or re-plan outputs / add one (novel, story, screenplay, radio, narrated, essay) once the core is complete |
 | `merge` | Accept a draft branch onto main, when the author says so |
 | `publish` | Compile the drafted text into one file |
 | `voice_list` / `voice_show` / `voice_flag` / `voice_exemplar` / `voice_rule` / `voice_edit` / `voice_remove` / `voice_use` | Inspect and grow the voice: list rules with ids, add, edit or remove one, add a named voice to a work |

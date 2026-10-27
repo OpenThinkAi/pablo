@@ -133,7 +133,9 @@ export function renderPlan(def: OutputDefinition, rows: readonly PlanRow[]): str
   return [
     `# Plan: ${def.id}`,
     "",
-    `The ${def.id} output's units (${def.plural}) mapped onto the core beats in \`${BEATS_FILE}\`.`,
+    def.planNote !== undefined
+      ? `The ${def.id} output's units: ${def.planNote}.`
+      : `The ${def.id} output's units (${def.plural}) mapped onto the core beats in \`${BEATS_FILE}\`.`,
     `A unit whose ${def.noun} exists carries its status.`,
     "",
     "| unit | title | beats | status |",
@@ -247,7 +249,7 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
     const missing = coreStages(core)
       .filter((s) => !s.done && s.optional !== true && s.id !== "facts")
       .flatMap((s) => s.missing.map((m) => `core ${s.id}: ${m}`));
-    return refuse("add", `the story core is not at beats yet (${short})`, missing);
+    return refuse("add", core.track === "nonfiction" ? `the core is not complete yet (${short})` : `the story core is not at beats yet (${short})`, missing);
   }
 
   const plan = planFile(id);

@@ -163,6 +163,41 @@ export interface WorkIdentity {
   readonly description?: string | undefined;
 }
 
+/** One section of an essay's outline (AGT-2134): its number, its title and what it covers. */
+export interface EssaySection {
+  readonly number: number;
+  readonly title: string;
+  readonly covers: string;
+}
+
+/** A claim an essay section makes (AGT-2134): the claims row, and the research note ids it cites (never the notes). */
+export interface EssayClaim {
+  readonly number: number;
+  readonly claim: string;
+  readonly sources: readonly string[];
+}
+
+/**
+ * The brief of one essay section (AGT-2134, D-7): a drafting pack with `essay` set is an essay's, not a chapter's.
+ * The section, the whole outline for its place, the thesis (nonfiction) or the story the essay is about (a fiction
+ * track), and the section's claims with the citations the writer puts in the text (`[#n]`, `[@note-id]`).
+ */
+export interface EssayBrief {
+  readonly section: EssaySection;
+  /** Every section of the outline, in order, so the writer knows where this one sits. */
+  readonly outline: readonly EssaySection[];
+  /** Where the outline came from (work-relative), for the slice's source. */
+  readonly outlineSource: string;
+  /** The thesis (`core/thesis.md`) on nonfiction. */
+  readonly thesis?: TextSource | undefined;
+  /** On a fiction track: the story the essay is about (`bible/overview.md`). */
+  readonly subject?: TextSource | undefined;
+  /** The section's claims, each with the note ids it cites. Empty for a section that makes none. */
+  readonly claims: readonly EssayClaim[];
+  /** Where the claims came from (`core/claims.md`), for the slice's source. */
+  readonly claimsSource?: string | undefined;
+}
+
 export interface DraftingInputs {
   readonly work: WorkIdentity;
   /** The unit's first (primary) beat. */
@@ -229,6 +264,8 @@ export interface DraftingInputs {
   readonly minScenes?: number | undefined;
   /** The author's (or harness's) steer for this chapter beyond the beat row, e.g. "slower, stay on Cora" (AGT-1562). Its own slice; absent or blank means none. */
   readonly direction?: string | undefined;
+  /** An essay section's brief (AGT-2134): set, the pack drafts that section of an essay instead of a chapter. */
+  readonly essay?: EssayBrief | undefined;
 }
 
 export interface AssembleOptions {

@@ -42,7 +42,7 @@ the work (`init --track`), each of the track's core stages in order (`save
 gated checklist: `research plan`, then `research save --item` or `research waive`
 for every item, and `research distill` for the period facts; on `fiction` an
 optional note), `output add` (for `narrated`, first a prose output to read and then
-`output add narrated --from <novel|story>`), each of the output's own stages (`write`, `revise`,
+`output add narrated --from <novel|story|essay>`), each of the output's own stages (`write`, `revise`,
 and for performed outputs `cast --auto`, `perform`, `mix`, `fix`), `check`, and
 `publish` with the output's targets. A step the track gates is marked `(gate)`;
 `write` refuses until it is met. Commands carry placeholders (`<slug>`, `N`) for
@@ -54,10 +54,10 @@ flags, `guide` lists every track (its core stages, the outputs it allows, and th
 planned but not built) and every output (its stages, tracks and publish targets);
 `--track` alone lists that track's. `--output` alone reads the `fiction` track when
 it allows the output, else the first track that does. An unknown track or output,
-an output the track does not allow, a planned one not built yet (`essay`), or one
+an output the track does not allow, a planned one not built yet, or one
 that cannot be finished yet is refused (exit 2) naming the choices. `narrated` reads
-a prose output, so on `nonfiction`, which has no prose output built yet, it is refused
-and listed under the track's `waiting`, not its `outputs`. `guide` reads no vault and needs no project.
+a prose output, so its path first adds and writes one (on `nonfiction`, the
+`essay`). `guide` reads no vault and needs no project.
 
 ```
 {ok: true, track, output, steps: [{phase, stage?, title, command, detail?, gate?, optional?}]}
@@ -148,15 +148,26 @@ pablo output plan <type> --project <slug> [--dry-run]
 
 A work is a **story core** (premise, research, bible, acts, beats, facts) plus
 one or more **outputs** made from it. The output types are `novel`, `story`,
-`screenplay`, `radio` and `narrated`. Each output declares the tracks it allows
+`screenplay`, `radio`, `narrated` and `essay`. Each output declares the tracks it allows
 (`novel`, `story`, `screenplay` and `radio`: `fiction` and `historical-fiction`;
-`narrated`: `fiction`, `historical-fiction` and `nonfiction`); `pablo output add
+`narrated` and `essay`: `fiction`, `historical-fiction` and `nonfiction`); `pablo output add
 <type>` refuses a type the work's track does not allow, naming the types it does.
+A verb run on a `nonfiction` work that has no output yet is refused naming
+`pablo output add essay`, never read as a novel.
+
+`essay` is an argued, cited piece; a blog post is an essay (where it is posted is
+up to you). On a `nonfiction` work its units are **sections**, the rows of the
+core outline (`core/outline.md`), and every section lives in one file,
+`outputs/essay/essay.md`, under a `## <section title>` heading in outline order.
+A section's claims are the `core/claims.md` rows its "What it covers" cell names
+(`#2`, `#3`), or every claim when it names none. On a fiction track the essay has
+one section, about the story, and draws on the story core (the overview, the
+period facts, `facts.md`).
 
 `narrated` is a straight, audiobook-style reading of another output's prose. It is
 added over a prose output the work already has: `pablo output add narrated --from
-novel` (or `story`) records `"from": "novel"` in `pablo.json`'s `outputs.narrated`.
-Its units (readings) mirror the source's units one for one, so its `plan.md` is
+novel` (or `story`, or `essay`) records `"from": "novel"` in `pablo.json`'s `outputs.narrated`.
+An essay section is read without its citations. Its units (readings) mirror the source's units one for one, so its `plan.md` is
 the source's. `--from` is refused without a source, for a script output such as
 `radio`, for an output the work does not have, and on any other type. While a
 narrated output reads an output, `output remove` refuses that output.
@@ -164,7 +175,7 @@ narrated output reads an output, `output remove` refuses that output.
 | Sub | What it does |
 |---|---|
 | `list` | each output, its units drafted and its next step |
-| `add <type>` | declares the output in `pablo.json` and scaffolds `outputs/<type>/` (`plan.md`, `RULES.md`); refused until the core has beats |
+| `add <type>` | declares the output in `pablo.json` and scaffolds `outputs/<type>/` (`plan.md`, `RULES.md`); refused until the core has beats (on `nonfiction`, until the core is complete) |
 | `remove <type>` | undeclares it and moves `outputs/<type>/` under `outputs/_removed/`; nothing is deleted |
 | `plan <type>` | rewrites `outputs/<type>/plan.md` (which units tell which beats) from the beats; `--dry-run` shows the rows and writes nothing |
 
@@ -382,6 +393,20 @@ Drafts one unit of an output on your configured writer model. `--chapter N` is
 short for `--output novel --unit N`. A work with several outputs needs `--output`.
 The `story` output has a single unit, so `write --output story` needs no `--unit`.
 
+`write --output essay --unit N` drafts section N of the essay. Its pack is the
+section and the outline around it, the thesis (`core/thesis.md`; on a fiction
+track the story's `bible/overview.md`), the section's claims each with its
+citation (`[#2]` for claims row 2, with the research note ids it cites as
+`[@note-id]`), the layered voice and `outputs/essay/RULES.md`, and the end of the
+previous section. Research notes themselves are never sent: a claim's sources go
+as ids. The writer is told to cite each claim it uses, where it uses it; `check`
+flags a claim without one (`claim-uncited`). The section is put into
+`outputs/essay/essay.md` (any heading the writer added is dropped, the other
+sections are kept) and committed on `draft/essay-NN`; the file's frontmatter is
+the provenance of the section written last. A section that already has text is
+refused without `--force`. Default length: 600 words a section (1500 for a
+fiction track's one-section essay).
+
 `write --output narrated --unit N` makes reading N from the source output's unit N
 with **no model**: a `CAST:` line, then a `NARRATOR:` line per paragraph, the words
 the source's, unchanged. With `--voices characters`, a paragraph whose quoted
@@ -404,7 +429,7 @@ shows the script as the pack's one `source` section. `--words`, `--scenes`,
 | `--seed N` | sampling seed, for a repeatable draw |
 | `--direction "..."` | a steer beyond the beat ("slower, stay on Cora"); sent as its own section and recorded as `direction:` in the frontmatter |
 | `--voices narrator\|characters` | the narrated output only: one narrator (default), or speaker lines for attributed dialogue; refused on any other output |
-| `--force` | overwrite an existing unit file |
+| `--force` | overwrite an existing unit file (an essay section: replace its text) |
 | `--dry-run` | build and show the prompt pack, send nothing |
 
 Before sending anything, it:
@@ -812,6 +837,7 @@ pablo publish --project <slug> [--output <type>] --target <target>
 |---|---|---|
 | `novel` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-<target>.md`. `draft`: every chapter in order, frontmatter stripped, sentence lines joined into paragraphs, quotes curled. `review`: chapter headings with each source sentence line numbered `[n]` (restarting in every chapter) so a reader can cite a line. `final`: the clean manuscript, same as the draft, plus `<slug>-final.epub` (one XHTML file per chapter; no pandoc needed); `files` lists both. |
 | `story` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-story-<target>.md`: `draft` and `final` are the clean compiled story; `review` adds a "Review copy, N words" line under the title |
+| `essay` | `draft`, `final` | `<work>/.pablo/out/<slug>-essay-<target>.md`: `# <title>`, every section under its `## ` heading (a one-section essay has none) with sentences joined into paragraphs and quotes curled, then `## Sources`. Each citation becomes a numbered reference (`[1]`, `[2, 3]`; a `#n` cites the notes claims row n names), and the sources list gives each cited research note's title, its sources and its retrieval date, in order of first citation. `draft` adds a "Draft, N words" line under the title naming any citation that resolves to nothing; `final` is the clean copy and is refused while such a citation remains. |
 | `narrated` | `script` | `<work>/.pablo/out/<slug>-narrated-script.md`: every reading's script in unit order, frontmatter stripped, under a `## Reading N: <title>` heading each. The audio targets come with the mixer. |
 | `screenplay` | `draft`, `final`, `fountain` | `<work>/.pablo/out/<slug>-screenplay.fountain`: a `Title:` page, then every written scene in order, frontmatter stripped, the Fountain copied line for line. `draft` and `final` also write `<slug>-screenplay.pdf` beside it in standard screenplay format (US Letter, Courier 12, 1.5in left and 1in other margins, indented dialogue, page numbers from page 2); `fountain` writes the Fountain file alone. The PDF is typeset by pablo itself (`packages/cli/src/screenplay-pdf.ts`, no dependency, no pandoc, Courier is a built-in PDF font); `files` lists both. |
 | `radio` | `bundle`, `stream` | `bundle`: `.pablo/out/<slug>-radio-bundle/` with every script, each mixed episode's newest audio and manifest, and `bundle.json`; unmixed episodes are listed in `notes`. `stream`: each mixed episode to `.pablo/out/stream/`. `player` is refused; use `pablo review`. |

@@ -30,6 +30,8 @@ import { estimateTokens } from "./estimate";
 import type {
   AssembleOptions,
   DraftingInputs,
+  EssayBrief,
+  EssayClaim,
   Pack,
   PackKind,
   PackVoice,
@@ -271,6 +273,7 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
  * not exist; draft 2, with the gate, did neither.
  */
 function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
+  if (inputs.essay !== undefined) return essaySpecs(inputs, inputs.essay);
   const minScenes = inputs.minScenes ?? DEFAULT_MIN_SCENES;
   const { beat } = inputs;
   const beats = [beat, ...(inputs.moreBeats ?? [])];
@@ -513,6 +516,139 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
     tail: new Set<string>(),
     expectedOutputTokens: Math.ceil(inputs.wordTarget * OUTPUT_TOKENS_PER_WORD),
   };
+}
+
+/**
+ * The craft rules every essay section carries (AGT-2134), in place of the fiction craft rules: an essay argues, cites
+ * and keeps to what its sources say. Required and non-reducible, like `CRAFT_RULES`.
+ */
+export const ESSAY_CRAFT_RULES = [
+  "- Argue the thesis. Every paragraph moves the argument forward; none restates the outline.",
+  "- Every factual statement comes from the claims you are given, and carries that claim's citation just before",
+  "  the sentence's closing punctuation: [#2] for claim 2, [@note-id] for a source note, [#2; @note-id] for both.",
+  "  Never invent a fact, a number, a date, a name or a quotation, and never cite what you were not given.",
+  "- Concrete over abstract: the example, the figure, the case. A promise of detail is not detail.",
+  '- No rhetorical tricolons, and none of "a testament to", "a reminder that", "in today\'s world", "it is',
+  '  important to note".',
+  "- Do not summarize what the section just said, and do not announce what the next one will say.",
+  '- Straight quotes, never curly. No em-dashes; use a comma, a period, or parentheses.',
+  "- Select from the claims. Using all of them in a row reads as machine-written.",
+].join("\n");
+
+/** `1. Title: what it covers` per outline section, the drafted one marked. */
+function renderOutline(essay: EssayBrief): string {
+  return essay.outline
+    .map((s) => `${s.number}. ${s.title}${s.covers === "" ? "" : `: ${s.covers}`}${s.number === essay.section.number ? "  <- this section" : ""}`)
+    .join("\n");
+}
+
+/** `- [#n] The claim (sources: [@a], [@b])` per claim. */
+function renderClaims(claims: readonly EssayClaim[]): string {
+  return claims
+    .map((c) => `- [#${c.number}] ${c.claim}${c.sources.length === 0 ? "" : ` (sources: ${c.sources.map((id) => `[@${id}]`).join(", ")})`}`)
+    .join("\n");
+}
+
+/**
+ * Drafting one essay section (AGT-2134, D-7): the ask, the section and the outline, the thesis (or the story the
+ * essay is about), the section's claims with their citations, the layered voice, the essay craft rules, the voices'
+ * exemplars, the period facts and `facts.md` (a fiction track's essay draws on the story core's), the end of the
+ * previous section, and the task. No cast, places or timeline: an essay is not told in scenes.
+ */
+function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
+  const { section } = essay;
+  const label = `section ${section.number}, "${section.title}"`;
+  const brief = [
+    `You are drafting ${label} of ${inputs.work.description ?? "an essay"}, working title "${inputs.work.title}".`,
+    "This is a first draft the author will cut and reshape. Write the section's prose and nothing",
+    "else: no heading, no title, no notes, no summary, no questions.",
+  ].join("\n");
+  const sectionText = [
+    `- Section ${section.number}: ${section.title}`,
+    ...(section.covers === "" ? [] : [`- What it covers: ${section.covers}`]),
+    `- Length: about ${inputs.wordTarget} words. Stay within ten percent.`,
+    "",
+    "The essay's outline:",
+    renderOutline(essay),
+  ].join("\n");
+  const about = essay.thesis ?? essay.subject;
+
+  const spec = (s: Partial<SliceSpec> & Pick<SliceSpec, "name" | "heading" | "text">): SliceSpec => ({
+    source: undefined,
+    required: false,
+    keep: "head",
+    minTokens: 0,
+    reducible: true,
+    cutOrder: 2,
+    ...s,
+  });
+
+  const specs: SliceSpec[] = [
+    spec({ name: "brief", heading: "", text: brief, required: true, reducible: false, cutOrder: 0 }),
+    spec({ name: "section", heading: "# The section", text: sectionText, source: essay.outlineSource, required: true, reducible: false, cutOrder: 0 }),
+    spec({
+      name: "direction",
+      heading: "# Direction for this section (from the author; follow it)",
+      text: inputs.direction?.trim() ?? "",
+      source: inputs.direction?.trim() ? "the author's direction" : undefined,
+      required: true,
+      reducible: false,
+      cutOrder: 0,
+    }),
+    spec({
+      name: "thesis",
+      heading: essay.thesis !== undefined ? "# The thesis (the essay argues this)" : "# The story this essay is about",
+      text: about?.text.trim() ?? "",
+      source: about?.path,
+      required: true,
+      reducible: false,
+      cutOrder: 0,
+    }),
+    spec({
+      name: "claims",
+      heading: "# The claims this section makes (cite each one where you use it)",
+      text: renderClaims(essay.claims),
+      source: essay.claims.length === 0 ? undefined : essay.claimsSource,
+      required: true,
+      reducible: false,
+      cutOrder: 0,
+    }),
+    spec({ name: "style", heading: "# Prose rules (binding)", text: concatSources(inputs.style), source: sourceLabel(inputs.style), required: true, minTokens: 400, cutOrder: 1 }),
+    spec({ name: "workRules", heading: "# Rules for this work (binding; they add to the prose rules above)", text: inputs.workRules?.text.trim() ?? "", source: inputs.workRules?.path }),
+    spec({ name: "outputRules", heading: "# Rules for this output (binding; they add to the rules above)", text: inputs.outputRules?.text.trim() ?? "", source: inputs.outputRules?.path }),
+    spec({ name: "never", heading: "# What this voice never does (binding)", text: concatSources(inputs.never ?? []), source: sourceLabel(inputs.never ?? []) }),
+    spec({ name: "craft", heading: "# Craft rules (binding, and the ones models break)", text: ESSAY_CRAFT_RULES, required: true, reducible: false, cutOrder: 0 }),
+    spec({
+      name: "exemplars",
+      heading: "# Exemplars of the voice (match how they sound; borrow nothing from what they say)",
+      text: concatSources(inputs.exemplars ?? []),
+      source: sourceLabel(inputs.exemplars ?? []),
+      cutOrder: 9,
+    }),
+    spec({ name: "period", heading: "# Period and place facts (binding)", text: concatSources(periodSources(inputs)), source: sourceLabel(periodSources(inputs)), cutOrder: 4 }),
+    spec({ name: "facts", heading: "# Story facts every telling honours (binding)", text: inputs.facts?.text.trim() ?? "", source: inputs.facts?.path, cutOrder: 4 }),
+    spec({
+      name: "previousTail",
+      heading: "# The end of the previous section (continue from here)",
+      text: joinManuscript(inputs.previousTail?.text ?? ""),
+      source: inputs.previousTail?.path,
+      keep: "tail",
+      cutOrder: 8,
+    }),
+    spec({
+      name: "task",
+      heading: "",
+      text: [
+        `Write section ${section.number} now, in paragraphs, about ${inputs.wordTarget} words, within ten percent.`,
+        "Cite every claim you use where you use it. No heading: the section's title is added for you.",
+      ].join("\n"),
+      required: true,
+      reducible: false,
+      cutOrder: 0,
+    }),
+  ];
+
+  return { specs, tail: new Set<string>(), expectedOutputTokens: Math.ceil(inputs.wordTarget * OUTPUT_TOKENS_PER_WORD) };
 }
 
 function renderTimeline(inputs: DraftingInputs): string {

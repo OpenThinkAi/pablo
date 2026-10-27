@@ -1,7 +1,7 @@
 /**
  * The `narrated` output type (AGT-2137, pm project `pablo-platform`, D-7,
  * text side): a straight audiobook-style reading of another output's prose.
- * `pablo output add narrated --from <output>` (a prose output: `novel`, `story`) records the source
+ * `pablo output add narrated --from <output>` (a prose output: `novel`, `story`, `essay`) records the source
  * in `pablo.json` (`outputs.narrated.from`); the narrated units mirror the
  * source's units one for one, and `pablo write --output narrated --unit N`
  * turns the source unit's prose into a `lines` script (`./narrate.ts`) with
@@ -151,7 +151,9 @@ function sourceBody(workDir: string, unit: number): { ok: true; body: string; fi
   const found = narratedSource(workDir) as { ok: true; source: OutputDefinition };
   const row = sourceUnit(workDir, found.source, unit) as OutputUnit;
   const file = row.file as string;
-  return { ok: true, body: stripFrontmatter(readFileSync(join(workDir, file), "utf8")), file, source: found.source, row };
+  // A source whose file holds more than the unit, or what is not read aloud (the essay's sections and citations), says what its unit reads as.
+  const body = found.source.unitText?.(workDir, unit) ?? stripFrontmatter(readFileSync(join(workDir, file), "utf8"));
+  return { ok: true, body, file, source: found.source, row };
 }
 
 function deriveReading(workDir: string, unit: number, options: Pick<UnitPackOptions, "voices">): DeriveOutcome {

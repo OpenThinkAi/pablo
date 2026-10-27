@@ -74,7 +74,7 @@ import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
 import { migrateTrack } from "./migrate-track";
 import { mergeDraftInProject } from "./novel/merge";
-import { readMarker } from "./marker";
+import { readMarker, trackOf } from "./marker";
 import { FACT_KINDS } from "./record-fact";
 import {
   distillFactsInProject,
@@ -321,7 +321,7 @@ export function unitStatus(projectPath: string, raw: string): VerbResult & { rea
     return { body: { ok: false, code: 2, message, missing: [`--for: ${outputIds().map((id) => `"${id} N"`).join(" | ")}`] }, exitCode: 2 };
   }
   const marker = readMarker(projectPath);
-  const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, parsed.output, "status");
+  const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, parsed.output, "status", marker.ok ? trackOf(marker.marker) : undefined);
   if (!resolved.ok) return { body: { ok: false, code: resolved.code, message: resolved.message, missing: resolved.missing }, exitCode: resolved.code };
   const label = `${resolved.output.noun} ${parsed.unit}`;
   // A type with stages after the write (the radio output, AGT-1686) reports where the unit stands in them.
@@ -1064,7 +1064,7 @@ const PUBLISH_ARGS = z.object({
 export function publishOutput(projectPath: string, target: string | undefined, output: string | undefined): VerbResult {
   const marker = readMarker(projectPath);
   if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
-  const resolved = resolveOutput(marker.marker.outputs, output, "publish");
+  const resolved = resolveOutput(marker.marker.outputs, output, "publish", trackOf(marker.marker));
   if (!resolved.ok) return outputRefusalBody(resolved);
   const outcome = resolved.output.publish.run(projectPath, marker.marker.slug, marker.marker.title, target);
   if (!outcome.ok) return { body: refusalBody(outcome), exitCode: outcome.code };
@@ -1848,10 +1848,10 @@ const OUTPUT_ARGS = z.object({
   sub: z
     .enum(["list", "add", "remove", "plan"])
     .describe(
-      "list: the work's outputs with units drafted and next step. add <type>: declare the output in pablo.json and scaffold outputs/<type>/ (plan.md, RULES.md), refused until the story core is at beats. remove <type>: undeclare it and archive outputs/<type>/ under outputs/_removed/. plan <type>: rewrite outputs/<type>/plan.md from the beats. Each write is one commit.",
+      "list: the work's outputs with units drafted and next step. add <type>: declare the output in pablo.json and scaffold outputs/<type>/ (plan.md, RULES.md), refused until the story core is at beats (on nonfiction, until the core is complete). remove <type>: undeclare it and archive outputs/<type>/ under outputs/_removed/. plan <type>: rewrite outputs/<type>/plan.md from the beats. Each write is one commit.",
     ),
   type: z.string().optional().describe("The output type for add, remove and plan, e.g. \"novel\" or \"radio\"."),
-  from: z.string().optional().describe("add narrated: the output the narration reads, a prose output the work has (e.g. \"novel\", \"story\")."),
+  from: z.string().optional().describe("add narrated: the output the narration reads, a prose output the work has (e.g. \"novel\", \"story\", \"essay\")."),
   project: projectField,
   "dry-run": z.boolean().optional().default(false).describe("plan: show the rows; write and commit nothing."),
 });
@@ -1890,14 +1890,14 @@ const OUTPUT_MCP: McpToolSpec = {
 
 const OUTPUT_ADD_MCP_ARGS = z.object({
   project: projectField,
-  type: z.string().describe('The output type to add, e.g. "story", "novel", "screenplay", "radio" or "narrated"; the work\'s track decides which it allows.'),
-  from: z.string().optional().describe('narrated only: the prose output the narration reads, one the work has (e.g. "novel", "story").'),
+  type: z.string().describe('The output type to add, e.g. "story", "novel", "screenplay", "radio", "narrated" or "essay"; the work\'s track decides which it allows.'),
+  from: z.string().optional().describe('narrated only: the prose output the narration reads, one the work has (e.g. "novel", "story", "essay").'),
 });
 
 const OUTPUT_ADD_MCP: McpToolSpec = {
   name: "output_add",
   description:
-    "Add an output to the work (`pablo output add <type>`): declare it in pablo.json and scaffold outputs/<type>/ (plan.md, RULES.md), in one commit. Refused until the story core is at beats, for a type the work's track does not allow, or for one the work already has; the refusal names what is missing.",
+    "Add an output to the work (`pablo output add <type>`): declare it in pablo.json and scaffold outputs/<type>/ (plan.md, RULES.md), in one commit. Refused until the story core is at beats (on nonfiction, until the core is complete), for a type the work's track does not allow, or for one the work already has; the refusal names what is missing.",
   args: OUTPUT_ADD_MCP_ARGS,
   run: async (raw, ctx) => {
     const args = OUTPUT_ADD_MCP_ARGS.parse(raw);
@@ -1972,7 +1972,7 @@ const GUIDE_ARGS = z.object({
   output: z
     .string()
     .optional()
-    .describe('The output to finish, e.g. "novel", "story", "screenplay", "radio" or "narrated". Without `track`: fiction when it allows the output. Omit both to list the tracks and outputs.'),
+    .describe('The output to finish, e.g. "novel", "story", "screenplay", "radio", "narrated" or "essay". Without `track`: fiction when it allows the output. Omit both to list the tracks and outputs.'),
 });
 
 async function runGuideVerb(args: z.infer<typeof GUIDE_ARGS>): Promise<VerbResult> {

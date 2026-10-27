@@ -13,8 +13,9 @@
  *   (`<policy>.md`). `loadPromptWork` loads it for the work's track
  *   (AGT-2102); an explicit `pablo.json` `policy` still overrides.
  * - `checks`: the checks run on every unit (AGT-2112..2115 add the new ones).
- * - `outputs`: the output types the track allows (D-7). Some are planned and
- *   not in `OUTPUTS` yet (`narrated`, `essay`); enforcement is AGT-2105.
+ * - `outputs`: the output types the track allows (D-7), each a row of
+ *   `OUTPUTS` whose own `tracks` agree (AGT-2105; `essay` on every track,
+ *   AGT-2134).
  *
  * Plain data, no imports from the output registry or the marker, so the
  * marker can validate against it without an initialisation cycle.
