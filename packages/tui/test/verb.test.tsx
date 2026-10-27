@@ -14,7 +14,7 @@ const mount = (calls: (readonly string[])[], result: VerbResult = { ok: true, li
 const chord = async (app: ReturnType<typeof mount>, second: string) => { app.stdin.write("o"); await sleep(30); app.stdin.write(second); await sleep(60); };
 const type = async (app: ReturnType<typeof mount>, text: string) => { app.stdin.write(text); await sleep(40); app.stdin.write("\r"); await sleep(80); };
 
-test("o s runs config show at once; o k / o c / o p ask for an optional output (Enter alone runs as is), and show and show their output", async () => {
+test("o s runs config show at once; o k / o c / o p ask for an optional output (Enter alone runs as is), and show their output", async () => {
   const calls: (readonly string[])[] = [];
   const app = mount(calls, { ok: true, lines: ["3 hits"] });
   await sleep(30);

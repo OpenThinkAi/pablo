@@ -5,16 +5,15 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-export type ScreenVerbResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
-export type ScreenVerb = (argv: readonly string[]) => Promise<ScreenVerbResult>;
+import type { VerbResult, VerbRunner } from "@openthink/pablo-tui"; // types only: the tui stays lazy at runtime
 
 const CLI = fileURLToPath(new URL("./cli.ts", import.meta.url));
 
 /** `pablo <argv>` in `dir`, with `--project <slug>` added for the verbs that take one. A non-zero exit is the verb's refusal, said as it said it. */
-export function screenVerb(dir: string, slug: string | undefined, run: readonly string[] = [process.execPath, CLI]): ScreenVerb {
+export function screenVerb(dir: string, slug: string | undefined, run: readonly string[] = [process.execPath, CLI]): VerbRunner {
   return (argv) => new Promise((resolve) => {
     const takesProject = slug !== undefined && argv[0] !== "config";
-    const [bin, ...head] = run;
+    const [bin, ...head] = run; // `run` is never empty: it defaults to the running binary and the CLI file
     const child = spawn(bin!, [...head, ...argv, ...(takesProject ? ["--project", slug] : [])], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
     let out = "", err = "";
     child.stdout.on("data", (d: Buffer) => { out += d.toString(); });

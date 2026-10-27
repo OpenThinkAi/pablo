@@ -35,9 +35,9 @@ export function verbArgs(id: string, extra: readonly string[] = []): VerbArgs {
 export interface VerbAsk { readonly title: string; readonly hint: string; readonly masked?: true; /** Enter on an empty line runs the verb as it is. */ readonly optional?: true }
 export const VERB_ASKS: Readonly<Record<string, VerbAsk>> = {
   "output.add": { title: "Add an output", hint: "the type (and for narrated: narrated --from <output>)" },
-  "output.critique": { title: "Critique", hint: "optional: the output to critique, when the work has several (Enter alone runs it as is)", optional: true },
-  "output.check": { title: "Check", hint: "optional: the output to check, when the work has several (Enter alone runs it as is)", optional: true },
-  "output.publish": { title: "Publish", hint: "optional: the output to publish, when the work has several (Enter alone runs it as is)", optional: true },
+  "output.critique": { title: "Critique", hint: "optional: the output to critique, when the work has several (Enter alone runs it as is; only the first word is used)", optional: true },
+  "output.check": { title: "Check", hint: "optional: the output to check, when the work has several (Enter alone runs it as is; only the first word is used)", optional: true },
+  "output.publish": { title: "Publish", hint: "optional: the output to publish, when the work has several (Enter alone runs it as is; only the first word is used)", optional: true },
   "voice.edit": { title: "Edit a voice rule", hint: "the rule id, then the new text" },
   "voice.remove": { title: "Remove a voice rule", hint: "the rule id" },
   "voice.use": { title: "Use a voice", hint: "the voice's name" },
