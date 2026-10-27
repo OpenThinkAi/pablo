@@ -210,6 +210,9 @@ export interface EditPaneText {
   /** The pane's mode (AGT-2169); absent reads as `normal`, the mode the pane opens in. */
   readonly mode?: EditMode;
 }
+/** Focus and typewriter modes of the editing pane (AGT-2176; edit-modes.ts has the rules and persists them). */
+export interface EditModes { readonly focus: boolean; readonly typewriter: boolean }
+
 export interface EditPane {
   readonly file: string;
   /** The unit's storage mode (`sentences`, `lines`, `screenplay`): how the text is shown and saved. */
@@ -228,6 +231,8 @@ export interface EditPane {
   readonly emptying: boolean;
   /** The save running is the idle autosave (AGT-2173), not a Ctrl+S: it says so quietly instead of "Saving…". */
   readonly auto: boolean;
+  /** The first display row the pane was last drawn from: the scroll lives in the model, set by `pane.scroll`, never in the buffer. */
+  readonly top: number;
 }
 
 /**
@@ -292,6 +297,8 @@ export interface State {
   readonly tick: number;
   /** `v e`: the unit open in the editing pane (AGT-2167), or null. */
   readonly editPane: EditPane | null;
+  /** Focus and typewriter, as the config sets them and the pane's toggles change them (AGT-2176). */
+  readonly modes: EditModes;
 }
 
 /**
@@ -400,6 +407,8 @@ export type Action =
   | { type: "pane.opened"; branch: string; text: EditPaneText; /** AGT-2173: commits an earlier session left on the branch that main does not have. */ unmerged?: number }
   | { type: "pane.failed"; message: string }
   | { type: "pane.edit"; edit: (text: EditPaneText) => EditPaneText }
+  | { type: "pane.scroll"; top: number }
+  | { type: "modes.set"; modes: EditModes }
   | { type: "pane.save"; /** The idle autosave (AGT-2173): skipped unless there is something to save and the body is not blank. */ auto?: boolean }
   | { type: "pane.saved"; branch: string; lines: readonly string[]; edit: (text: EditPaneText) => EditPaneText }
   | { type: "pane.save_failed"; message: string }
@@ -436,7 +445,7 @@ const voiceContent = (title: string, body: string): Content => ({ title, body, k
 const writingName = (output: string | undefined, unit: number) => (output === undefined || output === "novel" ? `chapter ${unit}` : `${output} ${unit}`);
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 /** What the editing pane's keys do, shown in the content area while it is open. */
-const PANE_KEYS = "i a o insert · v selects · Esc back to normal, and in normal closes · Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes";
+const PANE_KEYS = "i a o insert · v selects · Esc back to normal, and in normal closes · Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes · Ctrl+F focus · Ctrl+T typewriter";
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
@@ -496,9 +505,9 @@ const emptyView = (): View => ({ rail: { rows: [], collapsed: new Set(), cursor:
 
 export const initialCompose = (): Compose => ({ entries: [], input: "", busy: false, activity: "", sessionId: null, outbox: null, sendSeq: 0, reply: null, replySeq: 0, offset: 0, length: 0, visible: 0, branches: [], pick: null });
 
-export const initialState = (): State => ({
+export const initialState = (modes: EditModes = { focus: false, typewriter: false }): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null, editPane: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null, editPane: null, modes,
   tick: 0,
 });
 
@@ -938,7 +947,7 @@ export function reduce(s: State, a: Action): State {
       return { ...s, editing: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "pane.open":
       if (s.mode.kind !== "book" || s.editPane !== null || s.editing !== null || s.finishing !== null || s.revise !== null || s.writing !== null) return s;
-      return { ...s, editPane: { file: a.file, storage: a.storage, line: a.line, phase: "opening", branch: null, text: null, saveSeq: 0, closing: false, emptying: false, auto: false }, pending: null, full: false, content: writeContent(`Editing ${a.file}`, "opening the edit branch…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      return { ...s, editPane: { file: a.file, storage: a.storage, line: a.line, phase: "opening", branch: null, text: null, saveSeq: 0, closing: false, emptying: false, auto: false, top: 0 }, pending: null, full: false, content: writeContent(`Editing ${a.file}`, "opening the edit branch…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "pane.opened": {
       if (s.editPane?.phase !== "opening") return s;
       const opened = { ...s, editPane: { ...s.editPane, phase: "open" as const, branch: a.branch, text: a.text } };
@@ -950,6 +959,10 @@ export function reduce(s: State, a: Action): State {
     }
     case "pane.failed":
       return s.editPane === null ? s : { ...s, editPane: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "pane.scroll":
+      return s.editPane === null || s.editPane.top === a.top ? s : { ...s, editPane: { ...s.editPane, top: a.top } };
+    case "modes.set":
+      return { ...s, modes: a.modes };
     case "pane.edit":
       return s.editPane?.text == null || s.editPane.phase === "opening" ? s : { ...s, editPane: { ...s.editPane, text: a.edit(s.editPane.text), closing: false, emptying: false } };
     case "pane.save": {

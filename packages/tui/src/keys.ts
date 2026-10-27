@@ -30,10 +30,10 @@ export type Do = ModelAction | Command;
 const cmd = (id: string): Command => ({ type: "command", id });
 
 /** What the model's state looks like to the keys: which region has focus, whether a review is open, whether the content area shows something. */
-export interface KeyState { readonly state: KeyStateName; readonly review?: boolean; readonly content?: boolean }
+export interface KeyState { readonly state: KeyStateName; readonly review?: boolean; readonly content?: boolean; /** The editing pane is open: its own keys are in force. */ readonly pane?: boolean }
 
 /** The key state of the screen's model. */
-export const keyStateOf = (s: State): KeyState => ({ state: s.editPane?.text ? s.editPane.text.mode ?? "normal" : s.focus, review: s.mode.kind === "review", content: s.content !== null });
+export const keyStateOf = (s: State): KeyState => ({ state: s.editPane?.text ? s.editPane.text.mode ?? "normal" : s.focus, review: s.mode.kind === "review", content: s.content !== null, pane: s.editPane !== null });
 
 export interface KeyAction {
   /** Stable across key changes: overrides, the key panel and the docs name the action by it. */
@@ -50,7 +50,7 @@ export interface KeyAction {
   /** What it does; absent only on `g <digits>`, which the chord reads itself. */
   readonly do?: Do;
   /** Only in a review (`review`), only outside one (`book`), or only while the content area shows something (`content`). */
-  readonly needs?: "review" | "book" | "content";
+  readonly needs?: "review" | "book" | "content" | "pane";
   /** Not remappable: Tab, and `g <digits>` (the number closes on the prefix key itself, Enter alike). */
   readonly fixed?: true;
 }
@@ -59,6 +59,8 @@ const RAIL: readonly KeyStateName[] = ["rail"], MAIN: readonly KeyStateName[] = 
 const OUTSIDE: readonly KeyStateName[] = ["rail", "main"];
 /** The editing pane's normal and select modes: the same motions move the cursor in one and extend the selection in the other. */
 const MODAL: readonly KeyStateName[] = ["normal", "select"];
+/** Every mode of the editing pane: its own toggles (focus, typewriter) work in all three. */
+const PANE: readonly KeyStateName[] = ["normal", "insert", "select"];
 
 export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   // ---- the rail: the stage machine in a book, the changes in a review
@@ -135,6 +137,8 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "view.zen", states: OUTSIDE, prefix: "v", key: "z", label: "zen", description: "Hide or show the rail.", do: { type: "view.zen" } },
   { id: "view.fullscreen", states: ["rail", "main", "content"], needs: "content", prefix: "v", key: "c", label: "full-screen content", description: "Make the content area full-screen, or restore it; Esc restores it too.", do: { type: "view.full" } },
   { id: "view.editor", states: MAIN, prefix: "v", key: "e", label: "editor", description: "Edit the file here, in place, on an edit branch: Ctrl+S saves, Esc closes.", do: cmd("view.editor") },
+  { id: "edit.focus", states: PANE, needs: "pane", key: "ctrl-f", label: "focus mode", description: "Edit with everything but the current paragraph dimmed; in the editing pane; remembered.", do: cmd("edit.focus") },
+  { id: "edit.typewriter", states: PANE, needs: "pane", key: "ctrl-t", label: "typewriter mode", description: "Edit with the cursor's line kept in the middle of the pane; in the editing pane; remembered.", do: cmd("edit.typewriter") },
   { id: "view.save", states: OUTSIDE, needs: "book", prefix: "v", key: "s", label: "save edits", description: "Save your edits: merge the edit branch into main.", do: cmd("view.save") },
 
   // ---- g: go to
@@ -259,7 +263,7 @@ export const DEFAULT_KEYMAP: Keymap = { actions: DEFAULT_ACTIONS };
 export const keysOf = (a: KeyAction): string[] => [a.key, a.secondary ?? ""].filter(Boolean);
 
 const inState = (ks: KeyState) => (a: KeyAction): boolean =>
-  a.states.includes(ks.state) && (a.needs === undefined || (a.needs === "review" ? !!ks.review : a.needs === "book" ? !ks.review : !!ks.content));
+  a.states.includes(ks.state) && (a.needs === undefined || (a.needs === "review" ? !!ks.review : a.needs === "book" ? !ks.review : a.needs === "pane" ? !!ks.pane : !!ks.content));
 
 /** The top-level rows that act in a state (no prefix), bound ones only, in table order. */
 export const rowsOf = (ks: KeyState, km: Keymap = DEFAULT_KEYMAP): KeyAction[] => km.actions.filter((a) => !a.prefix && inState(ks)(a) && keysOf(a).length);
@@ -335,10 +339,11 @@ const where = (a: KeyAction, slot: "primary" | "secondary") => `${a.id}${slot ==
 
 /** Every state the keys can be in: the three regions, in a book or a review, with the content area open or not. */
 const VARIANTS: readonly KeyState[] = STATES.flatMap((state) => [false, true].flatMap((review) => [false, true].map((content) => ({ state, review, content }))));
+const PANE_VARIANTS: readonly KeyState[] = (["normal", "insert", "select"] as const).flatMap((state) => [false, true].map((content) => ({ state, review: false, content, pane: true })));
 
 /** Two bindings on one key in one state, per layer: the keys pressed first, and each prefix's second keys. */
 function checkConflicts(km: Keymap): void {
-  for (const ks of VARIANTS) {
+  for (const ks of [...VARIANTS, ...PANE_VARIANTS]) {
     const prefixes = prefixesOf(ks, km);
     const layers: [string, KeyAction[]][] = [["", rowsOf(ks, km)], ...prefixes.map((p): [string, KeyAction[]] => [p, prefixRows(ks, p, km)])];
     for (const [layer, rows] of layers) {

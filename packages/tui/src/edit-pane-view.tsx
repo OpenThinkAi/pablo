@@ -9,7 +9,8 @@ import { useEffect, useMemo, type Dispatch } from "react";
 import { Box, Text, useInput } from "ink";
 import { useAutosave, type AutosaveOptions } from "./autosave";
 import { tokenOf } from "./chord";
-import { openText, paneHits, paneRows, saveText, savedEdit, type EditText, type PaneSession } from "./edit-pane";
+import { modeOfKey, toggled, NO_MODES, type Modes } from "./edit-modes";
+import { openText, paneHits, paneView, saveText, savedEdit, type EditText, type PaneSession } from "./edit-pane";
 import { DEFAULT_KEYMAP, type Keymap } from "./keys";
 import { modalKey, modeOf, MODE_TAG } from "./modal";
 import type { CheckHit } from "./hits";
@@ -31,12 +32,15 @@ export interface EditPaneViewProps {
   readonly rows: number;
   /** The autosave's idle wait and clock (AGT-2173); tests pass a fake clock. */
   readonly autosave?: AutosaveOptions;
+  /** Focus and typewriter (edit-modes.ts) and what the app does when one is toggled (writes the config). */
+  readonly modes?: Modes;
+  readonly onModes?: (modes: Modes) => void;
 }
 
 const fail = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT_KEYMAP, pending = null, width, height, inner, rows, autosave }: EditPaneViewProps) {
-  const { file, storage, line, phase, branch, saveSeq } = pane;
+export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT_KEYMAP, pending = null, width, height, inner, rows, autosave, modes = NO_MODES, onModes }: EditPaneViewProps) {
+  const { file, storage, line, phase, branch, saveSeq, top } = pane;
   const text = pane.text as EditText | null;
   // Opening: the branch, its worktree and the file there. Once per pane (a new `v e` mounts a new one). `live` goes false
   // when the pane closes (unmounts): an open that lands after Esc lets its branch go again.
@@ -79,6 +83,9 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
       return void dispatch({ type: "pane.close" });
     }
     if (phase === "opening") return;
+    // Focus and typewriter work in every mode (a ctrl key is never text).
+    const toggle = modeOfKey(token, keymap);
+    if (toggle) { const next = toggled(modes, toggle); dispatch({ type: "modes.set", modes: next }); return onModes?.(next); }
     const step = modalKey(modeOf(text), pending, input, key, keymap, { width: inner, height: rows });
     if (step === "close") {
       // Esc in normal mode (insert and select go back to normal first, AGT-2169): the model's one Esc rule
@@ -90,34 +97,37 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
   });
 
   const hits = useMemo(() => (text ? paneHits(text, file, checks) : new Map<number, CheckHit[]>()), [text, file, checks]);
-  const shown = text ? paneRows(text, inner, rows, hits) : [];
-  const title = ` ${text ? `${MODE_TAG[modeOf(text)]} ` : ""}${clean(file)}${text?.dirty ? " [+]" : ""}${branch ? ` · ${clean(branch)}` : ""}${phase === "saving" ? (pane.auto ? " · autosaving…" : " · saving…") : phase === "opening" ? " · opening…" : ""}`;
+  // The scroll is the model's `pane.top`: drawing reads it, and the effect below records where the draw put it.
+  const view = text ? paneView(text, inner, rows, hits, { top, focus: modes.focus, typewriter: modes.typewriter }) : { rows: [], top };
+  useEffect(() => { if (view.top !== top) dispatch({ type: "pane.scroll", top: view.top }); });
+  const shown = view.rows;
+  const title = ` ${text ? `${MODE_TAG[modeOf(text)]} ` : ""}${clean(file)}${text?.dirty ? " [+]" : ""}${branch ? ` · ${clean(branch)}` : ""}${phase === "saving" ? (pane.auto ? " · autosaving…" : " · saving…") : phase === "opening" ? " · opening…" : ""}${modes.focus ? " · focus" : ""}${modes.typewriter ? " · typewriter" : ""}`;
   return (
     <Box flexDirection="column" width={width} height={height}>
       <Text wrap="truncate" bold={text?.dirty === true} dimColor={text?.dirty !== true}>{title}</Text>
       {shown.map((row, i) => {
         if (row.kind === "box") {
           return (
-            <Text key={i} wrap="truncate" color={row.color}>
+            <Text key={i} wrap="truncate" color={row.color} dimColor={row.dim === true}>
               {" "}{row.head !== undefined ? <>{row.head}{row.tag ? <Text dimColor>{row.tag}</Text> : null}{row.text.slice(row.head.length + (row.tag?.length ?? 0))}</> : row.text}
             </Text>
           );
         }
         if (row.parts) {
           return (
-            <Text key={i} wrap="truncate">
+            <Text key={i} wrap="truncate" dimColor={row.dim === true}>
               {" "}{row.parts.map((p, j) => (p.cursor ? <Text key={j} inverse>{p.text}</Text> : p.sel ? <Text key={j} backgroundColor="gray">{p.text}</Text> : p.text))}
             </Text>
           );
         }
         if (row.cursor) {
           return (
-            <Text key={i} wrap="truncate">
+            <Text key={i} wrap="truncate" dimColor={row.dim === true}>
               {" "}{row.cursor.before}<Text inverse>{row.cursor.at}</Text>{row.cursor.after}
             </Text>
           );
         }
-        return <Text key={i} wrap="truncate">{` ${row.text}`}</Text>;
+        return <Text key={i} wrap="truncate" dimColor={row.dim === true}>{` ${row.text}`}</Text>;
       })}
     </Box>
   );

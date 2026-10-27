@@ -201,6 +201,10 @@ configured, the agent runs on the local model.
 `e` (empty means `$EDITOR`, then `hx`); `v e` edits in the screen's own pane. `keys` overrides the screen's key bindings by action id; the
 screen's settings view (`\`) edits them for you and writes them here.
 
+`editModes` (`{ "focus": true, "typewriter": true }`) holds the editing pane's two modes, which the screen writes when you
+toggle them with Ctrl+F (focus: dim all but the current paragraph) and Ctrl+T (typewriter: keep the cursor's line in the
+middle of the pane); both are off when the entry is absent.
+
 ## Environment variables
 
 | Variable | Effect |
