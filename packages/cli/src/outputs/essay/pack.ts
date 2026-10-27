@@ -50,7 +50,10 @@ export function essayDefaultPlan(workDir: string): PlanRow[] {
   }));
 }
 
-/** `OUTPUTS.essay.preconditions`: the section is in the outline, and (nonfiction) the thesis is written and every claim it names exists. */
+/**
+ * `OUTPUTS.essay.preconditions`: the section is in the outline, the section before it is in `essay.md` (merged), and
+ * (nonfiction) the thesis is written and every claim it names exists.
+ */
 export function essayPreconditions(workDir: string, unit: number): UnitPreconditions {
   const track = essayTrack(workDir);
   const { sections, source } = essayOutline(workDir, track);
@@ -59,6 +62,15 @@ export function essayPreconditions(workDir: string, unit: number): UnitPrecondit
     return { ready: false, missing: [sections.length === 0 ? `no sections in ${source}` : `no section ${unit} in ${source} (it has ${sections.map((s) => s.number).join(", ")})`] };
   }
   const missing: string[] = [];
+  // Sections are written in order, each accepted before the next: every draft branch rewrites the one file's
+  // frontmatter, so two unmerged sections would always conflict.
+  const previous = sections.filter((s) => s.number < unit).at(-1);
+  if (previous !== undefined) {
+    const content = readEssayFile(workDir);
+    if (content === undefined || sectionBody(sections, content, previous.number) === undefined) {
+      missing.push(`section ${previous.number} is not written and accepted yet (pablo write --output essay --unit ${previous.number}, then merge its branch)`);
+    }
+  }
   if (track === "nonfiction") {
     if (!hasProse(read(join(workDir, THESIS_FILE)) ?? "")) missing.push(`${THESIS_FILE} has no thesis`);
     for (const n of sectionClaims(workDir, section).absent) missing.push(`section ${unit} names claim #${n}, which ${CLAIMS_FILE} does not have`);

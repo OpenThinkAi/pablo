@@ -161,7 +161,8 @@ test("AC1: on nonfiction the units are the outline's sections; output add scaffo
   expect(plan).toContain("core/outline.md");
   expect(plan).toContain("| 2 | The pamphlet war | 2 | beat |");
   expect(existsSync(join(work, "outputs", "essay", "RULES.md"))).toBe(true);
-  expect(essayPreconditions(work, 2)).toEqual({ ready: true, missing: [] });
+  expect(essayPreconditions(work, 1)).toEqual({ ready: true, missing: [] });
+  expect(essayPreconditions(work, 2).missing).toEqual(["section 1 is not written and accepted yet (pablo write --output essay --unit 1, then merge its branch)"]);
   expect(essayPreconditions(work, 9).missing[0]).toContain("no section 9 in core/outline.md");
 });
 
@@ -188,6 +189,10 @@ test("AC1: write --output essay --unit N puts section N into essay.md on draft/e
   const first = await write(vault, work, home, "1");
   expect(first.code).toBe(0);
   expect(first.body).toMatchObject({ ok: true, branch: "draft/essay-01", path: "outputs/essay/essay.md" });
+  // Section 2 waits for section 1 to be accepted: two unmerged branches would conflict on the one file.
+  const early = await write(vault, work, home, "2");
+  expect(early.code).toBe(2);
+  expect((early.body["missing"] as string[])[0]).toContain("section 1 is not written and accepted yet");
   const merged = await mergeDraft(work, "draft/essay-01", { slug: "the-press", env: { PATH: NO_THINK_PATH }, now: NOW });
   expect(merged.ok).toBe(true);
   if (merged.ok) expect(merged.rituals.filter((r) => r.status === "failed")).toEqual([]);

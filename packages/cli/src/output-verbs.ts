@@ -41,8 +41,6 @@ import type { Marker } from "./marker";
 import { dirtyPaths } from "./migrate";
 import { LEDGER_TEMPLATE } from "./novel/continuity";
 import { renderNovelPlan } from "./outputs/novel/plan";
-import { ESSAY_ID } from "./outputs/essay/units";
-import { OUTLINE_FILE } from "./core/nonfiction";
 import { isNarratableSource } from "./outputs/narrated";
 import { OUTPUTS, outputDefinition, outputIds, outputsOnTrack } from "./outputs/registry";
 import type { OutputDefinition, PlanRow } from "./outputs/types";
@@ -135,8 +133,8 @@ export function renderPlan(def: OutputDefinition, rows: readonly PlanRow[]): str
   return [
     `# Plan: ${def.id}`,
     "",
-    def.id === ESSAY_ID
-      ? `The essay's sections: on nonfiction the rows of \`${OUTLINE_FILE}\` (beats: the outline row), on a fiction track one section over the core beats.`
+    def.planNote !== undefined
+      ? `The ${def.id} output's units: ${def.planNote}.`
       : `The ${def.id} output's units (${def.plural}) mapped onto the core beats in \`${BEATS_FILE}\`.`,
     `A unit whose ${def.noun} exists carries its status.`,
     "",

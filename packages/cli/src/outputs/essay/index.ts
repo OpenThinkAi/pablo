@@ -81,6 +81,7 @@ export const ESSAY: OutputDefinition = {
   unitOfPath: essayUnitOfPath,
   branch: essayBranch,
   unitOfBranch: essayUnitOfBranch,
+  planNote: "its sections: on nonfiction the rows of `core/outline.md` (beats: the outline row), on a fiction track one section over the core beats",
   shared: {
     has: (workDir, content, unit) => sectionBody(essayOutline(workDir).sections, content, unit) !== undefined,
     put: (workDir, content, unit, body, frontmatter) => putSection(essayOutline(workDir).sections, content, unit, body, frontmatter),

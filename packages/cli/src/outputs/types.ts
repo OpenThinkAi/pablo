@@ -237,6 +237,11 @@ export interface OutputDefinition {
    * work directory.
    */
   readonly derive?: (workDir: string, unit: number, options: Pick<UnitPackOptions, "voices">) => DeriveOutcome;
+  /**
+   * What the plan's rows map onto, for `plan.md`'s header and the guide (the essay: the outline's sections). Absent:
+   * the core beats.
+   */
+  readonly planNote?: string;
   /** Units that are sections of one shared file (the essay, AGT-2134). Absent: one file per unit. */
   readonly shared?: SharedUnitFile;
   /**
