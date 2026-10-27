@@ -976,7 +976,10 @@ written. A historical-fiction run's drafts still wait on the period brief and pe
 facts (`write`'s track gate).
 
 By default every branch is accepted as soon as it lands. The agent's questions are
-answered by stated assumptions, which are kept with the run. With `--review`, the run
+answered by stated assumptions, which are kept with the run. An `--output essay` on a
+fiction work assumes the premise (`bible/overview.md`'s `## Premise`, else its logline)
+as the essay's thesis, recorded among the assumptions; edit `outputs/essay/thesis.md`
+to change it. With `--review`, the run
 stops on each branch for you to accept; `pablo story --project <slug>` then picks the
 run up again. Progress is kept in `<work>/.pablo/story.json`, so a stopped or failed
 run resumes where it was. Runs on the same provider as `agent`.

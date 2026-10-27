@@ -1853,7 +1853,7 @@ const OUTPUT_ARGS = z.object({
     ),
   type: z.string().optional().describe("The output type for add, remove and plan, e.g. \"novel\" or \"radio\"."),
   from: z.string().optional().describe("add narrated: the output the narration reads, a prose output the work has (e.g. \"novel\", \"story\", \"essay\")."),
-  thesis: z.string().optional().describe("add essay on a fiction or historical-fiction work: the one thing the essay argues about the story; written to outputs/essay/thesis.md with an outline drawn from the story core. Required there unless the file already has one."),
+  thesis: z.string().max(4000).optional().describe("add essay on a fiction or historical-fiction work: the one thing the essay argues about the story; written to outputs/essay/thesis.md with an outline drawn from the story core. Required there unless the file already has one."),
   project: projectField,
   "dry-run": z.boolean().optional().default(false).describe("plan: show the rows; write and commit nothing."),
 });
@@ -1896,6 +1896,7 @@ const OUTPUT_ADD_MCP_ARGS = z.object({
   from: z.string().optional().describe('narrated only: the prose output the narration reads, one the work has (e.g. "novel", "story", "essay").'),
   thesis: z
     .string()
+    .max(4000)
     .optional()
     .describe("essay on a fiction or historical-fiction work only: the one thing the essay argues about the story. Ask the author for it; the add is refused without one."),
 });

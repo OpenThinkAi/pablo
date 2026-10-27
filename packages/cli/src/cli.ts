@@ -1613,10 +1613,10 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     }
     let result = await verb.run(built.args as never, { cwd, env: process.env, stderr: process.stderr });
     // `output add essay` on a fiction track with no --thesis (AGT-2135): on a terminal, ask for it and add again.
-    const missing = (result.body as { missing?: unknown }).missing;
-    if (!args.json && Array.isArray(missing) && missing.some((m) => String(m).startsWith("--thesis")) && process.stdin.isTTY === true && process.stderr.isTTY === true) {
+    if (!args.json && (result.body as { ask?: unknown }).ask === "thesis" && process.stdin.isTTY === true && process.stderr.isTTY === true) {
       const thesis = await askLine("The essay's thesis (the one thing it argues about the story): ");
       if (thesis !== "") result = await verb.run({ ...(built.args as Record<string, unknown>), thesis } as never, { cwd, env: process.env, stderr: process.stderr });
+      else console.error("pablo: no thesis given; the essay was not added");
     }
     if (args.json) console.log(JSON.stringify(result.body));
     else if ((result.body as { ok?: boolean }).ok === true) console.log(outputVerbText(result.body));

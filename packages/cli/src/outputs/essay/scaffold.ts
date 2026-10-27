@@ -64,6 +64,22 @@ export function renderFictionEssayOutline(acts: readonly ActRow[]): string {
   ].join("\n");
 }
 
+/**
+ * The thesis an on-demand `pablo story` run assumes when it adds the essay with nobody to ask (AGT-2135): the work's
+ * premise (`bible/overview.md`'s `## Premise`, else its `## Logline`), first paragraph. Undefined when it has neither.
+ */
+export function assumedThesis(workDir: string): string | undefined {
+  const path = join(workDir, "bible", "overview.md");
+  if (!existsSync(path)) return undefined;
+  const text = readFileSync(path, "utf8");
+  for (const heading of ["Premise", "Logline"]) {
+    const match = new RegExp(`^##\\s+${heading}\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "m").exec(text);
+    const paragraph = (match?.[1] ?? "").trim().split(/\n\s*\n/)[0]?.replace(/\s+/g, " ").trim();
+    if (paragraph !== undefined && paragraph !== "") return paragraph;
+  }
+  return undefined;
+}
+
 /** `outputs/essay/thesis.md`'s text for `thesis`. */
 export function renderThesis(thesis: string): string {
   return `# Thesis\n\n${thesis.trim()}\n`;
@@ -89,6 +105,7 @@ export function essayScaffold(workDir: string, options: ScaffoldOptions): Scaffo
       ok: false,
       message: "an essay on a fiction track argues a thesis about the story; give it with --thesis \"<the one thing the essay argues>\"",
       missing: ["--thesis: the one thing the essay argues about the story"],
+      ask: "thesis",
     };
   }
   const files: { rel: string; content: string }[] = [];

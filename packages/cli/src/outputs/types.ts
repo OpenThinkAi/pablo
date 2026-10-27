@@ -267,4 +267,10 @@ export interface ScaffoldOptions {
 /** An output's scaffold files (work-relative path and text), or a refusal with what is missing. */
 export type ScaffoldOutcome =
   | { readonly ok: true; readonly files: readonly { readonly rel: string; readonly content: string }[] }
-  | { readonly ok: false; readonly message: string; readonly missing: readonly string[] };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly missing: readonly string[];
+      /** The one value the author can supply to get past the refusal (`--thesis`), so a front end can ask for it. */
+      readonly ask?: "thesis";
+    };

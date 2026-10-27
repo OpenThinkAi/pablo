@@ -20,6 +20,7 @@ import { runConformance } from "../src/outputs/conformance";
 import { ESSAY } from "../src/outputs/essay";
 import { buildEssayPack, essayDefaultPlan, essayPreconditions } from "../src/outputs/essay/pack";
 import { compileEssay, noteSource, publishEssay } from "../src/outputs/essay/publish";
+import { assumedThesis } from "../src/outputs/essay/scaffold";
 import { claimRefs, cleanSectionBody, parseEssayFile, putSection, sectionBody, withoutCitations } from "../src/outputs/essay/sections";
 import { NARRATED } from "../src/outputs/narrated";
 import { OUTPUTS, outputsOnTrack, resolveOutput } from "../src/outputs/registry";
@@ -418,6 +419,7 @@ test("AGT-2135 AC1: output add essay on a fiction work needs a thesis, then writ
   if (refused.ok) throw new Error("added without a thesis");
   expect(refused.message).toContain("--thesis");
   expect(refused.missing).toEqual(["--thesis: the one thing the essay argues about the story"]);
+  expect(refused.ask).toBe("thesis");
   expect(existsSync(join(work, "outputs", "essay"))).toBe(false);
   expect(addOutput(vault, work, "story", { now: NOW, thesis: "x" })).toMatchObject({ ok: false, message: expect.stringContaining("--thesis is for the essay output") });
 
@@ -505,4 +507,13 @@ test("AGT-2135 AC3: write --output essay drafts a fiction essay's first section 
   expect(file.sections.map((s) => s.title)).toEqual(["The story"]);
   expect(file.sections[0]!.body).toContain("Ines keeps the lamp the winter it is to run itself.");
   expect(onBranch).toContain("prompt_hash: ");
+});
+
+test("AGT-2135: assumedThesis is the premise's first paragraph, else the logline", () => {
+  const { work } = fiction();
+  expect(assumedThesis(work)).toBe("The lamp is to run itself by spring. Ines decides whether that is a loss.");
+  writeFileSync(join(work, "bible", "overview.md"), "# Overview\n\n## Logline\n\nA keeper's daughter\nkeeps the lamp.\n\nMore.\n");
+  expect(assumedThesis(work)).toBe("A keeper's daughter keeps the lamp.");
+  writeFileSync(join(work, "bible", "overview.md"), "# Overview\n");
+  expect(assumedThesis(work)).toBeUndefined();
 });

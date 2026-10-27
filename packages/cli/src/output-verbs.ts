@@ -74,6 +74,8 @@ export interface OutputRefusal {
   readonly code: 2;
   readonly message: string;
   readonly missing?: readonly string[];
+  /** The value the author can give to get past the refusal (`output add essay`'s thesis, AGT-2135), for a front end to ask for. */
+  readonly ask?: "thesis";
 }
 
 export type OutputListResult = { readonly ok: true; readonly outputs: readonly OutputListEntry[]; readonly available: readonly string[] } | OutputRefusal;
@@ -263,7 +265,10 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   const thesis = opts.thesis?.trim() || undefined;
   if (thesis !== undefined && def.def.scaffold === undefined) return refuse("add", `--thesis is for the essay output; the ${id} output takes none`);
   const scaffold = def.def.scaffold?.(workDir, { thesis }) ?? { ok: true as const, files: [] };
-  if (!scaffold.ok) return refuse("add", scaffold.message, scaffold.missing.length === 0 ? undefined : scaffold.missing);
+  if (!scaffold.ok) {
+    const refusal = refuse("add", scaffold.message, scaffold.missing.length === 0 ? undefined : scaffold.missing);
+    return scaffold.ask === undefined ? refusal : { ...refusal, ask: scaffold.ask };
+  }
 
   const plan = planFile(id);
   const rules = rulesFile(id);

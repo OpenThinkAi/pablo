@@ -58,6 +58,7 @@ import type { CastingDeps } from "./radio";
 import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, readMarker, trackOf, writeMarker } from "./marker";
 import { mergeDraft } from "./novel/merge";
 import { addOutput } from "./output-verbs";
+import { assumedThesis } from "./outputs/essay/scaffold";
 import { radioMachine } from "./outputs/radio/casting-side";
 import { episodeState } from "./outputs/radio/state";
 import { RADIO_ID } from "./outputs/radio/units";
@@ -818,7 +819,19 @@ async function advance(run: Run): Promise<VerbResult> {
       const marker = readMarker(run.work);
       if (!marker.ok) return refuse(marker.message);
       if (marker.marker.outputs[id] === undefined) {
-        const added = addOutput(run.vault, run.work, id, run.deps.now ? { now: run.deps.now } : {});
+        let added = addOutput(run.vault, run.work, id, run.deps.now ? { now: run.deps.now } : {});
+        // A fiction essay argues a thesis (AGT-2135). Nobody is asked in a story run: the premise is assumed and recorded.
+        const thesis = !added.ok && added.ask === "thesis" ? assumedThesis(run.work) : undefined;
+        if (thesis !== undefined) {
+          state.assumptions.push({
+            stage: addStep,
+            question: "What does the essay argue about the story?",
+            why: "an essay on a fiction work argues a thesis; the story's premise is assumed (edit outputs/essay/thesis.md to change it)",
+            options: [thesis],
+          });
+          saveState(run.work, state);
+          added = addOutput(run.vault, run.work, id, { ...(run.deps.now ? { now: run.deps.now } : {}), thesis });
+        }
         if (!added.ok) return { body: added, exitCode: added.code };
       }
       markDone(run, addStep);

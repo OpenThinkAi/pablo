@@ -624,6 +624,7 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
       reducible: false,
       cutOrder: 0,
     }),
+    // With a thesis, the story it is about gets its own slice; without one, the `thesis` slice above already sent it.
     spec({
       name: "subject",
       heading: "# The story this essay is about",

@@ -54,7 +54,7 @@ export const USAGE_LINES: readonly string[] = [
     "                                            core is at beats), remove one (archived under",
     "                                            outputs/_removed/), or rewrite its plan.md;",
     "                                            add narrated --from <output> reads that output;",
-    "                                            add essay --thesis \"<t>\" on a fiction track",
+    "                                            add essay --thesis \"<text>\" on fiction",
     "  pablo story \"<prompt>\" [--output <type>]... [--review] [--title T] [--words N] [--track <t>]",
     "                                            create a work and write it end to end: the core",
     "                                            through the harness, then each output (default:",
