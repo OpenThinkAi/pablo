@@ -46,13 +46,15 @@ test("pablo --help lists the P0 verbs and exits 0", () => {
   }
 });
 
-test("pablo --help lists dry-run under Later and points at write --dry-run", () => {
+test("pablo --help no longer lists dry-run, and `pablo dry-run` exits non-zero pointing at write --dry-run", () => {
   const { stdout } = runCli(["--help"]);
-  const [verbs, later] = stdout.split("Later (not yet implemented):");
+  expect(stdout).not.toMatch(/^ {2}dry-run$/m);
+  expect(stdout).not.toContain("Later (not yet implemented)");
+  expect(stdout).toMatch(/^ {2}describe_voice$/m);
 
-  expect(verbs).not.toMatch(/^ {2}dry-run$/m);
-  expect(later).toMatch(/^ {2}dry-run$/m);
-  expect(stdout).toContain("write --dry-run");
+  const r = runCli(["dry-run"]);
+  expect(r.exitCode).not.toBe(0);
+  expect(r.stderr + r.stdout).toContain("write --dry-run");
 });
 
 test("pablo with no verb prints help and exits 0", () => {
