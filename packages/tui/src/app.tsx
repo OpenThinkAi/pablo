@@ -27,14 +27,13 @@ import { openSettings, settingsPaste, settingsStep } from "./settings";
 import { SettingsScreen } from "./settings-view";
 import { fitFields, statusFields, GAP, type CommentKind } from "./status";
 import { branchRows, editTarget, loadReview, reviewLines, type BranchDiff, type DiffRow, type Note, type ReviewComment } from "./review";
-import type { CommentSaver, EditSession, Finisher, Puller, Refresher, Rejected, RoundsPoller } from "./screen";
-import { roundDoc, roundOf, roundRows, reviewsIn } from "./reviews";
+import type { CommentSaver, EditSession, Finisher, Refresher, Rejected } from "./screen";
 import { commentAction, isSubmit } from "./comment-input";
 import { voiceRuleAction } from "./voice-input";
 import type { Voicer, Writer } from "./screen";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
-import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Mark, type RailRow, type Revise, type Round, type State } from "./state";
+import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Mark, type RailRow, type Revise, type State } from "./state";
 
 export interface AppProps {
   /** The project's marker fields the status area shows. */
@@ -89,20 +88,14 @@ export interface AppProps {
   readonly onCommand?: (command: Command, selected?: Selected) => void;
   /** Reads the book's stages and waiting branches again, every `refreshMs`: what changed outside the screen shows in the rail (AGT-1640). */
   readonly refresh?: Refresher;
-  /** Polls for the work's reading rounds on open and every `roundsMs`: the Reviews group (AGT-1640). */
-  readonly rounds?: RoundsPoller;
-  /** Enter on a submitted round: pulls its review into a `reader/` branch, then the review opens (AGT-1641). */
-  readonly puller?: Puller;
-  /** How often the book is read again and the rounds polled; tests pass short ones. */
+  /** How often the book is read again; tests pass short ones. */
   readonly refreshMs?: number;
-  readonly roundsMs?: number;
   /** Tests pass a fixed size; the real screen measures the terminal. */
   readonly size?: Size;
 }
 
-/** The book is read again every few seconds; GitHub is asked about the rounds once a minute (AGT-1640). */
+/** The book is read again every few seconds (AGT-1640). */
 const REFRESH_MS = 3000;
-const ROUNDS_MS = 60_000;
 
 const NO_ROWS: readonly RailRow[] = [];
 const NO_LINES: readonly string[] = [];
@@ -113,7 +106,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, voicer, finisher, editSession, composer, refresh, rounds, puller, refreshMs = REFRESH_MS, roundsMs = ROUNDS_MS }: AppProps) {
+export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, reviser, voicer, finisher, editSession, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -131,18 +124,6 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     const timer = setInterval(() => dispatch({ type: "tick" }), refreshMs);
     return () => clearInterval(timer);
   }, [refresh, refreshMs]);
-  // The reading rounds, on open and every `roundsMs`: a poll that fails says why in the footer and the next one tries again.
-  useEffect(() => {
-    if (!rounds) return;
-    let live = true;
-    const poll = () => rounds().then(
-      (r) => { if (live) dispatch(r.ok ? { type: "rounds.loaded", rounds: r.rounds, ...(r.note !== undefined ? { note: r.note } : {}) } : { type: "rounds.failed", message: r.message }); },
-      (e: unknown) => { if (live) dispatch({ type: "rounds.failed", message: e instanceof Error ? e.message : String(e) }); },
-    );
-    void poll();
-    const timer = setInterval(() => void poll(), roundsMs);
-    return () => { live = false; clearInterval(timer); };
-  }, [rounds, roundsMs]);
   // A save puts the new bindings in force at once; until one, the keymap and editor the screen opened with.
   const keymap = state.saved ? effectiveKeys(state.saved.overrides) : given;
   const editor = state.saved ? state.saved.editor : givenEditor;
@@ -197,13 +178,10 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
       if (VOICE_CHOICES.some((c) => c.key === token)) return; // a choice that needs a selection, with none: nothing happens (f is not the filter prefix here)
     }
     for (const action of resolve(keyStateOf(state), state.pending, token, keymap)) {
-      // Enter on a reading round (AGT-1641) is the screen's: a review that is in is pulled, then opened.
-      const round = action.type === "rail.open" && state.mode.kind === "book" ? roundOf(state.rounds, railRow(viewOf(state).rail)?.id) : undefined;
       // `y` on a reader's comment (AGT-1642) is accept and revise: the author says what the writer model should do about it.
       const row = railRow(viewOf(state).rail);
       const note = row && action.type === "review.mark" && action.mark === "accepted" && state.mode.kind === "review" ? review?.notes.get(row.id) : undefined;
-      if (round) openRound(round);
-      else if (row && note && note.comment.tag !== "keep" && state.marks[row.id] !== "accepted") openNoteRevise(row.id, note);
+      if (row && note && note.comment.tag !== "keep" && state.marks[row.id] !== "accepted") openNoteRevise(row.id, note);
       else if (action.type !== "command") dispatch(action);
       else if (action.id === "quit") exit();
       else if (action.id === "settings") dispatch({ type: "settings.open", settings: openSettings(keymap, editor, configFile ?? configPath()) });
@@ -262,21 +240,6 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     finisher(open, { removed: [], added: [] }).then(
       (r) => dispatch(r.ok ? { type: "save.done", branch: open, lines: r.lines } : { type: "save.failed", message: r.message }),
       (e: unknown) => dispatch({ type: "save.failed", message: e instanceof Error ? e.message : String(e) }),
-    );
-  }
-
-  // Enter on a round row: a round still with its reader only says so; one with a review in is pulled into its
-  // `reader/` branch, and the review opens on it. One pull at a time, and not while a finish or an edit runs.
-  function openRound(round: Round) {
-    const show = (body: string) => dispatch({ type: "content.show", content: { title: `Review · ${round.reader}`, body, kind: "write" } });
-    if (round.status !== "submitted") return show(`${round.reader} has not sent their review yet. This row changes when it comes in.`);
-    if (state.pulling !== null) return show(`${state.pulling} is still being pulled.`);
-    if (state.finishing !== null || state.editing !== null) return show("Finish what is running first, then pull the review.");
-    if (!puller) return show("Pulling reviews is not available here.");
-    dispatch({ type: "pull.start", id: round.id });
-    puller(round.id).then(
-      (r) => dispatch(r.ok ? { type: "pull.done", id: round.id, branch: r.branch, lines: r.lines } : { type: "pull.failed", message: r.message }),
-      (e: unknown) => dispatch({ type: "pull.failed", message: e instanceof Error ? e.message : String(e) }),
     );
   }
 
@@ -394,10 +357,9 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   const reviewBranch = place.kind === "review" ? place.branch : undefined;
   const waiting = useMemo(() => [...branches, ...state.written.filter((b) => !branches.includes(b))].filter((b) => !state.finished.includes(b)), [branches, state.written, state.finished]);
   const extra = useMemo(() => {
-    const reviews = roundRows(state.rounds);
     const waitingRows = branchRows(waiting);
-    return { rows: [...reviews.rows, ...waitingRows.rows], labels: { ...reviews.labels, ...waitingRows.labels } };
-  }, [waiting, state.rounds]);
+    return { rows: waitingRows.rows, labels: waitingRows.labels };
+  }, [waiting]);
   const review = useMemo(() => (reviewBranch === undefined ? undefined : loadReview(diffOf?.(reviewBranch), commentsOf?.(reviewBranch), fileOf ? (path) => fileOf(reviewBranch, path) : undefined)), [reviewBranch, diffOf, fileOf, commentsOf, state.reviewGen, state.commentSeq]);
   const bookAll = useMemo(() => [...bookRows, ...extra.rows], [bookRows, extra]);
   const rows = review ? review.rows : bookAll;
@@ -417,9 +379,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   const rowId = railRow(viewOf(state).rail)?.id;
   // A chapter whose draft is waiting on a branch says so, and how to open it, instead of the missing-file notice.
   const waitingBranch = rowId === undefined || review ? undefined : book?.waiting[rowId];
-  // A round row (AGT-1640) says where the round stands and what Enter does.
-  const round = review ? undefined : roundOf(state.rounds, rowId);
-  const doc = useMemo(() => (round ? roundDoc(round) : waitingBranch !== undefined && rowId !== undefined ? waitingDoc(rowId, waitingBranch) : rowId !== undefined && !review ? load?.(rowId, book?.units[rowId]) : undefined), [rowId, load, book, review, state.finished, waitingBranch, round, snapKey]);
+  const doc = useMemo(() => (waitingBranch !== undefined && rowId !== undefined ? waitingDoc(rowId, waitingBranch) : rowId !== undefined && !review ? load?.(rowId, book?.units[rowId]) : undefined), [rowId, load, book, review, state.finished, waitingBranch, snapKey]);
   const hits = useMemo(() => (doc?.file !== undefined && checks ? checks(doc.file, doc.text) : NO_HITS), [doc, checks]);
   const shownTitle = doc ? doc.title : mainTitle;
   // A document's sentences are selectable (their spans are in these rows); lines handed in as plain text are not.
@@ -493,13 +453,12 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
 
   const view = viewOf(state);
   const working = state.compose.busy ? ` · pablo: ${clean(activityNow(state.compose)) || "working"}` : "";
-  const roundsNote = state.roundsNote ? ` · reviews: ${clean(state.roundsNote)}` : "";
-  const where = state.mode.kind === "compose" ? `compose · Esc back to the book${working}` : `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}${state.mode.back ? " · Esc back to compose" : ""}` : "book"} · ${state.focus}${working}${roundsNote}`;
+  const where = state.mode.kind === "compose" ? `compose · Esc back to the book${working}` : `${state.mode.kind === "review" ? `review ${clean(state.mode.branch)}${state.mode.back ? " · Esc back to compose" : ""}` : "book"} · ${state.focus}${working}`;
   const pending = pendingText(state.pending);
   const shownComments = hits.length ? { ...comments, check: hits.length } : comments;
   // The status line names the output the cursor is in (its group row or one of its units); on a core stage it names the work's format.
   const inOutput = review || stageId === undefined ? undefined : book?.outputOf[stageId];
-  const fields = fitFields(statusFields({ format: inOutput ?? format, ...(inOutput !== undefined && book?.counts[inOutput] ? book.counts[inOutput] : { drafted, total }), branch: reviewBranch ?? branch, comments: review ? { ...shownComments, ...review.counts } : shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}), reviews: reviewsIn(state.rounds) }), size.cols - 4);
+  const fields = fitFields(statusFields({ format: inOutput ?? format, ...(inOutput !== undefined && book?.counts[inOutput] ? book.counts[inOutput] : { drafted, total }), branch: reviewBranch ?? branch, comments: review ? { ...shownComments, ...review.counts } : shownComments, ...(reviewBranch !== undefined ? { review: reviewCounts(state) } : {}) }), size.cols - 4);
   return (
     <Box flexDirection="column" width={size.cols} height={size.rows}>
       <Box flexDirection="column" borderStyle="single" paddingX={1} height={4}>
