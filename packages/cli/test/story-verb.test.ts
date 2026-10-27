@@ -255,6 +255,9 @@ test("AC1: the spec example leaves research, a bible, an outline, a drafted and 
   for (const r of chain) expect(r).toMatchObject({ output: "story", unit: 1 });
   expect(writer.drafts).toBe(1);
 
+  // The track's checks ran on the draft (AGT-2115): its hits ride on the draft record, the text untouched.
+  expect(Array.isArray(body.drafts.story[0].check)).toBe(true);
+
   // Every branch was accepted and removed; the work is clean on main.
   expect(changeBranches(vault)).toEqual([]);
   expect(git(vault, "status", "--porcelain", "--", `stories/${body.project}`)).toBe("");

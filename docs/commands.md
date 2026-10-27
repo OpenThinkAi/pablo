@@ -445,6 +445,7 @@ shows the script as the pack's one `source` section. `--words`, `--scenes`,
 | `--direction "..."` | a steer beyond the beat ("slower, stay on Cora"); sent as its own section and recorded as `direction:` in the frontmatter |
 | `--voices narrator\|characters` | the narrated output only: one narrator (default), or speaker lines for attributed dialogue; refused on any other output |
 | `--force` | overwrite an existing unit file (an essay section: replace its text) |
+| `--no-check` | skip the track's checks after the draft (see below) |
 | `--dry-run` | build and show the prompt pack, send nothing |
 
 Before sending anything, it:
@@ -501,8 +502,14 @@ with the prompt hash as its `Receipt:` line. Branches are `draft/chNN` for a nov
 token, wall time, temperature, seed, and the voice layers as `voice_layers`, plus
 `voice_missing` when a listed voice was not found) is appended to
 `<work>/.pablo/receipts.jsonl`.
-The same check as `pablo check` runs on the new text. Its hits are reported but never
-change the exit code.
+After the draft is committed, `write` runs the checks of the work's track on that one unit, the
+same ones `pablo check --output <type> --unit N` runs: the mechanical tells and the core check on
+every track, anachronism and fact accuracy on `historical-fiction`, claim support on `nonfiction`.
+Their hits are reported (`check[]` in the JSON, one line each in the prose form) but never change
+the exit code, and a hit never rewrites the draft. A check that cannot run (no model configured,
+a model error) is reported in `checkNotices[]` (stderr in the prose form) and does not fail the
+write. `--no-check` skips the track's checks and keeps only the mechanical tells. The checks run in
+the draft branch's worktree, so the lexicon and fact-accuracy caches they write stay there.
 
 ```
 {ok, path, branch, worktree, commit, receipt, check[]}      // success
@@ -947,7 +954,7 @@ refused. Both are also MCP tools.
 ### story
 
 ```
-pablo story "<prompt>" [--output <type>]... [--review] [--title T] [--words N] [--track <t>]
+pablo story "<prompt>" [--output <type>]... [--review] [--no-check] [--title T] [--words N] [--track <t>]
 pablo story --project <slug>
 ```
 
@@ -983,6 +990,13 @@ to change it. With `--review`, the run
 stops on each branch for you to accept; `pablo story --project <slug>` then picks the
 run up again. Progress is kept in `<work>/.pablo/story.json`, so a stopped or failed
 run resumes where it was. Runs on the same provider as `agent`.
+
+After each drafted unit the run does what `write` does: it runs the work's track checks on
+that unit and keeps the hits (and any check that could not run) on the draft's record in
+the result, `drafts.<output>[].check[]` and `.checkNotices[]`; the prose form prints one
+line per hit. A hit never rewrites the draft and a failed check never stops the run.
+`--no-check` skips the track's checks (and stays on when the run is resumed). The radio
+output's episodes are checked by `write` as usual, but their hits are not summarised here.
 
 ---
 

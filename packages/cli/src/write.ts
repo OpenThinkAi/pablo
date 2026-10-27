@@ -30,7 +30,7 @@ import {
 } from "@openthink/pablo-core";
 import type { Adapter, CompletionStats, Intent, PabloConfig, Providers } from "@openthink/pablo-core";
 import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./branch";
-import { checkFile, loadCheckRules } from "./check";
+import { checkDraft, checkFile, loadCheckRules } from "./check";
 import type { Hit } from "./check";
 import { NO_WAIT_ESTIMATE_NOTE } from "./starter-config";
 import { readMarker, trackOf } from "./marker";
@@ -78,6 +78,8 @@ export interface WriteArgs {
    * the writer.
    */
   readonly voices?: string | undefined;
+  /** `write --no-check` (AGT-2115): skip the track's checks after the draft (the mechanical tells still run). */
+  readonly noCheck?: boolean | undefined;
 }
 
 /** A minimal `process.stderr`-shaped sink, so tests can capture progress without a real TTY. */
@@ -278,9 +280,11 @@ function emitWriteSuccess(
   branch: DraftBranch,
   /** For a derived unit: the unit file it was made from (no model ran). */
   from?: string,
+  /** A check that could not run (AGT-2115): reported, never fatal. */
+  notices: readonly string[] = [],
 ): void {
   if (json) {
-    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, ...(from === undefined ? {} : { from }) }));
+    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, ...(notices.length === 0 ? {} : { checkNotices: notices }), ...(from === undefined ? {} : { from }) }));
     return;
   }
   console.log(`wrote ${path} (${receipt.words} words) on branch ${branch.name}`);
@@ -297,6 +301,7 @@ function emitWriteSuccess(
     console.log(`sampled at temperature ${receipt.temperature}${receipt.seed === undefined ? "" : `, seed ${receipt.seed}`}`);
   }
   for (const hit of hits) console.log(formatHitLine(hit));
+  for (const notice of notices) console.error(notice);
 }
 
 /**
@@ -681,6 +686,17 @@ export async function runWrite(
   }
   const branch: DraftBranch = { name: branchName, worktree, sha: committed.sha as string };
 
-  emitWriteSuccess(args.json, workRelativePath, receipt, hits, branch);
+  // The track's checks on the fresh unit (AGT-2115, D-10): hits join the receipt, the text is never touched, and a check
+  // that cannot run is a notice. They run in the draft's worktree, where the unit now sits.
+  let reported: readonly Hit[] = hits;
+  let notices: readonly string[] = [];
+  if (args.noCheck !== true) {
+    const checked = await checkDraft(vaultRoot, join(worktree, projectInRepo), output.id, chapter, { env: env as NodeJS.ProcessEnv, progress: (line) => stderr.write(`${line}\n`) });
+    const seen = new Set(hits.map((h) => `${h.path}:${h.line}:${h.rule}`));
+    reported = [...hits, ...checked.hits.filter((h) => !seen.has(`${h.path}:${h.line}:${h.rule}`))];
+    notices = checked.notices;
+  }
+
+  emitWriteSuccess(args.json, workRelativePath, receipt, reported, branch, undefined, notices);
   return 0;
 }

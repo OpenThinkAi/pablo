@@ -475,6 +475,7 @@ const WRITE_ARGS = z.object({
   scenes: z.number().int().positive().optional().describe("Minimum scene count (defaults to the format's own minimum)."),
   "dry-run": z.boolean().optional().default(false).describe("Assemble and render the pack; send nothing to the model."),
   force: z.boolean().optional().default(false).describe("Overwrite an existing chapter file."),
+  "no-check": z.boolean().optional().default(false).describe("Skip the track's checks (anachronism, fact accuracy, claim support, the core check) after the draft. They never rewrite the draft; a hit is reported."),
   temperature: z
     .number()
     .min(0)
@@ -554,6 +555,7 @@ async function runWriteVerb(args: z.infer<typeof WRITE_ARGS>, ctx: VerbContext):
     seed: args.seed !== undefined ? String(args.seed) : undefined,
     direction: args.direction,
     voices: args.voices,
+    noCheck: args["no-check"] ?? false,
   };
   const deps: RunWriteDeps = { stderr: ctx.stderr, env: ctx.env, ...(ctx.writer ? { adapter: ctx.writer } : {}) };
 
@@ -588,7 +590,7 @@ const DRAFT_CHAPTER_ARGS = z.object({
  * reason. The harness reads the chapter through `read` when it wants it.
  */
 async function runDraftChapterVerb(args: z.infer<typeof DRAFT_CHAPTER_ARGS>, ctx: VerbContext): Promise<VerbResult> {
-  const result = await runWriteVerb({ ...args, "dry-run": false }, ctx);
+  const result = await runWriteVerb({ ...args, "dry-run": false, "no-check": false }, ctx);
   return { body: draftChapterBody(result.body), exitCode: result.exitCode };
 }
 
@@ -616,7 +618,7 @@ const DRAFT_UNIT_ARGS = z.object({
  */
 async function runDraftUnitVerb(args: z.infer<typeof DRAFT_UNIT_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const { n, ...rest } = args;
-  const result = await runWriteVerb({ ...rest, unit: n, "dry-run": false }, ctx);
+  const result = await runWriteVerb({ ...rest, unit: n, "dry-run": false, "no-check": false }, ctx);
   return { body: draftChapterBody(result.body), exitCode: result.exitCode };
 }
 
@@ -628,7 +630,8 @@ export function draftChapterBody(body: unknown): unknown {
     ? (written["check"] as { path: string; line: number; rule: string }[]).map(({ path, line, rule }) => ({ path, line, rule }))
     : [];
   const { ok, path, branch, worktree, commit, receipt } = written;
-  return { ok, branch, path, worktree, commit, receipt, check };
+  const notices = Array.isArray(written["checkNotices"]) ? { checkNotices: written["checkNotices"] } : {};
+  return { ok, branch, path, worktree, commit, receipt, check, ...notices };
 }
 
 // ---------------------------------------------------------------------------
@@ -1954,6 +1957,7 @@ const STORY_ARGS = z.object({
   title: z.string().optional().describe("The work's title (default: a working title from the prompt)."),
   words: z.number().int().positive().optional().describe("The story's length in words (default: the prompt's word cue, else the story output's own)."),
   project: z.string().optional().describe("Continue the `pablo story` run recorded in this work (its slug)."),
+  "no-check": WRITE_ARGS.shape["no-check"],
   track: z
     .string()
     .optional()

@@ -555,6 +555,36 @@ export async function runModelChecks(
   };
 }
 
+/** What the track's checks found on one freshly drafted unit (AGT-2115): the hits, and a notice for each check that could not run. */
+export interface DraftChecked {
+  readonly hits: readonly Hit[];
+  readonly notices: readonly string[];
+}
+
+/**
+ * The checks after a draft (AGT-2115, D-10): `checkWork` narrowed to the one unit (the mechanical tells, the core
+ * check, claim support on a nonfiction work) then `runModelChecks` (anachronism and fact accuracy on a
+ * historical-fiction work). Read-only on the draft: a hit is reported and the text is never rewritten. A check that
+ * cannot run (no model, a model error, a refusal) is a notice, never a throw, so it can never fail the draft.
+ * `workDir` is the work as the draft sits in it (the draft branch's worktree).
+ */
+export async function checkDraft(
+  vaultRoot: string,
+  workDir: string,
+  output: string,
+  unit: number,
+  options: { readonly env: NodeJS.ProcessEnv; readonly progress?: (line: string) => void; readonly factAsk?: () => Ask | string },
+): Promise<DraftChecked> {
+  try {
+    const outcome = checkWork(vaultRoot, workDir, undefined, output, unit);
+    if (!outcome.ok) return { hits: [], notices: [`pablo: check skipped: ${outcome.message}`] };
+    const model = await runModelChecks(outcome, workDir, output, { env: options.env, ...(options.progress ? { progress: options.progress } : {}), ...(options.factAsk ? { factAsk: options.factAsk } : {}) });
+    return { hits: [...model.hits, ...(outcome.core ?? [])], notices: model.notices };
+  } catch (error) {
+    return { hits: [], notices: [`pablo: check failed: ${(error as Error).message}`] };
+  }
+}
+
 /** `pablo check`'s own argument slice — kept local so `check.ts` does not import `cli.ts` (which imports `check.ts`). */
 export interface CheckArgs {
   readonly json: boolean;
