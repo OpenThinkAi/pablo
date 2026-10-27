@@ -16,6 +16,7 @@ import {
   EndpointHung,
   loadConfig,
   ProviderConfigError,
+  PERIOD_FACTS_FILE,
   ProviderResponseError,
 } from "@openthink/pablo-core";
 import { repoRoot } from "./branch";
@@ -24,7 +25,6 @@ import {
   completeText,
   distillPrompt,
   NAMES_FILE,
-  PERIOD_FACTS_FILE,
   parseDistillAnswer,
   parseNameMap,
   readBibleText,

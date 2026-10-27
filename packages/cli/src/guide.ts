@@ -16,7 +16,8 @@
 // The registry first: it must initialise before the output modules it imports (narrated, the core machine) are read.
 import { outputDefinition, outputIds, outputsOnTrack } from "./outputs/registry";
 import type { CoreStageId } from "./core/machine";
-import { PERIOD_BRIEF_FILE, PERIOD_FACTS_FILE } from "./core/machine";
+import { PERIOD_FACTS_FILE } from "@openthink/pablo-core";
+import { PERIOD_BRIEF_FILE } from "./core/machine";
 import { CHECKLIST_FILE } from "./core/checklist";
 import { CLAIMS_FILE, OUTLINE_FILE, THESIS_FILE } from "./core/nonfiction";
 import { isNarratableSource } from "./outputs/narrated";

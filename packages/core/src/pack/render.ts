@@ -77,13 +77,14 @@ export function renderPack(pack: Pack, rates?: PackRates): PackPreview {
   const summary = renderSummary(pack, wait, rates);
   const notes = pack.adjustments.map(renderAdjustment);
   const voice = renderVoice(pack);
+  const period = pack.periodFacts === undefined ? [] : [`period facts sent: ${pack.periodFacts}`];
 
   return {
     prompt: pack.prompt,
     table,
     summary,
     wait,
-    text: [summary, table, ...(voice === undefined ? [] : [voice]), ...(notes.length === 0 ? [] : [notes.join("\n")]), pack.prompt].join("\n\n"),
+    text: [summary, table, ...(voice === undefined ? [] : [voice]), ...period, ...(notes.length === 0 ? [] : [notes.join("\n")]), pack.prompt].join("\n\n"),
   };
 }
 

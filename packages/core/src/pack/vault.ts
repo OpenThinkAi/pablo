@@ -19,6 +19,8 @@
  *                                             outputs/<type>/continuity.md for another
  *                                             output: only the unit's own output's ledger)
  *     <work>/facts.md                         promoted facts every output honours
+ *     <work>/facts/period.md                  | Fact | Source | Story date |: distilled period facts,
+ *                                             the rows dated on or before the unit's (AGT-2110)
  *     <work>/chapters/NN-slug.md              the manuscript
  *
  * A missing file is not an error: a work with no continuity ledger yet gets a
@@ -28,8 +30,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { joinParagraphs } from "../sentences";
+import { PERIOD_FACTS_FILE, parsePeriodFacts, periodFactsAt } from "../period-facts";
 import { FACTS_FILE, beatsFile, continuityFile, workRulesFile } from "../work-paths";
-import type { BeatRow, DraftingInputs, TextSource, TimelineGate, WorkIdentity } from "./types";
+import type { BeatRow, DistilledFacts, DraftingInputs, TextSource, TimelineGate, WorkIdentity } from "./types";
 
 /** Words of the previous chapter carried into a drafting pack, as `draft-chapter` sends. */
 export const DEFAULT_TAIL_WORDS = 500;
@@ -112,6 +115,7 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
   // The period facts have their own slice, so the rules slice leaves that section out.
   const ruleText = workRuleSections(workRules, { exclude: [PERIOD_FACTS_SECTION] });
   const timelinePath = join(workRoot, "bible", "timeline.md");
+  const distilledFacts = readDistilledFacts(vaultRoot, workRoot, [beat, ...moreBeats].map((row) => row.storyDate));
 
   return {
     work: {
@@ -130,6 +134,7 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
       workRulesPath,
       section(workRules, { from: PERIOD_FACTS_SECTION, to: PERIOD_FACTS_END }),
     ),
+    ...(distilledFacts === undefined ? {} : { distilledFacts }),
     cast: sourceOfFile(vaultRoot, join(workRoot, "bible", "characters", "family-tree.md"), (text) =>
       section(text, { to: options.castEndsAt }),
     ),
@@ -143,6 +148,22 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
     wordTarget: options.wordTarget,
     minScenes: options.minScenes,
   };
+}
+
+/**
+ * `facts/period.md` (AGT-2110, D-10): the distilled period facts a unit told at `storyDates` may rely on, every
+ * undated row and every row dated on or before the latest of them. `undefined` when the work has no such file; a
+ * file with no row left is an empty list, so the receipt can still say none were sent.
+ */
+export function readDistilledFacts(
+  vaultRoot: string,
+  workRoot: string,
+  storyDates: readonly string[],
+): DistilledFacts | undefined {
+  const path = join(workRoot, PERIOD_FACTS_FILE);
+  const text = read(path);
+  if (text === undefined) return undefined;
+  return { path: label(vaultRoot, path), facts: periodFactsAt(parsePeriodFacts(text), storyDates) };
 }
 
 /** One row of an output's `plan.md`: `| unit | title | beats | status |`. */

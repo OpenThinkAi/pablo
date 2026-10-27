@@ -417,6 +417,13 @@ Before sending anything, it:
    A `fiction` work has no gate.
 2. Runs the same checks as `status --for` and refuses (exit `2`, with `missing[]`) if any fail.
 3. Builds the pack: the voice, the work's rules, period facts, cast and places, the timeline up to the beat's date, continuity, the end of the previous unit, and the beat.
+   - The period facts are the rows of `facts/period.md` (from `research distill`) whose story date is on or
+     before the unit's (its latest beat's, for a unit telling several), plus every undated row, then the
+     `Setting and period facts` section of the work's `STYLE.md`. Only the fact and its date are sent, never
+     its source note; nothing under `research/` is ever read into a pack.
+   - On a work with `realNames: false`, a research name `research/names.md` maps is swapped for its bible
+     name in the period facts, and a research name anywhere else in the pack is a refusal (exit `2`) naming
+     the section and the name.
    - Any source under one of the marker's `neverSend` prefixes is a refusal, not a silent drop.
    - In the style files, any section whose heading mentions replies or agents is left out.
    - The voice is layered, lowest first: **global** (`~/.config/pablo/voices/default/`,
@@ -434,8 +441,10 @@ when the endpoint has been timed, and the voice layers it used, one line each wi
 `pablo.json` entry that named it (the global default is labelled `global default`); a
 voice the list names that was not found is a `missing` line, never silently left out.
 With `--json` it returns
-`{ok, dryRun: true, output, unit, slices[], totalTokens, expectedOutputTokens, prompt_hash, adjustments, voiceLayers}`,
-where `voiceLayers` is `{layers: [{layer, name, source, via?}], missing: [{name, via, reason}]}`.
+`{ok, dryRun: true, output, unit, slices[], totalTokens, expectedOutputTokens, prompt_hash, adjustments, voiceLayers, periodFacts?}`,
+where `voiceLayers` is `{layers: [{layer, name, source, via?}], missing: [{name, via, reason}]}` and
+`periodFacts` (present when the work has `facts/period.md`) is how many of its rows the prompt carries,
+also shown as `period facts sent: N` in the text dry run and recorded as `period_facts` in the receipt.
 The same inputs give the same `prompt_hash`.
 
 Without `--dry-run`, the pack is sent once. While it streams, progress goes to

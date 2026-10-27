@@ -92,6 +92,8 @@ export interface Receipt {
   readonly voice_layers?: readonly PackVoiceLayer[];
   /** Voices the work's `pablo.json` names that were not found; present (and non-empty) only when there were some. */
   readonly voice_missing?: readonly PackVoiceMissing[];
+  /** How many of `facts/period.md`'s rows the prompt carried (AGT-2110); present when the work has the file. */
+  readonly period_facts?: number;
 }
 
 export type ReceiptSink = (receipt: Receipt) => void | Promise<void>;
@@ -157,6 +159,7 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
       ...(options.address === undefined ? {} : { output: options.address.output, unit: options.address.unit }),
       ...(pack?.voiceLayers === undefined ? {} : { voice_layers: pack.voiceLayers.layers }),
       ...(pack?.voiceLayers === undefined || pack.voiceLayers.missing.length === 0 ? {} : { voice_missing: pack.voiceLayers.missing }),
+      ...(pack?.periodFacts === undefined ? {} : { period_facts: pack.periodFacts }),
     };
   }
 

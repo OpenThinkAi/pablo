@@ -43,7 +43,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { beatsFile, parseBeatRows, section } from "@openthink/pablo-core";
+import { beatsFile, parseBeatRows, PERIOD_FACTS_FILE, section } from "@openthink/pablo-core";
 import type { BeatRow } from "@openthink/pablo-core";
 // Type-only: `tracks/registry.ts` imports this module's stage lists, so a value import here would be a cycle.
 import type { TrackId } from "../tracks/registry";
@@ -90,8 +90,6 @@ export type CoreStageId =
 
 /** The period brief a historical work's `period` stage needs. */
 export const PERIOD_BRIEF_FILE = "bible/period.md";
-/** The distilled, sourced period facts a historical work's `period-facts` stage needs (D-10). */
-export const PERIOD_FACTS_FILE = "facts/period.md";
 
 /** One core stage as `status` and `resume` report it. */
 export interface CoreStage {

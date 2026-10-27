@@ -14,35 +14,25 @@
  *    would carry the real names straight to the writer.
  *
  * `facts/period.md` is a markdown table, `| Fact | Source | Story date |`, one fact per row after the header and
- * separator. That is the shape `core/machine.ts`'s `countFactRows` counts (AGT-2100); `parsePeriodFacts` reads it
+ * separator. That is the shape `core/machine.ts`'s `countFactRows` counts (AGT-2100); core's `parsePeriodFacts` reads it
  * back exactly.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { Adapter, Intent } from "@openthink/pablo-core";
+import type { Adapter, Intent, PeriodFact } from "@openthink/pablo-core";
+import { splitTableRow } from "@openthink/pablo-core";
 import { CHECKLIST_FILE } from "./core/checklist";
 
 /** The intent distillation routes under: a planning-kind call, so an unmapped config sends it to the cloud planner when one exists. */
 export const RESEARCH_INTENT: Intent = { name: "research", kind: "planning" };
 
-/** Where the distilled facts live, work-relative. */
-export const PERIOD_FACTS_FILE = "facts/period.md";
 
 /** The research-name to bible-name map a `realNames: false` work keeps, work-relative. Never a source note. */
 export const NAMES_FILE = "research/names.md";
 
 /** A fact longer than this is not short: it is rejected so the author distils it again. */
 export const MAX_FACT_CHARS = 280;
-
-/** One row of `facts/period.md`. */
-export interface PeriodFact {
-  readonly fact: string;
-  /** A research note id: `research/<source>.md` exists. */
-  readonly source: string;
-  /** When in the story the fact holds: `YYYY`, `YYYY-MM` or `YYYY-MM-DD`. */
-  readonly date?: string;
-}
 
 /** A row the model proposed that pablo did not write, with why. */
 export interface RejectedFact {
@@ -94,7 +84,7 @@ export function parseNameMap(text: string): Map<string, string> {
     if (line.startsWith("|")) {
       if (/^\|[\s:|-]*$/.test(line)) continue;
       if (/^\|[\s:|-]*$/.test((lines[i + 1] ?? "").trim())) continue;
-      const cells = splitRow(line);
+      const cells = splitTableRow(line);
       const from = cells[0]?.trim();
       const to = cells[1]?.trim();
       if (from && to) map.set(from, to);
@@ -142,21 +132,6 @@ export function renderPeriodFacts(facts: readonly PeriodFact[]): string {
     ...rows,
     "",
   ].join("\n");
-}
-
-/** The fact rows of a `facts/period.md` table (the header and separator are not facts). */
-export function parsePeriodFacts(text: string): PeriodFact[] {
-  const lines = text.split("\n");
-  const facts: PeriodFact[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = (lines[i] ?? "").trim();
-    if (!line.startsWith("|") || /^\|[\s:|-]*$/.test(line)) continue;
-    if (/^\|[\s:|-]*$/.test((lines[i + 1] ?? "").trim())) continue;
-    const [fact = "", source = "", date = ""] = splitRow(line);
-    if (!fact && !source) continue;
-    facts.push({ fact, source, ...(date ? { date } : {}) });
-  }
-  return facts;
 }
 
 /** The prompt the research agent answers. Pure. */
@@ -228,7 +203,8 @@ export function swapNames(text: string, map: ReadonlyMap<string, string>): strin
   return out;
 }
 
-function mentions(haystack: string, name: string): boolean {
+/** Whether `haystack` names `name` as a whole word. */
+export function mentions(haystack: string, name: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(name)}(?![\\p{L}\\p{N}])`, "u").test(haystack);
 }
 

@@ -15,6 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { selectionText } from "../document";
+import { renderPeriodFactLine } from "../period-facts";
 import { joinManuscript } from "../sentences";
 import {
   CRITICMARKUP_EDIT_CLOSING,
@@ -108,6 +109,7 @@ export function assemblePack(
 
   const fitted = fitToBudget(built.specs, budgetTokens, estimate);
   const voiceLayers = voiceLayersOf(kind, inputs);
+  const periodFacts = kind === "drafting" ? periodFactsSent(inputs as DraftingInputs, fitted.slices) : undefined;
   const prompt = joinSlices(fitted.slices);
   const context = joinSlices(fitted.slices.filter((slice) => !built.tail.has(slice.name)));
 
@@ -123,6 +125,7 @@ export function assemblePack(
     hash: hashPrompt(prompt),
     expectedOutputTokens: built.expectedOutputTokens,
     ...(voiceLayers === undefined ? {} : { voiceLayers }),
+    ...(periodFacts === undefined ? {} : { periodFacts }),
   };
 }
 
@@ -407,10 +410,12 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       cutOrder: 9,
     },
     {
+      // The distilled rows first (AGT-2110), then the work's own STYLE.md section: a head-keeping cut drops the
+      // hand-written section before a sourced fact.
       name: "period",
       heading: "# Period and place facts (binding)",
-      text: inputs.periodFacts?.text.trim() ?? "",
-      source: inputs.periodFacts?.path,
+      text: concatSources(periodSources(inputs)),
+      source: sourceLabel(periodSources(inputs)),
       required: false,
       keep: "head",
       minTokens: 0,
@@ -784,6 +789,26 @@ function readerNoteText(note: ReaderNote): string {
 
 function joinSlices(slices: readonly Slice[]): string {
   return slices.map((slice) => renderSlice(slice.heading, slice.text)).join("\n\n");
+}
+
+/** The `period` slice's sources: `facts/period.md`'s rows for the unit as the writer sees them, then the `STYLE.md` section. */
+function periodSources(inputs: DraftingInputs): TextSource[] {
+  const distilled = inputs.distilledFacts;
+  return [
+    ...(distilled === undefined ? [] : [{ path: distilled.path, text: distilled.facts.map(renderPeriodFactLine).join("\n") }]),
+    ...(inputs.periodFacts === undefined ? [] : [inputs.periodFacts]),
+  ];
+}
+
+/**
+ * How many distilled period facts the fitted pack carries (AGT-2110): each row's line counted when it survives whole
+ * in the `period` slice. `undefined` when the inputs had no `facts/period.md`.
+ */
+function periodFactsSent(inputs: DraftingInputs, slices: readonly Slice[]): number | undefined {
+  const distilled = inputs.distilledFacts;
+  if (distilled === undefined) return undefined;
+  const lines = new Set((slices.find((slice) => slice.name === "period")?.text ?? "").split("\n"));
+  return distilled.facts.filter((fact) => lines.has(renderPeriodFactLine(fact))).length;
 }
 
 function concatSources(sources: readonly TextSource[]): string {
