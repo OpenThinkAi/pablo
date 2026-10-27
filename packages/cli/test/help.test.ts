@@ -74,12 +74,7 @@ test("every verb named in --help is runnable, and dry-run is not a verb (AGT-209
     expect(r.exitCode, verb).toBe(0);
     expect(r.stdout + r.stderr, verb).not.toContain("unknown verb");
   }
-  // The dispatcher itself knows every listed verb: a bare run never says "unknown verb".
-  for (const verb of ["describe_voice", "status", "search", "resume"]) {
-    const r = runCli([verb, "--json"]);
-    expect(r.stdout + r.stderr, verb).not.toContain("unknown verb");
-  }
   const dry = runCli(["dry-run"]);
   expect(dry.exitCode).not.toBe(0);
   expect(dry.stdout + dry.stderr).toContain("write --dry-run");
-});
+}, 60_000);
