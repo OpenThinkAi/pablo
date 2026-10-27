@@ -24,7 +24,12 @@ export const MODE_TAG: Readonly<Record<EditMode, string>> = { normal: "NOR", ins
 export const modeOf = (t: EditPaneText | null | undefined): EditMode => t?.mode ?? "normal";
 
 /** What a motion needs from the pane: its text width, for moves by display row. */
-export interface MotionContext { readonly width: number; readonly height: number }
+export interface MotionContext {
+  readonly width: number;
+  readonly height: number;
+  /** AGT-2174: the action that moves to the next (1) or previous (-1) unit; the view knows the rail, this module does not. */
+  readonly unit?: (dir: 1 | -1) => Action;
+}
 export type Motion = (b: TextBuffer, c: MotionContext) => void;
 
 // ---------------------------------------------------------------- words
@@ -197,6 +202,10 @@ export function modalKey(mode: EditMode, pending: Pending | null, input: string,
   const out: Action[] = [];
   for (const d of resolved) {
     if (d.type !== "command") { out.push(d); continue; }
+    if (d.id === "editor.unit_next" || d.id === "editor.unit_prev") {
+      if (c.unit) out.push(c.unit(d.id === "editor.unit_next" ? 1 : -1));
+      continue;
+    }
     const edit = modalEdit(d.id, c);
     if (edit) out.push({ type: "pane.edit", edit });
   }

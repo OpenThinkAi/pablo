@@ -537,7 +537,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
           {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} marks={state.marks} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
           {state.editPane && paneSession
-            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} keymap={keymap} modes={state.modes} onModes={saveModesNow} pending={state.pending} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} {...(autosave ? { autosave } : {})} held={wordsField?.typing === true} />
+            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} keymap={keymap} modes={state.modes} onModes={saveModesNow} pending={state.pending} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} {...(book ? { book } : {})} {...(autosave ? { autosave } : {})} held={wordsField?.typing === true} />
             : <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />}
         </Box>
       )}

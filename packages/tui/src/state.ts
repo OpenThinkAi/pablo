@@ -209,6 +209,8 @@ export interface EditPaneText {
   readonly empty: boolean;
   /** The pane's mode (AGT-2169); absent reads as `normal`, the mode the pane opens in. */
   readonly mode?: EditMode;
+  /** Where the cursor is (AGT-2174): the model keeps it per file, so moving between units puts it back. */
+  readonly cursor?: { readonly row: number; readonly col: number };
 }
 /** Focus and typewriter modes of the editing pane (AGT-2176; edit-modes.ts has the rules and persists them). */
 export interface EditModes { readonly focus: boolean; readonly typewriter: boolean }
@@ -233,7 +235,17 @@ export interface EditPane {
   readonly auto: boolean;
   /** The first display row the pane was last drawn from: the scroll lives in the model, set by `pane.scroll`, never in the buffer. */
   readonly top: number;
+  /** AGT-2174: the unit to move to once the autosave in flight lands (next/previous unit saves the current one first). */
+  readonly next?: UnitMove | null;
+  /** The cursor to restore when this file opens (AGT-2174: the one remembered for it this session). */
+  readonly cursor?: { readonly row: number; readonly col: number } | null;
+  /** True once the pane has moved to another unit: the branch is already known and in use, so `open` does not say it is resuming one. */
+  readonly moved?: boolean;
+  /** The registers the last unit held (AGT-2174): a yank in one unit pastes in the next. The search and its prompt, the mode and the undo history are per unit and start fresh. */
+  readonly carry?: Readonly<Record<string, string>> | null;
 }
+/** A unit the pane moves to (AGT-2174): its file and storage, and the rail row it is, so the rail follows. */
+export interface UnitMove { readonly file: string; readonly storage: string; readonly row: string }
 
 /**
  * Esc in the editing pane (AGT-2167, one rule for the reducer and the view): `leaves` when the pane closes now (still
@@ -306,6 +318,8 @@ export interface State {
   readonly modes: EditModes;
   /** The editor's word targets and the prompt that sets them. */
   readonly words: WordsState;
+  /** The cursor left in each file the pane has edited this session (AGT-2174), by file. */
+  readonly paneCursors: Readonly<Record<string, { readonly row: number; readonly col: number }>>;
 }
 
 /**
@@ -424,6 +438,10 @@ export type Action =
   | { type: "words.loaded"; targets: WordTargets }
   | { type: "words.prompt" } | { type: "words.type"; text: string } | { type: "words.back" } | { type: "words.cancel" }
   | { type: "words.set"; targets: WordTargets } | { type: "words.notice"; message: string | null }
+  // AGT-2174: next/previous unit in the pane. `pane.unit` saves the current unit (the autosave path) and then opens `to`;
+  // `pane.unit_none` says why it cannot move (no unit that way, or a body that is blank).
+  | { type: "pane.unit"; to: UnitMove }
+  | { type: "pane.unit_none"; message: string }
   | { type: "save.start"; branch: string }
   | { type: "save.done"; branch: string; lines: readonly string[] }
   | { type: "save.failed"; message: string }
@@ -457,6 +475,36 @@ const writingName = (output: string | undefined, unit: number) => (output === un
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 /** What the editing pane's keys do, shown in the content area while it is open. */
 const PANE_KEYS = "i a o insert · v selects · d c y p P x r edit the selection (or the character), \" names a register · u U undo and redo · Esc back to normal, and in normal closes · Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes · Ctrl+G sets a word target · Ctrl+F focus · Ctrl+T typewriter";
+
+/** `cursors` with the cursor `p`'s text holds, under its file. */
+const remember = (cursors: State["paneCursors"], p: EditPane): State["paneCursors"] => (p.text?.cursor ? { ...cursors, [p.file]: p.text.cursor } : cursors);
+
+/** The pane leaves its unit (saved or clean) for `to`: its cursor is kept, the new file opens at the one kept for it, and the rail follows. */
+function goUnit(s: State, p: EditPane, to: UnitMove): State {
+  const cursors = remember(s.paneCursors, p);
+  const rail = s.book.rail;
+  const at = rail.rows.findIndex((r) => r.id === to.row);
+  let book = s.book;
+  if (at >= 0) {
+    // Unfold the groups above the row, so the cursor is on a row that shows.
+    const collapsed = new Set(rail.collapsed);
+    let depth = rail.rows[at]!.depth;
+    for (let i = at - 1; i >= 0 && depth > 0; i--) {
+      const r = rail.rows[i]!;
+      if (r.depth < depth) { collapsed.delete(r.id); depth = r.depth; }
+    }
+    book = { ...s.book, rail: { ...rail, collapsed, cursor: at } };
+  }
+  return {
+    ...s,
+    book,
+    paneCursors: cursors,
+    editPane: { file: to.file, storage: to.storage, line: 1, phase: "opening", branch: p.branch, text: null, saveSeq: p.saveSeq, closing: false, emptying: false, auto: false, top: 0, next: null, cursor: cursors[to.file] ?? null, moved: true, carry: (p.text as { registers?: Readonly<Record<string, string>> } | null)?.registers ?? null },
+    pending: null,
+    content: writeContent(`Editing ${to.file}`, "opening…"),
+    contentScroll: { ...s.contentScroll, scroll: 0, length: 0 },
+  };
+}
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
@@ -518,7 +566,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (modes: EditModes = { focus: false, typewriter: false }): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null, editPane: null, words: { targets: { outputs: {}, units: {} }, typed: null, notice: null }, modes,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null, editPane: null, paneCursors: {}, words: { targets: { outputs: {}, units: {} }, typed: null, notice: null }, modes,
   tick: 0,
 });
 
@@ -989,10 +1037,16 @@ export function reduce(s: State, a: Action): State {
       const p = s.editPane;
       if (p?.phase !== "saving" || p.text === null) return s;
       const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
+      if (p.next) {
+        const saved = a.edit(p.text);
+        // Typing went on while the save ran: those edits are not in the commit, so stay on this unit and keep them.
+        if (!saved.dirty) return { ...goUnit({ ...s, written, editBranch: a.branch }, { ...p, text: saved }, p.next) };
+        return { ...s, editPane: { ...p, phase: "open", text: saved, auto: false, next: null }, written, editBranch: a.branch, content: writeContent(`Still editing ${p.file}`, `You typed while it saved; save again (Ctrl+S) before moving on.\n${PANE_KEYS}`) };
+      }
       return { ...s, editPane: { ...p, phase: "open", text: a.edit(p.text), auto: false }, written, editBranch: a.branch, content: writeContent(`${p.auto ? "Autosaved" : "Saved"} ${p.file} on ${a.branch}`, [...a.lines, PANE_KEYS].join("\n")) };
     }
     case "pane.save_failed":
-      return s.editPane?.phase !== "saving" ? s : { ...s, editPane: { ...s.editPane, phase: "open", auto: false }, content: writeContent(s.editPane.auto ? "Not autosaved" : "Not saved", a.message) };
+      return s.editPane?.phase !== "saving" ? s : { ...s, editPane: { ...s.editPane, phase: "open", auto: false, next: null }, content: writeContent(s.editPane.auto ? "Not autosaved" : "Not saved", a.message) };
     case "words.loaded": return { ...s, words: { ...s.words, targets: a.targets } };
     case "words.prompt": return s.editPane === null || s.editPane.phase === "opening" ? s : { ...s, words: { ...s.words, typed: "", notice: null } };
     case "words.type": return s.words.typed === null ? s : { ...s, words: { ...s.words, typed: s.words.typed + a.text, notice: null } };
@@ -1006,8 +1060,20 @@ export function reduce(s: State, a: Action): State {
       const esc = paneEsc(p);
       if (esc === "ignored") return s;
       if (esc === "asks") return { ...s, editPane: { ...p, closing: true }, content: writeContent(`Unsaved changes to ${p.file}`, "Esc again closes without saving them; Ctrl+S saves.") };
-      return { ...s, editPane: null, content: s.editBranch === null ? null : writeContent(`Edits on ${s.editBranch}`, "v e edits it again; v s saves the branch into main") };
+      return { ...s, editPane: null, paneCursors: remember(s.paneCursors, p), content: s.editBranch === null ? null : writeContent(`Edits on ${s.editBranch}`, "v e edits it again; v s saves the branch into main") };
     }
+    case "pane.unit": {
+      const p = s.editPane;
+      if (p?.phase !== "open" || p.text === null) return s;
+      if (p.text.dirty) {
+        // The same save as the idle autosave, then the move: a blank body is never autosaved, so it asks to be settled first.
+        if (p.text.empty) return { ...s, content: writeContent(`${p.file} is empty`, "Saving it leaves the file only its frontmatter. Ctrl+S saves it empty first, then move on.") };
+        return { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, auto: true, closing: false, next: a.to } };
+      }
+      return goUnit(s, p, a.to);
+    }
+    case "pane.unit_none":
+      return s.editPane === null ? s : { ...s, content: writeContent(`Editing ${s.editPane.file}`, a.message) };
     case "save.start":
       return s.finishing !== null || s.editing !== null || s.mode.kind !== "book" ? s : { ...s, finishing: a.branch, content: writeContent(`Saving ${a.branch}`, "merging…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "save.done":

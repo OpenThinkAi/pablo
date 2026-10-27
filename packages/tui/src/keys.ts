@@ -205,6 +205,8 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "editor.search_next", states: MODAL, key: "n", label: "next match", description: "Go to the next match of the last search, wrapping round at the end.", do: cmd("editor.search_next") },
   { id: "editor.search_prev", states: MODAL, key: "N", label: "previous match", description: "Go to the previous match of the last search, wrapping round at the start.", do: cmd("editor.search_prev") },
   { id: "editor.search_replace", states: MODAL, key: "R", label: "replace", description: "Replace: type what to find, then what to put there. In select mode it replaces within the selection, else across the whole text; Ctrl+Z undoes it in one step.", do: cmd("editor.search_replace") },
+  { id: "editor.unit_next", states: MODAL, prefix: "g", key: "n", label: "next unit", description: "Save this unit (the autosave's commit) and open the next one, in any output; the cursor comes back where you left it.", do: cmd("editor.unit_next") },
+  { id: "editor.unit_prev", states: MODAL, prefix: "g", key: "p", label: "previous unit", description: "Save this unit (the autosave's commit) and open the previous one, in any output; the cursor comes back where you left it.", do: cmd("editor.unit_prev") },
 ];
 
 // ---------------------------------------------------------------- `r`: the planning and research verbs, as data
