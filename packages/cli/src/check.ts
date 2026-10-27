@@ -33,7 +33,7 @@ import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
 import { readMarker, trackOf } from "./marker";
 import { checkClaimSupport, readClaimSources } from "./claim-support";
-import { checkAnachronisms } from "./anachronism";
+import { anachronismBody, checkAnachronisms } from "./anachronism";
 import { coreCheck } from "./core-check";
 import { narratedDrift } from "./outputs/narrated";
 import { resolveOutput } from "./outputs/registry";
@@ -513,7 +513,7 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   }
 
   // A historical-fiction work also gets the anachronism check (AGT-2113, `anachronism.ts`).
-  const anachronism = await checkAnachronisms(workDir, outcome.scanned);
+  const anachronism = await checkAnachronisms(workDir, outcome.scanned, { progress: (line) => process.stderr.write(`${line}\n`) });
   const hits = [...outcome.hits, ...(anachronism?.hits ?? [])];
   if (anachronism?.notice !== undefined && !args.json) console.error(anachronism.notice);
 
@@ -530,7 +530,7 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   const radioLines = hasRadio ? radioCheckLines(radioBody) : [];
 
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(anachronism?.notice !== undefined ? { anachronism: { notice: anachronism.notice } } : {}), ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}) }));
+    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(anachronism !== undefined ? { anachronism: anachronismBody(anachronism) } : {}) }));
   } else if (hits.length === 0 && outcome.unprovenanced.length === 0 && (outcome.core ?? []).length === 0 && radioLines.length === 0) {
     console.log("no hits");
   } else {

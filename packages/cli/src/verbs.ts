@@ -65,7 +65,7 @@ import { CHECK_INTENT, createPlanner, loadConfig, timelineAt } from "@openthink/
 import type { Adapter } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
 import { checkWork, radioScriptsChecked } from "./check";
-import { checkAnachronisms } from "./anachronism";
+import { anachronismBody, checkAnachronisms } from "./anachronism";
 import { checkAcross, promoteFinding } from "./across";
 import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import type { Ask } from "./critique";
@@ -734,8 +734,8 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     };
   }
   // A historical-fiction work also gets the anachronism check (AGT-2113): cached verdicts, else the `check` intent's model.
-  const anachronism = await checkAnachronisms(resolved.projectPath, outcome.scanned, { env: ctx.env });
-  const body: Record<string, unknown> = { ok: true, hits: [...outcome.hits, ...(anachronism?.hits ?? [])], ...(anachronism?.notice !== undefined ? { anachronism: { notice: anachronism.notice } } : {}), unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}) };
+  const anachronism = await checkAnachronisms(resolved.projectPath, outcome.scanned, { env: ctx.env, progress: (line) => ctx.stderr.write(`${line}\n`) });
+  const body: Record<string, unknown> = { ok: true, hits: [...outcome.hits, ...(anachronism?.hits ?? [])], unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}) };
   // A radio work also gets its scripts read: unknown directions and unbound roles (AGT-1680).
   const radio = radioScriptsChecked(args.file, args.output) ? radioCheck({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath) : undefined;
   if (radio !== undefined) {
@@ -743,6 +743,7 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     const { ok: _ok, ...rest } = radio.body as Record<string, unknown>;
     body["radio"] = rest;
   }
+  if (anachronism !== undefined) body["anachronism"] = anachronismBody(anachronism);
   return { body, exitCode: 0 };
 }
 

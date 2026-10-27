@@ -6,7 +6,7 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,8 +52,11 @@ const TEENAGER = { teenager: { why: "the word came into use in the 1940s", belon
 test("a hit names the term, why it is out of period and the period it belongs to; the lexicon caches every verdict", async () => {
   const { work, unit } = tempWork("The teenager hauled ice from the river.");
   const fake = fakeAsk(TEENAGER);
-  const result = await checkAnachronisms(work, [unit], { ask: fake.ask });
+  const progress: string[] = [];
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask, progress: (line) => progress.push(line) });
   expect(result?.asked).toBe(1);
+  // The wait is visible: what is asked, then each batch.
+  expect(progress).toEqual([`anachronism: asking the check model about 4 new word(s) in 1 batch(es); known verdicts come from ${LEXICON_FILE}`, "anachronism: batch 1/1"]);
   expect(result?.notice).toBeUndefined();
   expect(result?.hits).toEqual([
     {
@@ -72,7 +75,7 @@ test("a hit names the term, why it is out of period and the period it belongs to
   expect(fake.prompts[0]).not.toContain("hauled ice from the river");
   // Cached in the work, per (period, term), in-period verdicts too.
   expect(existsSync(join(work, LEXICON_FILE))).toBe(true);
-  const known = readLexicon(work).periods[PERIOD] ?? {};
+  const known = readLexicon(work)?.periods[PERIOD] ?? {};
   expect(known["teenager"]).toEqual({ inPeriod: false, ...TEENAGER.teenager });
   expect(known["hauled"]).toEqual({ inPeriod: true });
   expect(known["river"]).toEqual({ inPeriod: true });
@@ -114,8 +117,22 @@ test("a model that cannot be asked leaves a notice and keeps the cached hits", a
       throw new Error("no provider");
     },
   });
-  expect(result?.notice).toContain("no provider");
+  expect(result?.notice).toBe(
+    "anachronism: incomplete; 1 new word(s) not judged, cached verdicts still reported: no provider. Check the provider the `check` intent routes to (`pablo config test`; `pablo init --config` if none is set).",
+  );
   expect(result?.hits.map((h) => h.term)).toEqual(["teenager"]);
+});
+
+test("a lexicon that does not parse is never overwritten; the check is skipped with a notice", async () => {
+  const { work, unit } = tempWork("The teenager hauled ice.");
+  mkdirSync(join(work, "facts"), { recursive: true });
+  writeFileSync(join(work, LEXICON_FILE), "{ not json");
+  const fake = fakeAsk(TEENAGER);
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask });
+  expect(result?.hits).toEqual([]);
+  expect(result?.notice).toContain("is not a lexicon");
+  expect(fake.prompts).toEqual([]);
+  expect(readFileSync(join(work, LEXICON_FILE), "utf8")).toBe("{ not json");
 });
 
 test("only historical-fiction works are checked, and a work without a period brief is skipped with a notice", async () => {
@@ -138,6 +155,7 @@ test("`check` puts anachronism hits in hits[] through the anachronismModel seam"
   expect(result.exitCode).toBe(0);
   const hits = (result.body as { hits: Array<{ rule: string; term?: string }> }).hits;
   expect(hits.filter((h) => h.rule === "anachronism").map((h) => h.term)).toEqual(["teenager"]);
+  expect((result.body as { anachronism?: unknown }).anachronism).toEqual({ asked: 1 });
 });
 
 test("helpers: the period, the terms of a line and a lenient verdict parse", () => {
@@ -149,4 +167,6 @@ test("helpers: the period, the terms of a line and a lenient verdict parse", () 
   ]);
   const verdicts = parseVerdicts('Sure:\n[{"term":"Okay","inPeriod":false},{"term":"other","inPeriod":false},{"term":"sign"}]', ["okay", "sign"]);
   expect([...verdicts]).toEqual([["okay", { inPeriod: false, why: "no reason given", belongs: "a later period" }]]);
+  const long = parseVerdicts(JSON.stringify([{ term: "okay", inPeriod: false, why: "x".repeat(500), belongs: "the 1830s" }]), ["okay"]);
+  expect(long.get("okay")?.why).toHaveLength(200);
 });
