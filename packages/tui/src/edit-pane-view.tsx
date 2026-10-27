@@ -17,6 +17,7 @@ import { promptKey, promptLine, searchStatus } from "./search";
 import type { CheckHit } from "./hits";
 import { clean } from "./sanitize";
 import { paneEsc, type Action, type EditPane, type Pending } from "./state";
+import { adjacentUnit, type UnitRail } from "./unit-nav";
 
 export interface EditPaneViewProps {
   readonly pane: EditPane;
@@ -38,12 +39,14 @@ export interface EditPaneViewProps {
   readonly onModes?: (modes: Modes) => void;
   /** Another layer holds the keys (the word-target prompt, AGT-2175): the pane reads none. */
   readonly held?: boolean;
+  /** The rail's unit rows (AGT-2174): next and previous unit move along them. */
+  readonly book?: UnitRail;
 }
 
 const fail = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT_KEYMAP, pending = null, width, height, inner, rows, autosave, modes = NO_MODES, onModes, held = false }: EditPaneViewProps) {
-  const { file, storage, line, phase, branch, saveSeq, top } = pane;
+export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT_KEYMAP, pending = null, width, height, inner, rows, autosave, modes = NO_MODES, onModes, held = false, book }: EditPaneViewProps) {
+  const { file, storage, line, phase, branch, saveSeq, top, cursor, moved, carry } = pane;
   const text = pane.text as EditText | null;
   // Opening: the branch, its worktree and the file there. Once per pane (a new `v e` mounts a new one). `live` goes false
   // when the pane closes (unmounts): an open that lands after Esc lets its branch go again.
@@ -56,13 +59,13 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
             if (r.ok) void session.close(r.branch).catch(() => undefined);
             return;
           }
-          dispatch(r.ok ? { type: "pane.opened", branch: r.branch, text: openText(r.text, storage, line), ...(r.unmerged ? { unmerged: r.unmerged } : {}) } : { type: "pane.failed", message: r.message });
+          dispatch(r.ok ? { type: "pane.opened", branch: r.branch, text: carry ? ({ ...openText(r.text, storage, line, cursor), registers: carry } as EditText) : openText(r.text, storage, line, cursor), ...(r.unmerged && !moved ? { unmerged: r.unmerged } : {}) } : { type: "pane.failed", message: r.message });
         },
         (e: unknown) => { if (live) dispatch({ type: "pane.failed", message: fail(e) }); },
       );
     }
     return () => { live = false; };
-  }, []);
+  }, [file]);
 
   useAutosave(text, text?.dirty === true, phase !== "opening", () => dispatch({ type: "pane.save", auto: true }), autosave);
 
@@ -78,6 +81,12 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
     );
   }, [saveSeq]);
 
+  // Next and previous unit (AGT-2174): the neighbour in the rail, or the reason there is none.
+  const unit = (dir: 1 | -1): Action => {
+    const to = book ? adjacentUnit(book, file, dir) : null;
+    return to ? { type: "pane.unit", to: { file: to.file, storage: to.storage, row: to.id } } : { type: "pane.unit_none", message: `No ${dir === 1 ? "next" : "previous"} unit.` };
+  };
+
   useInput((input, key) => {
     if (held) return; // the word-target prompt has the keys (word-count.ts)
     const token = tokenOf(input, key);
@@ -92,7 +101,7 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
     // Focus and typewriter work in every mode (a ctrl key is never text).
     const toggle = modeOfKey(token, keymap);
     if (toggle) { const next = toggled(modes, toggle); dispatch({ type: "modes.set", modes: next }); return onModes?.(next); }
-    const step = modalKey(modeOf(text), pending, input, key, keymap, { width: inner, height: rows });
+    const step = modalKey(modeOf(text), pending, input, key, keymap, { width: inner, height: rows, unit });
     if (step === "close") {
       // Esc in normal mode (insert and select go back to normal first, AGT-2169): the model's one Esc rule
       // (`paneEsc`); when it leaves, a branch the pane made and never committed goes.

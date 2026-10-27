@@ -170,7 +170,7 @@ test("the modal keys are keymap rows: rebinding one moves the key, a clash in a 
   // Select mode has the same rows but insert and append (`i` and `a` start text objects there, AGT-2170) and the text objects.
   expect(rowsOf({ state: "select" }).map((a) => a.id).filter((id) => !id.startsWith("editor.inner_") && !id.startsWith("editor.around_"))).toEqual(normal.filter((id) => id !== "editor.insert" && id !== "editor.append"));
   expect(rowsOf({ state: "insert" }).map((a) => a.id).filter((id) => id !== "edit.target" && !id.startsWith("edit."))).toEqual([]);
-  expect(prefixRows({ state: "normal" }, "g").map((a) => a.id)).toEqual(["editor.top"]);
+  expect(prefixRows({ state: "normal" }, "g").map((a) => a.id)).toEqual(expect.arrayContaining(["editor.top", "editor.unit_next", "editor.unit_prev"]));
   // None of the editor rows act outside the pane.
   for (const s of ["rail", "main", "content"] as const) expect(rowsOf({ state: s, content: true }).some((a) => a.id.startsWith("editor."))).toBe(false);
 });

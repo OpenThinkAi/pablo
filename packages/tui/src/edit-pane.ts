@@ -18,6 +18,7 @@ import { paragraphSpan, scrollTop, type Modes } from "./edit-modes";
 import { visible } from "./sanitize";
 import { matchesOnLine } from "./search";
 import type { EditPaneText } from "./state";
+import { clampCursor } from "./unit-nav";
 
 /** What the screen asks the layer above for (the CLI's `screenEditPane`, passed in; this package cannot import it). */
 /** `unmerged` (AGT-2173): commits an earlier session left on the branch that main does not have yet; the pane resumes them. */
@@ -96,22 +97,23 @@ function storedRows(edited: string, storage: Storage): { stored: string[]; rowOf
 }
 
 /** The pane's text for a file as opened: the body in the buffer, the cursor on the row that holds file line `line` (1-based, frontmatter counted). */
-export function openText(raw: string, storage: string, line: number): EditText {
+export function openText(raw: string, storage: string, line: number, cursor?: Pos | null): EditText {
   const s = asStorage(storage);
   const { headLines } = partsOf(raw);
   const buffer = new TextBuffer(loadForEdit(raw, s).text);
   const { rowOf } = storedRows(buffer.text(), s);
   const at = line - 1 - headLines;
   const row = rowOf.length === 0 ? 0 : rowOf[Math.max(0, Math.min(at, rowOf.length - 1))]!;
-  buffer.cursor = { row, col: 0 };
-  return { buffer, raw, storage: s, dirty: false, empty: blankText(buffer), mode: "normal", anchor: null };
+  // A cursor kept for this file (AGT-2174: moving between units) wins over the line; it is clamped to the text as it is now.
+  buffer.cursor = cursor ? clampCursor(buffer.lines, cursor) : { row, col: 0 };
+  return { buffer, raw, storage: s, dirty: false, empty: blankText(buffer), mode: "normal", anchor: null, cursor: buffer.cursor };
 }
 
 /** `t` with its buffer copied and `op` applied to the copy; the state's own text is never changed. */
 export function apply(t: EditText, op: (b: TextBuffer) => void): EditText {
   const buffer = t.buffer.clone();
   op(buffer);
-  return { ...t, buffer, dirty: buffer.dirty, empty: blankText(buffer), note: null };
+  return { ...t, buffer, dirty: buffer.dirty, empty: blankText(buffer), note: null, cursor: buffer.cursor };
 }
 
 /** A body with nothing but whitespace: saving it would leave the file its frontmatter alone, so the pane asks first. */
