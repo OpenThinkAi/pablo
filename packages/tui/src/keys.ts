@@ -168,6 +168,18 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "editor.append", states: ["normal"], key: "a", label: "append", description: "Insert mode after the character under the cursor.", do: cmd("editor.append") },
   { id: "editor.open_below", states: MODAL, key: "o", label: "open line", description: "Open a new line below this one and insert there.", do: cmd("editor.open_below") },
   { id: "editor.select", states: MODAL, key: "v", label: "select", description: "Select mode: motions extend a selection from where it started; v again or Esc leaves it.", do: cmd("editor.select") },
+  // ---- operators, registers and undo (AGT-2171, D-18): operators.ts carries each out by id. They act on select mode's
+  // selection, or the character under the cursor in normal mode; each is one undo step.
+  { id: "editor.delete", states: MODAL, key: "d", label: "delete", description: "Delete the selection (the character under the cursor in normal mode) into the register.", do: cmd("editor.delete") },
+  { id: "editor.delete_char", states: MODAL, key: "x", label: "delete", description: "Delete the selection or the character under the cursor into the register, as d does.", do: cmd("editor.delete_char") },
+  { id: "editor.change", states: MODAL, key: "c", label: "change", description: "Delete the selection (or the character) into the register and insert in its place; the change undoes as one step.", do: cmd("editor.change") },
+  { id: "editor.yank", states: MODAL, key: "y", label: "yank", description: "Copy the selection (or the character under the cursor) into the register.", do: cmd("editor.yank") },
+  { id: "editor.paste", states: MODAL, key: "p", label: "paste", description: "Paste the register after the selection (after the character under the cursor in normal mode).", do: cmd("editor.paste") },
+  { id: "editor.paste_before", states: MODAL, key: "P", label: "paste before", description: "Paste the register before the selection (before the cursor in normal mode).", do: cmd("editor.paste_before") },
+  { id: "editor.replace", states: MODAL, key: "r", label: "replace", description: "Replace every character of the selection (or the one under the cursor) with the next key typed.", do: { type: "prefix.press", prefix: "replace" } },
+  { id: "editor.register", states: MODAL, key: "\"", label: "register", description: "Name the register the next yank, delete or paste uses (the next key typed); without one it is the default register.", do: { type: "prefix.press", prefix: "register" } },
+  { id: "editor.undo", states: MODAL, key: "u", label: "undo", description: "Undo the last change; an insert session, an operator or a change is one step.", do: cmd("editor.undo") },
+  { id: "editor.redo", states: MODAL, key: "U", label: "redo", description: "Redo the change last undone.", do: cmd("editor.redo") },
   { id: "editor.top", states: MODAL, prefix: "g", key: "g", label: "top", description: "Move to the start of the first line.", do: cmd("editor.top") },
 
   // ---- sentence and paragraph motions, and text objects (AGT-2170): `i` and `a` are prefixes in select mode (so `v i s`

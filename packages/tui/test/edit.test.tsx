@@ -361,7 +361,7 @@ test("the pane is modal (AGT-2169): it opens in normal mode, i inserts, v select
   expect(frame).toContain("NOR chapters/01-cold-open.md · edit/ab12cd");
   expect(frame).toContain("edit: normal");
   expect(frame).toMatch(/i +insert/);
-  await keys(app, "w", "x"); // w moves to "well"; x is no key in normal mode
+  await keys(app, "w", "q"); // w moves to "well"; q is no key in normal mode
   expect(plain(app.lastFrame())).not.toContain("[+]");
   await keys(app, "i", "X");
   frame = plain(app.lastFrame());

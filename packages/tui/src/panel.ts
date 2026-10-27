@@ -9,6 +9,7 @@
 
 import { groups, keyStateOf, voiceChoicesFor, PANE_FIXED_KEYS, VOICE_RULE_KEYS, prefixesOf, prefixRows, rowsOf, showKey, isPrefix, prefixLabel, DEFAULT_KEYMAP, type KeyAction, type KeyState, type Keymap } from "./keys";
 import type { Pending, State } from "./state";
+import { CHAR_PENDING } from "./operators";
 
 /** `keys` is how a listing reads (`↓/↑ j/k`); `prim` and `sec` are its two halves, the secondary drawn dim. */
 export interface Entry { readonly keys: string; readonly prim: string; readonly sec: string; readonly label: string }
@@ -27,6 +28,8 @@ const keysOfGroup = (g: KeyAction[]): Entry => {
  */
 export function entriesOf(ks: KeyState, pending: Pending | null = null, km: Keymap = DEFAULT_KEYMAP): Entry[] {
   if (pending?.digits !== undefined) return [entry("0-9", "", "line number"), entry(pending.prefix, "Enter", "go"), entry("Esc", "", "cancel")];
+  // `r` and `"` in the editing pane (AGT-2171): any one character, or Esc.
+  if (pending && CHAR_PENDING[pending.prefix]) return [entry("any key", "", CHAR_PENDING[pending.prefix]!), entry("Esc", "", "cancel")];
   if (pending && isPrefix(pending.prefix)) return groups(prefixRows(ks, pending.prefix, km)).map((g) => (g[0]!.id === "go.line" ? entry("0-9", "", g[0]!.label) : keysOfGroup(g)));
   return [...groups(rowsOf(ks, km)).map(keysOfGroup), ...prefixesOf(ks, km).map((p) => entry(p, "", `${prefixLabel(p, ks.state)}…`))];
 }
