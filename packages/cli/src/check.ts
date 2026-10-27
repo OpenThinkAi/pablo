@@ -573,12 +573,12 @@ export async function checkDraft(
   workDir: string,
   output: string,
   unit: number,
-  options: { readonly env: NodeJS.ProcessEnv; readonly factAsk?: () => Ask | string },
+  options: { readonly env: NodeJS.ProcessEnv; readonly progress?: (line: string) => void; readonly factAsk?: () => Ask | string },
 ): Promise<DraftChecked> {
   try {
     const outcome = checkWork(vaultRoot, workDir, undefined, output, unit);
     if (!outcome.ok) return { hits: [], notices: [`pablo: check skipped: ${outcome.message}`] };
-    const model = await runModelChecks(outcome, workDir, output, { env: options.env, ...(options.factAsk ? { factAsk: options.factAsk } : {}) });
+    const model = await runModelChecks(outcome, workDir, output, { env: options.env, ...(options.progress ? { progress: options.progress } : {}), ...(options.factAsk ? { factAsk: options.factAsk } : {}) });
     return { hits: [...model.hits, ...(outcome.core ?? [])], notices: model.notices };
   } catch (error) {
     return { hits: [], notices: [`pablo: check failed: ${(error as Error).message}`] };

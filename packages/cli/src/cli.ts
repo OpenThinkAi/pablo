@@ -1058,7 +1058,7 @@ function checkLines(drafts: Record<string, { unit: number; check?: readonly { pa
   return Object.entries(drafts).flatMap(([id, units]) =>
     units.flatMap((d) => [
       ...(d.check ?? []).map((h) => `  check ${id} ${d.unit}: ${h.path}:${h.line} ${h.rule} — ${h.excerpt}`),
-      ...(d.checkNotices ?? []).map((n) => `  check ${id} ${d.unit}: ${n}`),
+      ...(d.checkNotices ?? []).map((n) => `  check ${id} ${d.unit}: ${n.replace(/^pablo: /, "")}`),
     ]),
   );
 }

@@ -630,7 +630,8 @@ export function draftChapterBody(body: unknown): unknown {
     ? (written["check"] as { path: string; line: number; rule: string }[]).map(({ path, line, rule }) => ({ path, line, rule }))
     : [];
   const { ok, path, branch, worktree, commit, receipt } = written;
-  return { ok, branch, path, worktree, commit, receipt, check };
+  const notices = Array.isArray(written["checkNotices"]) ? { checkNotices: written["checkNotices"] } : {};
+  return { ok, branch, path, worktree, commit, receipt, check, ...notices };
 }
 
 // ---------------------------------------------------------------------------

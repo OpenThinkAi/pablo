@@ -691,7 +691,7 @@ export async function runWrite(
   let reported: readonly Hit[] = hits;
   let notices: readonly string[] = [];
   if (args.noCheck !== true) {
-    const checked = await checkDraft(vaultRoot, join(worktree, projectInRepo), output.id, chapter, { env: env as NodeJS.ProcessEnv });
+    const checked = await checkDraft(vaultRoot, join(worktree, projectInRepo), output.id, chapter, { env: env as NodeJS.ProcessEnv, progress: (line) => stderr.write(`${line}\n`) });
     const seen = new Set(hits.map((h) => `${h.path}:${h.line}:${h.rule}`));
     reported = [...hits, ...checked.hits.filter((h) => !seen.has(`${h.path}:${h.line}:${h.rule}`))];
     notices = checked.notices;
