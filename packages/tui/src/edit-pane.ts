@@ -18,12 +18,13 @@ import { visible } from "./sanitize";
 import type { EditPaneText } from "./state";
 
 /** What the screen asks the layer above for (the CLI's `screenEditPane`, passed in; this package cannot import it). */
-export type PaneOpenResult = { readonly ok: true; readonly branch: string; readonly text: string } | { readonly ok: false; readonly message: string };
+/** `unmerged` (AGT-2173): commits an earlier session left on the branch that main does not have yet; the pane resumes them. */
+export type PaneOpenResult = { readonly ok: true; readonly branch: string; readonly text: string; readonly unmerged?: number } | { readonly ok: false; readonly message: string };
 export type PaneSaveResult = { readonly ok: true; readonly branch: string; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
 export interface PaneSession {
   /** Makes (or reuses: one per work) the `edit/` branch and its worktree, and reads the project-relative `file` there. */
   open(file: string): Promise<PaneOpenResult>;
-  /** Writes `text` as the file on `branch` and commits it as the author. */
+  /** Writes `text` as the file on `branch` and commits it as the author (Ctrl+S, and the idle autosave: never main). */
   save(file: string, branch: string, text: string): Promise<PaneSaveResult>;
   /** The pane closed: a branch `open` made that never got a commit goes again. */
   close(branch: string): Promise<void>;

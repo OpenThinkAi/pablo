@@ -35,6 +35,7 @@ import { VERB_ASKS, VERB_ROUTES, verbArgs, verbExtra } from "./verb-routes";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
 import { EditPaneView } from "./edit-pane-view";
+import type { AutosaveOptions } from "./autosave";
 import type { PaneSession } from "./edit-pane";
 import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Planning, type Mark, type RailRow, type Revise, type State } from "./state";
 
@@ -85,6 +86,8 @@ export interface AppProps {
   readonly editSession?: EditSession;
   /** `v e`: the unit edited in place on the work's `edit/` branch (the CLI's `screenEditPane`, passed in; AGT-2167). */
   readonly paneSession?: PaneSession;
+  /** The editing pane's autosave wait and clock (AGT-2173); tests pass a fake clock. */
+  readonly autosave?: AutosaveOptions;
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
   readonly keymap?: Keymap;
   /** The editor command the config sets ("" for none); what the settings screen opens with. */
@@ -115,7 +118,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, planner, verbRunner, reviser, voicer, finisher, editSession, paneSession, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
+export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, planner, verbRunner, reviser, voicer, finisher, editSession, paneSession, autosave, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -523,7 +526,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
           {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} marks={state.marks} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
           {state.editPane && paneSession
-            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} />
+            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} {...(autosave ? { autosave } : {})} />
             : <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />}
         </Box>
       )}

@@ -10,6 +10,7 @@ import { fileLineAt } from "../src/document";
 import { mainRows } from "../src/hits";
 import type { EditRequest, EditResult, Finisher } from "../src/screen";
 import type { PaneSession } from "../src/edit-pane";
+import type { AutosaveClock } from "../src/autosave";
 import type { CheckHit } from "../src/hits";
 import type { BookStage as Stage, UnitRef } from "../src/book";
 
@@ -54,8 +55,16 @@ function fakeSession(files: Record<string, string>, branch = "edit/ab12cd") {
 /** No `$EDITOR` for `v e`: the old editor session is wired and must never be called. */
 const noEditor = async (r: EditRequest): Promise<EditResult> => { throw new Error(`the editor was launched for ${r.file}`); };
 
-function mount(opts: { session?: PaneSession; finisher?: Finisher; checks?: (file: string, text: string) => readonly CheckHit[]; stages?: Stage[]; load?: (id: string, unit?: UnitRef) => ReturnType<typeof load> }) {
-  return render(<App title="Ice House" format="novel" book={bookRail(opts.stages ?? STAGES)} load={opts.load ?? load} editSession={noEditor} {...(opts.session ? { paneSession: opts.session } : {})} {...(opts.finisher ? { finisher: opts.finisher } : {})} {...(opts.checks ? { checks: opts.checks } : {})} editor="vim" size={{ cols: 110, rows: 32 }} />);
+/** The autosave's clock (AGT-2173): its timers fire only on `elapse`, so no test depends on the real idle wait. */
+function fakeClock() {
+  const timers = new Map<number, () => void>();
+  let next = 0;
+  const clock: AutosaveClock = { set: (fire) => { timers.set(++next, fire); return next; }, clear: (h) => { timers.delete(h as number); } };
+  return { clock, elapse: () => { const due = [...timers.values()]; timers.clear(); due.forEach((f) => f()); }, get pending() { return timers.size; } };
+}
+
+function mount(opts: { session?: PaneSession; finisher?: Finisher; checks?: (file: string, text: string) => readonly CheckHit[]; stages?: Stage[]; load?: (id: string, unit?: UnitRef) => ReturnType<typeof load>; clock?: AutosaveClock }) {
+  return render(<App title="Ice House" format="novel" book={bookRail(opts.stages ?? STAGES)} load={opts.load ?? load} editSession={noEditor} autosave={{ clock: opts.clock ?? fakeClock().clock }} {...(opts.session ? { paneSession: opts.session } : {})} {...(opts.finisher ? { finisher: opts.finisher } : {})} {...(opts.checks ? { checks: opts.checks } : {})} editor="vim" size={{ cols: 110, rows: 32 }} />);
 }
 async function toRow(app: ReturnType<typeof mount>, index: number) {
   for (let i = 0; i < index; i++) { app.stdin.write(DOWN); await sleep(15); }
@@ -252,4 +261,84 @@ test("saving an emptied pane asks first: Ctrl+S again writes the frontmatter alo
   expect(fake.log.saved).toEqual([]);
   await keys(app, CTRL_S); await sleep(30);
   expect(fake.log.saved.map((x) => x.text)).toEqual(["---\nchapter: 1\n---\n\n"]);
+});
+
+// AGT-2173: edits autosave to the edit branch after an idle pause, through the same save as Ctrl+S; `v s` still merges.
+
+test("after an idle pause the edits autosave to the edit branch through the Ctrl+S save path; v s still merges", async () => {
+  const saved: string[] = [];
+  const finisher: Finisher = async (branch) => { saved.push(branch); return { ok: true, lines: [`merged ${branch} into main (abcdef0)`] }; };
+  const fake = fakeSession({ "chapters/01-cold-open.md": CHAPTER });
+  const c = fakeClock();
+  const app = mount({ session: fake.session, finisher, clock: c.clock });
+  await sleep(30);
+  await toChapterMain(app);
+  await vE(app);
+  expect(c.pending).toBe(0); // nothing typed, nothing waiting
+  await keys(app, "\x1b[F", " ", "S", "o", ".");
+  expect(c.pending).toBe(1); // one wait, restarted by each key
+  expect(fake.log.saved).toEqual([]);
+  c.elapse(); await sleep(40);
+  expect(fake.log.saved).toEqual([{ file: "chapters/01-cold-open.md", branch: "edit/ab12cd", text: ["---", "chapter: 1", "---", "", "The well was dry.", "Nobody came.", "So.", "", "Edwin stood in the doorway.", ""].join("\n") }]);
+  let frame = plain(app.lastFrame());
+  expect(frame).toContain("Autosaved chapters/01-cold-open.md on edit/ab12cd");
+  expect(frame).not.toContain("[+]");
+  expect(c.pending).toBe(0); // clean again: nothing waiting
+  // Undo back to what was saved: nothing to autosave, nothing saved.
+  await keys(app, "X", CTRL_Z);
+  c.elapse(); await sleep(30);
+  expect(fake.log.saved.length).toBe(1);
+  // Main moves only through v s: the finisher was never called by the autosave.
+  expect(saved).toEqual([]);
+  await keys(app, ESC); await sleep(30);
+  await keys(app, "v", "s"); await sleep(40);
+  expect(saved).toEqual(["edit/ab12cd"]);
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("Saved edit/ab12cd");
+});
+
+test("an emptied body is never autosaved; it waits for Ctrl+S's question", async () => {
+  const fake = fakeSession({ "chapters/01-cold-open.md": "---\nchapter: 1\n---\n\nAb\n" });
+  const c = fakeClock();
+  const app = mount({ session: fake.session, clock: c.clock });
+  await sleep(30);
+  await toChapterMain(app);
+  await vE(app);
+  await keys(app, "\x1b[F", BACKSPACE, BACKSPACE);
+  c.elapse(); await sleep(30);
+  expect(fake.log.saved).toEqual([]);
+  expect(plain(app.lastFrame())).toContain("[+]");
+});
+
+test("reopening a unit whose edit branch an earlier session left unmerged resumes that branch, and v s can save it", async () => {
+  const saved: string[] = [];
+  const finisher: Finisher = async (branch) => { saved.push(branch); return { ok: true, lines: [`merged ${branch} into main (abcdef0)`] }; };
+  const fake = fakeSession({ "chapters/01-cold-open.md": CHAPTER }, "edit/old123");
+  const session: PaneSession = { ...fake.session, open: async (file) => { const r = await fake.session.open(file); return r.ok ? { ...r, unmerged: 2 } : r; } };
+  const app = mount({ session, finisher });
+  await sleep(30);
+  await toChapterMain(app);
+  await vE(app);
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("chapters/01-cold-open.md · edit/old123");
+  expect(frame).toContain("Resuming edit/old123: 2 edits from earlier not saved into main yet");
+  await keys(app, ESC); await sleep(30);
+  await keys(app, "v", "s"); await sleep(40);
+  expect(saved).toEqual(["edit/old123"]);
+});
+
+test("Esc while the pane is opening cancels it; the branch the open made is let go when it lands", async () => {
+  const fake = fakeSession({ "chapters/01-cold-open.md": CHAPTER });
+  let land: () => void = () => undefined;
+  const slow: PaneSession = { ...fake.session, open: (file) => new Promise((resolve) => { land = () => void fake.session.open(file).then(resolve); }) };
+  const app = mount({ session: slow });
+  await sleep(30);
+  await toChapterMain(app);
+  await vE(app);
+  expect(plain(app.lastFrame())).toContain("opening");
+  await keys(app, ESC); await sleep(30);
+  expect(plain(app.lastFrame())).not.toContain("opening");
+  land(); await sleep(30);
+  expect(fake.log.closed).toEqual(["edit/ab12cd"]);
+  expect(plain(app.lastFrame())).not.toContain("edit/ab12cd");
 });

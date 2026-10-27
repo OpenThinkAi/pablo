@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -223,7 +223,7 @@ test("the pane opens the file on a new edit branch's worktree, and saving commit
   // Saving what is already there commits nothing.
   expect(await saveFromPane(project, CH1, "edit/ab12cd", edited, { env })).toEqual({ ok: true, branch: "edit/ab12cd", lines: [`no change to ${CH1}`] });
   // A second open reuses the open edit branch and reads the edited file from it; closing keeps it (it has a commit).
-  expect(await openForPane(project, CH1, { env, shortId: () => "ffffff" })).toEqual({ ok: true, branch: "edit/ab12cd", text: edited });
+  expect(await openForPane(project, CH1, { env, shortId: () => "ffffff" })).toEqual({ ok: true, branch: "edit/ab12cd", text: edited, unmerged: 1 });
   await closePane(project, "edit/ab12cd", { env });
   expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ab12cd"] } });
 });
@@ -245,4 +245,68 @@ test("the pane refuses a file that is not on main, a path outside the project, a
   expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: [] } });
   expect((await openForPane(project, "../../escape.md", { env })).ok).toBe(false);
   expect(await saveFromPane(project, CH1, "main", "x", { env })).toEqual({ ok: false, message: 'pablo: edit: "main" is not an edit branch' });
+});
+
+// AGT-2173: the pane's autosave is `save` on the edit branch; main moves only when `v s` merges it. An earlier session's
+// unmerged edit branch is resumed, and the pane never writes through a symlink.
+
+test("autosaves are commits on the edit branch only: main's head is unchanged until v s merges the branch", async () => {
+  const { project, vault, env } = setup();
+  const mainHead = git(vault, "rev-parse", "main");
+  const session = screenEditPane(project, { env, shortId: () => "ab12cd" });
+  const opened = await session.open(CH1);
+  expect(opened.ok).toBe(true);
+  let text = BASE;
+  for (const [from, to] of [["from the doorway", "from the porch"], ["under the horse", "under the mare"], ["green book", "red book"]] as const) {
+    text = text.replace(from, to);
+    expect((await session.save(CH1, "edit/ab12cd", text)).ok).toBe(true);
+    expect(git(vault, "rev-parse", "main")).toBe(mainHead);
+  }
+  expect(git(vault, "rev-list", "--count", "main..edit/ab12cd")).toBe("3");
+  expect(readFileSync(join(project, CH1), "utf8")).toBe(BASE);
+  const extractor: Adapter = { async *complete() { yield { type: "text", text: "{}" } as never; } } as unknown as Adapter;
+  const saved = await screenFinisher(project, { env, extractor, now: () => new Date("2026-10-26T12:00:00.000Z") })("edit/ab12cd", { removed: [], added: [] });
+  expect(saved.ok).toBe(true);
+  expect(git(vault, "rev-parse", "main")).not.toBe(mainHead);
+  expect(readFileSync(join(project, CH1), "utf8")).toContain("red book");
+});
+
+test("reopening after an earlier session left an unmerged edit branch (its worktree gone) resumes that branch", async () => {
+  const { project, vault, env } = setup();
+  const first = screenEditPane(project, { env, shortId: () => "ab12cd" });
+  expect((await first.open(CH1)).ok).toBe(true);
+  const edited = BASE.replace("from the doorway", "from the porch");
+  expect((await first.save(CH1, "edit/ab12cd", edited)).ok).toBe(true);
+  // The session ends and its worktree is cleaned away; the branch with its autosave stays.
+  git(vault, "worktree", "remove", "--force", worktreePath("ice-house", "edit/ab12cd", env));
+  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(false);
+  const again = await openForPane(project, CH1, { env, shortId: () => "ffffff" });
+  expect(again).toEqual({ ok: true, branch: "edit/ab12cd", text: edited, unmerged: 1 });
+  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(true);
+  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ab12cd"] } });
+  // Closing does not throw the resumed work away.
+  await closePane(project, "edit/ab12cd", { env });
+  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ab12cd"] } });
+});
+
+test("an edit branch with nothing main lacks is not resumed: a fresh one is made", async () => {
+  const { project, vault, env } = setup();
+  git(vault, "branch", "edit/stale1");
+  const opened = await openForPane(project, CH1, { env, shortId: () => "ab12cd" });
+  expect(opened).toEqual({ ok: true, branch: "edit/ab12cd", text: BASE });
+});
+
+test("the pane refuses to write through a symlink in the worktree", async () => {
+  const { project, env } = setup();
+  const opened = await openForPane(project, CH1, { env, shortId: () => "ab12cd" });
+  expect(opened.ok).toBe(true);
+  const wt = worktreePath("ice-house", "edit/ab12cd", env);
+  const inTree = join(wt, "novels", "ice-house", CH1);
+  const outside = join(dirname(wt), "outside.md");
+  writeFileSync(outside, "untouched\n");
+  rmSync(inTree);
+  symlinkSync(outside, inTree);
+  const saved = await saveFromPane(project, CH1, "edit/ab12cd", "overwritten\n", { env });
+  expect(saved).toEqual({ ok: false, message: `pablo: edit: ${CH1} is a symbolic link; not writing through it; make it a plain file on the branch first` });
+  expect(readFileSync(outside, "utf8")).toBe("untouched\n");
 });
