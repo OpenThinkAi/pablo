@@ -20,8 +20,10 @@ import type { Action as ModelAction, State, VoiceChoiceInfo, VoiceKind, VoiceTar
 export const STATES = ["rail", "main", "content", "normal", "insert", "select"] as const;
 export type KeyStateName = (typeof STATES)[number];
 
-export const PREFIXES = { a: "AI", f: "filter", v: "view", g: "go to", r: "research", o: "output & setup" } as const;
+export const PREFIXES = { a: "AI", f: "filter", v: "view", g: "go to", r: "research", o: "output & setup", i: "inside" } as const;
 export type Prefix = keyof typeof PREFIXES;
+/** What a prefix is called in `state`: in select mode `a` is "around" (it is the AI prefix elsewhere), `i` "inside". */
+export const prefixLabel = (p: Prefix, state: KeyStateName): string => (state === "select" && p === "a" ? "around" : PREFIXES[p]);
 export const isPrefix = (k: string): k is Prefix => k in PREFIXES;
 
 /** What a key does beyond the model: the layer above (the app, later the harness) handles it by `id`. `quit` is the app's own. */
@@ -158,11 +160,28 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "editor.line_start", states: MODAL, key: "0", secondary: "home", label: "line", description: "Move to the start of the line (the whole paragraph, not the display row).", do: cmd("editor.line_start") },
   { id: "editor.line_end", states: MODAL, key: "$", secondary: "end", label: "line", description: "Move to the last character of the line (the whole paragraph, not the display row).", do: cmd("editor.line_end") },
   { id: "editor.bottom", states: MODAL, key: "G", label: "last line", description: "Move to the start of the last line.", do: cmd("editor.bottom") },
-  { id: "editor.insert", states: MODAL, key: "i", label: "insert", description: "Insert mode before the cursor: keys type until Esc.", do: cmd("editor.insert") },
-  { id: "editor.append", states: MODAL, key: "a", label: "append", description: "Insert mode after the character under the cursor.", do: cmd("editor.append") },
+  { id: "editor.insert", states: ["normal"], key: "i", label: "insert", description: "Insert mode before the cursor: keys type until Esc. (In select mode `i` starts a text object.)", do: cmd("editor.insert") },
+  { id: "editor.append", states: ["normal"], key: "a", label: "append", description: "Insert mode after the character under the cursor.", do: cmd("editor.append") },
   { id: "editor.open_below", states: MODAL, key: "o", label: "open line", description: "Open a new line below this one and insert there.", do: cmd("editor.open_below") },
   { id: "editor.select", states: MODAL, key: "v", label: "select", description: "Select mode: motions extend a selection from where it started; v again or Esc leaves it.", do: cmd("editor.select") },
   { id: "editor.top", states: MODAL, prefix: "g", key: "g", label: "top", description: "Move to the start of the first line.", do: cmd("editor.top") },
+
+  // ---- sentence and paragraph motions, and text objects (AGT-2170): `i` and `a` are prefixes in select mode (so `v i s`
+  // selects the sentence under the cursor); text-objects.ts carries each out by id.
+  { id: "editor.sentence_next", states: MODAL, key: ")", label: "sentence", description: "Move to the start of the next sentence.", do: cmd("editor.sentence_next") },
+  { id: "editor.sentence_prev", states: MODAL, key: "(", label: "sentence", description: "Move to the start of the sentence, or of the previous one.", do: cmd("editor.sentence_prev") },
+  { id: "editor.paragraph_next", states: MODAL, key: "}", label: "paragraph", description: "Move to the start of the next paragraph.", do: cmd("editor.paragraph_next") },
+  { id: "editor.paragraph_prev", states: MODAL, key: "{", label: "paragraph", description: "Move to the start of the paragraph, or of the previous one.", do: cmd("editor.paragraph_prev") },
+  { id: "editor.inner_word", states: ["select"], prefix: "i", key: "w", label: "inside word", description: "Select the word under the cursor.", do: cmd("editor.inner_word") },
+  { id: "editor.inner_sentence", states: ["select"], prefix: "i", key: "s", label: "inside sentence", description: "Select the sentence under the cursor.", do: cmd("editor.inner_sentence") },
+  { id: "editor.inner_paragraph", states: ["select"], prefix: "i", key: "p", label: "inside paragraph", description: "Select the paragraph under the cursor.", do: cmd("editor.inner_paragraph") },
+  { id: "editor.inner_quote", states: ["select"], prefix: "i", key: '"', label: "inside quotes", description: "Select what is inside the double quotes around the cursor.", do: cmd("editor.inner_quote") },
+  { id: "editor.inner_paren", states: ["select"], prefix: "i", key: "(", label: "inside parentheses", description: "Select what is inside the parentheses around the cursor.", do: cmd("editor.inner_paren") },
+  { id: "editor.around_word", states: ["select"], prefix: "a", key: "w", label: "around word", description: "Select the word under the cursor and the space after it.", do: cmd("editor.around_word") },
+  { id: "editor.around_sentence", states: ["select"], prefix: "a", key: "s", label: "around sentence", description: "Select the sentence under the cursor and the space after it.", do: cmd("editor.around_sentence") },
+  { id: "editor.around_paragraph", states: ["select"], prefix: "a", key: "p", label: "around paragraph", description: "Select the paragraph under the cursor and the blank line after it.", do: cmd("editor.around_paragraph") },
+  { id: "editor.around_quote", states: ["select"], prefix: "a", key: '"', label: "around quotes", description: "Select the double quotes around the cursor and what is inside.", do: cmd("editor.around_quote") },
+  { id: "editor.around_paren", states: ["select"], prefix: "a", key: "(", label: "around parentheses", description: "Select the parentheses around the cursor and what is inside.", do: cmd("editor.around_paren") },
 ];
 
 // ---------------------------------------------------------------- `r`: the planning and research verbs, as data
