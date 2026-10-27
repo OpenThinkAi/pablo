@@ -190,6 +190,8 @@ interface ParsedArgs {
   readonly dryRun: boolean;
   /** `write --force`: overwrite an existing chapter file. */
   readonly force: boolean;
+  /** `write --no-check`, `story --no-check` (AGT-2115): skip the track's checks after each draft. */
+  readonly noCheck: boolean;
   /** `takes gc --yes` (AGT-1681): archive the listed takes without asking. */
   readonly yes: boolean;
   /** `write --temperature T`: sampling temperature; validated by `runWrite`. */
@@ -299,6 +301,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     scenes: typeof values["scenes"] === "string" ? values["scenes"] : undefined,
     dryRun: values["dry-run"] === true,
     force: values["force"] === true,
+    noCheck: values["no-check"] === true,
     yes: values["yes"] === true,
     temperature: typeof values["temperature"] === "string" ? values["temperature"] : undefined,
     seed: typeof values["seed"] === "string" ? values["seed"] : undefined,
@@ -1050,6 +1053,16 @@ export function repeatedFlag(argv: readonly string[], flag: string): string[] {
   return values;
 }
 
+/** One line per post-draft check hit, and per check that could not run (AGT-2115), for `story`'s prose form. */
+function checkLines(drafts: Record<string, { unit: number; check?: readonly { path: string; line: number; rule: string; excerpt: string }[]; checkNotices?: readonly string[] }[]>): string[] {
+  return Object.entries(drafts).flatMap(([id, units]) =>
+    units.flatMap((d) => [
+      ...(d.check ?? []).map((h) => `  check ${id} ${d.unit}: ${h.path}:${h.line} ${h.rule} — ${h.excerpt}`),
+      ...(d.checkNotices ?? []).map((n) => `  check ${id} ${d.unit}: ${n}`),
+    ]),
+  );
+}
+
 /** One line per thing a story run did, or the branch it waits on. */
 function storyText(body: Record<string, unknown>, trackLine: (choice: TrackChoice) => string): string {
   const waiting = body["waiting"] as { step: string; branch?: string; review?: string; unit?: number } | undefined;
@@ -1068,6 +1081,7 @@ function storyText(body: Record<string, unknown>, trackLine: (choice: TrackChoic
       p.episodes !== undefined ? `  ${id}: ${p.episodes.length} episode(s), published to ${p.where}` : `  ${id}: ${p.words} words, published to ${p.where}`,
     ),
     ...assumptions.map((a) => `  assumed: ${a.question}`),
+    ...checkLines((body["drafts"] ?? {}) as Record<string, { unit: number; check?: readonly { path: string; line: number; rule: string; excerpt: string }[]; checkNotices?: readonly string[] }[]>),
   ].join("\n");
 }
 
@@ -1090,6 +1104,7 @@ async function runStoryCli(args: ParsedArgs, argv: readonly string[], cwd: strin
       words,
       project: args.project,
       track: args.track,
+      noCheck: args.noCheck,
     },
     { cwd, env: process.env, stderr: process.stderr },
     interactive ? { ask: stdinAskAuthor(lineReader(process.stdin), process.stderr) } : {},

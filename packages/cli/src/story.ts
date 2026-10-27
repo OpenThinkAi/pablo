@@ -171,6 +171,10 @@ export interface StoryArgs {
    * planner infers `historical-fiction` from a prompt naming a period or event, else `fiction`. Ignored on resume.
    */
   readonly track?: string | undefined;
+  /** `--no-check` (AGT-2115): skip the track's checks after each drafted unit. */
+  readonly noCheck?: boolean | undefined;
+  /** The same, as the verb's schema spells it (`pablo story --no-check`, the MCP tool). */
+  readonly "no-check"?: boolean | undefined;
 }
 
 /** What a test injects so no model runs: the harness, the writer, the extractor, the author. */
@@ -214,6 +218,9 @@ interface DraftRecord {
   readonly path: string;
   /** The merge commit on `main` (absent in review mode, where the author merges). */
   readonly merged?: string;
+  /** The track's checks on the draft (AGT-2115): the hits (never a rewrite) and any check that could not run. */
+  readonly check?: readonly unknown[];
+  readonly checkNotices?: readonly string[];
 }
 
 interface StoryState {
@@ -221,6 +228,8 @@ interface StoryState {
   readonly prompt: string;
   readonly outputs: readonly string[];
   review: boolean;
+  /** `--no-check` was given (AGT-2115): the track's checks do not run after a draft. */
+  noCheck?: boolean;
   readonly words?: number;
   readonly started: string;
   /** The track the run chose and why (AGT-2103): `--track`, or inferred from the prompt. Absent on runs started before it. */
@@ -558,7 +567,7 @@ function stageMissing(work: string, stage: StoryCoreStage): readonly string[] | 
 }
 
 /** Drafts one unit through `write` (preconditions, pack, writer, draft branch, receipt naming output and unit). */
-async function draftUnit(run: Run, def: OutputDefinition, unit: number): Promise<{ ok: true; branch: string; path: string } | { ok: false; result: VerbResult }> {
+async function draftUnit(run: Run, def: OutputDefinition, unit: number): Promise<{ ok: true; branch: string; path: string; check: readonly unknown[]; checkNotices: readonly string[] } | { ok: false; result: VerbResult }> {
   const words = def.soleUnit !== undefined ? run.state.words : undefined;
   const { exitCode, text } = await withWriteLock(() =>
     captureConsoleLog(() =>
@@ -572,6 +581,7 @@ async function draftUnit(run: Run, def: OutputDefinition, unit: number): Promise
           dryRun: false,
           json: true,
           force: false,
+          noCheck: run.state.noCheck === true,
         },
         run.vault,
         run.work,
@@ -589,7 +599,9 @@ async function draftUnit(run: Run, def: OutputDefinition, unit: number): Promise
   if (exitCode !== 0 || body["ok"] !== true) {
     return { ok: false, result: { body: { ...body, output: def.id, unit }, exitCode: exitCode === 0 ? 1 : exitCode } };
   }
-  return { ok: true, branch: body["branch"] as string, path: body["path"] as string };
+  const check = Array.isArray(body["check"]) ? (body["check"] as unknown[]) : [];
+  const notices = Array.isArray(body["checkNotices"]) ? (body["checkNotices"] as string[]) : [];
+  return { ok: true, branch: body["branch"] as string, path: body["path"] as string, check, checkNotices: notices };
 }
 
 function extractorFor(run: Run): Adapter | undefined {
@@ -843,7 +855,7 @@ async function advance(run: Run): Promise<VerbResult> {
       const step = `draft:${id}:${unit}`;
       if (state.review) {
         state.pending = { step, branch: drafted.branch, sha: git(run.repo, ["rev-parse", drafted.branch]) };
-        (state.drafts[id] ??= []).push({ unit, branch: drafted.branch, path: drafted.path });
+        (state.drafts[id] ??= []).push({ unit, branch: drafted.branch, path: drafted.path, check: drafted.check, checkNotices: drafted.checkNotices });
         saveState(run.work, state);
         return waiting(run, step, drafted.branch);
       }
@@ -854,7 +866,7 @@ async function advance(run: Run): Promise<VerbResult> {
         ...(run.deps.now ? { now: run.deps.now } : {}),
       });
       if (!merged.ok) return fail(merged.notice, { output: id, unit, branch: drafted.branch });
-      (state.drafts[id] ??= []).push({ unit, branch: drafted.branch, path: drafted.path, merged: merged.sha });
+      (state.drafts[id] ??= []).push({ unit, branch: drafted.branch, path: drafted.path, merged: merged.sha, check: drafted.check, checkNotices: drafted.checkNotices });
       markDone(run, step);
     }
 
@@ -953,6 +965,7 @@ export async function runStory(args: StoryArgs, ctx: VerbContext, deps: StoryDep
     const marker = readMarker(project.path);
     if (!marker.ok) return refuse(marker.message);
     if (args.review === true) state.review = true;
+    if (args.noCheck === true || args["no-check"] === true) state.noCheck = true;
     const blocked = await ensureOutputs(state.outputs);
     if (blocked !== undefined) return blocked;
     const run: Run = { vault: vault.path, repo, work: project.path, slug: marker.marker.slug, title: marker.marker.title, state, ctx, deps };
@@ -998,6 +1011,7 @@ export async function runStory(args: StoryArgs, ctx: VerbContext, deps: StoryDep
     prompt,
     outputs,
     review: args.review === true,
+    ...(args.noCheck === true || args["no-check"] === true ? { noCheck: true } : {}),
     ...(words === undefined ? {} : { words }),
     started: now().toISOString(),
     track,

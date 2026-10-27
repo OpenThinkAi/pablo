@@ -128,6 +128,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     seed: { type: "string" }, // AGT-1272: write --seed
     "dry-run": { type: "boolean", default: false },
     force: { type: "boolean", default: false },
+    "no-check": { type: "boolean", default: false }, // AGT-2115: write/story --no-check
     stage: { type: "string" },
     file: { type: "string" },
     sub: { type: "string" },
