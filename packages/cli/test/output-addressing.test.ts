@@ -1,6 +1,6 @@
 /**
  * Addressing an output (AGT-1669, pm project `pablo-story-core`, S5): the
- * default-output rule on `write`/`status`/`check`/`publish`/`share`,
+ * default-output rule on `write`/`status`/`check`/`publish`,
  * `--output`/`--unit` with `--chapter` as the novel's sugar, receipts naming
  * `output` and `unit`, `draft_unit` reaching the same code as `write`, and
  * `pablo output list|add|remove|plan`.
@@ -294,7 +294,7 @@ test("AC3: draft_unit reaches the same code as write: same refusal, same branch,
   expect(git(vault, "show", "draft/ch03:novels/ice-house/chapters/03-the-route.md")).toContain("direction: stay on Odile");
 });
 
-// --- status, check, publish, share ------------------------------------------
+// --- status, check, publish ------------------------------------------
 
 test("status --for <type> N addresses one output; a bare N on a two-output work refuses naming them", async () => {
   const { vault, home } = vaultWith(TWO);

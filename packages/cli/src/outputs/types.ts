@@ -2,7 +2,7 @@
  * The shape of one output type (AGT-1668, pm project `pablo-story-core`,
  * "The output layer"): everything a verb needs to know about how a work's
  * story core is told in one form. `OUTPUTS` (`./registry.ts`) holds one
- * `OutputDefinition` per type; `write`, `check`, `publish`, `share`, `merge`,
+ * `OutputDefinition` per type; `write`, `check`, `publish`, `merge`,
  * the rituals and `status`/`resume` ask it instead of naming a type's paths.
  *
  * A type is added by adding a directory under `outputs/` and a row in

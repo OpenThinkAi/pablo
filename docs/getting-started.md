@@ -253,4 +253,3 @@ pablo publish --project lighthouse --target draft   # one markdown file in .pabl
 - Drive all of this from Claude Code, Codex or another agent: [agents.md](agents.md).
 - Every command and flag: [commands.md](commands.md).
 - What each vault file does, and the rules the planner enforces: [vault.md](vault.md).
-- Share chapters with readers who leave notes: [readers.md](readers.md).

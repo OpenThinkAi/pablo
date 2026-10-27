@@ -30,7 +30,7 @@ export const NOVEL_UNIT_FILE = /^(\d{2,})-.*\.md$/;
 
 /**
  * A chapter file's path anywhere in a vault (`novels/<slug>/chapters/03-x.md`):
- * the only files that ever reach a reading repo (`share`, `read`, `notes pull`).
+ * the only files a reading round ever carried.
  * Every segment is a plain name, so the pattern itself refuses `..`.
  */
 export const NOVEL_UNIT_PATH = /^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*chapters\/[^/]+\.md$/;

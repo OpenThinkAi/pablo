@@ -53,7 +53,6 @@ test("VERBS exposes exactly the thirty-six verbs, each project-required verb req
     "merge",
     "migrate",
     "mix", // AGT-1684
-    "notes",
     "output",
     "perform", // AGT-1683
     "promote",
@@ -66,7 +65,6 @@ test("VERBS exposes exactly the thirty-six verbs, each project-required verb req
     "revise_passage",
     "save",
     "search",
-    "share",
     "status",
     "story",
     "timeline",
@@ -165,8 +163,6 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     voices: { type: "string" }, // AGT-2137: write --voices narrator|characters
     from: { type: "string" }, // AGT-2137: output add narrated --from <output>
     branch: { type: "string" }, // AGT-1564: critique --branch
-    reader: { type: "string" }, // AGT-1582: share --reader
-    chapters: { type: "string" }, // AGT-1582: share --chapters
     role: { type: "string" }, // AGT-1680: bind --role; AGT-1679: audition/cast --role
     describe: { type: "string" }, // AGT-1679: audition --describe
     designer: { type: "string" }, // AGT-1679: audition --designer

@@ -523,7 +523,7 @@ on their own branch:
 | `revise/<id>` | revising in the screen, or the MCP `revise` tool with `branch` |
 | `edit/...` | editing by hand in the screen |
 | `plan/...` | an agent session's planning writes; `promote`; `research save`; `fact record`; `agent --tag-facts` |
-| `reader/<round>` | `notes pull` |
+| `reader/<round>` | nothing now; left over from the removed reading rounds, kept so an old vault still lists it |
 
 `status` and `resume` list them under `waiting`.
 
@@ -561,7 +561,6 @@ the branches waiting for review with their diffs and comments. You can:
 - edit by hand on an `edit/` branch
 - comment on a branch, and accept it (accepting runs the same after-write steps as `merge`)
 - compose a message to the agent
-- pull readers' reviews when they arrive
 
 Outside a work, or without a terminal, bare `pablo` prints the help.
 
@@ -933,9 +932,7 @@ It serves:
 refuse the same way. `merge` accepts a draft: an agent calls it only when you tell
 it to. Those three (`init`, `story`, `merge`) are never offered to pablo's own
 agent (`pablo agent`, the screen's compose view): it does not start works, run the
-drafting pipeline or land its own drafts. Deliberately missing: `share` and
-`notes`; sending the manuscript to people is your act, never a model's. There is
-also no `voice new` tool.
+drafting pipeline or land its own drafts. There is also no `voice new` tool.
 
 ### agent
 
@@ -970,63 +967,6 @@ provider the `plan` intent goes to (see [configuration.md](configuration.md#defa
 `{ok, provider: {id, model, credential}, entries[], result}`; `credential` is where the
 key comes from (`env:ANTHROPIC_API_KEY`, `keychain:…`, `none`), never the key. Exit `0` on success, `2`
 refused, `1` failed.
-
----
-
-## Sharing with readers
-
-> **Limitation:** sharing currently uses a fixed GitHub organisation, `OpenThinkAi`.
-> Reading repositories are always `OpenThinkAi/<slug>-reading`, and `read` only lists
-> or fetches from that organisation. This can't be configured yet, so the reader flow
-> works only for accounts with access to that org. Every call goes through the `gh`
-> CLI, which must be signed in.
-
-Readers are listed in pablo's config (`~/.config/pablo/config.json`):
-
-```json
-{ "readers": { "sam": { "github": "<login>", "name": "Sam Lee", "email": "sam@example.com" } } }
-```
-
-### share
-
-```
-pablo share --project <slug> --reader <name> --chapters N|N-M [--output <type>]
-pablo share --list --project <slug>
-```
-
-Opens a reading round. Every chapter must already be on `main`; if one isn't, it is
-refused by name.
-
-1. On first use, creates the private reading repository.
-2. Pushes a base branch without the chapters, and a round branch with them exactly as on `main`. Only chapter files ever reach that repository.
-3. Opens a pull request and gives the reader read access. A pending invitation is reported; the reader accepts it once per book.
-4. Requests the reader's review. If that fails, the notice prints the command to retry.
-5. Records the round in `<vault>/.pablo/rounds/<reader>-<date>.json`.
-
-`--list` shows the work's rounds:
-
-| Status | Meaning |
-|---|---|
-| `open` | not yet reviewed |
-| `submitted` | reviewed, waiting for `notes pull` |
-| `pulled` | pulled into the vault |
-
-### notes pull
-
-```
-pablo notes pull --project <slug>
-```
-
-For each round with a submitted review, it builds a `reader/<round>` branch from the
-vault commit that was shared. Each suggestion becomes one commit authored as the
-reader, using the name and email from your config. Every comment is stored for
-review in the screen. A review with no suggestions still gets one empty commit.
-
-A review that touches a file outside the round, or text that no longer matches the
-vault, is refused. After a pull, the pull request is closed (not merged), its
-branches are deleted, and the round is marked `pulled`. It is never pulled twice.
-Returns `{ok, code, pulled[], skipped[{round, reason, message}], notices[]}`. Exit is
-`1` if any round errored and `2` if any was refused.
 
 ---
 

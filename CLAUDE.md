@@ -103,10 +103,6 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 `write` and `prose` save through `splitManuscript`; pack
                 assembly joins manuscript slices with `joinManuscript`, so the
                 model never sees the splits (AGT-1531).
-                `review-map.ts` maps a reader's paragraph selections to
-                sentence lines and marks to a GitHub review payload and back
-                (AGT-1584, `--doc readers`); `share`'s
-                transport and `notes pull` call it, never re-derive it.
 packages/tui    @openthink/pablo-tui — the Ink 7 / React 19 screen, a third
                 front end on `verbs.ts` beside the CLI and MCP. Terminal and
                 React dependencies live here, never in core. Resize and
@@ -182,11 +178,6 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 -> work (`pablo.json` `voice` entries + `STYLE.md`) -> output
                 (`outputs/<type>/RULES.md`), each piece labelled with where
                 it came from and absent layers listed in `missing`.
-                Reading rounds: `share.ts` opens a round as a PR on the
-                book's private reading repo (AGT-1582), `read.ts` lists and
-                fetches rounds for a reader, `notes.ts` (`notes pull`,
-                AGT-1587) turns a submitted review into a vault branch, and
-                `round-housekeeping.ts` closes a pulled round (AGT-1588).
                 `install-reader.sh` at the repo root is the reader cleanup script
                 (AGT-1590). The output registry (AGT-1668): `src/outputs/registry.ts`'s
                 `OUTPUTS` is the single source of output types, like `VERBS`;
@@ -291,7 +282,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 radio output was added later (the novel's files untouched).
                 Tests: `test/story-radio.test.ts` (fake casting machine).
                 Addressing (AGT-1669): `write`, `status --for "<type> N"`,
-                `check`, `publish` and `share` take `--output <type>`
+                `check` and `publish` take `--output <type>`
                 (`--chapter N` is `--output novel --unit N`) and resolve it
                 with the registry's `resolveOutput`: one output is implied,
                 several and none named is a refusal naming them. `pablo

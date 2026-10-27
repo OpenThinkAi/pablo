@@ -8,7 +8,6 @@ export * from "./web";
 export { joinManuscript, joinParagraphs, joinSentences, splitManuscript, splitSentences } from "./sentences";
 export type { FactEntry, FactLine, FactScan, Provenance } from "./facts";
 export { establishedByOf, formatFactLine, formatProvenance, parseFactLine, scanFacts, unitTag, withProvenance } from "./facts";
-export * from "./review-map";
 export type { PeriodFact } from "./period-facts";
 export {
   PERIOD_FACTS_FILE,

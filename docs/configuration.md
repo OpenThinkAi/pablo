@@ -35,9 +35,6 @@ text) is reported by name the first time a command needs a model; nothing is sen
   "intents": {
     "plan": "anthropic"
   },
-  "readers": {
-    "sam": { "github": "sam-reads", "name": "Sam Lee", "email": "sam@example.com" }
-  },
   "web": {
     "search": { "backend": "searxng", "url": "http://127.0.0.1:8080" }
   },
@@ -142,7 +139,7 @@ A work's `pablo.json` may carry its own `providers` and `intents`, in the same s
 above. They are merged over this file for every command run on that work: a provider
 entry changes only the fields it sets on the global one of the same name (its key
 reference included), a new name adds a provider, and an intent mapping replaces the
-global one for that intent. `default`, `readers` and the rest stay global.
+global one for that intent. `default` and the rest stay global.
 
 ```json
 {
@@ -198,16 +195,6 @@ through an `anthropic` provider, or any OpenAI-compatible model with tool calls
 other request; your Claude Code login is not used. With no non-local provider
 configured, the agent runs on the local model.
 
-## `readers`
-
-People you share chapters with (see [readers.md](readers.md)). The key is the name
-you pass to `pablo share --reader`; lowercase letters, digits and hyphens.
-
-| Field | Meaning |
-|---|---|
-| `github` | Their GitHub username; they are invited to the reading repo |
-| `name`, `email` | Used as the author of the commits their suggestions become |
-
 ## The screen: `keys` and `editor`
 
 `editor` is the command the screen runs to edit a file by hand (empty means
@@ -221,7 +208,7 @@ screen's settings view (`\`) edits them for you and writes them here.
 | `PABLO_VAULT` | Use this vault instead of searching up from the current directory |
 | `PABLO_HOME` | Where draft branches are checked out while being written (default `~/.cache/pablo`) |
 | `XDG_CONFIG_HOME` | Moves the config directory |
-| `XDG_STATE_HOME` | Where a reader's fetched rounds go (default `~/.local/state`) |
+| `XDG_STATE_HOME` | Where the receipts log goes when there is no vault (default `~/.local/state`) |
 | `XDG_DATA_HOME` | Where the radio tools' Python environment goes |
 
 ## The radio tools: `casting.json`

@@ -475,3 +475,18 @@ test("bareScreenTarget finds the project from a subdirectory and not outside one
   expect(bareScreenTarget(join(vault, "novels", "ice-house", "chapters"))?.format).toBe("novel");
   expect(bareScreenTarget(join(vault, "novels", "no-marker"))).toBeUndefined();
 });
+
+test("the removed reading-round forms of `read` and the share/notes verbs point at the change (AGT-2094)", () => {
+  const vault = tempVault();
+  const env = { PABLO_VAULT: vault };
+  for (const args of [["read", "--list"], ["read", "atara-2026-10-03", "--json"]]) {
+    const r = runCli(args, env);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr + r.stdout).toContain("reading rounds were removed");
+  }
+  for (const verb of ["share", "notes"]) {
+    const r = runCli([verb, "--project", "ice-house"], env);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr + r.stdout).toContain("reading rounds were removed");
+  }
+});
