@@ -1,7 +1,7 @@
 // The keys, as data. Every action is a row: a stable id, the states it acts in, a primary key, an optional secondary
 // key (the vim/helix spelling), the label the key panel shows, and what it does (`do`: a model action from state.ts, or
 // a command for the layer above it). Arrows move around the screen; letter prefixes hold everything else: `a` AI,
-// `f` filter, `v` view, `g` go to. A prefixed row's key is its second key, pressed after the prefix. Copied from
+// `f` filter, `v` view, `g` go to, `r` research and planning. A prefixed row's key is its second key, pressed after the prefix. Copied from
 // prview's keys.ts and adapted (pablo's states are the rail, the main pane and the content area, and a review is a
 // mode of them); never shared with it, so the two may drift.
 //
@@ -19,7 +19,7 @@ import type { Action as ModelAction, State, VoiceChoiceInfo, VoiceKind, VoiceTar
 export const STATES = ["rail", "main", "content"] as const;
 export type KeyStateName = (typeof STATES)[number];
 
-export const PREFIXES = { a: "AI", f: "filter", v: "view", g: "go to" } as const;
+export const PREFIXES = { a: "AI", f: "filter", v: "view", g: "go to", r: "research" } as const;
 export type Prefix = keyof typeof PREFIXES;
 export const isPrefix = (k: string): k is Prefix => k in PREFIXES;
 
@@ -103,6 +103,15 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "ai.write", states: OUTSIDE, needs: "book", prefix: "a", key: "w", label: "write chapter", description: "Write the selected chapter with the configured writer model.", do: cmd("ai.write") },
   { id: "ai.revise", states: MAIN, prefix: "a", key: "r", label: "revise", description: "Revise the selected sentences.", do: cmd("ai.revise") },
   { id: "ai.voice", states: MAIN, prefix: "a", key: "v", label: "voice", description: "Add the selected sentences to the voice (flag them, keep them as an exemplar), or type a rule for it.", do: cmd("ai.voice") },
+
+  // ---- r: research and planning (AGT-2178): the planning and research verbs, each its own action (the parity test names them)
+  { id: "plan.save", states: OUTSIDE, needs: "book", prefix: "r", key: "c", label: "save core doc", description: "Save a core doc of the work's track (premise, acts, beats, bible, period, or thesis, claims, outline) from a file.", do: cmd("plan.save") },
+  { id: "research.plan", states: OUTSIDE, needs: "book", prefix: "r", key: "p", label: "research plan", description: "Draft the work's research checklist.", do: cmd("research.plan") },
+  { id: "research.save", states: OUTSIDE, needs: "book", prefix: "r", key: "s", label: "save note", description: "Save a research note with its sources, for the checklist items it covers.", do: cmd("research.save") },
+  { id: "research.waive", states: OUTSIDE, needs: "book", prefix: "r", key: "w", label: "waive item", description: "Waive a research checklist item, giving the reason.", do: cmd("research.waive") },
+  { id: "research.link", states: OUTSIDE, needs: "book", prefix: "r", key: "l", label: "link note", description: "Link an existing research note to a checklist item.", do: cmd("research.link") },
+  { id: "research.distill", states: OUTSIDE, needs: "book", prefix: "r", key: "d", label: "distill facts", description: "Distill the research notes into the period facts.", do: cmd("research.distill") },
+  { id: "fact.record", states: OUTSIDE, needs: "book", prefix: "r", key: "f", label: "record fact", description: "Record a fact (researched, invented or author's) where it belongs: continuity or a bible file.", do: cmd("fact.record") },
 
   // ---- f: filter
   { id: "filter.all", states: OUTSIDE, needs: "review", prefix: "f", key: "a", label: "all changes", description: "Show every change in the review.", do: cmd("filter.all") },

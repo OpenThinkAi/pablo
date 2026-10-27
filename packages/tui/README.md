@@ -248,7 +248,7 @@ model sees them; a selection that stops mid-line keeps the rest of that line aro
 Keys are data (`keys.ts`), copied from prview's key map and free to drift from it. A row has an id, the states it acts
 in (`rail`, `main`, `content`, narrowed by `needs`: in a `review`, outside one (`book`), or with the `content` area
 open), a primary key, an optional secondary key, a label and a `do`: a model action, or a `Command` for the layer above
-(`quit` is the app's; the rest reach `onCommand`). `a`, `f`, `v`, `g` are prefixes: a row with `prefix` is that
+(`quit` is the app's; the rest reach `onCommand`). `a`, `f`, `v`, `g`, `r` (research and planning: `r c` save core doc, `r p` research plan, `r s` save note, `r w` waive, `r l` link, `r d` distill, `r f` record fact) are prefixes: a row with `prefix` is that
 prefix's second key, and the key panel shows the second keys while the prefix is pending. `Esc` is not a row: it is
 always the model's `escape`. `Tab` is fixed. The panel lists exactly the rows that act in the state, because it reads
 the same rows the key handler resolves through (`chord.ts`).

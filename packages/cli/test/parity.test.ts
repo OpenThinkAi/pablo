@@ -32,12 +32,12 @@ const PARITY: Readonly<Record<string, Entry>> = {
   revise_passage: tui("ai.revise"),
   voice: tui("ai.voice"),
   prose: tui("ai.compose"),
-  save: tui("ai.plan"),
+  save: tui("plan.save"),
   story: tui("ai.compose"),
   output: tui("ai.compose"),
   promote: tui("ai.compose"),
-  research: tui("ai.compose"), // via the harness, like save: a plan/ branch the author reviews
-  fact: tui("ai.compose"), // via the harness, like save and promote
+  research: tui("research.plan", "research.save", "research.waive", "research.link", "research.distill"),
+  fact: tui("fact.record"),
   critique: tui("review.comment"),
   merge: tui("review.finish"),
   check: tui("go.hit_next"),
