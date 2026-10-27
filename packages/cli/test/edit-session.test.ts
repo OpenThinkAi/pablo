@@ -307,6 +307,6 @@ test("the pane refuses to write through a symlink in the worktree", async () => 
   rmSync(inTree);
   symlinkSync(outside, inTree);
   const saved = await saveFromPane(project, CH1, "edit/ab12cd", "overwritten\n", { env });
-  expect(saved).toEqual({ ok: false, message: `pablo: edit: ${CH1} is a symbolic link; not writing through it` });
+  expect(saved).toEqual({ ok: false, message: `pablo: edit: ${CH1} is a symbolic link; not writing through it; make it a plain file on the branch first` });
   expect(readFileSync(outside, "utf8")).toBe("untouched\n");
 });

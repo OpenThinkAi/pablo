@@ -947,7 +947,8 @@ export function reduce(s: State, a: Action): State {
     case "pane.save": {
       const p = s.editPane;
       if (p?.phase !== "open" || p.text === null) return s;
-      if (a.auto) return !p.text.dirty || p.text.empty ? s : { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, auto: true } };
+      // Never while Esc's "closes without saving" question is up: the author may be about to drop those changes.
+      if (a.auto) return !p.text.dirty || p.text.empty || p.closing ? s : { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, auto: true } };
       if (!p.text.dirty) return { ...s, content: writeContent(`Editing ${p.file} on ${p.branch}`, `Nothing to save.\n${PANE_KEYS}`) };
       if (p.text.empty && !p.emptying) return { ...s, editPane: { ...p, emptying: true, closing: false }, content: writeContent(`${p.file} is empty`, "Saving it leaves the file only its frontmatter. Ctrl+S again saves it empty; any other key keeps editing.") };
       return { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, closing: false, emptying: false, auto: false }, content: writeContent(`Saving ${p.file}`, "committing…") };

@@ -42,5 +42,7 @@ export function scheduleAutosave(open: boolean, dirty: boolean, save: () => void
  * The Ink layer keeps no state (test/boundary.test.ts): the pending wait lives only in the effect's cleanup.
  */
 export function useAutosave(text: unknown, dirty: boolean, open: boolean, save: () => void, options: AutosaveOptions = {}): void {
+  // `save` and `options` are left out on purpose: `save` only wraps the stable `dispatch` and `options` is a new object
+  // each render; listing them would restart the wait on every render instead of on every change to the text.
   useEffect(() => scheduleAutosave(open, dirty, save, options), [text, dirty, open]);
 }

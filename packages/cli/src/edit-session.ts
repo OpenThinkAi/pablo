@@ -258,7 +258,7 @@ export async function saveFromPane(projectPath: string, file: string, branch: st
   const path = relative(worktree, inTree);
   // Never write through a link: a symlink in the worktree could point anywhere, main's checkout included.
   try {
-    if (lstatSync(inTree, { throwIfNoEntry: false })?.isSymbolicLink()) return { ok: false, message: `pablo: edit: ${file} is a symbolic link; not writing through it` };
+    if (lstatSync(inTree, { throwIfNoEntry: false })?.isSymbolicLink()) return { ok: false, message: `pablo: edit: ${file} is a symbolic link; not writing through it; make it a plain file on the branch first` };
   } catch (error) {
     return { ok: false, message: `pablo: edit: could not check ${file}: ${error instanceof Error ? error.message : String(error)}` };
   }

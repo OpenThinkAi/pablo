@@ -39,7 +39,10 @@ export function EditPaneView({ pane, session, checks, dispatch, width, height, i
     if (phase === "opening") {
       session.open(file).then(
         (r) => {
-          if (!live) return void (r.ok ? session.close(r.branch).catch(() => undefined) : undefined);
+          if (!live) {
+            if (r.ok) void session.close(r.branch).catch(() => undefined);
+            return;
+          }
           dispatch(r.ok ? { type: "pane.opened", branch: r.branch, text: openText(r.text, storage, line), ...(r.unmerged ? { unmerged: r.unmerged } : {}) } : { type: "pane.failed", message: r.message });
         },
         (e: unknown) => { if (live) dispatch({ type: "pane.failed", message: fail(e) }); },

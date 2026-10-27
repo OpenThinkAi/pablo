@@ -485,6 +485,8 @@ test("pane.save auto: saves only a dirty, non-blank text with the pane open, and
   expect(reduce(open, { type: "pane.save", auto: true })).toBe(open); // clean: nothing
   const blank = reduce(open, { type: "pane.edit", edit: () => ({ dirty: true, empty: true }) });
   expect(reduce(blank, { type: "pane.save", auto: true })).toBe(blank); // blank: only Ctrl+S's question saves it
+  const asked = reduce(reduce(open, { type: "pane.edit", edit: () => ({ dirty: true, empty: false }) }), { type: "pane.close" });
+  expect(reduce(asked, { type: "pane.save", auto: true })).toBe(asked); // Esc's discard question is up: not now
   const dirty = reduce(open, { type: "pane.edit", edit: () => ({ dirty: true, empty: false }) });
   const saving = reduce(dirty, { type: "pane.save", auto: true });
   expect(saving.editPane).toMatchObject({ phase: "saving", auto: true, saveSeq: 1 });
