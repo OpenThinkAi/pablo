@@ -167,11 +167,7 @@ period facts, `facts.md`).
 `narrated` is a straight, audiobook-style reading of another output's prose. It is
 added over a prose output the work already has: `pablo output add narrated --from
 novel` (or `story`, or `essay`) records `"from": "novel"` in `pablo.json`'s `outputs.narrated`.
-An essay section is read without its citations.
-
-`narrated` is a straight, audiobook-style reading of another output's prose. It is
-added over a prose output the work already has: `pablo output add narrated --from
-Its units (readings) mirror the source's units one for one, so its `plan.md` is
+An essay section is read without its citations. Its units (readings) mirror the source's units one for one, so its `plan.md` is
 the source's. `--from` is refused without a source, for a script output such as
 `radio`, for an output the work does not have, and on any other type. While a
 narrated output reads an output, `output remove` refuses that output.
@@ -820,7 +816,7 @@ pablo publish --project <slug> [--output <type>] --target <target>
 |---|---|---|
 | `novel` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-<target>.md`. `draft`: every chapter in order, frontmatter stripped, sentence lines joined into paragraphs, quotes curled. `review`: chapter headings with each source sentence line numbered `[n]` (restarting in every chapter) so a reader can cite a line. `final`: the clean manuscript, same as the draft, plus `<slug>-final.epub` (one XHTML file per chapter; no pandoc needed); `files` lists both. |
 | `story` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-story-<target>.md`: `draft` and `final` are the clean compiled story; `review` adds a "Review copy, N words" line under the title |
-| `essay` | `draft`, `final` | `<work>/.pablo/out/<slug>-essay-<target>.md`: `# <title>`, every section under its `## ` heading with sentences joined into paragraphs and quotes curled, then `## Sources`. Each citation becomes a numbered reference (`[1]`, `[2, 3]`; a `#n` cites the notes claims row n names), and the sources list gives each cited research note's title, its sources and its retrieval date, in order of first citation. `draft` adds a "Draft, N words" line under the title naming any citation that resolves to nothing; `final` is the clean copy and is refused while such a citation remains. |
+| `essay` | `draft`, `final` | `<work>/.pablo/out/<slug>-essay-<target>.md`: `# <title>`, every section under its `## ` heading (a one-section essay has none) with sentences joined into paragraphs and quotes curled, then `## Sources`. Each citation becomes a numbered reference (`[1]`, `[2, 3]`; a `#n` cites the notes claims row n names), and the sources list gives each cited research note's title, its sources and its retrieval date, in order of first citation. `draft` adds a "Draft, N words" line under the title naming any citation that resolves to nothing; `final` is the clean copy and is refused while such a citation remains. |
 | `narrated` | `script` | `<work>/.pablo/out/<slug>-narrated-script.md`: every reading's script in unit order, frontmatter stripped, under a `## Reading N: <title>` heading each. The audio targets come with the mixer. |
 | `screenplay` | `draft`, `final`, `fountain` | `<work>/.pablo/out/<slug>-screenplay.fountain`: a `Title:` page, then every written scene in order, frontmatter stripped, the Fountain copied line for line. `draft` and `final` also write `<slug>-screenplay.pdf` beside it in standard screenplay format (US Letter, Courier 12, 1.5in left and 1in other margins, indented dialogue, page numbers from page 2); `fountain` writes the Fountain file alone. The PDF is typeset by pablo itself (`packages/cli/src/screenplay-pdf.ts`, no dependency, no pandoc, Courier is a built-in PDF font); `files` lists both. |
 | `radio` | `bundle`, `stream` | `bundle`: `.pablo/out/<slug>-radio-bundle/` with every script, each mixed episode's newest audio and manifest, and `bundle.json`; unmixed episodes are listed in `notes`. `stream`: each mixed episode to `.pablo/out/stream/`. `player` is refused; use `pablo review`. |

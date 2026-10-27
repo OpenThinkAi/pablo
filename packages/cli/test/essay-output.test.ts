@@ -319,8 +319,10 @@ test("AC3: publish draft|final compile markdown with numbered references and a s
 });
 
 test("AC3: an essay that cites nothing still ends with its sources list", () => {
-  const compiled = compileEssay("T", "## One\n\nPlain.\n", new Map(), new Map(), "final");
-  expect(compiled.text).toBe("# T\n\n## One\n\nPlain.\n\n## Sources\n\nNo sources cited.\n");
+  const compiled = compileEssay("T", "## One\n\nPlain.\n\n## Two\n\nMore.\n", new Map(), new Map(), "final");
+  expect(compiled.text).toBe("# T\n\n## One\n\nPlain.\n\n## Two\n\nMore.\n\n## Sources\n\nNo sources cited.\n");
+  // One section (a fiction track's essay) is the essay itself: no heading over it.
+  expect(compileEssay("T", "## The essay\n\nPlain.\n", new Map(), new Map(), "final").text).toBe("# T\n\nPlain.\n\n## Sources\n\nNo sources cited.\n");
   expect(noteSource("x", "no title")).toEqual({ id: "x", title: "x", links: [] });
 });
 

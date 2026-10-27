@@ -7,7 +7,7 @@
  *   final    the clean copy and its sources; refused while a citation
  *            resolves to nothing
  *
- * Sections keep their `## ` headings; sentences are joined back into
+ * Sections keep their `## ` headings (a one-section essay has none); sentences are joined back into
  * paragraphs and quotes curled. Every citation (`[#2]`, `[@note-id]`, the
  * claim-support check's syntax, AGT-2114) becomes a numbered reference
  * (`[1]`, `[1, 3]`) into the sources list: a `@note-id` is that research
@@ -94,8 +94,10 @@ export function compileEssay(
   const file = parseEssayFile(content);
   const body: string[] = [];
   for (const paragraph of bodyParagraphs(file.preamble.replace(/^#\s.*$/m, ""))) body.push(curlQuotes(cite(paragraph)));
+  // A one-section essay (a fiction track's) is the essay itself: no heading over it.
+  const headed = file.sections.length > 1;
   for (const section of file.sections) {
-    body.push(`## ${curlQuotes(section.title)}`);
+    if (headed) body.push(`## ${curlQuotes(section.title)}`);
     for (const paragraph of bodyParagraphs(section.body)) body.push(curlQuotes(cite(paragraph)));
   }
   const sources = order.map((id) => noteSource(id, notes.get(id) as string));
