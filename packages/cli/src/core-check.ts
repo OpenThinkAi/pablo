@@ -94,7 +94,7 @@ function laterThings(timeline: string, storyDate: string): LaterThing[] {
 }
 
 /** The unit's story date: its frontmatter `story_date`, else its plan row's first beat's. */
-function storyDateOf(workDir: string, def: OutputDefinition, unit: number | undefined, text: string): string | undefined {
+export function storyDateOf(workDir: string, def: OutputDefinition, unit: number | undefined, text: string): string | undefined {
   const own = parseFrontmatter(text)["story_date"]?.trim().replace(/^["']|["']$/g, "");
   if (own) return own;
   if (unit === undefined) return undefined;

@@ -100,3 +100,16 @@ test("commentBox wraps the body onto up to maxLines rows, every row the same wid
   // A word longer than a row is cut across rows, never overflowing the box.
   expect(new Set(commentBox({ title: "t", body: "x".repeat(70) }, 20, { maxLines: Infinity }).map((r) => [...r.text].length))).toEqual(new Set([20]));
 });
+
+test("a fact-accuracy hit (AGT-2112) shows what it contradicts and its source, not a matched word", () => {
+  const hit: CheckHit = { line: 6, rule: "fact-accuracy", excerpt: "The well had been dry since June.", detail: 'contradicts "Rain fell all June" (research/weather.md): wet month' };
+  const rows = mainRows(CHAPTER, 80, [hit]);
+  expect(rows.find((r) => r.kind === "box" && r.part === "top")?.text).toContain("▲ facts");
+  const detail = hitDetail(hit);
+  expect(detail.title).toBe("check · fact-accuracy · line 6");
+  expect(detail.body).toContain('contradicts "Rain fell all June" (research/weather.md)');
+  expect(detail.body).toContain("line 6: The well had been dry since June.");
+  const period: CheckHit = { line: 9, rule: "anachronism", excerpt: "Edwin stood in the doorway.", detail: '"doorway": fine; belongs to 1929' };
+  expect(mainRows(CHAPTER, 80, [period]).find((r) => r.kind === "box" && r.part === "top")?.text).toContain("▲ period");
+  expect(hitDetail(period).body).toContain('"doorway": fine; belongs to 1929');
+});

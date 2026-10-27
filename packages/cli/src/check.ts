@@ -18,8 +18,9 @@
  *
  * A nonfiction work's `*.md` units also get the claim-support check (AGT-2114, `claim-support.ts`):
  * `claim-unsupported` and `claim-uncited` hits in `hits[]`. A historical-fiction work's units get the
- * `anachronism` check (AGT-2113, `anachronism.ts`), which asks a model, so `runCheck` and the verb run it after
- * `checkWork` over `scanned`.
+ * `anachronism` check (AGT-2113, `anachronism.ts`) and, with `--output`, the `fact-accuracy` check against the
+ * distilled period facts (AGT-2112, `fact-accuracy.ts`). Both ask a model, so `runCheck` and the verb run them after
+ * `checkWork` over `scanned`, through one pipeline (`runModelChecks`).
  *
  * Voice-pattern scoring beyond verbatim flagged lines is P1, out of scope
  * here (AC3). `checkFile` and `checkWork` are pure/read-only and exported for
@@ -35,8 +36,10 @@ import { readMarker, trackOf } from "./marker";
 import { checkClaimSupport, readClaimSources } from "./claim-support";
 import { anachronismBody, checkAnachronisms } from "./anachronism";
 import { coreCheck } from "./core-check";
+import type { Ask } from "./critique";
+import { factAccuracyAsk, runFactAccuracy, savedFactHits } from "./fact-accuracy";
 import { narratedDrift } from "./outputs/narrated";
-import { resolveOutput } from "./outputs/registry";
+import { outputDefinition, resolveOutput } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
 import { radioCheck, radioCheckLines, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
@@ -69,7 +72,7 @@ export interface CheckSuccess {
    * that output's units. Absent when no output was named.
    */
   readonly core?: readonly Hit[];
-  /** The absolute paths scanned, for the checks that run after (the model-backed `anachronism`, AGT-2113). */
+  /** The absolute paths scanned, for the model-backed checks that run after (`anachronism`, AGT-2113; `fact-accuracy`, AGT-2112). */
   readonly scanned: readonly string[];
 }
 
@@ -395,8 +398,11 @@ export function isUnprovenanced(text: string): boolean {
  * calls this (or `checkFile` directly) to put a chapter's hits in its
  * receipt.
  */
-export function checkWork(vaultRoot: string, workDir: string, file?: string, output?: string): CheckOutcome {
+export function checkWork(vaultRoot: string, workDir: string, file?: string, output?: string, unit?: number): CheckOutcome {
   let filePaths: string[];
+  if (unit !== undefined && file !== undefined) {
+    return { ok: false, code: 2, message: "pablo: check --unit picks a unit of the output; it cannot be combined with --file", tried: [] };
+  }
 
   // Which output's units a whole-work scan reads (AGT-1669): `--output`, else the work's one output;
   // several outputs and none named is a refusal naming them.
@@ -442,6 +448,14 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
           .sort()
           .map((name) => join(chaptersDir, name))
       : [];
+    // `--unit N` (AGT-2112): just that unit of the output.
+    if (unit !== undefined && scanned !== undefined) {
+      const def = scanned;
+      filePaths = filePaths.filter((path) => def.unitOfPath(relative(workDir, path).split("\\").join("/")) === unit);
+      if (filePaths.length === 0) {
+        return { ok: false, code: 2, message: `pablo: check --unit ${unit}: ${def.id} has no unit ${unit} under ${def.artifactDir}/`, tried: [chaptersDir] };
+      }
+    }
   }
 
   const rules = loadCheckRules(vaultRoot);
@@ -472,9 +486,73 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
  * the first chapter. Takes the file's raw text, so a hit's line is a line of the file and the screen can put its
  * box under the sentence it is about.
  */
-export function screenChecks(vaultRoot: string): (file: string, text: string) => Hit[] {
+export function screenChecks(vaultRoot: string, workDir?: string): (file: string, text: string) => Hit[] {
   let rules: CheckRules | undefined;
-  return (file, text) => checkFile(text, file, (rules ??= loadCheckRules(vaultRoot)));
+  return (file, text) => {
+    const hits = checkFile(text, file, (rules ??= loadCheckRules(vaultRoot)));
+    // The last `check --output` run's fact-accuracy hits on this unit, while its text is unchanged (AGT-2112).
+    return workDir === undefined ? hits : [...hits, ...savedFactHits(workDir, file, text)].sort((a, b) => a.line - b.line);
+  };
+}
+
+/** What `check --output` adds for a historical-fiction work (AGT-2112): its fact-accuracy run's count and any notice. */
+export interface FactAccuracySummary {
+  readonly checked: number;
+  readonly notice?: string;
+}
+
+/**
+ * The fact-accuracy step (AGT-2112, `fact-accuracy.ts`): with `--output` named on a historical-fiction work that has
+ * `facts/period.md`, each scanned unit goes to the `check` intent's model and its hits join `hits`. Anything else
+ * leaves the outcome as it was. `ask` builds the model seam lazily (tests inject a fake).
+ */
+export async function withFactAccuracy(
+  outcome: CheckSuccess,
+  workDir: string,
+  output: string | undefined,
+  ask: () => Ask | string,
+  progress?: (line: string) => void,
+): Promise<{ outcome: CheckSuccess; factAccuracy?: FactAccuracySummary }> {
+  const def = output === undefined ? undefined : outputDefinition(output);
+  if (def === undefined) return { outcome };
+  const run = await runFactAccuracy({ workDir, def, files: outcome.scanned, ask, ...(progress ? { progress } : {}) });
+  if (run === undefined) return { outcome };
+  return {
+    outcome: { ...outcome, hits: [...outcome.hits, ...run.hits] },
+    factAccuracy: { checked: run.checked, ...(run.notice !== undefined ? { notice: run.notice } : {}) },
+  };
+}
+
+/** What the model-backed checks added to a scan: every hit (the scan's first), their JSON blocks, and the notices to print. */
+export interface ModelChecked {
+  readonly hits: readonly Hit[];
+  readonly anachronism?: { asked: number; notice?: string };
+  readonly factAccuracy?: FactAccuracySummary;
+  /** Each check's notice when it stopped short, for the prose form's stderr. */
+  readonly notices: readonly string[];
+}
+
+/**
+ * The one pipeline after `checkWork` that `runCheck` and the `check` verb share: the anachronism check (AGT-2113)
+ * then fact accuracy (AGT-2112), both on the `check` intent's model, both a no-op off the historical-fiction track.
+ * `factAsk` is the fact-accuracy model seam (default: `factAccuracyModel.ask`, else the planner).
+ */
+export async function runModelChecks(
+  outcome: CheckSuccess,
+  workDir: string,
+  output: string | undefined,
+  options: { readonly env: NodeJS.ProcessEnv; readonly progress?: (line: string) => void; readonly factAsk?: () => Ask | string },
+): Promise<ModelChecked> {
+  const progress = options.progress;
+  const anachronism = await checkAnachronisms(workDir, outcome.scanned, { env: options.env, ...(progress ? { progress } : {}) });
+  const fact = await withFactAccuracy(outcome, workDir, output, options.factAsk ?? (() => factAccuracyAsk(options.env, workDir)), progress);
+  const notices = [anachronism?.notice, fact.factAccuracy?.notice].filter((n): n is string => n !== undefined);
+  return {
+    hits: [...fact.outcome.hits, ...(anachronism?.hits ?? [])],
+    notices,
+    ...(anachronism !== undefined ? { anachronism: anachronismBody(anachronism) } : {}),
+    ...(fact.factAccuracy !== undefined ? { factAccuracy: fact.factAccuracy } : {}),
+  };
 }
 
 /** `pablo check`'s own argument slice — kept local so `check.ts` does not import `cli.ts` (which imports `check.ts`). */
@@ -483,6 +561,8 @@ export interface CheckArgs {
   readonly file: string | undefined;
   /** `check --output <type>` (AGT-1669): scan that output's units. */
   readonly output?: string | undefined;
+  /** `check --unit N` (AGT-2112): only unit N of the output; validated here. */
+  readonly unit?: string | undefined;
 }
 
 /** Whether a check also reads radio scripts: not for a single `--file`, nor when `--output` names another output. */
@@ -503,8 +583,18 @@ export function radioScriptsChecked(file: string | undefined, output: string | u
  * one `file:line unknown direction` / `unbound role` line each. A `--file`
  * scan skips it. `casting` is injectable so tests never reach `uv`.
  */
-export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, casting?: CastingDeps): Promise<number> {
-  const outcome = checkWork(vaultRoot, workDir, args.file, args.output);
+export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, casting?: CastingDeps, factAsk?: () => Ask | string): Promise<number> {
+  const badUnit =
+    args.unit === undefined ? undefined
+    : !/^[1-9]\d*$/.test(args.unit) ? `pablo: check --unit must be a positive whole number (got "${args.unit}")`
+    : args.file !== undefined ? "pablo: check --unit picks a unit of the output; it cannot be combined with --file"
+    : undefined;
+  if (badUnit !== undefined) {
+    if (args.json) console.log(JSON.stringify({ ok: false, code: 2, message: badUnit }));
+    else console.error(badUnit);
+    return 2;
+  }
+  const outcome = checkWork(vaultRoot, workDir, args.file, args.output, args.unit === undefined ? undefined : Number(args.unit));
 
   if (!outcome.ok) {
     if (args.json) {
@@ -516,10 +606,10 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
     return outcome.code;
   }
 
-  // A historical-fiction work also gets the anachronism check (AGT-2113, `anachronism.ts`).
-  const anachronism = await checkAnachronisms(workDir, outcome.scanned, { progress: (line) => process.stderr.write(`${line}\n`) });
-  const hits = [...outcome.hits, ...(anachronism?.hits ?? [])];
-  if (anachronism?.notice !== undefined && !args.json) console.error(anachronism.notice);
+  // A historical-fiction work also gets the model-backed checks: anachronism (AGT-2113) and fact accuracy (AGT-2112).
+  const model = await runModelChecks(outcome, workDir, args.output, { env: process.env, progress: (line) => process.stderr.write(`${line}\n`), ...(factAsk ? { factAsk } : {}) });
+  const hits = model.hits;
+  if (!args.json) for (const notice of model.notices) console.error(notice);
 
   const radio =
     radioScriptsChecked(args.file, args.output) ? radioCheck({ env: process.env, stderr: process.stderr }, casting ?? realCastingDeps(process.env), workDir) : undefined;
@@ -534,7 +624,7 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   const radioLines = hasRadio ? radioCheckLines(radioBody) : [];
 
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(anachronism !== undefined ? { anachronism: anachronismBody(anachronism) } : {}) }));
+    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(model.anachronism !== undefined ? { anachronism: model.anachronism } : {}), ...(model.factAccuracy !== undefined ? { factAccuracy: model.factAccuracy } : {}) }));
   } else if (hits.length === 0 && outcome.unprovenanced.length === 0 && (outcome.core ?? []).length === 0 && radioLines.length === 0) {
     console.log("no hits");
   } else {

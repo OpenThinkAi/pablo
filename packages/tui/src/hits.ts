@@ -32,12 +32,22 @@ const RULES: Readonly<Record<string, string>> = {
   "fountain-colon-dialogue": "NAME: words on one line; in Fountain the character goes on its own line, the dialogue under it",
   "fountain-markdown": "a Markdown code fence, which is not Fountain",
   "fountain-unclosed-boneyard": "a /* never closed, which hides the rest of the scene",
+  "fact-accuracy": "a sentence a distilled period fact (facts/period.md) contradicts",
+  anachronism: "a word, object or idiom out of the work's period (bible/period.md)",
 };
+
+/** Rules whose `detail` is the whole finding (what is wrong and why), not a matched word, with the box title each shows (AGT-2112, AGT-2113). */
+const FINDING_RULES: ReadonlyMap<string, string> = new Map([
+  ["fact-accuracy", "▲ facts"],
+  ["anachronism", "▲ period"],
+]);
 
 const ruleText = (hit: CheckHit) => RULES[hit.rule] ?? hit.rule;
 
 /** The short comment a hit shows on its line: `▲ tells · em-dash`, the flagged line or name as the body. */
 export function hitComment(hit: CheckHit): Comment {
+  const finding = FINDING_RULES.get(hit.rule);
+  if (finding !== undefined) return { title: finding, body: hit.detail ?? hit.excerpt, color: "yellow" };
   return {
     title: `▲ tells · ${hit.rule}`,
     ...(hit.detail !== undefined ? { tag: `(${hit.detail})` } : {}),
@@ -48,6 +58,7 @@ export function hitComment(hit: CheckHit): Comment {
 
 /** What `→` opens in the content area for a hit: the rule, the pattern it flagged, and the line. */
 export function hitDetail(hit: CheckHit): { title: string; body: string } {
+  if (FINDING_RULES.has(hit.rule)) return { title: `check · ${hit.rule} · line ${hit.line}`, body: `rule: ${hit.rule}\n${hit.detail ?? ruleText(hit)}\nline ${hit.line}: ${hit.excerpt}` };
   const pattern = hit.rule === "stock-name" ? `name: ${hit.detail ?? ""}` : hit.rule === "flagged-line" ? `flagged line: ${hit.excerpt}` : `pattern: ${ruleText(hit)}`;
   return { title: `check · ${hit.rule} · line ${hit.line}`, body: `rule: ${hit.rule}\n${pattern}\nline ${hit.line}: ${hit.excerpt}` };
 }
