@@ -16,6 +16,7 @@ import { commentBox, type BoxPart } from "./comment-box";
 import { hitComment, type CheckHit } from "./hits";
 import { paragraphSpan, scrollTop, type Modes } from "./edit-modes";
 import { visible } from "./sanitize";
+import { matchesOnLine } from "./search";
 import type { EditPaneText } from "./state";
 
 /** What the screen asks the layer above for (the CLI's `screenEditPane`, passed in; this package cannot import it). */
@@ -38,6 +39,12 @@ export interface EditText extends EditPaneText {
   readonly storage: Storage;
   /** Where select mode's selection started (AGT-2169, modal.ts); null outside select mode. */
   readonly anchor?: Pos | null;
+  /** The last search (AGT-2172, search.ts): its matches are highlighted and `n`/`N` step through them. */
+  readonly search?: { readonly query: string } | null;
+  /** A one-line prompt being typed (`/` or `R`); it takes every key until Enter or Esc. */
+  readonly prompt?: { readonly kind: "search" | "find" | "with"; readonly text: string; readonly find?: string } | null;
+  /** What the last search or replace did, for the title ("2 replacements", "no match"); any other edit of the text clears it. */
+  readonly note?: string | null;
 }
 
 /** A file split for the pane: the frontmatter and the blank lines after it (`head`, kept byte for byte), then the body. */
@@ -104,7 +111,7 @@ export function openText(raw: string, storage: string, line: number): EditText {
 export function apply(t: EditText, op: (b: TextBuffer) => void): EditText {
   const buffer = t.buffer.clone();
   op(buffer);
-  return { ...t, buffer, dirty: buffer.dirty, empty: blankText(buffer) };
+  return { ...t, buffer, dirty: buffer.dirty, empty: blankText(buffer), note: null };
 }
 
 /** A body with nothing but whitespace: saving it would leave the file its frontmatter alone, so the pane asks first. */
@@ -174,7 +181,7 @@ export type PaneRow =
 export interface PaneLook extends Partial<Modes> { readonly top?: number }
 
 /** A run of a display row inside or around select mode's selection (AGT-2169): `sel` drawn as selected, `cursor` as the cursor. */
-export interface TextPart { readonly text: string; readonly sel?: boolean; readonly cursor?: boolean }
+export interface TextPart { readonly text: string; readonly sel?: boolean; readonly cursor?: boolean; /** A search match (AGT-2172). */ readonly match?: boolean }
 
 const INDENT = 2;
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -205,19 +212,19 @@ function graphemeEnd(line: string, col: number): number {
 }
 
 /** The display row `[start, end)` of `line` cut into runs by `sel` and the cursor at `cursor` (null: not on this row). */
-function selectedParts(line: string, start: number, end: number, cursor: number | null, sel: readonly [number, number]): TextPart[] {
-  const cells: { text: string; sel: boolean; cursor: boolean }[] = [];
+function selectedParts(line: string, start: number, end: number, cursor: number | null, sel: readonly [number, number], matches: readonly { readonly start: number; readonly end: number }[] = []): TextPart[] {
+  const cells: { text: string; sel: boolean; cursor: boolean; match: boolean }[] = [];
   for (const { segment, index } of graphemes.segment(line.slice(start, end))) {
     const at = start + index;
-    cells.push({ text: segment, sel: at >= sel[0] && at < sel[1], cursor: at === cursor });
+    cells.push({ text: segment, sel: at >= sel[0] && at < sel[1], cursor: at === cursor, match: matches.some((m) => at >= m.start && at < m.end) });
   }
   // The cursor past the row's last character is a cell of its own, as in the rows without a selection.
-  if (cursor !== null && cursor >= end) cells.push({ text: " ", sel: end >= sel[0] && end < sel[1], cursor: true });
+  if (cursor !== null && cursor >= end) cells.push({ text: " ", sel: end >= sel[0] && end < sel[1], cursor: true, match: false });
   const parts: TextPart[] = [];
   for (const c of cells) {
     const last = parts[parts.length - 1];
-    if (last && !c.cursor && !last.cursor && !!last.sel === c.sel) parts[parts.length - 1] = { ...last, text: last.text + c.text };
-    else parts.push({ text: c.text, ...(c.sel ? { sel: true } : {}), ...(c.cursor ? { cursor: true } : {}) });
+    if (last && !c.cursor && !last.cursor && !!last.sel === c.sel && !!last.match === c.match) parts[parts.length - 1] = { ...last, text: last.text + c.text };
+    else parts.push({ text: c.text, ...(c.sel ? { sel: true } : {}), ...(c.match ? { match: true } : {}), ...(c.cursor ? { cursor: true } : {}) });
   }
   return parts.map((p) => ({ ...p, text: shown(p.text) }));
 }
@@ -237,13 +244,15 @@ export function paneView(t: EditText, width: number, height: number, hits: Reado
     const line = b.lines[r]!;
     const segs = b.segments(r, width);
     const sel = selectedCols(t, r);
+    const found = t.search ? matchesOnLine(line, t.search.query) : [];
     segs.forEach((seg, i) => {
       const text = line.slice(seg.start, seg.end);
       const here = r === b.cursor.row && b.cursor.col >= seg.start && (b.cursor.col < seg.end || i === segs.length - 1);
       source.push(r);
-      if (sel && sel[0] <= seg.end && sel[1] > seg.start) {
+      const matched = found.some((m) => m.start < seg.end && m.end > seg.start);
+      if ((sel && sel[0] <= seg.end && sel[1] > seg.start) || matched) {
         if (here) cursorAt = all.length;
-        return void all.push({ kind: "text", text: shown(text), parts: selectedParts(line, seg.start, seg.end, here ? b.cursor.col : null, sel) });
+        return void all.push({ kind: "text", text: shown(text), parts: selectedParts(line, seg.start, seg.end, here ? b.cursor.col : null, sel ?? [0, 0], found) });
       }
       if (!here) return void all.push({ kind: "text", text: shown(text) });
       cursorAt = all.length;

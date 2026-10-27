@@ -155,7 +155,7 @@ test("the rows are listed, rebindable, and conflict-free; select mode names its 
     const ids = rowsOf({ state }).map((a) => a.id);
     expect(ids).toEqual(expect.arrayContaining(["editor.sentence_next", "editor.sentence_prev", "editor.paragraph_next", "editor.paragraph_prev"]));
   }
-  expect(() => effectiveKeys({ "editor.sentence_next": "n" })).not.toThrow();
+  expect(() => effectiveKeys({ "editor.sentence_next": "m" })).not.toThrow();
   const s = initialState();
   const ks = { state: "select" as const };
   expect(panelTitle(ks, { prefix: "i" })).toBe("i inside");

@@ -13,6 +13,7 @@ import type { Pos, TextBuffer } from "./buffer";
 import { resolve, tokenOf, type InkKey } from "./chord";
 import { apply, paneKey, type EditText } from "./edit-pane";
 import type { Keymap } from "./keys";
+import { SEARCH_KEYS } from "./search";
 import { OPERATORS, pendingChar, type OpText } from "./operators";
 import type { Action, EditMode, EditPaneText, Pending } from "./state";
 import { selectObject, TEXT_MOTIONS } from "./text-objects";
@@ -159,7 +160,8 @@ export function modalEdit(id: string, c: MotionContext): Edit | null {
   const object = selectObject(id);
   if (object) return (t) => object(t as EditText);
   const op = OPERATORS[id];
-  return op ? (t) => op(t as OpText) : null;
+  if (op) return (t) => op(t as OpText);
+  return SEARCH_KEYS[id] ?? null;
 }
 
 /** Back to normal mode from insert or select (the selection goes). */

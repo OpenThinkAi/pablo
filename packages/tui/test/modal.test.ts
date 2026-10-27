@@ -158,9 +158,9 @@ test("arrows, paging and Ctrl+Z still work in normal mode; Backspace and text do
 });
 
 test("the modal keys are keymap rows: rebinding one moves the key, a clash in a mode is refused", () => {
-  const km = effectiveKeys({ "editor.down": "n", "editor.insert": { primary: "I" } });
+  const km = effectiveKeys({ "editor.down": "m", "editor.insert": { primary: "I" } });
   const t = open("one\ntwo");
-  expect(run(t, ["n"], km).at).toEqual({ row: 1, col: 0 });
+  expect(run(t, ["m"], km).at).toEqual({ row: 1, col: 0 });
   expect(run(t, ["j"], km).at).toEqual({ row: 0, col: 0 }); // j no longer moves
   expect(run(t, ["I"], km).text.mode).toBe("insert");
   expect(() => effectiveKeys({ "editor.down": "w" })).toThrow(KeysError);
