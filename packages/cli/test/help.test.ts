@@ -17,7 +17,7 @@ test("every verb in ALL_VERBS has per-verb help with usage and an example", () =
     expect(text, verb).toBeDefined();
     expect(text, verb).toContain("Usage:");
     expect(text, verb).toContain("Example:");
-    if (verb !== "dry-run") expect(usageFor(verb).length, `${verb} has a usage line`).toBeGreaterThan(0);
+    expect(usageFor(verb).length, `${verb} has a usage line`).toBeGreaterThan(0);
   }
 });
 
@@ -60,4 +60,26 @@ test("`pablo help` alone still prints the global help", () => {
   const r = runCli(["help"]);
   expect(r.exitCode).toBe(0);
   expect(r.stdout).toContain("Verbs:");
+});
+
+test("every verb named in --help is runnable, and dry-run is not a verb (AGT-2098)", () => {
+  const help = runCli(["--help"]).stdout;
+  const listed = help.split("Verbs:\n")[1]!.split("\n\n")[0]!.split("\n").map((l) => l.trim());
+  expect(listed).toEqual([...ALL_VERBS]);
+  expect(listed).toContain("describe_voice");
+  expect(listed).not.toContain("dry-run");
+  // Verbs that start servers, windows or provision the casting side are checked through their per-verb help instead.
+  for (const verb of listed) {
+    const r = runCli([verb, "--help"]);
+    expect(r.exitCode, verb).toBe(0);
+    expect(r.stdout + r.stderr, verb).not.toContain("unknown verb");
+  }
+  // The dispatcher itself knows every listed verb: a bare run never says "unknown verb".
+  for (const verb of ["describe_voice", "status", "search", "resume"]) {
+    const r = runCli([verb, "--json"]);
+    expect(r.stdout + r.stderr, verb).not.toContain("unknown verb");
+  }
+  const dry = runCli(["dry-run"]);
+  expect(dry.exitCode).not.toBe(0);
+  expect(dry.stdout + dry.stderr).toContain("write --dry-run");
 });

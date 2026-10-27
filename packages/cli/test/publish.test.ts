@@ -120,9 +120,8 @@ test("pablo publish --project --target draft works end to end through the CLI", 
 
   expect(run(["publish", "--project", "ice-house", "--target", "pdf"]).exitCode).toBe(2);
   const help = run(["--help"]).stdout.toString();
-  const [verbs, later] = help.split("Later (not yet implemented):");
-  expect(verbs).toMatch(/^ {2}publish$/m);
-  expect(later).not.toMatch(/^ {2}publish$/m);
+  expect(help).toMatch(/^ {2}publish$/m);
+  expect(help).not.toContain("Later (not yet implemented)");
 });
 
 test("compileReview numbers each source line per chapter under chapter headings", () => {

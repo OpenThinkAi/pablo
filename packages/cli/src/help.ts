@@ -323,13 +323,13 @@ export const VERB_EXAMPLES: Readonly<Record<string, string>> = {
   gate: "pablo gate take.wav --line \"Hello there.\" --card marta",
   cast: "pablo cast --auto --project my-story --episode 1",
   voices: "pablo voices list",
+  describe_voice: 'pablo describe_voice --describe "an old fisherman, gravelly" --gender m',
   perform: "pablo perform --project my-story --output radio --unit 1",
   mix: "pablo mix --project my-story --output radio --unit 1",
   review: "pablo review --project my-story --episode 1",
   mixer: "pablo mixer --project my-story --episode 1",
   fix: "pablo fix --project my-story --output radio --unit 1",
   config: "pablo config show --project my-story",
-  "dry-run": "pablo write --project my-story --output novel --unit 3 --dry-run",
 };
 
 /** The usage entries for a verb: each starts at a `  pablo <verb>` line and runs through its indented continuation lines. */

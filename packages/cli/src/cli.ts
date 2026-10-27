@@ -106,6 +106,7 @@ const P0_VERBS = [
   "gate",
   "cast",
   "voices",
+  "describe_voice",
   "perform",
   "mix",
   "review",
@@ -114,10 +115,7 @@ const P0_VERBS = [
   "config",
 ] as const;
 
-/** Verbs planned for P1/P2 — listed in `--help` as later, not yet wired up. */
-const LATER_VERBS = ["dry-run"] as const;
-
-export const ALL_VERBS: readonly string[] = [...P0_VERBS, ...LATER_VERBS];
+export const ALL_VERBS: readonly string[] = [...P0_VERBS];
 
 export const EXIT_OK = 0;
 export const EXIT_REFUSED = 2;
@@ -131,11 +129,6 @@ function helpText(): string {
     "",
     "Verbs:",
     ...P0_VERBS.map((verb) => `  ${verb}`),
-    "",
-    "Later (not yet implemented):",
-    ...LATER_VERBS.map((verb) => `  ${verb}`),
-    "",
-    "dry-run as its own verb is later; today use `write --dry-run` (or `prose`/`revise --dry-run`).",
     "",
     "Every verb accepts --project <slug> and --json.",
     "pablo --version (or -v) prints the installed version.",
@@ -1188,6 +1181,12 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     const message = `pablo: reading rounds were removed (${args.verb === "read" ? "`pablo read <path> --project <slug>` still reads a file in the work" : `there is no \`pablo ${args.verb}\``}); share a manuscript outside pablo`;
     emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
     return EXIT_REFUSED;
+  }
+
+  // `dry-run` was never a verb (AGT-2098): it is a flag on the verbs that send to a model.
+  if (args.verb === "dry-run") {
+    emit({ ok: false, code: EXIT_ERROR, message: "pablo: there is no `dry-run` verb — use `pablo write --dry-run` (or `prose`/`revise --dry-run`) to render the pack and send nothing" }, args.json);
+    return EXIT_ERROR;
   }
 
   if (!ALL_VERBS.includes(args.verb)) {
