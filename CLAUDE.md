@@ -261,9 +261,14 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 dropped). Its pack is core's essay specs (`DraftingInputs.
                 essay`): thesis, the section's claims as `[#n]`/`[@id]`
                 citations (note ids only, never notes), voice, the previous
-                section; a fiction track's essay is one section about the
-                story. Publish `draft|final` numbers citations into a
-                sources list.
+                section. On a fiction track (AGT-2135) `output add essay
+                --thesis` writes `outputs/essay/thesis.md` and an outline
+                drawn from the core (`scaffold.ts`, via the optional
+                `OutputDefinition.scaffold`); its sections' packs carry the
+                thesis, overview, period facts, `facts.md`, cast, places and
+                the ungated timeline, no citations (a work without
+                `outline.md` keeps one section). Publish `draft|final`
+                numbers citations into a sources list.
                 `pablo story "<prompt>"` (AGT-1690, `src/story.ts`, one
                 `VERBS` entry; an MCP tool since AGT-2143 but, like `init` and
                 `merge`, `harness: false`, never one of the harness's own) creates a work under

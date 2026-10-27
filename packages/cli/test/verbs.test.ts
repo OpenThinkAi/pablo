@@ -162,6 +162,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     direction: { type: "string" }, // AGT-1562: write --direction
     voices: { type: "string" }, // AGT-2137: write --voices narrator|characters
     from: { type: "string" }, // AGT-2137: output add narrated --from <output>
+    thesis: { type: "string" }, // AGT-2135: output add essay --thesis "<text>"
     branch: { type: "string" }, // AGT-1564: critique --branch
     role: { type: "string" }, // AGT-1680: bind --role; AGT-1679: audition/cast --role
     describe: { type: "string" }, // AGT-1679: audition --describe

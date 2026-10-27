@@ -190,8 +190,16 @@ export interface EssayBrief {
   readonly outlineSource: string;
   /** The thesis (`core/thesis.md`) on nonfiction. */
   readonly thesis?: TextSource | undefined;
-  /** On a fiction track: the story the essay is about (`bible/overview.md`). */
+  /**
+   * On a fiction track: the story the essay is about (`bible/overview.md`). With a `thesis` too (a fiction essay's
+   * own, `outputs/essay/thesis.md`, AGT-2135) both are sent, the thesis first.
+   */
   readonly subject?: TextSource | undefined;
+  /**
+   * On a fiction track (AGT-2135): the story's whole timeline (`bible/timeline.md`), ungated: an essay speaks of the
+   * story from outside it, so nothing in it is "not yet". The cast and places come from the inputs' own slices.
+   */
+  readonly timeline?: TextSource | undefined;
   /** The section's claims, each with the note ids it cites. Empty for a section that makes none. */
   readonly claims: readonly EssayClaim[];
   /** Where the claims came from (`core/claims.md`), for the slice's source. */

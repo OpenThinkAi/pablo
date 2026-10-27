@@ -142,6 +142,7 @@ needs a model refuses (exit `2`) and points here; `pablo init <format> ...` and
 pablo output list --project <slug>
 pablo output add <type> --project <slug>
 pablo output add narrated --from <output> --project <slug>
+pablo output add essay --thesis "<thesis>" --project <slug>
 pablo output remove <type> --project <slug>
 pablo output plan <type> --project <slug> [--dry-run]
 ```
@@ -160,9 +161,23 @@ up to you). On a `nonfiction` work its units are **sections**, the rows of the
 core outline (`core/outline.md`), and every section lives in one file,
 `outputs/essay/essay.md`, under a `## <section title>` heading in outline order.
 A section's claims are the `core/claims.md` rows its "What it covers" cell names
-(`#2`, `#3`), or every claim when it names none. On a fiction track the essay has
-one section, about the story, and draws on the story core (the overview, the
-period facts, `facts.md`).
+(`#2`, `#3`), or every claim when it names none.
+
+On a `fiction` or `historical-fiction` work the essay argues a **thesis about the
+story**. `pablo output add essay` asks for it (on a terminal it prompts; otherwise
+it is refused with `missing: ["--thesis: ..."]` until you pass `--thesis "<text>"`)
+and writes two files beside `plan.md` and `RULES.md`: `outputs/essay/thesis.md`,
+and `outputs/essay/outline.md`, the sections (`| # | Section | What it covers |`)
+drawn from the story core: the story, the world it is drawn from, one section per
+act, and what the story argues. Edit the outline freely; `pablo output plan essay`
+re-reads it. A thesis already in `thesis.md` is kept (passing `--thesis` then is
+refused), and `--thesis` is refused on nonfiction, whose essay argues
+`core/thesis.md`. Each section's pack carries the thesis, the story it is about
+(`bible/overview.md`), the outline, the distilled period facts (`facts/period.md`,
+under the bible's names on a `realNames: false` work), `facts.md`, the cast, the
+places and the whole timeline (`bible/timeline.md`); never `research/` itself. The
+writer cites nothing. An essay added to a fiction work before this had one section
+about the story, and still does until it gets an `outline.md`.
 
 `narrated` is a straight, audiobook-style reading of another output's prose. It is
 added over a prose output the work already has: `pablo output add narrated --from
@@ -405,7 +420,7 @@ flags a claim without one (`claim-uncited`). The section is put into
 sections are kept) and committed on `draft/essay-NN`; the file's frontmatter is
 the provenance of the section written last. A section that already has text is
 refused without `--force`. Default length: 600 words a section (1500 for a
-fiction track's one-section essay).
+fiction essay with no `outline.md`, whose one section is the whole essay).
 
 `write --output narrated --unit N` makes reading N from the source output's unit N
 with **no model**: a `CAST:` line, then a `NARRATOR:` line per paragraph, the words

@@ -378,3 +378,131 @@ test("check scans the essay file only, never its RULES.md or plan.md, and flags 
   expect(checked.hits.map((h) => h.rule)).toContain("claim-uncited");
   expect(checked.unprovenanced).toEqual([]);
 });
+
+// AGT-2135: an essay on a fiction work draws on the story core ------------------
+
+const PERIOD = "# Period facts\n\n| Fact | Source | Story date |\n|---|---|---|\n| Lajos Halmi ran the lighthouse board in 1930 | lighthouses | 1930 |\n";
+
+/** A git vault holding the four-beat fiction work (the novel output), with distilled period facts and a raw research note. */
+function fiction(opts: { realNames?: boolean } = {}): { vault: string; work: string; home: string } {
+  const root = mkdtempSync(join(tmpdir(), "pablo-essay-fic-"));
+  dirs.push(root);
+  const vault = join(root, "vault");
+  cpSync(CONFORMANCE, vault, { recursive: true });
+  const work = join(vault, "novels", "four-beats");
+  mkdirSync(join(work, "facts"), { recursive: true });
+  writeFileSync(join(work, "facts", "period.md"), PERIOD);
+  writeFileSync(join(work, "facts.md"), "# Facts\n\n- The lamp is red. established-by: novel/ch01\n");
+  mkdirSync(join(work, "research"), { recursive: true });
+  writeFileSync(join(work, "research", "lighthouses.md"), NOTE("lighthouses", "Lighthouse boards"));
+  if (opts.realNames === false) {
+    writeFileSync(join(work, "research", "names.md"), "| Research name | Bible name |\n|---|---|\n| Lajos Halmi | Tomas Varga |\n");
+    const path = join(work, "pablo.json");
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), realNames: false }, null, 2));
+  }
+  git(vault, "init", "-q", "-b", "main");
+  git(vault, "config", "user.email", "pablo-test@example.com");
+  git(vault, "config", "user.name", "Pablo Test");
+  git(vault, "config", "commit.gpgsign", "false");
+  git(vault, "add", ".");
+  git(vault, "commit", "-q", "-m", "base");
+  return { vault, work, home: join(root, "pablo-home") };
+}
+
+const FICTION_THESIS = "Automation in the story is a kind of grief, not progress.";
+
+test("AGT-2135 AC1: output add essay on a fiction work needs a thesis, then writes the thesis and an outline drawn from the core", () => {
+  const { vault, work } = fiction();
+  const refused = addOutput(vault, work, "essay", { now: NOW });
+  expect(refused).toMatchObject({ ok: false, code: 2 });
+  if (refused.ok) throw new Error("added without a thesis");
+  expect(refused.message).toContain("--thesis");
+  expect(refused.missing).toEqual(["--thesis: the one thing the essay argues about the story"]);
+  expect(existsSync(join(work, "outputs", "essay"))).toBe(false);
+  expect(addOutput(vault, work, "story", { now: NOW, thesis: "x" })).toMatchObject({ ok: false, message: expect.stringContaining("--thesis is for the essay output") });
+
+  const added = addOutput(vault, work, "essay", { now: NOW, thesis: FICTION_THESIS });
+  if (!added.ok) throw new Error(added.message);
+  expect(added.paths).toEqual(["outputs/essay/RULES.md", "outputs/essay/outline.md", "outputs/essay/plan.md", "outputs/essay/thesis.md", "pablo.json"]);
+  expect(added.committed).toBe(true);
+  expect(readFileSync(join(work, "outputs", "essay", "thesis.md"), "utf8")).toBe(`# Thesis\n\n${FICTION_THESIS}\n`);
+  const outline = readFileSync(join(work, "outputs", "essay", "outline.md"), "utf8");
+  expect(outline).toContain("| 3 | Act I | The light is to be automated; Ines keeps it anyway. (1930) |");
+  expect(essayDefaultPlan(work).map((r) => r.title)).toEqual(["The story", "The world it is drawn from", "Act I", "What the story argues"]);
+  expect(essayDefaultPlan(work)[0]!.beats).toEqual([1, 2, 3, 4]);
+  expect(readFileSync(join(work, "outputs", "essay", "plan.md"), "utf8")).toContain("| 4 | What the story argues | 1, 2, 3, 4 | beat |");
+  expect(git(vault, "status", "--porcelain")).toBe("");
+});
+
+test("AGT-2135 AC1: --thesis is refused on nonfiction (the core's thesis is the essay's) and on a fiction essay that has one", () => {
+  const { vault, work } = nonfiction();
+  expect(addOutput(vault, work, "essay", { now: NOW, thesis: "x" })).toMatchObject({ ok: false, message: expect.stringContaining("core/thesis.md") });
+  const fic = fiction();
+  mkdirSync(join(fic.work, "outputs", "essay"), { recursive: true });
+  writeFileSync(join(fic.work, "outputs", "essay", "thesis.md"), "# Thesis\n\nAlready argued.\n");
+  expect(addOutput(fic.vault, fic.work, "essay", { now: NOW, thesis: "x" })).toMatchObject({ ok: false, message: expect.stringContaining("already has a thesis") });
+  // The thesis already written is enough: no --thesis needed, and the file is kept as written.
+  git(fic.vault, "add", ".");
+  git(fic.vault, "commit", "-q", "-m", "thesis");
+  const added = addOutput(fic.vault, fic.work, "essay", { now: NOW });
+  if (!added.ok) throw new Error(added.message);
+  expect(added.paths).not.toContain("outputs/essay/thesis.md");
+  expect(readFileSync(join(fic.work, "outputs", "essay", "thesis.md"), "utf8")).toContain("Already argued.");
+});
+
+test("AGT-2135 AC2: a fiction essay section's pack carries the thesis, period facts, bible and timeline; never raw research", () => {
+  const { vault, work } = fiction();
+  const added = addOutput(vault, work, "essay", { now: NOW, thesis: FICTION_THESIS });
+  if (!added.ok) throw new Error(added.message);
+  expect(essayPreconditions(work, 1)).toEqual({ ready: true, missing: [] });
+  const packed = buildEssayPack(vault, work, 3, { marker: markerOf(work), output: "essay" });
+  if (!packed.ok) throw new Error(packed.message);
+  const prompt = packed.pack.prompt;
+  expect(prompt).toContain("# The thesis (the essay argues this)");
+  expect(prompt).toContain(FICTION_THESIS);
+  expect(prompt).toContain("# The story this essay is about");
+  expect(prompt).toContain("A lighthouse keeper's daughter keeps the lamp lit");
+  expect(prompt).toContain("Section 3: Act I");
+  expect(prompt).toContain("Lajos Halmi ran the lighthouse board in 1930");
+  expect(prompt).toContain("The lamp is red.");
+  expect(prompt).toContain("Ines Varga");
+  expect(prompt).toContain("ninety steps");
+  expect(prompt).toContain("# The story's timeline (binding)");
+  expect(prompt).toContain("Ines is born in the keeper's house");
+  expect(prompt).toContain("the lighthouse board votes to automate the light");
+  expect(prompt).toContain("add no citations");
+  expect(prompt).not.toContain("never sent to the writer");
+  expect(prompt).not.toContain("Cite every claim");
+  const sources = packed.pack.slices.map((s) => s.source ?? "");
+  expect(sources.filter((s) => s.includes("research/"))).toEqual([]);
+  expect(sources).toContain("novels/four-beats/outputs/essay/thesis.md");
+  expect(sources).toContain("novels/four-beats/bible/timeline.md");
+
+  // An emptied thesis leaves the section unready, naming the file.
+  writeFileSync(join(work, "outputs", "essay", "thesis.md"), "# Thesis\n");
+  expect(essayPreconditions(work, 1).missing).toContain("outputs/essay/thesis.md has no thesis (write the one thing the essay argues about the story there)");
+});
+
+test("AGT-2135 AC2: on a realNames: false work the period facts reach the essay under the bible's names", () => {
+  const { vault, work } = fiction({ realNames: false });
+  const added = addOutput(vault, work, "essay", { now: NOW, thesis: FICTION_THESIS });
+  if (!added.ok) throw new Error(added.message);
+  const packed = buildEssayPack(vault, work, 2, { marker: markerOf(work), output: "essay" });
+  if (!packed.ok) throw new Error(packed.message);
+  expect(packed.pack.prompt).toContain("Tomas Varga ran the lighthouse board in 1930");
+  expect(packed.pack.prompt).not.toContain("Lajos Halmi");
+});
+
+test("AGT-2135 AC3: write --output essay drafts a fiction essay's first section with the fake writer", async () => {
+  const { vault, work, home } = fiction();
+  const added = addOutput(vault, work, "essay", { now: NOW, thesis: FICTION_THESIS });
+  if (!added.ok) throw new Error(added.message);
+  const first = await write(vault, work, home, "1", {}, fakeEssayWriter("Ines keeps the lamp the winter it is to run itself. The story mourns the hand on the wick."));
+  expect(first.code).toBe(0);
+  expect(first.body).toMatchObject({ ok: true, branch: "draft/essay-01", path: "outputs/essay/essay.md" });
+  const onBranch = git(vault, "show", "draft/essay-01:novels/four-beats/outputs/essay/essay.md");
+  const file = parseEssayFile(onBranch);
+  expect(file.sections.map((s) => s.title)).toEqual(["The story"]);
+  expect(file.sections[0]!.body).toContain("Ines keeps the lamp the winter it is to run itself.");
+  expect(onBranch).toContain("prompt_hash: ");
+});

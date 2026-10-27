@@ -6,8 +6,12 @@
  *
  * Allowed on every track (D-7). On nonfiction its units are the sections of
  * the core outline (`core/outline.md`), each drafted from the thesis and the
- * claims it names, citations in the text; on a fiction track it is one
- * section about the story, drawing on the story core's facts. Every section
+ * claims it names, citations in the text; on a fiction track it argues a
+ * thesis about the story (AGT-2135): `output add essay --thesis` writes
+ * `outputs/essay/thesis.md` and an outline drawn from the core
+ * (`./scaffold.ts`), and each section draws on the story core's period
+ * facts, bible and timeline (one section about the story on a work added
+ * before that). Every section
  * lives in `outputs/essay/essay.md` (`./sections.ts`), on its own
  * `draft/essay-NN` branch; publish `draft|final` compiles the file with a
  * sources list (`./publish.ts`).
@@ -21,6 +25,7 @@ import type { OutputDefinition, OutputReport, OutputUnit } from "../types";
 import { buildEssayPack, essayDefaultPlan, essayPreconditions } from "./pack";
 import { publishEssay } from "./publish";
 import { ESSAY_RITUALS } from "./rituals";
+import { essayScaffold } from "./scaffold";
 import { ESSAY_PATH, essayOutline, essaySectionText, putSection, readEssayFile, sectionBody, withoutCitations } from "./sections";
 import { ESSAY_DIR, ESSAY_ID, ESSAY_PUBLISH_TARGETS, essayBranch, essayUnitFileName, essayUnitOfBranch, essayUnitOfPath } from "./units";
 
@@ -31,6 +36,9 @@ Rules for the essay output only, layered after the work's voice (\`STYLE.md\`)
 and before the section's own slices.
 
 - An essay argues one thing (the thesis) and every section moves it forward.
+- On a fiction track, the essay argues \`outputs/essay/thesis.md\` and its
+  sections are \`outputs/essay/outline.md\`'s rows; it draws on the story core
+  (bible, timeline, period facts, \`facts.md\`) and cites nothing.
 - On nonfiction, the sections are \`core/outline.md\`'s rows. A section's
   claims are the claims rows its "What it covers" cell names (\`#2\`, \`#3\`),
   or every claim when it names none.
@@ -81,7 +89,9 @@ export const ESSAY: OutputDefinition = {
   unitOfPath: essayUnitOfPath,
   branch: essayBranch,
   unitOfBranch: essayUnitOfBranch,
-  planNote: "its sections: on nonfiction the rows of `core/outline.md` (beats: the outline row), on a fiction track one section over the core beats",
+  planNote:
+    "its sections: on nonfiction the rows of `core/outline.md` (beats: the outline row), on a fiction track the rows of `outputs/essay/outline.md`, each over the core beats",
+  scaffold: essayScaffold,
   shared: {
     has: (workDir, content, unit) => sectionBody(essayOutline(workDir).sections, content, unit) !== undefined,
     put: (workDir, content, unit, body, frontmatter) => putSection(essayOutline(workDir).sections, content, unit, body, frontmatter),

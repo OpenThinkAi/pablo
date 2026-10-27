@@ -535,6 +535,22 @@ export const ESSAY_CRAFT_RULES = [
   "- Select from the claims. Using all of them in a row reads as machine-written.",
 ].join("\n");
 
+/**
+ * The essay craft rules for an essay about a story (AGT-2135): no claims table, so every fact comes from the story
+ * core it is given (the bible, the timeline, the period facts, `facts.md`) and nothing is cited.
+ */
+export const ESSAY_STORY_CRAFT_RULES = [
+  "- Argue the thesis. Every paragraph moves the argument forward; none restates the outline.",
+  "- Every statement about the story comes from the story material you are given (the overview, the cast, the",
+  "  places, the timeline, the story facts), and every statement about the period from the period facts.",
+  "  Never invent a fact, a number, a date, a name, an event or a quotation, and add no citations.",
+  "- Concrete over abstract: the scene, the character, the date. A promise of detail is not detail.",
+  '- No rhetorical tricolons, and none of "a testament to", "a reminder that", "in today\'s world", "it is',
+  '  important to note".',
+  "- Do not summarize what the section just said, and do not announce what the next one will say.",
+  '- Straight quotes, never curly. No em-dashes; use a comma, a period, or parentheses.',
+].join("\n");
+
 /** `1. Title: what it covers` per outline section, the drafted one marked. */
 function renderOutline(essay: EssayBrief): string {
   return essay.outline
@@ -553,7 +569,9 @@ function renderClaims(claims: readonly EssayClaim[]): string {
  * Drafting one essay section (AGT-2134, D-7): the ask, the section and the outline, the thesis (or the story the
  * essay is about), the section's claims with their citations, the layered voice, the essay craft rules, the voices'
  * exemplars, the period facts and `facts.md` (a fiction track's essay draws on the story core's), the end of the
- * previous section, and the task. No cast, places or timeline: an essay is not told in scenes.
+ * previous section, and the task. A fiction track's essay (AGT-2135) also carries its own thesis beside the story
+ * it is about, and the story core's bible: the cast, the places and the whole timeline (never gated: an essay is not
+ * told from a point in the story), with the story craft rules in place of the citing ones. Never raw research.
  */
 function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
   const { section } = essay;
@@ -572,6 +590,8 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
     renderOutline(essay),
   ].join("\n");
   const about = essay.thesis ?? essay.subject;
+  // An essay about a story (AGT-2135): no claims to cite, the story core is its evidence.
+  const story = essay.subject !== undefined && essay.claims.length === 0;
 
   const spec = (s: Partial<SliceSpec> & Pick<SliceSpec, "name" | "heading" | "text">): SliceSpec => ({
     source: undefined,
@@ -605,6 +625,15 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
       cutOrder: 0,
     }),
     spec({
+      name: "subject",
+      heading: "# The story this essay is about",
+      text: essay.thesis !== undefined ? (essay.subject?.text.trim() ?? "") : "",
+      source: essay.thesis !== undefined ? essay.subject?.path : undefined,
+      required: true,
+      reducible: false,
+      cutOrder: 0,
+    }),
+    spec({
       name: "claims",
       heading: "# The claims this section makes (cite each one where you use it)",
       text: renderClaims(essay.claims),
@@ -617,7 +646,7 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
     spec({ name: "workRules", heading: "# Rules for this work (binding; they add to the prose rules above)", text: inputs.workRules?.text.trim() ?? "", source: inputs.workRules?.path }),
     spec({ name: "outputRules", heading: "# Rules for this output (binding; they add to the rules above)", text: inputs.outputRules?.text.trim() ?? "", source: inputs.outputRules?.path }),
     spec({ name: "never", heading: "# What this voice never does (binding)", text: concatSources(inputs.never ?? []), source: sourceLabel(inputs.never ?? []) }),
-    spec({ name: "craft", heading: "# Craft rules (binding, and the ones models break)", text: ESSAY_CRAFT_RULES, required: true, reducible: false, cutOrder: 0 }),
+    spec({ name: "craft", heading: "# Craft rules (binding, and the ones models break)", text: story ? ESSAY_STORY_CRAFT_RULES : ESSAY_CRAFT_RULES, required: true, reducible: false, cutOrder: 0 }),
     spec({
       name: "exemplars",
       heading: "# Exemplars of the voice (match how they sound; borrow nothing from what they say)",
@@ -627,6 +656,9 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
     }),
     spec({ name: "period", heading: "# Period and place facts (binding)", text: concatSources(periodSources(inputs)), source: sourceLabel(periodSources(inputs)), cutOrder: 4 }),
     spec({ name: "facts", heading: "# Story facts every telling honours (binding)", text: inputs.facts?.text.trim() ?? "", source: inputs.facts?.path, cutOrder: 4 }),
+    spec({ name: "cast", heading: "# The story's cast (binding)", text: inputs.cast?.text.trim() ?? "", source: inputs.cast?.path, cutOrder: 5 }),
+    spec({ name: "places", heading: "# The story's places (binding)", text: inputs.places?.text.trim() ?? "", source: inputs.places?.path, cutOrder: 6 }),
+    spec({ name: "timeline", heading: "# The story's timeline (binding)", text: essay.timeline?.text.trim() ?? "", source: essay.timeline?.path, cutOrder: 5 }),
     spec({
       name: "previousTail",
       heading: "# The end of the previous section (continue from here)",
@@ -640,7 +672,7 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
       heading: "",
       text: [
         `Write section ${section.number} now, in paragraphs, about ${inputs.wordTarget} words, within ten percent.`,
-        "Cite every claim you use where you use it. No heading: the section's title is added for you.",
+        story ? "No citations and no heading: the section's title is added for you." : "Cite every claim you use where you use it. No heading: the section's title is added for you.",
       ].join("\n"),
       required: true,
       reducible: false,

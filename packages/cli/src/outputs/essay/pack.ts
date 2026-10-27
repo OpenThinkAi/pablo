@@ -9,8 +9,10 @@
  * layered voice and the essay's own `RULES.md` (`packFromInputs`), and the end
  * of the previous section. On a fiction track it also carries the story
  * core's distilled period facts and `facts.md`, read as the story pack reads
- * them. Research notes themselves are never in it (D-10): a claim's sources
- * go to the writer as ids only.
+ * them, and (AGT-2135) the essay's own thesis (`outputs/essay/thesis.md`) and
+ * the bible: the cast, the places and the whole timeline. Research notes
+ * themselves are never in it (D-10): a claim's sources go to the writer as
+ * ids only, and a fiction essay's facts come distilled.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -23,13 +25,13 @@ import { trackOf } from "../../marker";
 import { CAST_ENDS_AT, packFromInputs } from "../../novel/pack";
 import { frontmatterField } from "../novel/plan";
 import type { PlanRow, UnitPackOptions, UnitPackOutcome, UnitPreconditions } from "../types";
-import { ESSAY_PATH, essayOutline, essayTrack, readEssayFile, sectionBody, sectionClaims } from "./sections";
+import { ESSAY_OUTLINE_FILE, ESSAY_PATH, ESSAY_THESIS_FILE, essayOutline, essayTrack, readEssayFile, sectionBody, sectionClaims } from "./sections";
 import { ESSAY_ID } from "./units";
 
 /** Words asked for one section when the request names no length. */
 export const SECTION_WORDS = 600;
 
-/** Words asked for the whole essay on a fiction track (one section). */
+/** Words asked for the whole essay on a fiction track with no outline of its own (one section). */
 export const FICTION_ESSAY_WORDS = 1500;
 
 /** How much of the previous section the next one continues from. */
@@ -76,6 +78,10 @@ export function essayPreconditions(workDir: string, unit: number): UnitPrecondit
     for (const n of sectionClaims(workDir, section).absent) missing.push(`section ${unit} names claim #${n}, which ${CLAIMS_FILE} does not have`);
   } else {
     const core = readCoreState(workDir, track);
+    // An essay with its own outline (AGT-2135) argues a thesis about the story.
+    if (source === ESSAY_OUTLINE_FILE && !hasProse(read(join(workDir, ESSAY_THESIS_FILE)) ?? "")) {
+      missing.push(`${ESSAY_THESIS_FILE} has no thesis (write the one thing the essay argues about the story there)`);
+    }
     if (!core.premise) missing.push("bible/overview.md has no logline (the essay is about the story)");
     if (core.beats.length === 0) missing.push(`no beats in ${core.outlineFile} (the essay is about the story they tell)`);
   }
@@ -138,21 +144,33 @@ export function buildEssayPack(vaultRoot: string, workDir: string, unit: number,
   } else {
     // A fiction track's essay is about the story: the core read as the story pack reads it, over every beat.
     const beats = readCoreState(workDir, track).beats.map((b) => b.chapter);
-    const read = readDraftingInputs({
+    const story = readDraftingInputs({
       vaultRoot,
       workRoot: workDir,
       chapter: beats[0] ?? 1,
       ...(beats.length === 0 ? {} : { beats }),
       outputRulesPath,
-      wordTarget: options.words ?? FICTION_ESSAY_WORDS,
+      wordTarget: options.words ?? (source === ESSAY_OUTLINE_FILE ? SECTION_WORDS : FICTION_ESSAY_WORDS),
       minScenes: DEFAULT_MIN_SCENES,
       castEndsAt: CAST_ENDS_AT,
       work: { description: "an essay about the story" },
       output: ESSAY_ID,
     });
+    // AGT-2135: the essay's own thesis, and the story core's bible and whole timeline (never research, D-10).
     const subject = readTextSource(vaultRoot, join(workDir, "bible", "overview.md"));
-    essay = { section, outline: sections, outlineSource: vaultRel(source), subject, claims: [] };
-    inputs = { ...read, beat: sectionBeat(section, read.beat.source), moreBeats: [], unit, previousTail: undefined };
+    const thesisPath = join(workDir, ESSAY_THESIS_FILE);
+    const thesis = hasProse(read(thesisPath) ?? "") ? readTextSource(vaultRoot, thesisPath) : undefined;
+    const timeline = readTextSource(vaultRoot, join(workDir, "bible", "timeline.md"));
+    essay = {
+      section,
+      outline: sections,
+      outlineSource: vaultRel(source),
+      ...(thesis === undefined ? {} : { thesis }),
+      subject,
+      ...(timeline === undefined ? {} : { timeline }),
+      claims: [],
+    };
+    inputs = { ...story, beat: sectionBeat(section, story.beat.source), moreBeats: [], unit, previousTail: undefined };
   }
   return packFromInputs(vaultRoot, workDir, { ...inputs, essay, ...(previousTail === undefined ? {} : { previousTail }) }, { ...options, output: ESSAY_ID });
 }

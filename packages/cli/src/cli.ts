@@ -323,6 +323,16 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   };
 }
 
+/** One line of text from the terminal (the prompt on stderr), trimmed; empty when the author gives none. */
+async function askLine(question: string): Promise<string> {
+  const prompt = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return (await prompt.question(question)).trim();
+  } finally {
+    prompt.close();
+  }
+}
+
 /** A yes/no question on the terminal (stderr, so `--json`-free stdout stays the body); anything but y/yes is no. */
 async function askYesNo(question: string): Promise<boolean> {
   const prompt = createInterface({ input: process.stdin, output: process.stderr });
@@ -1601,7 +1611,13 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit({ ok: false, code: EXIT_REFUSED, message: `${built.message} (pablo output list|add|remove|plan [<type>] --project <slug>)` }, args.json);
       return EXIT_REFUSED;
     }
-    const result = await verb.run(built.args as never, { cwd, env: process.env, stderr: process.stderr });
+    let result = await verb.run(built.args as never, { cwd, env: process.env, stderr: process.stderr });
+    // `output add essay` on a fiction track with no --thesis (AGT-2135): on a terminal, ask for it and add again.
+    const missing = (result.body as { missing?: unknown }).missing;
+    if (!args.json && Array.isArray(missing) && missing.some((m) => String(m).startsWith("--thesis")) && process.stdin.isTTY === true && process.stderr.isTTY === true) {
+      const thesis = await askLine("The essay's thesis (the one thing it argues about the story): ");
+      if (thesis !== "") result = await verb.run({ ...(built.args as Record<string, unknown>), thesis } as never, { cwd, env: process.env, stderr: process.stderr });
+    }
     if (args.json) console.log(JSON.stringify(result.body));
     else if ((result.body as { ok?: boolean }).ok === true) console.log(outputVerbText(result.body));
     else console.error(outputVerbText(result.body));
