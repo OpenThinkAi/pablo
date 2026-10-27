@@ -7,7 +7,7 @@
 // columns as fit that height; when the grid is too wide it drops the secondary keys (the primaries still name every
 // action), and when even that is too wide it flows the entries along the rows.
 
-import { groups, keyStateOf, voiceChoicesFor, VOICE_RULE_KEYS, prefixesOf, prefixRows, rowsOf, showKey, isPrefix, PREFIXES, DEFAULT_KEYMAP, type KeyAction, type KeyState, type Keymap } from "./keys";
+import { groups, keyStateOf, voiceChoicesFor, PANE_FIXED_KEYS, VOICE_RULE_KEYS, prefixesOf, prefixRows, rowsOf, showKey, isPrefix, PREFIXES, DEFAULT_KEYMAP, type KeyAction, type KeyState, type Keymap } from "./keys";
 import type { Pending, State } from "./state";
 
 /** `keys` is how a listing reads (`↓/↑ j/k`); `prim` and `sec` are its two halves, the secondary drawn dim. */
@@ -37,13 +37,17 @@ export function entriesFor(s: State, km: Keymap = DEFAULT_KEYMAP): Entry[] {
   if (s.voiceRule) return VOICE_RULE_KEYS.map((k) => entry(showKey(k.key), "", k.key === "tab" && s.voiceRule!.targets.length < 2 ? "" : k.label)).filter((e) => e.label);
   if (s.planning) return [entry("Enter", "", "run"), entry("Esc", "", "cancel")];
   if (s.voice) return [...voiceChoicesFor(s.voice.length).map((c) => entry(c.key, "", c.label)), entry("Esc", "", "cancel")];
-  return entriesOf(keyStateOf(s), s.pending, km);
+  const ks = keyStateOf(s);
+  // The editing pane (AGT-2169): its mode's rows, then the keys that are not rows (Esc, the Ctrl keys).
+  if (s.editPane?.text) return [...entriesOf(ks, s.pending, km), ...(s.pending ? [] : PANE_FIXED_KEYS.filter((k) => k.modes.includes(ks.state)).map((k) => entry(showKey(k.key), "", k.label)))];
+  return entriesOf(ks, s.pending, km);
 }
 
 /** The panel's title: the pending prefix and its meaning, else where the keys act. */
 export function panelTitle(ks: KeyState, pending: Pending | null = null, voice = false): string {
   if (voice) return "voice";
   if (pending) return isPrefix(pending.prefix) ? `${pending.prefix} ${PREFIXES[pending.prefix]}` : pending.prefix;
+  if (ks.state === "normal" || ks.state === "insert" || ks.state === "select") return `edit: ${ks.state}`;
   return ks.state === "rail" ? (ks.review ? "changes" : "contents") : ks.state === "main" ? "keys" : "content";
 }
 

@@ -72,7 +72,8 @@ async function toRow(app: ReturnType<typeof mount>, index: number) {
 }
 const toChapterMain = (app: ReturnType<typeof mount>) => toRow(app, 1);
 async function keys(app: ReturnType<typeof mount>, ...ks: string[]) { for (const k of ks) { app.stdin.write(k); await sleep(15); } await sleep(20); }
-async function vE(app: ReturnType<typeof mount>) { await keys(app, "v", "e"); await sleep(30); }
+/** `v e`, then `i`: the pane opens in normal mode (AGT-2169), and these tests type, so they enter insert mode first. */
+async function vE(app: ReturnType<typeof mount>, insert = true) { await keys(app, "v", "e"); await sleep(30); if (insert) await keys(app, "i"); }
 
 test("v e opens the unit in place, on the edit branch, the cursor on the cursor's line; no editor is launched", async () => {
   const fake = fakeSession({ "chapters/01-cold-open.md": CHAPTER });
@@ -152,6 +153,8 @@ test("Esc with unsaved changes asks; Esc again closes without saving and the bra
   await toChapterMain(app);
   await vE(app);
   await keys(app, "x");
+  await keys(app, ESC); await sleep(30); // insert mode back to normal
+  expect(plain(app.lastFrame())).toContain("NOR chapters/01-cold-open.md [+]");
   await keys(app, ESC); await sleep(30);
   expect(plain(app.lastFrame())).toContain("Unsaved changes to chapters/01-cold-open.md");
   expect(fake.log.closed).toEqual([]);
@@ -200,7 +203,8 @@ test("v s merges the open edit branch through the finisher with nothing rejected
   await vE(app);
   await keys(app, "N", "o", "w", " ", CTRL_S); await sleep(30);
   expect(plain(app.lastFrame())).toContain("branches to review (1)");
-  await keys(app, ESC); await sleep(30);
+  await keys(app, ESC); await sleep(30); // to normal mode
+  await keys(app, ESC); await sleep(30); // closed: nothing unsaved
   await keys(app, "v", "s"); await sleep(40);
   expect(saved).toEqual([{ branch: "edit/ab12cd", rejected: { removed: [], added: [] } }]);
   const frame = plain(app.lastFrame());
@@ -290,7 +294,8 @@ test("after an idle pause the edits autosave to the edit branch through the Ctrl
   expect(fake.log.saved.length).toBe(1);
   // Main moves only through v s: the finisher was never called by the autosave.
   expect(saved).toEqual([]);
-  await keys(app, ESC); await sleep(30);
+  await keys(app, ESC); await sleep(30); // to normal mode
+  await keys(app, ESC); await sleep(30); // closed
   await keys(app, "v", "s"); await sleep(40);
   expect(saved).toEqual(["edit/ab12cd"]);
   frame = plain(app.lastFrame());
@@ -318,7 +323,7 @@ test("reopening a unit whose edit branch an earlier session left unmerged resume
   const app = mount({ session, finisher });
   await sleep(30);
   await toChapterMain(app);
-  await vE(app);
+  await vE(app, false);
   const frame = plain(app.lastFrame());
   expect(frame).toContain("chapters/01-cold-open.md · edit/old123");
   expect(frame).toContain("Resuming edit/old123: 2 edits from earlier not saved into main yet");
@@ -334,11 +339,37 @@ test("Esc while the pane is opening cancels it; the branch the open made is let 
   const app = mount({ session: slow });
   await sleep(30);
   await toChapterMain(app);
-  await vE(app);
+  await vE(app, false);
   expect(plain(app.lastFrame())).toContain("opening");
   await keys(app, ESC); await sleep(30);
   expect(plain(app.lastFrame())).not.toContain("opening");
   land(); await sleep(30);
   expect(fake.log.closed).toEqual(["edit/ab12cd"]);
   expect(plain(app.lastFrame())).not.toContain("edit/ab12cd");
+});
+
+test("the pane is modal (AGT-2169): it opens in normal mode, i inserts, v selects, the mode and its keys are on screen", async () => {
+  const fake = fakeSession({ "chapters/01-cold-open.md": CHAPTER });
+  const app = mount({ session: fake.session });
+  await sleep(30);
+  await toChapterMain(app);
+  await vE(app, false);
+  let frame = plain(app.lastFrame());
+  expect(frame).toContain("NOR chapters/01-cold-open.md · edit/ab12cd");
+  expect(frame).toContain("edit: normal");
+  expect(frame).toMatch(/i +insert/);
+  await keys(app, "w", "x"); // w moves to "well"; x is no key in normal mode
+  expect(plain(app.lastFrame())).not.toContain("[+]");
+  await keys(app, "i", "X");
+  frame = plain(app.lastFrame());
+  expect(frame).toContain("INS chapters/01-cold-open.md [+]");
+  expect(frame).toContain("The Xwell was dry.");
+  expect(frame).toContain("edit: insert");
+  await keys(app, ESC); await sleep(30);
+  await keys(app, "v");
+  expect(plain(app.lastFrame())).toContain("SEL chapters/01-cold-open.md");
+  await keys(app, "g", "g");
+  expect(plain(app.lastFrame())).toContain("SEL chapters/01-cold-open.md");
+  await keys(app, "v");
+  expect(plain(app.lastFrame())).toContain("NOR chapters/01-cold-open.md");
 });

@@ -27,6 +27,7 @@ src/sanitize.ts  strips control characters from text that did not come from the 
 src/buffer.ts    the editor's own text buffer (D-23), pure: grapheme cursor, cell-width soft-wrap, word-grouped undo
 src/edit-pane.ts `v e` in place, pure: the `PaneSession` seam, the file to the buffer and back (`saveText`), rows, keys
 src/edit-pane-view.tsx  the editing pane as a component, drawn where the main pane is
+src/modal.ts     the editing pane's Helix-style modes (normal, insert, select) and motions, pure
 src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
 src/source.ts    reads the file behind a rail row id from the project (the loader `App` is given as `load`)
 src/index.ts     the package's public surface (`runScreen`); the CLI imports it lazily, only for bare `pablo`
@@ -295,10 +296,20 @@ pane's place, on pablo's own buffer (`buffer.ts`), with the cursor on the paragr
 an `edit/<short-id>` branch with its own worktree and reads the file there, `save` writes and commits it as the author,
 `close` deletes a branch it made that never got a commit. The model holds the pane (`state.editPane`) with its text
 opaque: a key is a `pane.edit` whose function (`edit-pane.ts`'s `paneKey`) copies the buffer and edits the copy, so the
-state is never mutated. The app's own keys are off while the pane is open; `edit-pane-view.tsx` reads them: text, Enter,
-Backspace, arrows, Home/End, PgUp/PgDn, Ctrl+Z / Ctrl+Y undo and redo, Ctrl+S saves (a commit on the branch), Esc
-closes (twice with unsaved changes; while the pane is still opening it cancels, and the branch the open made goes). Esc's
-rule is the model's `paneEsc`, which the view also reads. A dirty marker (`[+]`) shows in the pane's title until a save.
+state is never mutated. The app's own keys are off while the pane is open; `edit-pane-view.tsx` reads them and hands them
+to `modal.ts` (AGT-2169, D-18): the pane is Helix-style modal and opens in **normal** mode, its mode shown at the start of
+the title (`NOR`, `INS`, `SEL`) and as the key panel's title. Normal mode moves: `h j k l` (and the arrows) by character
+and by display row, so `j` walks a wrapped paragraph a row at a time; `w b e` by word; `0 $` (Home/End) to the start and
+last character of the whole paragraph; `g g` and `G` to the first and last line. `i` inserts before the cursor, `a` after
+it, `o` on a new line below; `v` toggles **select** mode, where the same motions extend a selection from where it
+started (drawn shaded). These are `editor.*` rows in `keys.ts` in the `normal` and `select` key states, resolved through
+`chord.ts` like every other key, so the key panel lists them and `keys` in the config rebinds them; while the pane is open
+`keyStateOf` is its mode. A motion only moves the buffer's cursor (`MOTIONS` in `modal.ts`), so operators and text
+objects can take the range it covers. In **insert** mode keys type (`paneKey`): text, Enter, Backspace, arrows,
+Home/End, PgUp/PgDn. In every mode Ctrl+Z / Ctrl+Y undo and redo and Ctrl+S saves (a commit on the branch). Esc backs
+out a mode at a time: insert or select to normal; in normal it closes (twice with unsaved changes; while the pane is
+still opening it cancels, and the branch the open made goes). Closing is the model's `paneEsc`, which the view also
+reads. A dirty marker (`[+]`) shows in the pane's title until a save.
 Edits also autosave (AGT-2173, `autosave.ts`): once the text has sat dirty for `AUTOSAVE_MS` the pane dispatches
 `pane.save` with `auto`, the same save as Ctrl+S (a commit on the `edit/` branch, never `main`); a blank body is never
 autosaved. The wait runs on an injectable clock (`App`'s `autosave` prop) so tests fire it by hand. `main` changes only

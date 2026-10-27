@@ -10,7 +10,7 @@
 import { splitManuscript } from "@openthink/pablo-core";
 import { loadForEdit, saveEdited } from "./edit-save";
 import type { Storage } from "./book";
-import { TextBuffer } from "./buffer";
+import { TextBuffer, type Pos } from "./buffer";
 import { tokenOf, type InkKey } from "./chord";
 import { commentBox, type BoxPart } from "./comment-box";
 import { hitComment, type CheckHit } from "./hits";
@@ -35,6 +35,8 @@ export interface EditText extends EditPaneText {
   readonly buffer: TextBuffer;
   readonly raw: string;
   readonly storage: Storage;
+  /** Where select mode's selection started (AGT-2169, modal.ts); null outside select mode. */
+  readonly anchor?: Pos | null;
 }
 
 /** A file split for the pane: the frontmatter and the blank lines after it (`head`, kept byte for byte), then the body. */
@@ -94,11 +96,11 @@ export function openText(raw: string, storage: string, line: number): EditText {
   const at = line - 1 - headLines;
   const row = rowOf.length === 0 ? 0 : rowOf[Math.max(0, Math.min(at, rowOf.length - 1))]!;
   buffer.cursor = { row, col: 0 };
-  return { buffer, raw, storage: s, dirty: false, empty: blankText(buffer) };
+  return { buffer, raw, storage: s, dirty: false, empty: blankText(buffer), mode: "normal", anchor: null };
 }
 
 /** `t` with its buffer copied and `op` applied to the copy; the state's own text is never changed. */
-function apply(t: EditText, op: (b: TextBuffer) => void): EditText {
+export function apply(t: EditText, op: (b: TextBuffer) => void): EditText {
   const buffer = t.buffer.clone();
   op(buffer);
   return { ...t, buffer, dirty: buffer.dirty, empty: blankText(buffer) };
@@ -164,13 +166,57 @@ export function paneHits(t: EditText, file: string, checks: ((file: string, text
 
 /** A row the pane draws: a display row of the text (the cursor's split around the character it is on), or a hit's box row. */
 export type PaneRow =
-  | { readonly kind: "text"; readonly text: string; readonly cursor?: { readonly before: string; readonly at: string; readonly after: string } }
+  | { readonly kind: "text"; readonly text: string; readonly cursor?: { readonly before: string; readonly at: string; readonly after: string }; readonly parts?: readonly TextPart[] }
   | { readonly kind: "box"; readonly part: BoxPart; readonly text: string; readonly head?: string; readonly tag?: string; readonly color: string };
+
+/** A run of a display row inside or around select mode's selection (AGT-2169): `sel` drawn as selected, `cursor` as the cursor. */
+export interface TextPart { readonly text: string; readonly sel?: boolean; readonly cursor?: boolean }
 
 const INDENT = 2;
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 /** Text as the pane shows it: a tab one space, any other control character its visible stand-in. */
 const shown = (s: string) => visible(s.replace(/\t/g, " "));
+
+/**
+ * Select mode's selection on line `r` (AGT-2169): `[start, end)` offsets from the anchor to the cursor, the character
+ * at each end included as Helix does; an `end` past the line's length takes in its end. Null off the selection.
+ */
+function selectedCols(t: EditText, r: number): readonly [number, number] | null {
+  if (t.mode !== "select" || !t.anchor) return null;
+  const b = t.buffer;
+  const row = Math.min(t.anchor.row, b.lines.length - 1);
+  const a = { row, col: Math.min(t.anchor.col, b.lines[row]!.length) };
+  const c = b.cursor;
+  const [from, to] = a.row < c.row || (a.row === c.row && a.col <= c.col) ? [a, c] : [c, a];
+  if (r < from.row || r > to.row) return null;
+  const line = b.lines[r]!;
+  return [r === from.row ? from.col : 0, r === to.row ? graphemeEnd(line, to.col) : line.length + 1];
+}
+
+/** The offset after the grapheme at `col` in `line` (one past the end at the end: the line's end is a cell too). */
+function graphemeEnd(line: string, col: number): number {
+  if (col >= line.length) return line.length + 1;
+  const next = graphemes.segment(line.slice(col))[Symbol.iterator]().next();
+  return col + (next.done ? 1 : next.value.segment.length);
+}
+
+/** The display row `[start, end)` of `line` cut into runs by `sel` and the cursor at `cursor` (null: not on this row). */
+function selectedParts(line: string, start: number, end: number, cursor: number | null, sel: readonly [number, number]): TextPart[] {
+  const cells: { text: string; sel: boolean; cursor: boolean }[] = [];
+  for (const { segment, index } of graphemes.segment(line.slice(start, end))) {
+    const at = start + index;
+    cells.push({ text: segment, sel: at >= sel[0] && at < sel[1], cursor: at === cursor });
+  }
+  // The cursor past the row's last character is a cell of its own, as in the rows without a selection.
+  if (cursor !== null && cursor >= end) cells.push({ text: " ", sel: end >= sel[0] && end < sel[1], cursor: true });
+  const parts: TextPart[] = [];
+  for (const c of cells) {
+    const last = parts[parts.length - 1];
+    if (last && !c.cursor && !last.cursor && !!last.sel === c.sel) parts[parts.length - 1] = { ...last, text: last.text + c.text };
+    else parts.push({ text: c.text, ...(c.sel ? { sel: true } : {}), ...(c.cursor ? { cursor: true } : {}) });
+  }
+  return parts.map((p) => ({ ...p, text: shown(p.text) }));
+}
 
 /**
  * The `height` rows the pane shows at `width`: every display row of the buffer, each hit's box under its paragraph,
@@ -183,9 +229,14 @@ export function paneRows(t: EditText, width: number, height: number, hits: Reado
   for (let r = 0; r < b.lines.length; r++) {
     const line = b.lines[r]!;
     const segs = b.segments(r, width);
+    const sel = selectedCols(t, r);
     segs.forEach((seg, i) => {
       const text = line.slice(seg.start, seg.end);
       const here = r === b.cursor.row && b.cursor.col >= seg.start && (b.cursor.col < seg.end || i === segs.length - 1);
+      if (sel && sel[0] <= seg.end && sel[1] > seg.start) {
+        if (here) cursorAt = all.length;
+        return void all.push({ kind: "text", text: shown(text), parts: selectedParts(line, seg.start, seg.end, here ? b.cursor.col : null, sel) });
+      }
       if (!here) return void all.push({ kind: "text", text: shown(text) });
       cursorAt = all.length;
       const off = b.cursor.col - seg.start;

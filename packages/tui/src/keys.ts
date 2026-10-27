@@ -16,7 +16,8 @@
 
 import type { Action as ModelAction, State, VoiceChoiceInfo, VoiceKind, VoiceTargetInfo } from "./state";
 
-export const STATES = ["rail", "main", "content"] as const;
+/** The screen's regions, then the editing pane's modes (AGT-2169): while `v e`'s pane is open, its mode is the key state. */
+export const STATES = ["rail", "main", "content", "normal", "insert", "select"] as const;
 export type KeyStateName = (typeof STATES)[number];
 
 export const PREFIXES = { a: "AI", f: "filter", v: "view", g: "go to", r: "research", o: "output & setup" } as const;
@@ -32,7 +33,7 @@ const cmd = (id: string): Command => ({ type: "command", id });
 export interface KeyState { readonly state: KeyStateName; readonly review?: boolean; readonly content?: boolean }
 
 /** The key state of the screen's model. */
-export const keyStateOf = (s: State): KeyState => ({ state: s.focus, review: s.mode.kind === "review", content: s.content !== null });
+export const keyStateOf = (s: State): KeyState => ({ state: s.editPane?.text ? s.editPane.text.mode ?? "normal" : s.focus, review: s.mode.kind === "review", content: s.content !== null });
 
 export interface KeyAction {
   /** Stable across key changes: overrides, the key panel and the docs name the action by it. */
@@ -56,6 +57,8 @@ export interface KeyAction {
 
 const RAIL: readonly KeyStateName[] = ["rail"], MAIN: readonly KeyStateName[] = ["main"], CONTENT: readonly KeyStateName[] = ["content"];
 const OUTSIDE: readonly KeyStateName[] = ["rail", "main"];
+/** The editing pane's normal and select modes: the same motions move the cursor in one and extend the selection in the other. */
+const MODAL: readonly KeyStateName[] = ["normal", "select"];
 
 export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   // ---- the rail: the stage machine in a book, the changes in a review
@@ -142,6 +145,24 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "go.hit_next", states: MAIN, needs: "book", prefix: "g", key: "f", label: "next hit", description: "Go to the next check hit in the document, wrapping round at the end.", do: cmd("check.next") },
   { id: "go.hit_prev", states: MAIN, needs: "book", prefix: "g", key: "F", label: "previous hit", description: "Go to the previous check hit in the document, wrapping round at the start.", do: cmd("check.prev") },
   { id: "go.line", states: MAIN, prefix: "g", key: "<n>", label: "line", description: "Type a line number, then close it with the go prefix key again or Enter, to go to that line.", fixed: true },
+
+  // ---- the editing pane (`v e`), Helix-style (AGT-2169, D-18): motions in normal and select mode, and the keys that change
+  // mode. modal.ts carries each out by id. Insert mode has no rows: keys type there, and Esc goes back to normal.
+  { id: "editor.left", states: MODAL, key: "h", secondary: "left", label: "move", description: "Move the cursor a character left (to the end of the previous line at the start of one).", do: cmd("editor.left") },
+  { id: "editor.down", states: MODAL, key: "j", secondary: "down", label: "move", description: "Move the cursor down a display row; a wrapped paragraph is several rows.", do: cmd("editor.down") },
+  { id: "editor.up", states: MODAL, key: "k", secondary: "up", label: "move", description: "Move the cursor up a display row; a wrapped paragraph is several rows.", do: cmd("editor.up") },
+  { id: "editor.right", states: MODAL, key: "l", secondary: "right", label: "move", description: "Move the cursor a character right (to the start of the next line at the end of one).", do: cmd("editor.right") },
+  { id: "editor.word_next", states: MODAL, key: "w", label: "word", description: "Move to the start of the next word.", do: cmd("editor.word_next") },
+  { id: "editor.word_prev", states: MODAL, key: "b", label: "word", description: "Move to the start of the word, or of the previous one.", do: cmd("editor.word_prev") },
+  { id: "editor.word_end", states: MODAL, key: "e", label: "word", description: "Move to the end of the word, or of the next one.", do: cmd("editor.word_end") },
+  { id: "editor.line_start", states: MODAL, key: "0", secondary: "home", label: "line", description: "Move to the start of the line (the whole paragraph, not the display row).", do: cmd("editor.line_start") },
+  { id: "editor.line_end", states: MODAL, key: "$", secondary: "end", label: "line", description: "Move to the last character of the line (the whole paragraph, not the display row).", do: cmd("editor.line_end") },
+  { id: "editor.bottom", states: MODAL, key: "G", label: "last line", description: "Move to the start of the last line.", do: cmd("editor.bottom") },
+  { id: "editor.insert", states: MODAL, key: "i", label: "insert", description: "Insert mode before the cursor: keys type until Esc.", do: cmd("editor.insert") },
+  { id: "editor.append", states: MODAL, key: "a", label: "append", description: "Insert mode after the character under the cursor.", do: cmd("editor.append") },
+  { id: "editor.open_below", states: MODAL, key: "o", label: "open line", description: "Open a new line below this one and insert there.", do: cmd("editor.open_below") },
+  { id: "editor.select", states: MODAL, key: "v", label: "select", description: "Select mode: motions extend a selection from where it started; v again or Esc leaves it.", do: cmd("editor.select") },
+  { id: "editor.top", states: MODAL, prefix: "g", key: "g", label: "top", description: "Move to the start of the first line.", do: cmd("editor.top") },
 ];
 
 // ---------------------------------------------------------------- `r`: the planning and research verbs, as data
@@ -192,6 +213,18 @@ export const VOICE_RULE_KEYS: readonly { readonly key: string; readonly label: s
   { key: "enter", label: "write rule" }, { key: "tab", label: "target" }, { key: "esc", label: "cancel" },
 ];
 export type { VoiceKind };
+
+/**
+ * The editing pane's keys that are not rows (AGT-2167/AGT-2169), for the key panel: Esc backs out a mode at a time (insert
+ * or select to normal, normal closes the pane) and is never a binding; the Ctrl keys work in every mode.
+ */
+export const PANE_FIXED_KEYS: readonly { readonly key: string; readonly label: string; readonly modes: readonly KeyStateName[] }[] = [
+  { key: "esc", label: "normal", modes: ["insert", "select"] },
+  { key: "esc", label: "close", modes: ["normal"] },
+  { key: "ctrl-s", label: "save", modes: ["normal", "insert", "select"] },
+  { key: "ctrl-z", label: "undo", modes: ["normal", "insert", "select"] },
+  { key: "ctrl-y", label: "redo", modes: ["normal", "insert", "select"] },
+];
 
 // ---------------------------------------------------------------- key tokens
 

@@ -201,7 +201,15 @@ export interface Planning { readonly id: string; readonly title: string; readonl
  * edit-pane.ts's (the buffer, the file as opened, its storage); the model holds it opaquely and only ever replaces it
  * with what a `pane.edit` function returns, so a keystroke never mutates the state it was given.
  */
-export interface EditPaneText { readonly dirty: boolean; /** Nothing but whitespace: a save would leave the file its frontmatter alone. */ readonly empty: boolean }
+/** The editing pane's mode (AGT-2169, D-18, Helix-style): keys move in `normal`, type in `insert`, extend a selection in `select`. modal.ts holds the machine. */
+export type EditMode = "normal" | "insert" | "select";
+export interface EditPaneText {
+  readonly dirty: boolean;
+  /** Nothing but whitespace: a save would leave the file its frontmatter alone. */
+  readonly empty: boolean;
+  /** The pane's mode (AGT-2169); absent reads as `normal`, the mode the pane opens in. */
+  readonly mode?: EditMode;
+}
 export interface EditPane {
   readonly file: string;
   /** The unit's storage mode (`sentences`, `lines`, `screenplay`): how the text is shown and saved. */
@@ -428,7 +436,7 @@ const voiceContent = (title: string, body: string): Content => ({ title, body, k
 const writingName = (output: string | undefined, unit: number) => (output === undefined || output === "novel" ? `chapter ${unit}` : `${output} ${unit}`);
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 /** What the editing pane's keys do, shown in the content area while it is open. */
-const PANE_KEYS = "Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes · Esc closes";
+const PANE_KEYS = "i a o insert · v selects · Esc back to normal, and in normal closes · Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes";
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
