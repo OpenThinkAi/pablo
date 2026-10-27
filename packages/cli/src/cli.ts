@@ -1675,7 +1675,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit(refusalResult(vaultResult), args.json);
       return vaultResult.code;
     }
-    return runCheck(args, vaultResult.path, projectPath);
+    return await runCheck(args, vaultResult.path, projectPath);
   }
 
   if (args.verb === "migrate") {

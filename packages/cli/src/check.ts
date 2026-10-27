@@ -17,7 +17,9 @@
  *    best document in the vault and the pattern the rest follows."
  *
  * A nonfiction work's `*.md` units also get the claim-support check (AGT-2114, `claim-support.ts`):
- * `claim-unsupported` and `claim-uncited` hits in `hits[]`.
+ * `claim-unsupported` and `claim-uncited` hits in `hits[]`. A historical-fiction work's units get the
+ * `anachronism` check (AGT-2113, `anachronism.ts`), which asks a model, so `runCheck` and the verb run it after
+ * `checkWork` over `scanned`.
  *
  * Voice-pattern scoring beyond verbatim flagged lines is P1, out of scope
  * here (AC3). `checkFile` and `checkWork` are pure/read-only and exported for
@@ -31,6 +33,7 @@ import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
 import { readMarker, trackOf } from "./marker";
 import { checkClaimSupport, readClaimSources } from "./claim-support";
+import { checkAnachronisms } from "./anachronism";
 import { coreCheck } from "./core-check";
 import { narratedDrift } from "./outputs/narrated";
 import { resolveOutput } from "./outputs/registry";
@@ -66,6 +69,8 @@ export interface CheckSuccess {
    * that output's units. Absent when no output was named.
    */
   readonly core?: readonly Hit[];
+  /** The absolute paths scanned, for the checks that run after (the model-backed `anachronism`, AGT-2113). */
+  readonly scanned: readonly string[];
 }
 
 /** A resolution refusal before any scanning happens — the one case `checkWork`/`runCheck` exit non-zero (a `--file` outside the work). */
@@ -455,7 +460,7 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
   }
 
   // `--output <type>` adds the core check (AGT-1671): the units against the bible, the timeline and facts.md.
-  return { ok: true, code: 0, hits, unprovenanced, ...(named !== undefined ? { core: coreCheck(workDir, named, filePaths) } : {}) };
+  return { ok: true, code: 0, hits, unprovenanced, scanned: filePaths, ...(named !== undefined ? { core: coreCheck(workDir, named, filePaths) } : {}) };
 }
 
 /**
@@ -494,7 +499,7 @@ export function radioScriptsChecked(file: string | undefined, output: string | u
  * one `file:line unknown direction` / `unbound role` line each. A `--file`
  * scan skips it. `casting` is injectable so tests never reach `uv`.
  */
-export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, casting?: CastingDeps): number {
+export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, casting?: CastingDeps): Promise<number> {
   const outcome = checkWork(vaultRoot, workDir, args.file, args.output);
 
   if (!outcome.ok) {
@@ -506,6 +511,11 @@ export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, ca
     }
     return outcome.code;
   }
+
+  // A historical-fiction work also gets the anachronism check (AGT-2113, `anachronism.ts`).
+  const anachronism = await checkAnachronisms(workDir, outcome.scanned);
+  const hits = [...outcome.hits, ...(anachronism?.hits ?? [])];
+  if (anachronism?.notice !== undefined && !args.json) console.error(anachronism.notice);
 
   const radio =
     radioScriptsChecked(args.file, args.output) ? radioCheck({ env: process.env, stderr: process.stderr }, casting ?? realCastingDeps(process.env), workDir) : undefined;
@@ -520,11 +530,11 @@ export function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, ca
   const radioLines = hasRadio ? radioCheckLines(radioBody) : [];
 
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, hits: outcome.hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}) }));
-  } else if (outcome.hits.length === 0 && outcome.unprovenanced.length === 0 && (outcome.core ?? []).length === 0 && radioLines.length === 0) {
+    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(anachronism?.notice !== undefined ? { anachronism: { notice: anachronism.notice } } : {}), ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}) }));
+  } else if (hits.length === 0 && outcome.unprovenanced.length === 0 && (outcome.core ?? []).length === 0 && radioLines.length === 0) {
     console.log("no hits");
   } else {
-    for (const hit of outcome.hits) {
+    for (const hit of hits) {
       const detail = hit.detail !== undefined ? ` (${hit.detail})` : "";
       console.log(`${hit.path}:${hit.line} ${hit.rule} — ${hit.excerpt}${detail}`);
     }
