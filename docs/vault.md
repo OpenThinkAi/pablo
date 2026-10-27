@@ -111,8 +111,9 @@ as the fix, which writes only the marker into an existing work.
 ## Voice: what the writer is told
 
 Every drafting prompt carries, in order: `style/` (both files), then the rule sections
-of the work's `STYLE.md` (its ground rules, point of view and voice). The setting and
-period facts section goes in as its own slice. A work's rules add to the shared ones;
+of the work's `STYLE.md` (its ground rules, point of view and voice). The period facts
+go in as their own slice: the rows of `facts/period.md` dated on or before the unit's story
+date (and every undated row), then the `STYLE.md` setting and period facts section. A work's rules add to the shared ones;
 they never remove them.
 
 A work made before the rename keeps its rules in `QWEN.md`, which pablo still reads when there is

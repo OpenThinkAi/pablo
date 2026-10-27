@@ -28,7 +28,10 @@ import {
   planBeatsFor,
   readDraftingInputs,
 } from "@openthink/pablo-core";
+import { existsSync, readFileSync } from "node:fs";
+import { mentions, NAMES_FILE, parseNameMap, swapNames } from "../distill";
 import type { Marker } from "../marker";
+import { realNamesOf } from "../marker";
 import { NOVEL_ID } from "../outputs/novel/units";
 import { joinSources, layerOf, mergeVoice, packVoice, resolveVoiceLayers } from "../voice-layers";
 
@@ -125,6 +128,10 @@ export function buildChapterPack(
  * `never.md` and exemplars their own slices. The rules file's text is the
  * reader's (`inputs.workRules`), which keeps the period facts in their own
  * slice. Which layers were used rides on the pack to the dry run and receipt.
+ *
+ * Period facts (AGT-2110, D-10): the reader has already filtered `facts/period.md` to the unit's date. On a
+ * `realNames: false` work the facts' research names are swapped through `research/names.md` (read here, never
+ * sent), and any slice still naming one is a refusal.
  */
 export function packFromInputs(
   vaultRoot: string,
@@ -147,9 +154,18 @@ export function packFromInputs(
     ...(hasRulesFile && inputs.workRules !== undefined ? [inputs.workRules] : []),
   ]);
 
+  // A `realNames: false` work (AGT-2110, D-10): the period facts' research names are swapped for the bible's, as
+  // distillation already does, so a hand-edited `facts/period.md` cannot carry one either.
+  const nameMap = realNamesOf(options.marker) ? new Map<string, string>() : readNameMap(workDir);
+  const distilledFacts =
+    inputs.distilledFacts === undefined || nameMap.size === 0
+      ? inputs.distilledFacts
+      : { ...inputs.distilledFacts, facts: inputs.distilledFacts.facts.map((f) => ({ ...f, fact: swapNames(f.fact, nameMap) })) };
+
   // `inputs.style` (the reader's `style/`) is replaced: the resolver's vault layer reads the same files.
   const filtered: DraftingInputs = {
     ...inputs,
+    ...(distilledFacts === undefined ? {} : { distilledFacts }),
     style: filterVoice(mergeVoice(below).rules),
     workRules,
     outputRules: outputPiece?.rules[0],
@@ -172,6 +188,17 @@ export function packFromInputs(
     };
   }
 
+  const named = findResearchName(pack, nameMap);
+  if (named !== undefined) {
+    return {
+      ok: false,
+      code: 2,
+      message:
+        `pablo: refusing to draft — slice "${named.slice}" (${named.source ?? "built in"}) names "${named.name}", ` +
+        `a research name ${NAMES_FILE} maps to "${named.to}"; this work sets realNames: false, so use the bible's name there`,
+    };
+  }
+
   const leak = findOtherOutputSlice(pack, vaultRoot, workDir, output);
   if (leak !== undefined) {
     return {
@@ -184,6 +211,25 @@ export function packFromInputs(
   }
 
   return { ok: true, pack, inputs: filtered };
+}
+
+/** `research/names.md` (research name to bible name), or an empty map when the work has none. Read, never sent. */
+function readNameMap(workDir: string): Map<string, string> {
+  const path = join(workDir, NAMES_FILE);
+  return existsSync(path) ? parseNameMap(readFileSync(path, "utf8")) : new Map();
+}
+
+/** The first slice, in prompt order, naming a research name `nameMap` maps away (AGT-2110), or `undefined`. */
+function findResearchName(
+  pack: Pack,
+  nameMap: ReadonlyMap<string, string>,
+): { slice: string; source: string | undefined; name: string; to: string } | undefined {
+  for (const slice of pack.slices) {
+    for (const [name, to] of nameMap) {
+      if (mentions(slice.text, name)) return { slice: slice.name, source: slice.source, name, to };
+    }
+  }
+  return undefined;
 }
 
 /**

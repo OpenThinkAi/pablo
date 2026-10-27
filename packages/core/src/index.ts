@@ -9,6 +9,16 @@ export { joinManuscript, joinParagraphs, joinSentences, splitManuscript, splitSe
 export type { FactEntry, FactLine, FactScan, Provenance } from "./facts";
 export { establishedByOf, formatFactLine, formatProvenance, parseFactLine, scanFacts, unitTag, withProvenance } from "./facts";
 export * from "./review-map";
+export type { PeriodFact } from "./period-facts";
+export {
+  PERIOD_FACTS_FILE,
+  factHoldsBy,
+  parsePeriodFacts,
+  periodFactsAt,
+  renderPeriodFactLine,
+  splitTableRow,
+  storyDateKey,
+} from "./period-facts";
 export {
   BEATS_FILE,
   FACTS_FILE,

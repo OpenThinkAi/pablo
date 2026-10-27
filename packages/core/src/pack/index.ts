@@ -1,6 +1,7 @@
 export type {
   AssembleOptions,
   BeatRow,
+  DistilledFacts,
   DraftingInputs,
   Pack,
   PackKind,
@@ -65,6 +66,7 @@ export {
   parseWorkTitle,
   planBeatsFor,
   PERIOD_FACTS_SECTION,
+  readDistilledFacts,
   readDraftingInputs,
   readStyle,
   readTextSource,

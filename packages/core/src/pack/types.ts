@@ -9,6 +9,7 @@
 
 import type { Document, Span } from "../document";
 import type { OutputMode } from "../providers/types";
+import type { PeriodFact } from "../period-facts";
 import type { TokenEstimator } from "./estimate";
 
 /** The shapes of prompt pablo assembles today. */
@@ -67,6 +68,11 @@ export interface Pack {
    * prompt, so not part of the hash.
    */
   readonly voiceLayers?: PackVoice | undefined;
+  /**
+   * How many of `facts/period.md`'s rows the prompt carries (AGT-2110): the rows the unit's date let in, less any
+   * the budget cut. Present on a drafting pack whose work has the file; the receipt's `period_facts`.
+   */
+  readonly periodFacts?: number | undefined;
 }
 
 /** One piece of the layered voice a pack carries, as a receipt shows it. */
@@ -94,6 +100,13 @@ export interface PackVoiceMissing {
 export interface PackVoice {
   readonly layers: readonly PackVoiceLayer[];
   readonly missing: readonly PackVoiceMissing[];
+}
+
+/** The rows of `facts/period.md` a drafting pack carries (AGT-2110). */
+export interface DistilledFacts {
+  /** The file's path as the table and the receipt show it (vault-relative). */
+  readonly path: string;
+  readonly facts: readonly PeriodFact[];
 }
 
 /** A style or rules file read out of the vault, kept with its path for the table. */
@@ -192,8 +205,14 @@ export interface DraftingInputs {
   readonly exemplars?: readonly TextSource[] | undefined;
   /** Which layers `style`, `workRules`, `outputRules`, `never` and `exemplars` came from, for the receipt. */
   readonly voiceLayers?: PackVoice | undefined;
-  /** The work's period and place facts, usually a section of its `STYLE.md`. */
+  /** The work's own period and place section of its `STYLE.md`, when it has one; sent after `distilledFacts`. */
   readonly periodFacts?: TextSource | undefined;
+  /**
+   * `facts/period.md` (AGT-2110, D-10): the distilled, sourced period facts this unit may rely on, already filtered
+   * to the unit's story date (`periodFactsAt`). Present whenever the work has the file, even with no row left.
+   * The source note of each row is never sent; only the fact and its date.
+   */
+  readonly distilledFacts?: DistilledFacts | undefined;
   /** `bible/characters/*`: who exists. */
   readonly cast?: TextSource | undefined;
   /** `bible/places.md`. */

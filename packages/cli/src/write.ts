@@ -429,6 +429,8 @@ export async function runWrite(
         adjustments: pack.adjustments,
         // The layered voice (AGT-2139): every layer used, lowest first, and any voice pablo.json names that was not found.
         ...(pack.voiceLayers === undefined ? {} : { voiceLayers: pack.voiceLayers }),
+        // AGT-2110: how many facts/period.md rows the prompt carries, when the work has the file.
+        ...(pack.periodFacts === undefined ? {} : { periodFacts: pack.periodFacts }),
       };
       console.log(JSON.stringify(body));
     } else {
