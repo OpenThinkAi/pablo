@@ -198,6 +198,11 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "editor.around_paragraph", states: ["select"], prefix: "a", key: "p", label: "around paragraph", description: "Select the paragraph under the cursor and the blank line after it.", do: cmd("editor.around_paragraph") },
   { id: "editor.around_quote", states: ["select"], prefix: "a", key: '"', label: "around quotes", description: "Select the double quotes around the cursor and what is inside.", do: cmd("editor.around_quote") },
   { id: "editor.around_paren", states: ["select"], prefix: "a", key: "(", label: "around parentheses", description: "Select the parentheses around the cursor and what is inside.", do: cmd("editor.around_paren") },
+  // search and replace (AGT-2172, search.ts)
+  { id: "editor.search", states: MODAL, key: "/", label: "search", description: "Search forward: type a query (case ignored unless it has a capital), Enter jumps to the next match and highlights them all.", do: cmd("editor.search") },
+  { id: "editor.search_next", states: MODAL, key: "n", label: "next match", description: "Go to the next match of the last search, wrapping round at the end.", do: cmd("editor.search_next") },
+  { id: "editor.search_prev", states: MODAL, key: "N", label: "previous match", description: "Go to the previous match of the last search, wrapping round at the start.", do: cmd("editor.search_prev") },
+  { id: "editor.search_replace", states: MODAL, key: "R", label: "replace", description: "Replace: type what to find, then what to put there. In select mode it replaces within the selection, else across the whole text; Ctrl+Z undoes it in one step.", do: cmd("editor.search_replace") },
 ];
 
 // ---------------------------------------------------------------- `r`: the planning and research verbs, as data

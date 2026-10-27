@@ -13,6 +13,7 @@ import { modeOfKey, toggled, NO_MODES, type Modes } from "./edit-modes";
 import { openText, paneHits, paneView, saveText, savedEdit, type EditText, type PaneSession } from "./edit-pane";
 import { DEFAULT_KEYMAP, type Keymap } from "./keys";
 import { modalKey, modeOf, MODE_TAG } from "./modal";
+import { promptKey, promptLine, searchStatus } from "./search";
 import type { CheckHit } from "./hits";
 import { clean } from "./sanitize";
 import { paneEsc, type Action, type EditPane, type Pending } from "./state";
@@ -83,6 +84,8 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
       return void dispatch({ type: "pane.close" });
     }
     if (phase === "opening") return;
+    const typing = promptKey(text, input, key);
+    if (typing) { for (const action of typing) dispatch(action); return; }
     // Focus and typewriter work in every mode (a ctrl key is never text).
     const toggle = modeOfKey(token, keymap);
     if (toggle) { const next = toggled(modes, toggle); dispatch({ type: "modes.set", modes: next }); return onModes?.(next); }
@@ -98,10 +101,12 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
 
   const hits = useMemo(() => (text ? paneHits(text, file, checks) : new Map<number, CheckHit[]>()), [text, file, checks]);
   // The scroll is the model's `pane.top`: drawing reads it, and the effect below records where the draw put it.
-  const view = text ? paneView(text, inner, rows, hits, { top, focus: modes.focus, typewriter: modes.typewriter }) : { rows: [], top };
+  const prompt = text?.prompt ?? null;
+  const view = text ? paneView(text, inner, prompt ? Math.max(1, rows - 1) : rows, hits, { top, focus: modes.focus, typewriter: modes.typewriter }) : { rows: [], top };
   useEffect(() => { if (view.top !== top) dispatch({ type: "pane.scroll", top: view.top }); });
   const shown = view.rows;
-  const title = ` ${text ? `${MODE_TAG[modeOf(text)]} ` : ""}${clean(file)}${text?.dirty ? " [+]" : ""}${branch ? ` · ${clean(branch)}` : ""}${phase === "saving" ? (pane.auto ? " · autosaving…" : " · saving…") : phase === "opening" ? " · opening…" : ""}${modes.focus ? " · focus" : ""}${modes.typewriter ? " · typewriter" : ""}`;
+  const status = text ? searchStatus(text) : "";
+  const title = ` ${text ? `${MODE_TAG[modeOf(text)]} ` : ""}${clean(file)}${text?.dirty ? " [+]" : ""}${status ? ` · ${clean(status)}` : ""}${branch ? ` · ${clean(branch)}` : ""}${phase === "saving" ? (pane.auto ? " · autosaving…" : " · saving…") : phase === "opening" ? " · opening…" : ""}${modes.focus ? " · focus" : ""}${modes.typewriter ? " · typewriter" : ""}`;
   return (
     <Box flexDirection="column" width={width} height={height}>
       <Text wrap="truncate" bold={text?.dirty === true} dimColor={text?.dirty !== true}>{title}</Text>
@@ -116,7 +121,7 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
         if (row.parts) {
           return (
             <Text key={i} wrap="truncate" dimColor={row.dim === true}>
-              {" "}{row.parts.map((p, j) => (p.cursor ? <Text key={j} inverse>{p.text}</Text> : p.sel ? <Text key={j} backgroundColor="gray">{p.text}</Text> : p.text))}
+              {" "}{row.parts.map((p, j) => (p.cursor ? <Text key={j} inverse>{p.text}</Text> : p.match ? <Text key={j} color="yellow" underline backgroundColor={p.sel ? "gray" : undefined}>{p.text}</Text> : p.sel ? <Text key={j} backgroundColor="gray">{p.text}</Text> : p.text))}
             </Text>
           );
         }
@@ -129,6 +134,7 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
         }
         return <Text key={i} wrap="truncate" dimColor={row.dim === true}>{` ${row.text}`}</Text>;
       })}
+      {prompt ? <Text wrap="truncate">{" "}{clean(promptLine(prompt))}<Text inverse>{" "}</Text></Text> : null}
     </Box>
   );
 }
