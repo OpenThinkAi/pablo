@@ -249,9 +249,15 @@ model sees them; a selection that stops mid-line keeps the rest of that line aro
 Keys are data (`keys.ts`), copied from prview's key map and free to drift from it. A row has an id, the states it acts
 in (`rail`, `main`, `content`, narrowed by `needs`: in a `review`, outside one (`book`), or with the `content` area
 open), a primary key, an optional secondary key, a label and a `do`: a model action, or a `Command` for the layer above
-(`quit` is the app's; the rest reach `onCommand`). `a`, `f`, `v`, `g` are prefixes: a row with `prefix` is that
+(`quit` is the app's; the rest reach `onCommand`). `a`, `f`, `v`, `g`, `r` are prefixes: a row with `prefix` is that
 prefix's second key, and the key panel shows the second keys while the prefix is pending. `Esc` is not a row: it is
-always the model's `escape`. `Tab` is fixed. The panel lists exactly the rows that act in the state, because it reads
+always the model's `escape`. `Tab` is fixed.
+
+`r` runs the planning and research verbs (AGT-2178), each its own row in `keys.ts`: `r c` `save` a core doc, `r p` `research plan`,
+`r s` `research save`, `r w` `research waive`, `r l` `research link`, `r d` `research distill`, `r f` `fact record`. A verb that takes
+args asks for one line in the content area (the hint says its shape; Enter runs it, Esc cancels); `r p` and `r d` run at once.
+The `planner` prop (cli.ts builds it from the same in-project functions the verbs call, `screen-planning.ts`) runs them, each on
+a `plan/` branch for review; without one a key says it is not available. The panel still lists exactly what acts. The panel lists exactly the rows that act in the state, because it reads
 the same rows the key handler resolves through (`chord.ts`).
 
 Overrides live in `$XDG_CONFIG_HOME/pablo/config.json` (default `~/.config/pablo/config.json`) as `"keys": { "rail.down": "n", "main.page_down": { "primary": "pgdn",

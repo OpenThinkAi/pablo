@@ -59,6 +59,7 @@ import { screenEditor } from "./edit-session";
 import { screenCommenter, screenFinisher } from "./review-finish";
 import { screenReviser } from "./screen-revise";
 import { screenVoicer } from "./screen-voice";
+import { screenPlanner } from "./screen-planning";
 import { screenWriter } from "./screen-write";
 import { screenRefresh } from "./screen-refresh";
 import { deriveCliOptions, notesWith, publishOutput, runVoiceEdit, runVoiceList, runVoiceRemove, runVoiceRule, runVoiceUse, shareWith, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
@@ -1417,6 +1418,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         ...(vault.ok ? { checks: screenChecks(vault.path) } : {}),
         // `a w` writes the selected chapter through the same `runWrite` the verb uses (AGT-1542).
         ...(vault.ok ? { writer: screenWriter(vault.path, screen.dir) } : {}),
+        // `r ...` runs the planning and research verbs on a `plan/` branch (AGT-2178).
+        ...(vault.ok ? { planner: screenPlanner(vault.path, screen.dir) } : {}),
         // `a r` revises the selected sentences; taking the candidate commits it on a revise/ branch (AGT-1544).
         ...(vault.ok ? { reviser: screenReviser(vault.path, screen.dir) } : {}),
         // `a v` adds the selected sentences to the project's voice: flagged, or kept as an exemplar (AGT-1547).

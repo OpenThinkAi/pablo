@@ -20,6 +20,11 @@ export type WriteResult =
   | { readonly ok: true; readonly branch: string; readonly lines: readonly string[] }
   | { readonly ok: false; readonly message: string; readonly missing: readonly string[] };
 /** `unit` of `output` (`write --output radio --unit 3`); a writer that only knows the novel ignores `output`. */
+/** What a planning or research verb run from the screen (`r ...`, AGT-2178) gives back: what it did, or why not. */
+export type PlanResult = { readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
+/** Runs the verb of key row `id` on the typed `line` (empty for a verb that takes none); the CLI's `screenPlanner`. */
+export type Planner = (id: string, line: string) => Promise<PlanResult>;
+
 export type Writer = (unit: number, progress: (line: string) => void, output?: string) => Promise<WriteResult>;
 
 /** What `a v` came to: lines saying where the sentences were written, or why they were not. */
@@ -71,6 +76,7 @@ export interface ScreenOptions {
   readonly checks?: (file: string, text: string) => readonly CheckHit[];
   /** `a w`: writes a chapter (the CLI's `runWrite`, passed in from cli.ts) and says what came of it (AGT-1542). */
   readonly writer?: Writer;
+  readonly planner?: Planner;
   /** `a r`: revises the selected sentences and commits the taken candidate on a `revise/` branch (the CLI's `screenReviser`, passed in; AGT-1544). */
   readonly reviser?: Reviser;
   /** `a v`: flags the selected sentences in the voice, keeps them as an exemplar, or writes a typed rule (the CLI's `screenVoicer`, passed in from cli.ts; AGT-1547). */
@@ -120,7 +126,7 @@ export async function runScreen(options: ScreenOptions): Promise<number> {
         stdout.write(ENTER_ALT);
       }
     });
-    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} {...(options.fileOf ? { fileOf: options.fileOf } : {})} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} {...(options.refresh ? { refresh: options.refresh } : {})} />, {
+    const app = render(<App title={options.title} format={options.format} drafted={drafted} total={total} book={book} keymap={keymap} branches={options.branches} diffOf={options.diffOf} {...(options.fileOf ? { fileOf: options.fileOf } : {})} commentSaver={options.commentSaver} commentsOf={options.commentsOf} editor={loadEditor()} load={load} checks={options.checks} writer={options.writer} {...(options.planner ? { planner: options.planner } : {})} reviser={options.reviser} finisher={options.finisher} voicer={options.voicer} {...(editSession ? { editSession } : {})} {...(options.composer ? { composer: options.composer } : {})} {...(options.refresh ? { refresh: options.refresh } : {})} />, {
       exitOnCtrlC: true,
       stdout,
       ...(options.stdin ? { stdin: options.stdin } : {}),
