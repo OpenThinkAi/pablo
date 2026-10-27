@@ -24,6 +24,7 @@ src/layout.ts    the layout geometry, pure: region sizes at a terminal size, tex
 src/status.ts    the status area's fields (format, progress, branch, comment counts) and which drop when narrow
 src/resize.ts    the terminal size as state (below the model: plumbing, not where the author is)
 src/sanitize.ts  strips control characters from text that did not come from the keyboard
+src/buffer.ts    the editor's own text buffer (D-23), pure: grapheme cursor, cell-width soft-wrap, word-grouped undo
 src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
 src/source.ts    reads the file behind a rail row id from the project (the loader `App` is given as `load`)
 src/index.ts     the package's public surface (`runScreen`); the CLI imports it lazily, only for bare `pablo`
