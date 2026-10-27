@@ -145,7 +145,7 @@ track's choice with any shipped policy.
 
 pablo never writes manuscript changes to `main` directly. A draft goes to `draft/chNN`
 (`draft/story`, `draft/radio-epNN` for other outputs), a revision to `revise/<id>`, a
-planning change from the agent to `plan/<id>`, a reader's notes to `reader/<round>`.
+planning change from the agent to `plan/<id>`.
 Read them with `git diff`, or in the screen's review mode (bare `pablo`). Accept a
 draft with `pablo merge`; accept the other kinds in the screen's review mode, which
 also lets you take part of a change. Both run the after-write steps. `pablo status`

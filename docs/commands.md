@@ -539,7 +539,7 @@ action, or `--branch` (with `--passage`), which commit it on a `revise/<id>` bra
 
 ## Reviewing and accepting
 
-Drafts, revisions, planning saves from an agent session, and reader notes each land
+Drafts, revisions, and planning saves from an agent session each land
 on their own branch:
 
 | Branch | Made by |
@@ -548,7 +548,7 @@ on their own branch:
 | `revise/<id>` | revising in the screen, or the MCP `revise` tool with `branch` |
 | `edit/...` | editing by hand in the screen |
 | `plan/...` | an agent session's planning writes; `promote`; `research save`; `fact record`; `agent --tag-facts` |
-| `reader/<round>` | nothing now; left over from the removed reading rounds, kept so an old vault still lists it |
+| `reader/<round>` | nothing now; left over from an earlier version, kept so an old vault still lists it |
 
 `status` and `resume` list them under `waiting`.
 
