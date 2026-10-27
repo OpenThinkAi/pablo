@@ -6,7 +6,7 @@ every change is a span operation, and the author is one person working on a
 manuscript — not a developer reading logs.
 
 The canonical design doc is the `ai-terminal` project's design doc in pm
-(`pm project show ai-terminal`; named docs `--doc prose`, `--doc review-tray`).
+(`pm project show ai-terminal`; named docs `--doc prose`).
 The binding decisions there are the product contract; a diff that contradicts
 one is `denied` unless the diff also amends the doc.
 

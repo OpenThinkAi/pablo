@@ -2,7 +2,7 @@
 
 This file is for working **on** pablo (contributors and their agents). To **use**
 pablo, read `README.md` and `docs/` (getting-started, configuration, vault,
-commands, agents, readers).
+commands, agents).
 
 **pablo is a CLI that writes, with a full-terminal screen of its own** (decided
 2026-10-01, pm project `ai-terminal`, `--doc screen`; it supersedes the
@@ -178,8 +178,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 -> work (`pablo.json` `voice` entries + `STYLE.md`) -> output
                 (`outputs/<type>/RULES.md`), each piece labelled with where
                 it came from and absent layers listed in `missing`.
-                `install-reader.sh` at the repo root is the reader cleanup script
-                (AGT-1590). The output registry (AGT-1668): `src/outputs/registry.ts`'s
+                The output registry (AGT-1668): `src/outputs/registry.ts`'s
                 `OUTPUTS` is the single source of output types, like `VERBS`;
                 each type is a directory (`src/outputs/novel/`) exporting an
                 `OutputDefinition` (`src/outputs/types.ts`: artifact dir,
@@ -603,11 +602,10 @@ implemented, and the current `packages/tui` is the Ink screen rebuilt from
 material (the pack assembler, the vault reader, the provider adapters, the
 config loader) versus what was cut outright (the screen, the CriticMarkup
 parser and renderer, span verbs). The old **review queue** (a JSONL log the
-first `pablo review` read, AGT-1255..1263) and the author's **menu-bar tray**
+first `pablo review` read, AGT-1255..1263) and the author's menu-bar app
 that watched it were both retired 2026-10-01 (AGT-1520, AGT-1541; the `screen`
 design doc's decisions supersede them). One name came back for a new thing:
-`pablo review` is now the radio review player (in `packages/cli` above); the
-reader's `pablo tray` was removed in AGT-2091. Every manuscript change is a git branch,
+`pablo review` is now the radio review player (in `packages/cli` above). Every manuscript change is a git branch,
 the screen's review mode is where the author decides, and `pablo status` /
 `pablo resume` report the branches waiting for review.
 
