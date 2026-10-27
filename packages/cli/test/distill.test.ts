@@ -190,7 +190,7 @@ test("distill_facts is an MCP tool running the same distiller", async () => {
 
 test("the research intent is planning-kind: unmapped, it goes to the first non-local provider", () => {
   const config = parseConfig(
-    JSON.stringify({ providers: { anthropic: { kind: "anthropic", key: "env:X" } } }),
+    JSON.stringify({ providers: { anthropic: { kind: "anthropic", endpoint: "https://api.anthropic.com/v1", model: "test-claude", key: "env:X" } } }),
     "config.json",
   );
   expect(RESEARCH_INTENT).toEqual({ name: "research", kind: "planning" });

@@ -30,10 +30,23 @@ pablo writes prose with one request per chapter to a model you configure. It doe
 not need one for planning or checking, so you can do steps 3 to 5 before this is
 working.
 
-**A local model** (the default). Any server that speaks the OpenAI chat API works:
+pablo ships with no model: no endpoint, no model id. Until you configure one, any
+verb that needs a model refuses and points you here. Write a documented starter
+config, then edit it:
+
+```sh
+pablo init --config                         # writes ~/.config/pablo/config.json
+pablo config set providers.local.model the-model-id-your-server-lists
+pablo config test                           # sends one tiny request per provider
+```
+
+The starter has two examples to edit or delete: a local OpenAI-compatible server and
+Anthropic. It never contains a key, only where to find one.
+
+**A local model.** Any server that speaks the OpenAI chat API works:
 [LM Studio](https://lmstudio.ai), [Ollama](https://ollama.com), llama.cpp's server or
-`mlx_lm.server`. With no config file at all, pablo expects one at
-`http://127.0.0.1:8002/v1`. To use yours, create `~/.config/pablo/config.json`:
+`mlx_lm.server`. Set the `local` provider's `endpoint` to its base URL and `model` to
+the id it serves:
 
 ```json
 {
@@ -48,8 +61,7 @@ working.
 ```
 
 **A hosted model instead.** Put your key in the environment and route the prose
-work to Anthropic. The `intents` block matters: without it, drafting still goes to
-the local endpoint.
+work to Anthropic. The `intents` block says which provider each request uses.
 
 ```sh
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -58,7 +70,11 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```json
 {
   "providers": {
-    "anthropic": { "kind": "anthropic" }
+    "anthropic": {
+      "kind": "anthropic",
+      "endpoint": "https://api.anthropic.com/v1",
+      "model": "the-claude-model-id-you-use"
+    }
   },
   "default": "anthropic",
   "intents": {

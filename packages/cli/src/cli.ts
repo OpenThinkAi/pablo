@@ -31,6 +31,7 @@ import { mergeDraftInProject } from "./novel/merge";
 import { initBody, initWork } from "./init";
 import type { TrackChoice } from "./tracks/infer";
 import type { InitOk, InitRefusal } from "./init";
+import { missingConfigNotice, writeStarterConfig } from "./starter-config";
 import { outputsLabel, readMarker } from "./marker";
 import type { Composer } from "@openthink/pablo-tui";
 import { loadConfig } from "@openthink/pablo-core";
@@ -155,6 +156,8 @@ function helpText(): string {
     "  pablo init --track <t> <slug> \"<Title>\"  a work with only its track's core files, no output yet",
     "                                            (--track: fiction, historical-fiction, nonfiction)",
     "  pablo init --adopt --project <slug>      write only the marker into an existing work",
+    "  pablo init --config                      write a documented starter model config (never",
+    "                                            overwrites; pablo has no built-in model)",
     "  pablo status --project <slug>            the story core's stages, then each output's",
     "  pablo status --project <slug> --for \"<output> N\"",
     "                                            {ready, missing[]} for one unit (\"chapter N\" is",
@@ -162,7 +165,7 @@ function helpText(): string {
     "                                            lists what the episode still needs (roles to",
     "                                            cast, render, mix, flags, the casting side)",
     "  pablo write --project <slug> [--output <type>] --unit N [--dry-run]",
-    "                                            draft unit N of an output on the local model;",
+    "                                            draft unit N of an output on the configured writer model;",
     "                                            --chapter N is --output novel --unit N; a work",
     "                                            with several outputs needs --output;",
     "                                            --output narrated [--voices characters] reads",
@@ -281,7 +284,7 @@ function helpText(): string {
     "  pablo revise --project <slug> --file F",
     '              (--passage "<quoted text>" | --start N --end N)',
     '              --instruction "<text>" [--json] [--dry-run]',
-    "                                            send one located passage to the local model;",
+    "                                            send one located passage to the configured writer model;",
     "                                            returns {candidate, span, receipt} and writes",
     "                                            nothing — the file is never touched",
     '  pablo agent --project <slug> [--new] "<message>"',
@@ -439,6 +442,8 @@ interface ParsedArgs {
   /** `--version` / `-v` (AGT-1597): print the installed version. */
   readonly version: boolean;
   readonly adopt: boolean;
+  /** `init --config`: write the documented starter model config (AGT-2131). */
+  readonly starterConfig: boolean;
   /** `agent --tag-facts` (AGT-1570): tag every untagged fact on a plan branch. */
   readonly tagFacts: boolean;
   /** `status --for "chapter N"` (also accepts `chapter-N`, `ch N`, or bare `N`). */
@@ -544,6 +549,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       help: { type: "boolean", default: false },
       version: { type: "boolean", short: "v", default: false },
       adopt: { type: "boolean", default: false },
+      config: { type: "boolean", default: false },
       "tag-facts": { type: "boolean", default: false },
       new: { type: "boolean", default: false },
       list: { type: "boolean", default: false },
@@ -568,6 +574,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     help: values["help"] === true,
     version: values["version"] === true,
     adopt: values["adopt"] === true,
+    starterConfig: values["config"] === true,
     tagFacts: values["tag-facts"] === true,
     new: values["new"] === true,
     list: values["list"] === true,
@@ -882,18 +889,19 @@ function requireMarker(projectPath: string): Refusal | undefined {
   return marker.ok ? undefined : marker;
 }
 
-function emitInitResult(result: InitOk | InitRefusal | Refusal, json: boolean): number {
+function emitInitResult(result: InitOk | InitRefusal | Refusal, json: boolean, configNotice?: string): number {
   if (!result.ok) {
     emit({ ok: false, code: result.code, message: result.message, ...(result.tried === undefined ? {} : { tried: result.tried }) }, json);
     return result.code;
   }
 
   if (json) {
-    console.log(JSON.stringify(initBody(result)));
+    console.log(JSON.stringify({ ...initBody(result), ...(configNotice ? { configNotice } : {}) }));
   } else {
     const committedNote = result.committed ? " (committed)" : "";
     console.log(result.adoptedLine ?? `pablo: created ${result.path}${committedNote}`);
     if (result.notice) console.log(result.notice);
+    if (configNotice) console.log(configNotice);
   }
 
   return EXIT_OK;
@@ -906,12 +914,21 @@ function emitInitResult(result: InitOk | InitRefusal | Refusal, json: boolean): 
  * the positionals are `<format> <slug> "<Title>"`.
  */
 function runInit(args: ParsedArgs, cwd: string): number {
+  // `init --config` needs no vault: it writes the one global file (AGT-2131).
+  if (args.starterConfig) {
+    const written = writeStarterConfig(process.env);
+    if (args.json) console.log(JSON.stringify({ ok: written.ok, path: written.path, message: written.message }));
+    else if (written.ok) console.log(written.message);
+    else console.error(written.message);
+    return written.ok ? EXIT_OK : EXIT_REFUSED;
+  }
+
   const coreOnly = args.track !== undefined && args.rest.length === 2;
   const [first, second, third] = args.rest;
   const request = coreOnly
     ? { slug: first, title: second, track: args.track }
     : { output: first, slug: second, title: third, track: args.track };
-  return emitInitResult(initWork(cwd, process.env, { ...request, adopt: args.adopt, project: args.project }), args.json);
+  return emitInitResult(initWork(cwd, process.env, { ...request, adopt: args.adopt, project: args.project }), args.json, missingConfigNotice(process.env));
 }
 
 /**

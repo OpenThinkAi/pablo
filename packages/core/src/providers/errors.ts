@@ -10,6 +10,23 @@ export class ProviderConfigError extends Error {
 }
 
 /**
+ * A verb needed a model and the config names none (AGT-2131, D-13). pablo has
+ * no built-in endpoint or model id, so a fresh install refuses here, pointing
+ * at `pablo config` and the starter file, before any request is made.
+ */
+export class NoModelConfiguredError extends ProviderConfigError {
+  override readonly name = "NoModelConfiguredError";
+
+  constructor(intent?: string) {
+    super(
+      `pablo: no model is configured${intent === undefined ? "" : ` for "${intent}"`} — pablo ships with no default endpoint or model. ` +
+        `Run \`pablo init --config\` to write a starter config, then edit it with \`pablo config set\` ` +
+        `(\`pablo config show\` prints what is set; see docs/configuration.md).`,
+    );
+  }
+}
+
+/**
  * The endpoint sent nothing for `timeoutMs`. The renderer shows this and
  * offers a retry: the request is unchanged and adapters are pure functions of
  * it, so retrying is the same one-line call that produced the error.
@@ -61,7 +78,7 @@ export class EndpointUnreachable extends ProviderResponseError {
     this.message =
       `pablo: could not reach the model at ${endpoint} (${cause}) — is the server running? ` +
       (local
-        ? `If you have no local model, route the writing intents to another provider with "intents" in the config (see docs/configuration.md).`
+        ? `If you have no local model, route the writing intents to another provider with "intents" in the config (\`pablo config show\`, docs/configuration.md).`
         : `Check the endpoint and your network, or point at another provider.`);
   }
 }

@@ -59,7 +59,8 @@ function setup(o: Setup = {}): { deps: WritingDoctorDeps; root: string; pings: s
   return { deps, root, pings };
 }
 
-const FULL = { web: { search: { backend: "searxng", url: "http://127.0.0.1:1" } } };
+const LOCAL = { local: { endpoint: "http://127.0.0.1:8002/v1", model: "test-local-model", local: true } };
+const FULL = { providers: LOCAL, web: { search: { backend: "searxng", url: "http://127.0.0.1:1" } } };
 
 describe("doctor writing side (AGT-2146)", () => {
   test("everything ok exits ok", async () => {
@@ -75,12 +76,20 @@ describe("doctor writing side (AGT-2146)", () => {
     expect(pings).toEqual(["local"]);
   });
 
-  test("no config file and no search backend are warnings with a fix, not failures", async () => {
+  test("no config file is a warning, and with it no provider, which fails: pablo has no built-in model (AGT-2131)", async () => {
     const r = await runWritingDoctor(setup().deps);
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe(false);
     const warns = r.checks.filter((c) => c.status === "warn");
     expect(warns.map((c) => c.name)).toEqual(["config", "search"]);
     for (const w of warns) expect(w.fix).toBeTruthy();
+    expect(r.checks.find((c) => c.name === "providers")).toMatchObject({ status: "fail" });
+    expect(r.checks.find((c) => c.name === "providers")?.fix).toContain("pablo init --config");
+  });
+
+  test("a config with a provider and no search backend is only a warning", async () => {
+    const r = await runWritingDoctor(setup({ config: { providers: LOCAL } }).deps);
+    expect(r.ok).toBe(true);
+    expect(r.checks.filter((c) => c.status === "warn").map((c) => c.name)).toEqual(["search"]);
   });
 
   test("an invalid config fails with a fix and skips provider pings", async () => {

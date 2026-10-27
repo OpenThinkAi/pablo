@@ -19,6 +19,10 @@ import type { PromptWork } from "../src/harness/prompt";
 import { loopSpec } from "../src/harness/session";
 import type { HarnessQuery } from "../src/harness/session";
 import { readMarker } from "../src/marker";
+import { configTextWithTestDefaults, writeLocalConfig } from "./local-config";
+
+
+
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "pablo-harness-prompt-test-"));
@@ -27,6 +31,7 @@ cpSync(FIXTURE_VAULT, vault, { recursive: true });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const BASE_ENV = { PABLO_VAULT: vault, PATH: "/usr/bin:/bin", HOME: root, XDG_CONFIG_HOME: join(root, "config") };
+writeLocalConfig(join(root, "config"));
 
 /** A second work in the temp vault, named for a policy, with its own invented rules. */
 function work(slug: string, marker: Record<string, unknown>, rules?: string): string {
@@ -249,7 +254,7 @@ const quiet = () => ({ cwd: vault, env: BASE_ENV, stdout: { write: () => {} }, s
 test("pablo agent runs the session on the work's policy and rules", async () => {
   work("agent-hf", { policy: "historical-fiction" }, RULES);
   const { query, calls } = recordingQuery();
-  const code = await runAgent({ project: "agent-hf", message: "Where are we?", json: false }, quiet(), { query, readConfig: () => undefined });
+  const code = await runAgent({ project: "agent-hf", message: "Where are we?", json: false }, quiet(), { query, readConfig: () => configTextWithTestDefaults("{}") });
 
   expect(code).toBe(0);
   const prompt = calls[0]!.system;
@@ -265,7 +270,7 @@ test("pablo agent with an unshipped policy is refused before any session", async
   const { query, calls } = recordingQuery();
   let err = "";
   const ctx = { ...quiet(), stderr: { write: (t: string) => void (err += t) } };
-  expect(await runAgent({ project: "agent-unknown", message: "Hi", json: false }, ctx, { query, readConfig: () => undefined })).toBe(2);
+  expect(await runAgent({ project: "agent-unknown", message: "Hi", json: false }, ctx, { query, readConfig: () => configTextWithTestDefaults("{}") })).toBe(2);
   expect(err).toContain('"space-opera"');
   expect(calls).toHaveLength(0);
 });

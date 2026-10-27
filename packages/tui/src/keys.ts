@@ -100,7 +100,7 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   // ---- a: AI
   { id: "ai.plan", states: OUTSIDE, prefix: "a", key: "p", label: "planner", description: "Talk to the planner about the stage under the cursor.", do: cmd("ai.plan") },
   { id: "ai.compose", states: OUTSIDE, prefix: "a", key: "c", label: "compose", description: "Open the compose view: a full-screen conversation with pablo. Esc returns here with the session kept.", do: { type: "compose.open" } },
-  { id: "ai.write", states: OUTSIDE, needs: "book", prefix: "a", key: "w", label: "write chapter", description: "Write the selected chapter with the local writer.", do: cmd("ai.write") },
+  { id: "ai.write", states: OUTSIDE, needs: "book", prefix: "a", key: "w", label: "write chapter", description: "Write the selected chapter with the configured writer model.", do: cmd("ai.write") },
   { id: "ai.revise", states: MAIN, prefix: "a", key: "r", label: "revise", description: "Revise the selected sentences.", do: cmd("ai.revise") },
   { id: "ai.voice", states: MAIN, prefix: "a", key: "v", label: "voice", description: "Add the selected sentences to the voice (flag them, keep them as an exemplar), or type a rule for it.", do: cmd("ai.voice") },
 

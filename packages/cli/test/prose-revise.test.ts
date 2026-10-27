@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent, CompletionRequest, CompletionStats } from "@openthink/pablo-core";
 import { proseCore } from "../src/prose";
 import type { ProseCoreArgs, ProseDeps, ProseSendBody } from "../src/prose";
+import { writeLocalConfig } from "./local-config";
 
 /**
  * AGT-1244: `pablo prose --draft <file> --instruction "<text>"`, the revise
@@ -24,6 +25,10 @@ afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** A temp `XDG_CONFIG_HOME` holding the local test provider, so no call reads the machine's real config. */
+const CONFIG_HOME = mkdtempSync(join(tmpdir(), "pablo-prose-revise-config-"));
+writeLocalConfig(CONFIG_HOME);
 
 function tempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -122,7 +127,7 @@ test("--dry-run with --draft and --instruction shows both slices, in order, befo
 
   const outcome = await proseCore(
     baseArgs({ brief: briefPath, draft: draftPath, instruction: "Shorten it." }),
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
   );
 
   expect(outcome.exitCode).toBe(0);
@@ -142,7 +147,7 @@ test("a --dry-run with no --draft/--instruction never shows those slices", async
   const vault = tempVault();
   const briefPath = writeBrief(vault);
 
-  const outcome = await proseCore(baseArgs({ brief: briefPath }), { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } });
+  const outcome = await proseCore(baseArgs({ brief: briefPath }), { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } });
 
   const body = outcome.body as unknown as { slices: Array<{ name: string }> };
   const names = body.slices.map((s) => s.name);
@@ -160,7 +165,7 @@ test("--draft without --instruction refuses (exit 2)", async () => {
   const draftPath = join(vault, "prev.md");
   writeFileSync(draftPath, "Previous text.\n", "utf8");
 
-  const outcome = await proseCore(baseArgs({ brief: briefPath, draft: draftPath }), { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } });
+  const outcome = await proseCore(baseArgs({ brief: briefPath, draft: draftPath }), { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } });
 
   expect(outcome.exitCode).toBe(2);
   expect(outcome.body).toMatchObject({ ok: false, code: 2 });
@@ -173,7 +178,7 @@ test("--instruction without --draft refuses (exit 2)", async () => {
 
   const outcome = await proseCore(
     baseArgs({ brief: briefPath, instruction: "Shorten it." }),
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
   );
 
   expect(outcome.exitCode).toBe(2);
@@ -186,7 +191,7 @@ test("the --draft/--instruction pairing refusal fires even with no --voice or --
 
   const outcome = await proseCore(baseArgs({ voice: undefined, brief: undefined, draft: "x.md" }), {
     cwd: vault,
-    env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() },
+    env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME },
   });
 
   expect(outcome.exitCode).toBe(2);
@@ -204,7 +209,7 @@ test("the same voice, brief, draft and instruction give the same prompt_hash on 
   writeFileSync(draftPath, "The dock opens at seven, not six.\n", "utf8");
 
   const args = baseArgs({ brief: briefPath, draft: draftPath, instruction: "Shorten it." });
-  const ctx = { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } };
+  const ctx = { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } };
 
   const first = await proseCore(args, ctx);
   const second = await proseCore(args, ctx);
@@ -232,7 +237,7 @@ test("--draft with pablo frontmatter carries the draft's own prompt_hash as revi
 
   const outcome = await proseCore(
     { voice: "desk", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: undefined, force: false, draft: draftPath, instruction: "Shorten it." },
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
     noProgress(),
   );
 
@@ -250,7 +255,7 @@ test("--draft with no frontmatter at all carries revised_from: \"unknown\" (AC3)
 
   const outcome = await proseCore(
     { voice: "desk", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: undefined, force: false, draft: draftPath, instruction: "Shorten it." },
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
     noProgress(),
   );
 
@@ -266,7 +271,7 @@ test("a send with no --draft carries no revised_from field at all", async () => 
 
   const outcome = await proseCore(
     { voice: "desk", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: undefined, force: false, draft: undefined, instruction: undefined },
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
     noProgress(),
   );
 
@@ -293,7 +298,7 @@ test("--out on a revise call writes revised_from into the frontmatter (AC3)", as
 
   const outcome = await proseCore(
     { voice: "desk", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: outPath, force: false, draft: draftPath, instruction: "Shorten it." },
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
     noProgress(),
   );
 
@@ -317,7 +322,7 @@ test("--out pointing at the draft file itself refuses without --force, and --for
 
   const refused = await proseCore(
     { voice: "desk", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: draftPath, force: false, draft: draftPath, instruction: "Shorten it." },
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
     noProgress(),
   );
   expect(refused.exitCode).toBe(2);
@@ -325,7 +330,7 @@ test("--out pointing at the draft file itself refuses without --force, and --for
 
   const forced = await proseCore(
     { voice: "desk", brief: briefPath, context: [], format: undefined, words: undefined, dryRun: false, out: draftPath, force: true, draft: draftPath, instruction: "Shorten it." },
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
     noProgress(),
   );
   expect(forced.exitCode).toBe(0);
@@ -370,7 +375,7 @@ test("the sanitized instruction and the frontmatter-stripped draft body both app
       draft: draftPath,
       instruction: "Line one.\nLine two with a fake # heading.",
     },
-    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome() } },
+    { cwd: vault, env: { PABLO_VAULT: vault, XDG_STATE_HOME: tempStateHome(), XDG_CONFIG_HOME: CONFIG_HOME } },
     { adapter: capturing, now: () => new Date("2026-09-07T12:00:00.000Z"), stderr: { write: () => {} } },
   );
 

@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { EndpointHung, EndpointUnreachable, NoToolCallError, PREFERRED_OUTPUT, ProviderResponseError, createProviders, parseConfig } from "../src/index";
+import { EndpointHung, EndpointUnreachable, NoToolCallError, PREFERRED_OUTPUT, ProviderResponseError, createProviders } from "../src/index";
 import type { CompletionStats, Document, Intent, Providers } from "../src/index";
 import { startFakeEndpoint } from "./fake-endpoint";
 import type { FakeEndpoint, FakeEndpointOptions } from "./fake-endpoint";
+import { parseWithTestDefaults } from "./local-config";
 
 const running: FakeEndpoint[] = [];
 
@@ -17,7 +18,7 @@ function endpoint(options: FakeEndpointOptions = {}): FakeEndpoint {
 }
 
 function providersAt(url: string, local: Record<string, unknown> = {}): Providers {
-  const config = parseConfig(JSON.stringify({ providers: { local: { endpoint: url, model: "fake-writer", ...local } } }));
+  const config = parseWithTestDefaults(JSON.stringify({ providers: { local: { endpoint: url, model: "fake-writer", ...local } } }));
   return createProviders(config, { keys: { env: {} } });
 }
 
@@ -324,7 +325,7 @@ test("an endpoint that answers with an error says so, with its status", async ()
 
 test("a key is sent to a cloud provider and never invented for a local one", async () => {
   const fake = endpoint({ tokens: ["ok"], gapMs: 1 });
-  const config = parseConfig(
+  const config = parseWithTestDefaults(
     JSON.stringify({
       providers: { local: { endpoint: fake.url }, cloudy: { endpoint: fake.url, model: "cloud-model" } },
     }),
@@ -398,7 +399,7 @@ test("thinking stays the server's call for a hosted endpoint, and a config may t
 });
 
 test('a "thinking" that is not true or false is a config error', () => {
-  expect(() => parseConfig(JSON.stringify({ providers: { local: { thinking: "no" } } }))).toThrow(/"thinking" must be true or false/);
+  expect(() => parseWithTestDefaults(JSON.stringify({ providers: { local: { thinking: "no" } } }))).toThrow(/"thinking" must be true or false/);
 });
 
 test("a model that spends its whole budget thinking is named as such, not an empty answer", async () => {

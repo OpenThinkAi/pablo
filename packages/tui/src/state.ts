@@ -423,7 +423,7 @@ export function reviseContent(r: Revise): Content {
   if (r.reader) {
     const said = `${r.reader.reader}: "${r.reader.comment}"\nOn: ${r.reader.quoted}`;
     switch (r.phase) {
-      case "ask": return { kind: "revise", title: `Revise · ${r.reader.reader}'s note: tell Gemma what to revise here. Enter runs, Esc cancels`, body: `${said}\n\n› ${withCursor(r.instruction, r.cursor)}${note}` };
+      case "ask": return { kind: "revise", title: `Revise · ${r.reader.reader}'s note: tell the writer model what to revise here. Enter runs, Esc cancels`, body: `${said}\n\n› ${withCursor(r.instruction, r.cursor)}${note}` };
       case "running": return { kind: "revise", title: "Revising... Esc cancels", body: `${said}\n\nYou asked: ${r.instruction}\n\n${r.candidate || "waiting for the model..."}` };
       case "edit": return { kind: "revise", title: "Candidate: edit it, Enter takes it into the review, Esc discards", body: `${withCursor(r.candidate, r.cursor)}\n\n--- was ---\n${r.sentences.join(" ")}\n\n--- ${r.reader.reader} said ---\n${r.reader.comment}\n\n--- you asked ---\n${r.instruction}${note}` };
       case "taking": return { kind: "revise", title: "Taking the candidate...", body: r.candidate };
@@ -729,7 +729,7 @@ export function reduce(s: State, a: Action): State {
     case "revise.run": {
       const r = s.revise;
       if (r === null || r.phase !== "ask") return s;
-      if (r.instruction.trim() === "") return showRevise(s, { ...r, note: r.reader ? "Tell Gemma what to revise first: the note alone is not enough to go on." : "Say what should change first." }, false);
+      if (r.instruction.trim() === "") return showRevise(s, { ...r, note: r.reader ? "Tell the writer model what to revise first: the note alone is not enough to go on." : "Say what should change first." }, false);
       return showRevise(s, { ...r, phase: "running", candidate: "", note: "" }, true);
     }
     case "revise.partial":
@@ -766,7 +766,7 @@ export function reduce(s: State, a: Action): State {
         const dropped = Object.keys(s.marks).some((id) => id.startsWith(EDIT_ROW));
         return {
           ...s, revise: null, full: false, reviewGen: s.reviewGen + 1, marks,
-          content: writeContent(`Revised on ${a.branch}`, [...a.lines, "", "Gemma's version is now a change in this review, with the note under it: y accepts it, n rejects it.", ...(dropped ? ["the review reloaded: decide each change again"] : [])].join("\n")),
+          content: writeContent(`Revised on ${a.branch}`, [...a.lines, "", "The writer model's version is now a change in this review, with the note under it: y accepts it, n rejects it.", ...(dropped ? ["the review reloaded: decide each change again"] : [])].join("\n")),
           contentScroll: { ...s.contentScroll, scroll: 0, length: 0 },
         };
       }

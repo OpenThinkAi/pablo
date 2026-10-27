@@ -9,6 +9,9 @@ import type { ProgressSink, RunWriteDeps, WriteArgs } from "../src/write";
 import { runWrite } from "../src/write";
 import { worktreePath } from "../src/branch";
 import { mergeDraft } from "../src/novel/merge";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 /**
  * `runWrite`'s send path (AGT-1237) — exercised by calling it directly

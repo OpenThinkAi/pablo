@@ -8,6 +8,7 @@ import type { Adapter, CompletionEvent, CompletionStats } from "@openthink/pablo
 import { EndpointHung, normalizeOutput } from "@openthink/pablo-core";
 import { proseCore, runProse } from "../src/prose";
 import type { ProseDeps, ProseSendBody } from "../src/prose";
+import { writeLocalConfig } from "./local-config";
 
 /**
  * `pablo prose`'s send path (AGT-1242), exercised by calling `proseCore`
@@ -72,6 +73,7 @@ function tempVaultEnv(voiceName = "desk"): Env {
 
   const configHome = tempDir("pablo-prose-send-config-");
   const stateHome = tempDir("pablo-prose-send-state-");
+  writeLocalConfig(configHome);
 
   mkdirSync(join(vault, "voices", voiceName), { recursive: true });
   writeFileSync(join(vault, "voices", voiceName, "voice.md"), DESK_VOICE, "utf8");
@@ -392,6 +394,7 @@ test("with no vault at all the receipt lands in $XDG_STATE_HOME/pablo/receipts.j
   const cwd = tempDir("pablo-prose-send-novault-");
   const configHome = tempDir("pablo-prose-send-config-");
   const stateHome = tempDir("pablo-prose-send-state-");
+  writeLocalConfig(configHome);
   mkdirSync(join(configHome, "pablo", "voices", "desk"), { recursive: true });
   writeFileSync(join(configHome, "pablo", "voices", "desk", "voice.md"), DESK_VOICE, "utf8");
   const brief = join(cwd, "brief.md");

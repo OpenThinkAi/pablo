@@ -1,18 +1,19 @@
 import { expect, test } from "bun:test";
-import { ProviderConfigError, createProviders, defaultConfig, parseConfig, resolveRoute, route } from "../src/index";
+import { NoModelConfiguredError, ProviderConfigError, defaultConfig, createProviders,  resolveRoute, route } from "../src/index";
 import type { Intent, IntentKind } from "../src/index";
+import { localConfig, parseWithTestDefaults } from "./local-config";
 
 const intent = (kind: IntentKind, name: string = kind): Intent => ({ name, kind });
 
 const withCloud = () =>
-  parseConfig(
+  parseWithTestDefaults(
     JSON.stringify({
       providers: { anthropic: { endpoint: "https://api.anthropic.com/v1", model: "claude-opus-4-1" } },
     }),
   );
 
 test("with no config, every intent goes to the local writer", () => {
-  const config = defaultConfig();
+  const config = localConfig();
   for (const kind of ["planning", "drafting", "revising", "extraction"] as const) {
     expect(route(config, intent(kind))).toBe("local");
   }
@@ -27,7 +28,7 @@ test("once a cloud provider is configured, planning goes there and the rest stay
 });
 
 test("an intent named in the config overrides its kind's default", () => {
-  const config = parseConfig(
+  const config = parseWithTestDefaults(
     JSON.stringify({
       providers: { anthropic: { endpoint: "https://api.anthropic.com/v1", model: "claude-opus-4-1" } },
       intents: { "period-check": "anthropic", "outline-act": "local" },
@@ -48,7 +49,7 @@ test("the registry answers with the adapter an intent routes to", () => {
 });
 
 test("asking for a provider that is not configured names the ones that are", () => {
-  const providers = createProviders(defaultConfig());
+  const providers = createProviders(localConfig());
   expect(() => providers.adapter("openai")).toThrow(ProviderConfigError);
   expect(() => providers.adapter("openai")).toThrow(/configured providers are local/);
 });
@@ -56,7 +57,7 @@ test("asking for a provider that is not configured names the ones that are", () 
 // AGT-2127: route() passes over a provider whose key does not resolve.
 
 const twoClouds = () =>
-  parseConfig(
+  parseWithTestDefaults(
     JSON.stringify({
       providers: { anthropic: { kind: "anthropic" }, backup: { kind: "anthropic", key: "env:BACKUP_KEY" } },
       intents: { research: "anthropic" },
@@ -89,7 +90,7 @@ test("a local provider needs no key, and a skip is announced once per intent and
 });
 
 test("when every candidate lacks a key the first is returned so the adapter reports the real problem", () => {
-  const config = parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, default: "anthropic" }));
+  const config = parseWithTestDefaults(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, default: "anthropic" }));
   const routed = createProviders(config, { keys: { env: {} }, onSkip: () => {} }).routed(intent("planning"));
   expect(routed).toEqual({ provider: "anthropic", skipped: [] });
 });
@@ -97,4 +98,11 @@ test("when every candidate lacks a key the first is returned so the adapter repo
 test("the pure route() and resolveRoute() without a key check never skip", () => {
   expect(route(twoClouds(), intent("planning", "research"))).toBe("anthropic");
   expect(resolveRoute(twoClouds(), intent("planning")).skipped).toEqual([]);
+});
+
+test("with no provider configured at all, resolveRoute refuses with NoModelConfiguredError instead of naming a missing id", () => {
+  for (const kind of ["planning", "drafting", "revising", "extraction"] as const) {
+    expect(() => resolveRoute(defaultConfig(), intent(kind))).toThrow(NoModelConfiguredError);
+  }
+  expect(() => createProviders(defaultConfig()).adapterFor(intent("drafting"))).toThrow(/pablo init --config/);
 });

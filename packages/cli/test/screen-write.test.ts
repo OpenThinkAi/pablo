@@ -5,6 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { screenWriter } from "../src/screen-write";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 /**
  * The screen's writer (AGT-1542): `runWrite` against a fake Adapter on a temp git copy of the fixture vault, with a

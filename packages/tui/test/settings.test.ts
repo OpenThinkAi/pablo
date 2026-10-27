@@ -107,7 +107,7 @@ test("overridesOf lists only the rebound rows; an action put back to its default
 // ---------------------------------------------------------------- saving
 
 test("saving writes keys and editor to the config, keeps every other entry, and reads back through the startup loader", () => {
-  const seed = { providers: { local: { endpoint: "http://127.0.0.1:8002/v1" } }, default: "local" };
+  const seed = { providers: { local: { endpoint: "http://127.0.0.1:8002/v1", model: "test-model" } }, default: "local" };
   mkdirSync(join(dir, "pablo"));
   writeFileSync(path, JSON.stringify(seed));
   let s = press(on(open(), "rail.down"), "enter", "x");

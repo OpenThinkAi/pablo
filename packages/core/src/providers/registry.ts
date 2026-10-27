@@ -10,7 +10,7 @@
 
 import { createAnthropicAdapter } from "./anthropic";
 import type { AdapterKind, PabloConfig, ProviderConfig } from "./config";
-import { ProviderConfigError } from "./errors";
+import { NoModelConfiguredError, ProviderConfigError } from "./errors";
 import type { KeyLookup, KeySource } from "./keys";
 import { resolveKey } from "./keys";
 import type { OpenAiAdapterOptions } from "./openai";
@@ -93,7 +93,8 @@ export function resolveRoute(config: PabloConfig, intent: Intent, unusable?: Unu
   for (const provider of config.providers.values()) {
     if (provider.local === wantLocal) candidates.push(provider.id);
   }
-  candidates.push(config.defaultProvider);
+  if (config.defaultProvider !== "") candidates.push(config.defaultProvider);
+  if (candidates.length === 0) throw new NoModelConfiguredError(intent.name);
 
   const skipped: SkippedProvider[] = [];
   const tried = new Set<string>();

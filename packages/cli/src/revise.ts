@@ -21,6 +21,7 @@ import {
   fileReceiptSink,
   isWithin,
   joinManuscript,
+  NoModelConfiguredError,
   loadConfig,
   locatePassage,
   normalizeCandidate,
@@ -34,6 +35,7 @@ import {
   withReceipts,
 } from "@openthink/pablo-core";
 import type { Adapter, CompletionStats, Intent, Pack, ReaderNote, Span, SliceAction, SliceAdjustment } from "@openthink/pablo-core";
+import { NO_WAIT_ESTIMATE_NOTE } from "./starter-config";
 
 /** A minimal `process.stderr`-shaped sink — mirrors `write.ts`'s/`prose.ts`'s `ProgressSink`. */
 export interface ProgressSink {
@@ -407,9 +409,8 @@ function routeRevise(pack: Pack, ctx: ReviseCoreContext, deps: ReviseDeps): Rout
     throw error;
   }
 
-  const providerId = providers.route(REVISE_INTENT);
-
   try {
+    const providerId = providers.route(REVISE_INTENT);
     const adapter = deps.adapter ?? providers.adapter(providerId);
     return { providerId, adapter, timeoutMs: packTimeoutMs(pack, providers.rates(providerId)) };
   } catch (error) {
@@ -607,6 +608,11 @@ export async function runRevise(args: ReviseCliArgs, ctx: ReviseCoreContext, dep
     console.log(renderPack(outcome.pack as Pack, providers.rates(providerId)).text);
     return outcome.exitCode;
   } catch (error) {
+    if (error instanceof NoModelConfiguredError) {
+      // The preview needs no model; only the wait estimate does.
+      console.log(`${renderPack(outcome.pack as Pack).text}\n\n${NO_WAIT_ESTIMATE_NOTE}`);
+      return outcome.exitCode;
+    }
     if (error instanceof ProviderConfigError) {
       console.error(error.message);
       return 2;

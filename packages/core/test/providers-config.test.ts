@@ -1,26 +1,45 @@
 import { expect, test } from "bun:test";
 import {
-  DEFAULT_LOCAL_ENDPOINT,
   DEFAULT_TIMEOUT_MS,
+  NoModelConfiguredError,
   ProviderConfigError,
   configPath,
   defaultConfig,
   isLoopbackEndpoint,
   loadConfig,
+  mergeProjectConfig,
   parseConfig,
   route,
 } from "../src/index";
+import { TEST_LOCAL_ENDPOINT, TEST_LOCAL_MODEL, TEST_LOCAL_PROVIDER } from "./local-config";
 
-test("with no config file at all, pablo talks to the local writer with no key", () => {
+test("with no config file at all, pablo has no provider, no endpoint and no model", () => {
   const config = loadConfig({ readFile: () => undefined, path: "/nowhere/config.json" });
-  const local = config.providers.get("local");
 
-  expect(config.providers.size).toBe(1);
-  expect(config.defaultProvider).toBe("local");
-  expect(local?.endpoint).toBe(DEFAULT_LOCAL_ENDPOINT);
+  expect(config.providers.size).toBe(0);
+  expect(config.defaultProvider).toBe("");
+  expect(() => route(config, { name: "draft", kind: "drafting" })).toThrow(NoModelConfiguredError);
+  expect(() => route(config, { name: "draft", kind: "drafting" })).toThrow(/pablo init --config/);
+});
+
+test("a provider entry carries what the config names, with the 60s idle timeout by default", () => {
+  const local = parseConfig(JSON.stringify({ providers: { local: TEST_LOCAL_PROVIDER } })).providers.get("local");
+
+  expect(local?.endpoint).toBe(TEST_LOCAL_ENDPOINT);
+  expect(local?.model).toBe(TEST_LOCAL_MODEL);
   expect(local?.local).toBe(true);
   expect(local?.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
   expect(local?.key).toEqual({ from: "env", variable: "LOCAL_API_KEY" });
+});
+
+test("a provider entry with no endpoint or no model is refused by name", () => {
+  expect(() => parseConfig(JSON.stringify({ providers: { local: { model: "m" } } }))).toThrow(/provider "local": "endpoint" must be set.*pablo init --config/s);
+  expect(() => parseConfig(JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:1/v1" } } }))).toThrow(/provider "local": "model" must be set/);
+});
+
+test("with no \"default\", the first provider is the default", () => {
+  const config = parseConfig(JSON.stringify({ providers: { a: TEST_LOCAL_PROVIDER, b: TEST_LOCAL_PROVIDER } }));
+  expect(config.defaultProvider).toBe("a");
 });
 
 test("the config file lives under XDG_CONFIG_HOME when one is set", () => {
@@ -28,10 +47,11 @@ test("the config file lives under XDG_CONFIG_HOME when one is set", () => {
   expect(configPath({})).toMatch(/\/\.config\/pablo\/config\.json$/);
 });
 
-test("a config file adds providers and keeps the local default underneath", () => {
+test("a config file names its providers in order", () => {
   const config = parseConfig(
     JSON.stringify({
       providers: {
+        local: TEST_LOCAL_PROVIDER,
         anthropic: { endpoint: "https://api.anthropic.com/v1", model: "claude-opus-4-1", key: "keychain:ANTHROPIC_API_KEY_PERSONAL/mattpardini" },
       },
       intents: { research: "anthropic" },
@@ -50,12 +70,14 @@ test("a config file adds providers and keeps the local default underneath", () =
 });
 
 test("a provider entry overrides only the fields it names", () => {
-  const config = parseConfig(JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:8000/v1", timeoutMs: 5000 } } }));
-  const local = config.providers.get("local");
+  const base = parseConfig(JSON.stringify({ providers: { local: TEST_LOCAL_PROVIDER } }));
+  const text = JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:8000/v1", timeoutMs: 5000 } } });
+  // A work's pablo.json layers over the global file: an entry overrides only what it names.
+  const local = mergeProjectConfig(base, text).providers.get("local");
 
   expect(local?.endpoint).toBe("http://127.0.0.1:8000/v1");
   expect(local?.timeoutMs).toBe(5000);
-  expect(local?.model).toBe(defaultConfig().providers.get("local")?.model);
+  expect(local?.model).toBe(TEST_LOCAL_MODEL);
   expect(local?.local).toBe(true);
 });
 
@@ -81,7 +103,7 @@ test("an endpoint that is not an http URL is rejected", () => {
 });
 
 test("a trailing slash on an endpoint does not become a double slash in the request path", () => {
-  const config = parseConfig(JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:8002/v1/" } } }));
+  const config = parseConfig(JSON.stringify({ providers: { local: { ...TEST_LOCAL_PROVIDER, endpoint: "http://127.0.0.1:8002/v1/" } } }));
   expect(config.providers.get("local")?.endpoint).toBe("http://127.0.0.1:8002/v1");
 });
 
@@ -90,11 +112,11 @@ test("a config file that is not JSON names the file it could not read", () => {
 });
 
 test("a provider's sampling temperature is read, inherited, and range-checked", () => {
-  const config = parseConfig(JSON.stringify({ providers: { local: { temperature: 0.6 } } }));
+  const config = parseConfig(JSON.stringify({ providers: { local: { ...TEST_LOCAL_PROVIDER, temperature: 0.6 } } }));
   expect(config.providers.get("local")?.temperature).toBe(0.6);
-  expect(defaultConfig().providers.get("local")?.temperature).toBeUndefined();
-  expect(() => parseConfig(JSON.stringify({ providers: { local: { temperature: 3 } } }))).toThrow(/"temperature" must be a number from 0 to 2/);
-  expect(() => parseConfig(JSON.stringify({ providers: { local: { temperature: "hot" } } }))).toThrow(/"temperature"/);
+  expect(parseConfig(JSON.stringify({ providers: { local: TEST_LOCAL_PROVIDER } })).providers.get("local")?.temperature).toBeUndefined();
+  expect(() => parseConfig(JSON.stringify({ providers: { local: { ...TEST_LOCAL_PROVIDER, temperature: 3 } } }))).toThrow(/"temperature" must be a number from 0 to 2/);
+  expect(() => parseConfig(JSON.stringify({ providers: { local: { ...TEST_LOCAL_PROVIDER, temperature: "hot" } } }))).toThrow(/"temperature"/);
 });
 
 test("the config's readers are parsed, validated, and empty by default", () => {
@@ -121,7 +143,10 @@ test("the config's readers are parsed, validated, and empty by default", () => {
 // AGT-2129 (D-13): a work's pablo.json routes its own models over the global config.
 
 const GLOBAL = JSON.stringify({
-  providers: { anthropic: { kind: "anthropic", key: "keychain:anthropic-api-key" } },
+  providers: {
+    local: TEST_LOCAL_PROVIDER,
+    anthropic: { kind: "anthropic", endpoint: "https://api.anthropic.com/v1", model: "test-anthropic-model", key: "keychain:anthropic-api-key" },
+  },
   intents: { plan: "anthropic" },
 });
 
@@ -232,4 +257,18 @@ test("a work may define and change providers on this machine freely", () => {
   expect(isLoopbackEndpoint("http://127.0.0.2:8002/v1")).toBe(true);
   expect(isLoopbackEndpoint("http://127.0.0.1.attacker.example/v1")).toBe(false);
   expect(isLoopbackEndpoint("https://api.anthropic.com/v1")).toBe(false);
+});
+
+test("a work's pablo.json can be the only place providers come from: its first provider is the default", () => {
+  const base = loadConfig({ readFile: () => undefined, path: "/nowhere/config.json" });
+  const work = mergeProjectConfig(base, JSON.stringify({ providers: { local: TEST_LOCAL_PROVIDER } }), "pablo.json");
+  expect(work.defaultProvider).toBe("local");
+  expect(route(work, { name: "plan", kind: "planning" })).toBe("local");
+  expect(route(work, { name: "draft", kind: "drafting" })).toBe("local");
+});
+
+test("an anthropic entry without an endpoint or model says pablo no longer fills them in", () => {
+  expect(() => parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic", key: "env:ANTHROPIC_API_KEY" } } }))).toThrow(
+    /"endpoint" and "model" must be set — pablo has no built-in endpoint or model \(not even for kind "anthropic"\)/,
+  );
 });

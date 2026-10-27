@@ -15,6 +15,7 @@ import { readRound, realRunner } from "../src/share";
 import { waitingBranches } from "../src/branch";
 import type { RoundRecord, RunResult, Runner } from "../src/share";
 import { notesWith, shareWith } from "../src/verbs";
+import { writeLocalConfig } from "./local-config";
 
 /**
  * AGT-1587: `pablo notes pull`. Nothing reaches GitHub: `gh` is answered by a fake runner serving a recorded review
@@ -97,6 +98,7 @@ function setup() {
   mkdirSync(join(vault, ".pablo", "rounds"), { recursive: true });
   writeFileSync(join(vault, ".pablo", "rounds", `${round.id}.json`), JSON.stringify(round, null, 2));
   const env = { PATH: NO_THINK_PATH, XDG_CONFIG_HOME: join(dir, "xdg-c"), XDG_STATE_HOME: join(dir, "state"), PABLO_HOME: join(dir, "home"), PABLO_VAULT: vault };
+  writeLocalConfig(env.XDG_CONFIG_HOME);
   return { dir, vault, project, round, env };
 }
 

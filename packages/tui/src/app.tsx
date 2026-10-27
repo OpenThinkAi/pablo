@@ -199,7 +199,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     for (const action of resolve(keyStateOf(state), state.pending, token, keymap)) {
       // Enter on a reading round (AGT-1641) is the screen's: a review that is in is pulled, then opened.
       const round = action.type === "rail.open" && state.mode.kind === "book" ? roundOf(state.rounds, railRow(viewOf(state).rail)?.id) : undefined;
-      // `y` on a reader's comment (AGT-1642) is accept and revise: the author says what Gemma should do about it.
+      // `y` on a reader's comment (AGT-1642) is accept and revise: the author says what the writer model should do about it.
       const row = railRow(viewOf(state).rail);
       const note = row && action.type === "review.mark" && action.mark === "accepted" && state.mode.kind === "review" ? review?.notes.get(row.id) : undefined;
       if (round) openRound(round);

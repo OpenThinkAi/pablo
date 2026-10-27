@@ -21,16 +21,21 @@ function scope(withConfig?: object, withProject?: object) {
 }
 
 const GLOBAL = {
-  providers: { anthropic: { kind: "anthropic", key: "keychain:ANTHROPIC_KEY/matt" } },
+  providers: {
+    local: { endpoint: "http://127.0.0.1:8002/v1", model: "test-local-model", local: true },
+    anthropic: { kind: "anthropic", endpoint: "https://api.anthropic.com/v1", model: "test-claude", key: "keychain:ANTHROPIC_KEY/matt" },
+  },
   intents: { research: "anthropic" },
 };
 
-test("show: no file prints the default local provider", () => {
+test("show: no file prints no providers and points at the starter config", () => {
   const s = scope();
   const r = configShow({ env: s.env });
   expect(r.exitCode).toBe(0);
-  expect(r.text).toContain("default: local");
-  expect(r.text).toContain("draft -> local (by kind)");
+  expect(r.text).toContain("default: (none)");
+  expect(r.text).toContain("pablo init --config");
+  expect(r.text).toContain("draft -> (none) (by kind)");
+  expect(r.text).not.toContain("127.0.0.1");
 });
 
 test("show: merged providers, key as reference only, project overrides", () => {
@@ -60,13 +65,18 @@ test("show: a broken config is a refusal, not a crash", () => {
 
 test("set: writes global config, creating the file, and show reflects it", () => {
   const s = scope();
+  // A provider is built up one field at a time: it need not be complete until a verb routes to it.
   expect(configSet({ env: s.env }, "providers.cloud.kind", "anthropic").exitCode).toBe(0);
+  expect(configShow({ env: s.env }).exitCode).toBe(2);
+  expect(configShow({ env: s.env }).text).toContain('provider "cloud": "endpoint" and "model" must be set');
+  expect(configSet({ env: s.env }, "providers.cloud.endpoint", "https://api.anthropic.com/v1").exitCode).toBe(0);
+  expect(configSet({ env: s.env }, "providers.cloud.model", "test-claude").exitCode).toBe(0);
   expect(configSet({ env: s.env }, "providers.cloud.key", "env:MY_KEY").exitCode).toBe(0);
   expect(configSet({ env: s.env }, "intents.research", "cloud").exitCode).toBe(0);
   expect(configSet({ env: s.env }, "providers.cloud.temperature", "0.5").exitCode).toBe(0);
   expect(configSet({ env: s.env }, "default", "cloud").exitCode).toBe(0);
   const written = JSON.parse(readFileSync(s.globalFile, "utf8"));
-  expect(written.providers.cloud).toEqual({ kind: "anthropic", key: "env:MY_KEY", temperature: 0.5 });
+  expect(written.providers.cloud).toEqual({ kind: "anthropic", endpoint: "https://api.anthropic.com/v1", model: "test-claude", key: "env:MY_KEY", temperature: 0.5 });
   expect(written.intents.research).toBe("cloud");
   expect(configShow({ env: s.env }).text).toContain("default: cloud");
 });
@@ -127,7 +137,7 @@ function fakeAdapter(id: string, fail?: string): Adapter {
 
 test("test: one request per mapped intent, ok/error per provider, exit 1 on any error", async () => {
   const s = scope({
-    providers: { anthropic: { kind: "anthropic", key: "env:K" }, other: { endpoint: "http://127.0.0.1:9/v1", model: "m" } },
+    providers: { anthropic: { kind: "anthropic", endpoint: "https://api.anthropic.com/v1", model: "test-claude", key: "env:K" }, other: { endpoint: "http://127.0.0.1:9/v1", model: "m" } },
     intents: { research: "anthropic", draft: "other", revise: "other" },
   });
   const calls: string[] = [];
@@ -145,8 +155,14 @@ test("test: one request per mapped intent, ok/error per provider, exit 1 on any 
   expect(r.text).toContain("connection refused");
 });
 
+test("test: with no provider configured it refuses and points at the starter config", async () => {
+  const r = await configTest({ env: scope().env }, { adapterFor: () => fakeAdapter("x") });
+  expect(r.exitCode).toBe(2);
+  expect(r.text).toContain("pablo init --config");
+});
+
 test("test: all ok exits 0; with no mapped intents it checks the default route", async () => {
-  const s = scope();
+  const s = scope({ providers: GLOBAL.providers });
   const calls: string[] = [];
   const r = await configTest({ env: s.env }, { adapterFor: (_c, id) => (calls.push(id), fakeAdapter(id)) });
   expect(calls).toEqual(["local"]);
@@ -158,10 +174,12 @@ test("CLI end to end against a temp XDG_CONFIG_HOME", () => {
   const s = scope();
   const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
   const run = (...args: string[]) => Bun.spawnSync(["bun", "run", cli, "config", ...args], { env: { ...process.env, ...s.env } });
-  const set = run("set", "providers.cloud.kind", "anthropic");
-  expect(set.exitCode).toBe(0);
+  expect(JSON.parse(run("show", "--json").stdout.toString()).providers).toEqual([]);
+  for (const [path, value] of [["kind", "anthropic"], ["endpoint", "https://api.anthropic.com/v1"], ["model", "test-claude"]] as const) {
+    expect(run("set", `providers.cloud.${path}`, value).exitCode).toBe(0);
+  }
   const show = run("show", "--json");
   expect(show.exitCode).toBe(0);
-  expect(JSON.parse(show.stdout.toString()).providers.map((p: { id: string }) => p.id)).toEqual(["local", "cloud"]);
+  expect(JSON.parse(show.stdout.toString()).providers.map((p: { id: string }) => p.id)).toEqual(["cloud"]);
   expect(run("bogus").exitCode).toBe(2);
 });

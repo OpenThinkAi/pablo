@@ -10,7 +10,7 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createScriptedChatAdapter, defaultConfig, parseConfig } from "@openthink/pablo-core";
+import { createScriptedChatAdapter } from "@openthink/pablo-core";
 import type { ScriptedChatAdapter } from "@openthink/pablo-core";
 import { main } from "../src/cli";
 import { runAgent } from "../src/harness/agent";
@@ -22,6 +22,7 @@ import type { HarnessQuery, HarnessSpec } from "../src/harness/session";
 import { harnessTools } from "../src/harness/tools";
 import { formatEntry } from "../src/harness/transcript";
 import { mcpTools } from "../src/mcp";
+import { writeLocalConfig, localConfig, parseWithTestDefaults, configTextWithTestDefaults } from "./local-config";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "pablo-harness-test-"));
@@ -30,6 +31,7 @@ cpSync(FIXTURE_VAULT, vault, { recursive: true });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const BASE_ENV = { PABLO_VAULT: vault, PATH: "/usr/bin:/bin", HOME: root, XDG_CONFIG_HOME: join(root, "config") };
+writeLocalConfig(join(root, "config"));
 const noConfig = () => undefined;
 
 function spec(over: Partial<HarnessSpec> = {}): HarnessSpec {
@@ -93,14 +95,14 @@ test("a narrower tool list narrows what is offered", () => {
 // ---------------------------------------------------------------------------
 
 test("with only the default config the session runs on the local writer, with no key and no cost", () => {
-  const provider = harnessProvider(defaultConfig(), { keys: { env: {} } });
+  const provider = harnessProvider(localConfig(), { keys: { env: {} } });
   expect(provider.adapter.id).toBe("local");
   expect(provider).toMatchObject({ local: true, credential: "none", forcedToolChoice: true });
   expect(loopSpec(spec({ provider }))).toMatchObject({ local: true, credential: "none" });
 });
 
 test("an anthropic provider takes the agent intent; its credential is the key's source, never the key", () => {
-  const config = parseConfig(
+  const config = parseWithTestDefaults(
     JSON.stringify({ providers: { anthropic: { kind: "anthropic", key: "keychain:pablo-test/me", model: "claude-test-1" } } }),
   );
   const keychain = (service: string, account: string | undefined) => (service === "pablo-test" && account === "me" ? "sk-config" : "");
@@ -114,7 +116,7 @@ test("an anthropic provider takes the agent intent; its credential is the key's 
 });
 
 test("an anthropic provider with no key is skipped: the agent falls back to the local writer and the skip is reported (AGT-2127)", () => {
-  const config = parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } } }));
+  const config = parseWithTestDefaults(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } } }));
   const told: string[] = [];
   const provider = harnessProvider(config, { keys: { env: {} }, onSkip: (s, to) => void told.push(`${s.provider}->${to}: ${s.reason}`) });
   expect(provider.adapter.id).toBe("local");
@@ -126,7 +128,7 @@ test("an anthropic provider with no key is skipped: the agent falls back to the 
 });
 
 test("a story stage routes under its own intent: research maps separately from plan and agent (AGT-2127)", () => {
-  const config = parseConfig(
+  const config = parseWithTestDefaults(
     JSON.stringify({ providers: { anthropic: { kind: "anthropic" }, other: { kind: "anthropic", model: "m2" } }, intents: { research: "other", plan: "anthropic", agent: "anthropic" } }),
   );
   const keys = { keys: { env: { ANTHROPIC_API_KEY: "a", OTHER_API_KEY: "b" } } };
@@ -138,7 +140,7 @@ test("a story stage routes under its own intent: research maps separately from p
 });
 
 test("an explicit agent intent wins over the default route", () => {
-  const config = parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, intents: { [AGENT_INTENT.name]: "local" } }));
+  const config = parseWithTestDefaults(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, intents: { [AGENT_INTENT.name]: "local" } }));
   expect(harnessProvider(config, { keys: { env: {} } }).adapter.id).toBe("local");
 });
 
@@ -204,7 +206,7 @@ test("--json prints one object with the provider, entries and result", async () 
 test("the config's agent provider is the one the session runs on; a missing key fails the session naming where to put it", async () => {
   const io = capture();
   // `default` is the anthropic provider, so the route has nowhere else to fall back to and the adapter reports the missing key.
-  const readConfig = () => JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, default: "anthropic" });
+  const readConfig = () => configTextWithTestDefaults(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } }, default: "anthropic" }));
   const code = await runAgent({ project: "ice-house", message: "Hi", json: false }, io.ctx, { readConfig, keys: { env: {}, keychain: () => "" } });
   expect(code).toBe(1);
   expect(io.out()).toContain("credential env:ANTHROPIC_API_KEY");
@@ -214,11 +216,11 @@ test("the config's agent provider is the one the session runs on; a missing key 
 test("with no cloud provider configured the agent says it runs on the local model; a mapped agent intent does not", async () => {
   const unmapped = capture();
   // The default config routes the agent to `local`; its first request fails (nothing listens in a test), which is fine here.
-  await runAgent({ project: "ice-house", message: "Hi", json: false }, unmapped.ctx, { readConfig: () => JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:9/v1" } } }) });
+  await runAgent({ project: "ice-house", message: "Hi", json: false }, unmapped.ctx, { readConfig: () => configTextWithTestDefaults(JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:9/v1" } } })) });
   expect(unmapped.err()).toContain('no cloud provider is configured, so the agent runs on the local model ("local")');
 
   const mapped = capture();
-  await runAgent({ project: "ice-house", message: "Hi", json: false }, mapped.ctx, { readConfig: () => JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:9/v1" } }, intents: { agent: "local" } }) });
+  await runAgent({ project: "ice-house", message: "Hi", json: false }, mapped.ctx, { readConfig: () => configTextWithTestDefaults(JSON.stringify({ providers: { local: { endpoint: "http://127.0.0.1:9/v1" } }, intents: { agent: "local" } })) });
   expect(mapped.err()).not.toContain("no cloud provider");
 
   const fresh = capture();

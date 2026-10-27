@@ -122,6 +122,21 @@ the title from the work `README.md`'s first `# ` heading (minus a trailing "(wor
 title)"). If missing, it also adds the `.gitignore` line. It never commits; the
 result's `notice` reminds you to. A work that already has a `pablo.json` is refused.
 
+### init --config
+
+```
+pablo init --config
+```
+
+Writes a documented starter model config to `$XDG_CONFIG_HOME/pablo/config.json`
+(`~/.config/pablo/config.json`): a local OpenAI-compatible provider and an Anthropic
+one, with notes in `_about` fields, no key, and placeholder model ids for you to set.
+It needs no vault. It never overwrites: if the file exists it exits `2` and changes
+nothing. pablo has no built-in model, so until a config names one every verb that
+needs a model refuses (exit `2`) and points here; `pablo init <format> ...` and
+`init --adopt` print the same pointer while there is no config file. Next:
+`pablo config set` to fill in the ids, `pablo config test` to check them.
+
 ### output
 
 ```
@@ -364,7 +379,7 @@ pablo write --project <slug> [--output <type>] --unit N [flags]
 pablo write --project <slug> --chapter N [flags]
 ```
 
-Drafts one unit of an output on your configured local model. `--chapter N` is
+Drafts one unit of an output on your configured writer model. `--chapter N` is
 short for `--output novel --unit N`. A work with several outputs needs `--output`.
 The `story` output has a single unit, so `write --output story` needs no `--unit`.
 
@@ -481,7 +496,7 @@ pablo revise --project <slug> --file F
              --instruction "<text>" [--dry-run]
 ```
 
-Sends one passage of a file to the local model with your instruction and returns a
+Sends one passage of a file to the configured writer model with your instruction and returns a
 candidate. It never changes the file. Find the passage by quoting it, or with
 `--start`/`--end` character offsets into the body (frontmatter excluded). Returns
 `{ok, candidate, span, receipt}`. To keep a candidate, use the screen's revise

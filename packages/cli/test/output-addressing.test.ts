@@ -26,6 +26,9 @@ import { parseForUnit, VERBS } from "../src/verbs";
 import type { VerbContext } from "../src/verbs";
 import { runWrite } from "../src/write";
 import type { WriteArgs } from "../src/write";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");

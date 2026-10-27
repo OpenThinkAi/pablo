@@ -8,17 +8,16 @@ import { afterEach, expect, test } from "bun:test";
 import {
   ANTHROPIC_PREFERRED_OUTPUT,
   CRITICMARKUP_EDIT_CLOSING,
-  DEFAULT_ANTHROPIC_ENDPOINT,
-  DEFAULT_ANTHROPIC_MODEL,
   EndpointHung,
   ProviderConfigError,
   ProviderResponseError,
   RateMeter,
   createAnthropicAdapter,
   createProviders,
-  parseConfig,
   TOOL_EDIT_CLOSING,
+  parseConfig,
 } from "../src/index";
+import { TEST_ANTHROPIC_ENDPOINT, TEST_ANTHROPIC_MODEL, parseWithTestDefaults } from "./local-config";
 import type {
   Adapter,
   CompletionEvent,
@@ -168,7 +167,7 @@ const document: Document = { path: "/tmp/chapter-01.md", text: "The valley kept 
 const span = { start: 0, end: document.text.length };
 
 function configFor(url: string, extra: Record<string, unknown> = {}) {
-  return parseConfig(
+  return parseWithTestDefaults(
     JSON.stringify({ providers: { anthropic: { kind: "anthropic", endpoint: url, ...extra } } }),
   );
 }
@@ -198,17 +197,27 @@ async function drain(events: AsyncIterable<CompletionEvent>): Promise<{ text: st
 
 // ------------------------------------------------------------------- tests
 
-test("a config entry of kind anthropic needs only a key: the endpoint and model come with it", () => {
+test("a config entry of kind anthropic names its endpoint and model: pablo supplies neither", () => {
+  expect(() => parseConfig(JSON.stringify({ providers: { anthropic: { kind: "anthropic", key: "env:ANTHROPIC_API_KEY" } } }))).toThrow(
+    /"endpoint" and "model" must be set/,
+  );
   const config = parseConfig(
     JSON.stringify({
-      providers: { anthropic: { kind: "anthropic", key: "keychain:ANTHROPIC_API_KEY_PERSONAL/mattpardini" } },
+      providers: {
+        anthropic: {
+          kind: "anthropic",
+          endpoint: TEST_ANTHROPIC_ENDPOINT,
+          model: TEST_ANTHROPIC_MODEL,
+          key: "keychain:ANTHROPIC_API_KEY_PERSONAL/mattpardini",
+        },
+      },
       intents: { "period-check": "anthropic" },
     }),
   );
 
   const provider = config.providers.get("anthropic");
-  expect(provider?.endpoint).toBe(DEFAULT_ANTHROPIC_ENDPOINT);
-  expect(provider?.model).toBe(DEFAULT_ANTHROPIC_MODEL);
+  expect(provider?.endpoint).toBe(TEST_ANTHROPIC_ENDPOINT);
+  expect(provider?.model).toBe(TEST_ANTHROPIC_MODEL);
   expect(provider?.local).toBe(false);
   expect(provider?.key).toEqual({
     from: "keychain",
@@ -238,7 +247,7 @@ test("a completion streams its text and reports what the Messages API measured",
   const sent = fake.requests[0];
   expect(sent?.apiKey).toBe(KEY);
   expect(sent?.version).toBe("2023-06-01");
-  expect(sent?.body["model"]).toBe(DEFAULT_ANTHROPIC_MODEL);
+  expect(sent?.body["model"]).toBe(TEST_ANTHROPIC_MODEL);
   expect(sent?.body["stream"]).toBe(true);
   expect(sent?.body["max_tokens"]).toBe(16_000);
   expect(sent?.body["messages"]).toEqual([{ role: "user", content: "write a line" }]);
@@ -265,7 +274,7 @@ test("a native tool call becomes a proposal against the span it was asked about"
   expect(proposal.span).toEqual(span);
   expect(proposal.intent).toBe(revise);
   expect(proposal.providerId).toBe("anthropic");
-  expect(proposal.model).toBe(DEFAULT_ANTHROPIC_MODEL);
+  expect(proposal.model).toBe(TEST_ANTHROPIC_MODEL);
 
   const sent = fake.requests[0]?.body ?? {};
   const tools = sent["tools"] as { name: string; strict: boolean; input_schema: Record<string, unknown> }[];
