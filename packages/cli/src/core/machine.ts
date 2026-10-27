@@ -90,8 +90,6 @@ export type CoreStageId =
 
 /** The period brief a historical work's `period` stage needs. */
 export const PERIOD_BRIEF_FILE = "bible/period.md";
-/** The distilled, sourced period facts a historical work's `period-facts` stage needs (D-10). */
-export { PERIOD_FACTS_FILE };
 
 /** One core stage as `status` and `resume` report it. */
 export interface CoreStage {

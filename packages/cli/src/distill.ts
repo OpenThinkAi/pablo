@@ -14,22 +14,19 @@
  *    would carry the real names straight to the writer.
  *
  * `facts/period.md` is a markdown table, `| Fact | Source | Story date |`, one fact per row after the header and
- * separator. That is the shape `core/machine.ts`'s `countFactRows` counts (AGT-2100); `parsePeriodFacts` reads it
+ * separator. That is the shape `core/machine.ts`'s `countFactRows` counts (AGT-2100); core's `parsePeriodFacts` reads it
  * back exactly.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Adapter, Intent, PeriodFact } from "@openthink/pablo-core";
-import { PERIOD_FACTS_FILE, parsePeriodFacts, splitTableRow } from "@openthink/pablo-core";
+import { splitTableRow } from "@openthink/pablo-core";
 import { CHECKLIST_FILE } from "./core/checklist";
 
 /** The intent distillation routes under: a planning-kind call, so an unmapped config sends it to the cloud planner when one exists. */
 export const RESEARCH_INTENT: Intent = { name: "research", kind: "planning" };
 
-/** Where the distilled facts live, work-relative, and how a row reads back: core owns both, since every drafting pack reads them (AGT-2110). */
-export { PERIOD_FACTS_FILE, parsePeriodFacts };
-export type { PeriodFact };
 
 /** The research-name to bible-name map a `realNames: false` work keeps, work-relative. Never a source note. */
 export const NAMES_FILE = "research/names.md";

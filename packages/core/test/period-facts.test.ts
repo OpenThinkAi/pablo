@@ -11,6 +11,7 @@ test("AGT-2110: a story date reads as precisely as its text allows", () => {
   expect(storyDateKey("Winter 1931")).toBe("1931");
   expect(storyDateKey("1934")).toBe("1934");
   expect(storyDateKey("the morning after")).toBeUndefined();
+  expect(storyDateKey("1931, may be autumn")).toBe("1931");
 });
 
 test("AGT-2110: a fact holds by a unit's date, compared at the coarser precision", () => {

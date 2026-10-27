@@ -80,7 +80,10 @@ export function storyDateKey(text: string): string | undefined {
   const year = /(?<!\d)(1[0-9]\d{2}|20\d{2})(?!\d)/.exec(text);
   if (year === null) return undefined;
   const lower = text.toLowerCase();
-  const month = MONTHS.findIndex((name) => new RegExp(`\\b(${name}|${name.slice(0, 3)})\\b`).test(lower));
+  // A month counts only next to the year (`January 1929`, `9 Jan 1929`, `January 9, 1929`), so "may" in prose does not.
+  const month = MONTHS.findIndex((name) =>
+    new RegExp(`\\b(?:${name}|${name.slice(0, 3)})\\.?(?:\\s+\\d{1,2}(?:st|nd|rd|th)?,?)?\\s+${year[1]}\\b`).test(lower),
+  );
   if (month < 0) return year[1];
   const mm = String(month + 1).padStart(2, "0");
   const name = MONTHS[month] as string;
