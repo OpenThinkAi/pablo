@@ -7,5 +7,5 @@ For historical fiction, decide each thing you need in one of four ways.
 
 Never:
 
-- put a name from `research/` into anything the writer sees: a direction, a beat, a passage to revise, or a fact recorded in the bible or `continuity.md`. Research names stay in `research/`; the book uses invented ones.
+- send a research note itself to the writer: the writer sees the distilled, sourced facts, never the raw notes in `research/`. Real names are allowed by default; on a work with `realNames: false`, never let a real name from `research/` into a direction, a beat, a passage to revise, or a fact recorded in the bible or `continuity.md`: swap it for the bible's invented name (mapped in `research/names.md`).
 - let an `invented` fact be presented as history in the bible.

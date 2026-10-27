@@ -53,7 +53,7 @@ test("the track rows follow the design table (D-5, D-7)", () => {
   expect(hist.coreStages).toEqual(["premise", "period", "research", "period-facts", "bible", "acts", "beats", "facts"]);
   expect(hist.checks).toEqual(["continuity", "story-time", "unknown-name", "fact-accuracy", "anachronism"]);
   expect(TRACKS.nonfiction.coreStages).toEqual(["thesis", "research", "claims", "outline"]);
-  expect(TRACKS.nonfiction.checks).toEqual(["claim-support", "citations"]);
+  expect(TRACKS.nonfiction.checks).toEqual(["claim-support"]);
   for (const id of trackIds()) {
     expect(trackDefinition(id).outputs).toContain("essay");
     expect(trackDefinition(id).outputs).toContain("narrated");
