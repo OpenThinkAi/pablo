@@ -18,6 +18,7 @@ import { paragraphSpan, scrollTop, type Modes } from "./edit-modes";
 import { visible } from "./sanitize";
 import { matchesOnLine } from "./search";
 import type { EditPaneText } from "./state";
+import type { AiDiffs, PaneRevision } from "./inline-diff";
 import { clampCursor } from "./unit-nav";
 
 /** What the screen asks the layer above for (the CLI's `screenEditPane`, passed in; this package cannot import it). */
@@ -31,6 +32,8 @@ export interface PaneSession {
   save(file: string, branch: string, text: string): Promise<PaneSaveResult>;
   /** The pane closed: a branch `open` made that never got a commit goes again. */
   close(branch: string): Promise<void>;
+  /** The unit's pending `revise/` branches, each as git's diff of the file since it left main (AGT-2177): shown inline to accept or reject. */
+  revisions?(file: string): Promise<readonly PaneRevision[]>;
 }
 
 /** The model's opaque `EditPaneText` (`dirty`, and `empty` when the body is blank): the buffer, the file as last opened or saved, and how it is stored. */
@@ -46,12 +49,14 @@ export interface EditText extends EditPaneText {
   readonly prompt?: { readonly kind: "search" | "find" | "with"; readonly text: string; readonly find?: string } | null;
   /** What the last search or replace did, for the title ("2 replacements", "no match"); any other edit of the text clears it. */
   readonly note?: string | null;
+  /** A pending `revise/` branch's changes shown inline (AGT-2177, inline-diff.ts), each accepted or rejected in turn; per file, so a unit switch drops them. */
+  readonly ai?: AiDiffs;
 }
 
 /** A file split for the pane: the frontmatter and the blank lines after it (`head`, kept byte for byte), then the body. */
-interface Parts { readonly head: string; readonly headLines: number; readonly body: string }
+export interface Parts { readonly head: string; readonly headLines: number; readonly body: string }
 
-function partsOf(raw: string): Parts {
+export function partsOf(raw: string): Parts {
   const lines = raw.replace(/\r\n?/g, "\n").split("\n");
   let start = 0;
   if (lines[0]?.replace(/^﻿/, "").trim() === "---") {
@@ -177,7 +182,9 @@ export function paneHits(t: EditText, file: string, checks: ((file: string, text
 /** A row the pane draws: a display row of the text (the cursor's split around the character it is on), or a hit's box row. */
 export type PaneRow =
   | { readonly kind: "text"; readonly text: string; readonly cursor?: { readonly before: string; readonly at: string; readonly after: string }; readonly parts?: readonly TextPart[]; readonly dim?: true }
-  | { readonly kind: "box"; readonly part: BoxPart; readonly text: string; readonly head?: string; readonly tag?: string; readonly color: string; readonly dim?: true };
+  | { readonly kind: "box"; readonly part: BoxPart; readonly text: string; readonly head?: string; readonly tag?: string; readonly color: string; readonly dim?: true }
+  /** A row of an AI change shown inline (AGT-2177): `hl` marks the words that differ, as review mode marks them. */
+  | { readonly kind: "diff"; readonly text: string; readonly parts: readonly { readonly text: string; readonly hl: boolean }[]; readonly color: string; readonly bold?: boolean; readonly dim?: true };
 
 /** How the pane is scrolled and which modes (edit-modes.ts) shape it. `top` is the first display row of the last draw. */
 export interface PaneLook extends Partial<Modes> { readonly top?: number }
@@ -233,11 +240,11 @@ function selectedParts(line: string, start: number, end: number, cursor: number 
 
 /**
  * The `height` rows the pane shows at `width`, and the scroll they were drawn at: every display row of the buffer, each
- * hit's box under its paragraph, scrolled so the cursor's row is on screen (`scrollTop`: from `look.top`, counted in
+ * hit's box under its paragraph (then the rows `under` puts there: the inline AI changes, AGT-2177), scrolled so the cursor's row is on screen (`scrollTop`: from `look.top`, counted in
  * these rows, boxes included; centred in typewriter mode). Pure: the caller keeps the returned `top` for the next draw.
  * Focus mode marks every row outside the cursor's paragraph (its boxes too) `dim`.
  */
-export function paneView(t: EditText, width: number, height: number, hits: ReadonlyMap<number, readonly CheckHit[]>, look: PaneLook = {}): { rows: PaneRow[]; top: number } {
+export function paneView(t: EditText, width: number, height: number, hits: ReadonlyMap<number, readonly CheckHit[]>, look: PaneLook = {}, under: ReadonlyMap<number, readonly PaneRow[]> = new Map()): { rows: PaneRow[]; top: number } {
   const b = t.buffer;
   const all: PaneRow[] = [];
   const source: number[] = [];
@@ -270,6 +277,8 @@ export function paneView(t: EditText, width: number, height: number, hits: Reado
         all.push({ kind: "box", part: box.part, text: `${" ".repeat(INDENT)}${box.text}`, ...(box.head !== undefined ? { head: `${" ".repeat(INDENT)}${box.head}` } : {}), ...(box.tag ? { tag: box.tag } : {}), color: c.color ?? "gray" });
       }
     }
+    // The inline AI changes under this row (AGT-2177, inline-diff.ts's `aiRows`).
+    for (const row of under.get(r) ?? []) { source.push(r); all.push(row); }
   }
   const focused = look.focus === true ? paragraphSpan(b.lines, b.cursor.row) : null;
   const marked = focused ? all.map((row, i): PaneRow => (source[i]! >= focused.first && source[i]! <= focused.last ? row : { ...row, dim: true })) : all;
@@ -283,4 +292,4 @@ export function paneView(t: EditText, width: number, height: number, hits: Reado
 }
 
 /** `paneView`'s rows alone, scrolled from the buffer's own `top` (read, never written). */
-export const paneRows = (t: EditText, width: number, height: number, hits: ReadonlyMap<number, readonly CheckHit[]>, look: PaneLook = {}): PaneRow[] => paneView(t, width, height, hits, look).rows;
+export const paneRows = (t: EditText, width: number, height: number, hits: ReadonlyMap<number, readonly CheckHit[]>, look: PaneLook = {}, under: ReadonlyMap<number, readonly PaneRow[]> = new Map()): PaneRow[] => paneView(t, width, height, hits, look, under).rows;

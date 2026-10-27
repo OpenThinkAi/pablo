@@ -216,10 +216,13 @@ export function screenEditor(projectPath: string, deps: EditDeps = {}): ScreenEd
 /** `unmerged` (AGT-2173): the commits the branch already holds that main does not (an earlier session's autosaves), when there are any. */
 export type PaneOpen = { readonly ok: true; readonly branch: string; readonly text: string; readonly unmerged?: number } | { readonly ok: false; readonly message: string };
 export type PaneSave = { readonly ok: true; readonly branch: string; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
+/** A pending revise branch for the unit (AGT-2177): its name and git's diff of the unit's file since it left main. */
+export interface PaneRevision { readonly branch: string; readonly diff: string }
 export interface EditPaneSession {
   open(file: string): Promise<PaneOpen>;
   save(file: string, branch: string, text: string): Promise<PaneSave>;
   close(branch: string): Promise<void>;
+  revisions(file: string): Promise<readonly PaneRevision[]>;
 }
 
 function paneRepo(projectPath: string): { ok: true; repo: string; slug: string } | { ok: false; message: string } {
@@ -295,11 +298,36 @@ export async function closePane(projectPath: string, branch: string, deps: EditD
   deleteBranch(at.repo, at.slug, branch, { force: true, env });
 }
 
+/**
+ * The unit's pending AI revisions (AGT-2177): every `revise/` branch with commits main does not have that changes the
+ * project-relative `file`, with git's diff of that file since the branch left main (`main...branch`, as review mode
+ * reads a branch). The pane shows them inline; it never writes them. None when anything is in the way.
+ */
+export async function revisionsForPane(projectPath: string, file: string): Promise<PaneRevision[]> {
+  const at = paneRepo(projectPath);
+  if (!at.ok || insideDir(projectPath, file) === undefined) return [];
+  const listed = listBranches(at.repo);
+  if (!listed.ok) return [];
+  const path = relative(at.repo, resolve(realpathSync(projectPath), file));
+  const out: PaneRevision[] = [];
+  for (const branch of listed.branches.revise) {
+    if (unmergedCount(at.repo, branch) === 0) continue;
+    try {
+      const diff = git(at.repo, ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U3", "--src-prefix=a/", "--dst-prefix=b/", `main...${branch}`, "--", path]);
+      if (diff.trim() !== "") out.push({ branch, diff });
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
 export function screenEditPane(projectPath: string, deps: EditDeps = {}): EditPaneSession {
   return {
     open: (file) => openForPane(projectPath, file, deps),
     save: (file, branch, text) => saveFromPane(projectPath, file, branch, text, deps),
     close: (branch) => closePane(projectPath, branch, deps),
+    revisions: (file) => revisionsForPane(projectPath, file),
   };
 }
 

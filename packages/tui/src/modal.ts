@@ -14,6 +14,7 @@ import { resolve, tokenOf, type InkKey } from "./chord";
 import { apply, paneKey, type EditText } from "./edit-pane";
 import type { Keymap } from "./keys";
 import { SEARCH_KEYS } from "./search";
+import { acceptHunk, rejectHunk, stepHunk } from "./inline-diff";
 import { OPERATORS, pendingChar, type OpText } from "./operators";
 import type { Action, EditMode, EditPaneText, Pending } from "./state";
 import { selectObject, TEXT_MOTIONS } from "./text-objects";
@@ -156,11 +157,19 @@ export const MODE_KEYS: Readonly<Record<string, (t: EditText) => EditText>> = {
   "editor.select": (t) => (modeOf(t) === "select" ? toMode(t, "normal") : toMode(t, "select", t.buffer.cursor)),
 };
 
+/** The inline AI changes' keys (AGT-2177), by row id: inline-diff.ts moves to, accepts or rejects one. */
+export const AI_KEYS: Readonly<Record<string, (t: EditText) => EditText>> = {
+  "editor.ai_next": (t) => stepHunk(t, 1),
+  "editor.ai_prev": (t) => stepHunk(t, -1),
+  "editor.ai_accept": acceptHunk,
+  "editor.ai_reject": rejectHunk,
+};
+
 /** The edit a row id makes, or null for an id that is not the pane's. */
 export function modalEdit(id: string, c: MotionContext): Edit | null {
   const motion = MOTIONS[id];
   if (motion) return (t) => apply(t as EditText, (b) => motion(b, c));
-  const mode = MODE_KEYS[id];
+  const mode = MODE_KEYS[id] ?? AI_KEYS[id];
   if (mode) return (t) => mode(t as EditText);
   const object = selectObject(id);
   if (object) return (t) => object(t as EditText);
@@ -208,6 +217,9 @@ export function modalKey(mode: EditMode, pending: Pending | null, input: string,
     }
     const edit = modalEdit(d.id, c);
     if (edit) out.push({ type: "pane.edit", edit });
+    // An accepted AI change goes to the edit branch the way any edit does: the save path, which skips a clean text
+    // (an accept that no longer matched changed nothing).
+    if (d.id === "editor.ai_accept") out.push({ type: "pane.save", auto: true });
   }
   return out;
 }
