@@ -39,17 +39,47 @@ env = { PABLO_VAULT = "/Users/you/writing" }
 code `0` is success, `2` is a refusal whose body lists what is `missing`, `1` is an
 error. That is the whole contract.
 
+## Start with `guide`
+
+Before anything else, ask pablo for the path. `guide` is the one call that needs no vault
+and no project:
+
+```
+pablo guide                                      # list the tracks and outputs
+pablo guide --track historical-fiction           # the outputs that track allows
+pablo guide --track historical-fiction --output novel
+```
+
+With a track and an output it returns one numbered step per line, each with the command
+that does it, from `init --track` through the core stages, research, `output add`,
+`write`, `check` and `publish`. Steps the track gates are marked `(gate)`: `write` refuses
+until they are met. Over MCP it is the `guide` tool (`track`, `output`); with `--json` the
+steps are `{phase, stage?, title, command, detail?, gate?, optional?}`. The path is
+composed from the track and output registries, so it is always the current one. If you
+do not know what the author wants to make, run `guide` with no flags, show them the
+choices, and ask.
+
+The per-track and per-output pages say what each step means:
+
+- Tracks: [fiction](tracks/fiction.md), [historical-fiction](tracks/historical-fiction.md)
+  (research gate, distilled period facts, `realNames`, anachronism and fact-accuracy
+  checks), [nonfiction](tracks/nonfiction.md) (thesis, claims, claim-support check).
+- Outputs: [novel](outputs/novel.md), [story](outputs/story.md),
+  [screenplay](outputs/screenplay.md), [radio](outputs/radio.md),
+  [narrated](outputs/narrated.md), [essay](outputs/essay.md).
+
+For one verb, `pablo help <verb>` (or the tool's description over MCP) gives its flags.
+[commands.md](commands.md) is the full reference.
+
 ## How to drive it
 
 These are the rules pablo gives its own built-in agent. `pablo mcp` also sends them
 to your agent as the server's instructions when it connects, so an MCP client gets
 them without reading this page.
 
-0. **Call `guide` first.** `pablo guide` (the `guide` tool) lists the tracks and
-   outputs; with a track and an output it returns the path from creating the work
-   to publishing it, with the command for each step. See [guide](commands.md#guide).
-1. **Start with `resume`.** It returns where the work stands: the core's stages,
-   each output's progress, branches waiting for review, open decisions, and `next`.
+0. **Call `guide` first** (see above) to learn the path for the track and output.
+1. **Then `resume`** on an existing work. It returns where the work stands: the core's
+   stages, each output's progress, branches waiting for review, open decisions, and `next`.
 2. **Never write the book's prose yourself.** Plan, research, decide and ask in the
    conversation; every sentence of prose comes from `write` (or `revise`), which
    sends one prompt to the configured writer model. Don't paste prose into `save`.
@@ -68,6 +98,15 @@ them without reading this page.
    a stated assumption, and batch your questions.
 7. **Tag facts.** When you record a fact, say whether it was `researched` (with the
    source), `invented`, or decided by the `author`.
+8. **Research through pablo, and send only distilled facts to the writer.** On
+   `historical-fiction` and `nonfiction` works the gate wants a checklist where every
+   item is sourced or waived: `plan_research`, `save_research` (with `items`),
+   `waive_research_item`, `link_research_item`, then `distill_facts` for the period
+   facts. The drafting model sees only those distilled facts, never `research/`.
+   `web_search` and `web_fetch` are pablo's own tools for finding sources.
+9. **Report check hits; never fix them silently.** `write` runs the track's checks
+   (anachronism, fact accuracy, claim support) and returns the hits. Tell the author, and
+   use `revise` for a fix they want. Hits never change the exit code.
 
 A typical session:
 
@@ -93,7 +132,10 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `write` (`draft_chapter`, `draft_unit` are deprecated aliases, removed next release) | Draft one unit on the writer model; returns the branch and a receipt, never the prose |
 | `revise` (`revise_passage` is a deprecated alias for `revise` with `branch`, removed next release) | Revise a passage on the writer model; with `branch` the result lands on a `revise/` branch for the author |
 | `revise` | The same, but returns the candidate text instead of committing it |
-| `check` | Tells, banned names and provenance gaps in the drafted text |
+| `guide` | The path from nothing to a finished piece for a track and an output. Call it first; no project needed |
+| `check` | Tells, banned names and provenance gaps in the drafted text, plus the track's checks (story-time, unknown names; anachronism and fact accuracy on historical fiction; claim support on nonfiction) |
+| `plan_research` / `save_research` / `waive_research_item` / `link_research_item` / `distill_facts` | The research gate: derive the checklist, keep a sourced note, close an item, and distill notes to sourced period facts. See [historical-fiction](tracks/historical-fiction.md) |
+| `record_fact` | Record one fact tagged `researched`, `invented` or `author` |
 | `critique` | Comment on a change branch: continuity contradictions, things mentioned before their date, voice tells |
 | `read` / `search` | Read a file in the work, or search it |
 | `web_search` / `web_fetch` | Search the web through pablo's configured backend (SearXNG; set `web.search` in the config, see `docs/configuration.md`), and read one page as markdown with its URL and retrieval date. pablo's own tools: an agent does not need its own WebSearch/WebFetch, and `web_search` fails with a clear message when no backend is set |

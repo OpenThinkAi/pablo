@@ -56,6 +56,14 @@ llama.cpp, MLX) or an Anthropic API key.
   first chapter in about fifteen minutes.
 - **[Using pablo from an agent](docs/agents.md):** connect Claude Code or Codex over
   MCP, and the rules an agent should follow.
+- **Tracks** (the kind of work, with its research gate and checks):
+  [fiction](docs/tracks/fiction.md),
+  [historical-fiction](docs/tracks/historical-fiction.md),
+  [nonfiction](docs/tracks/nonfiction.md). Run `pablo guide` for the step-by-step path.
+- **Outputs** (the form a work takes): [novel](docs/outputs/novel.md),
+  [story](docs/outputs/story.md), [screenplay](docs/outputs/screenplay.md),
+  [radio](docs/outputs/radio.md), [narrated](docs/outputs/narrated.md),
+  [essay](docs/outputs/essay.md).
 - **[The vault](docs/vault.md):** every file, the `pablo.json` marker, and what pablo
   checks before it drafts.
 - **[Configuration](docs/configuration.md):** models, keys, routing.
