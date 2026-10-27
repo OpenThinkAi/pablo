@@ -19,10 +19,11 @@ export function screenVerb(dir: string, slug: string | undefined, run: readonly 
     let out = "", err = "";
     child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
     child.stderr.on("data", (d: Buffer) => { err += d.toString(); });
-    child.on("error", (e) => resolve({ ok: false, message: e.message }));
+    child.on("error", () => resolve({ ok: false, message: `pablo ${argv.join(" ")} could not be started.` }));
     child.on("close", (code) => {
-      const lines = (code === 0 ? out || err : err || out).trim().split("\n");
-      resolve(code === 0 ? { ok: true, lines } : { ok: false, message: lines.join("\n") });
+      const text = (code === 0 ? out || err : err || out).trim();
+      if (code === 0) return resolve({ ok: true, lines: text.split("\n") });
+      resolve({ ok: false, message: text || `pablo ${argv.join(" ")} stopped (exit ${code}) without saying why.` });
     });
   });
 }

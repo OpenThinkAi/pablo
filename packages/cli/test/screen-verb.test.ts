@@ -7,4 +7,6 @@ test("screenVerb runs argv in the dir, adds --project except for config, and say
   expect(await screenVerb(process.cwd(), "ice", echo)(["config", "show"])).toEqual({ ok: true, lines: ["config show"] });
   const fail = ["node", "-e", "console.error('refused'); process.exit(1)", "--"];
   expect(await screenVerb(process.cwd(), undefined, fail)(["publish"])).toEqual({ ok: false, message: "refused" });
+  const silent = ["node", "-e", "process.exit(3)"];
+  expect(await screenVerb(process.cwd(), undefined, silent)(["publish"])).toEqual({ ok: false, message: "pablo publish stopped (exit 3) without saying why." });
 });

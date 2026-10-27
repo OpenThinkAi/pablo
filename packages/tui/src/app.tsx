@@ -278,7 +278,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     const verb = routed ? { title: VERB_ASKS[id]?.title ?? id, hint: VERB_ASKS[id]?.hint } : planningVerbOf(id);
     if (!verb || state.mode.kind !== "book" || state.planning !== null || state.writing !== null || state.revise !== null || state.editing !== null || state.finishing !== null) return;
     if (!(routed ? verbRunner : planner)) return void dispatch({ type: "content.show", content: { title: verb.title, body: "This is not available here.", kind: "plan" } });
-    if (verb.hint !== undefined) return void dispatch({ type: "plan.open", id, title: verb.title, hint: verb.hint, ...(VERB_ASKS[id]?.masked ? { masked: true } : {}) });
+    if (verb.hint !== undefined) return void dispatch({ type: "plan.open", id, title: verb.title, hint: verb.hint, ...(VERB_ASKS[id]?.masked ? { masked: true } : {}), ...(VERB_ASKS[id]?.optional ? { optional: true } : {}) });
     runPlanning({ id, title: verb.title, hint: "", text: "" });
   }
   function runPlanning(p: Planning) {
@@ -287,7 +287,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
     if (built && !built.ok) return void dispatch({ type: "plan.failed", title: p.title, message: built.message });
     const run = built?.ok ? verbRunner && (() => verbRunner(built.argv)) : planner && (() => planner(p.id, p.text.trim()));
     if (!run) return;
-    if (p.hint !== "" && p.text.trim() === "") return;
+    if (p.hint !== "" && !p.optional && p.text.trim() === "") return;
     dispatch({ type: "plan.start", id: p.id, title: p.title });
     run().then(
       (r) => dispatch(r.ok ? { type: "plan.done", title: p.title, lines: r.lines } : { type: "plan.failed", title: p.title, message: r.message }),

@@ -194,7 +194,7 @@ export interface VoiceTargetInfo { readonly id: string; readonly label: string }
 export interface VoiceRule { readonly sentences: readonly string[]; readonly targets: readonly VoiceTargetInfo[]; readonly at: number; readonly text: string }
 
 /** `r c` / `r s` / `r w` / `r l` / `r f` (AGT-2178): a planning or research verb's one-line input, typed until Enter hands it to the planner or Esc cancels. `id` is the key row's id; `title` and `hint` say what to type. */
-export interface Planning { readonly id: string; readonly title: string; readonly hint: string; readonly text: string; /** AGT-2179: everything after the first word is drawn as dots (a `config set` value). */ readonly masked?: boolean }
+export interface Planning { readonly id: string; readonly title: string; readonly hint: string; readonly text: string; /** AGT-2179: Enter on an empty line runs the verb as it is. */ readonly optional?: boolean; /** AGT-2179: everything after the first word is drawn as dots (a `config set` value). */ readonly masked?: boolean }
 
 export interface State {
   readonly mode: Mode;
@@ -331,7 +331,7 @@ export type Action =
   | { type: "voice.failed"; message: string }
   // `r ...` (AGT-2178): a planning or research verb. `plan.open` asks for its one line (Enter is `plan.start`, Esc cancels);
   // a verb that needs no input goes straight to `plan.start`; then done (what it did) or failed (why not).
-  | { type: "plan.open"; id: string; title: string; hint: string; masked?: boolean }
+  | { type: "plan.open"; id: string; title: string; hint: string; masked?: boolean; optional?: boolean }
   | { type: "plan.type"; text: string } | { type: "plan.backspace" }
   | { type: "plan.start"; id: string; title: string }
   | { type: "plan.done"; title: string; lines: readonly string[] }
@@ -834,7 +834,7 @@ export function reduce(s: State, a: Action): State {
       return { ...s, voice: null, voiceRule: null, content: voiceContent("Added to the voice", a.lines.join("\n")), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "plan.open": {
       if (s.mode.kind !== "book" || s.planning !== null || s.writing !== null || s.revise !== null || s.editing !== null || s.finishing !== null) return s;
-      const p: Planning = { id: a.id, title: a.title, hint: a.hint, text: "", ...(a.masked ? { masked: true } : {}) };
+      const p: Planning = { id: a.id, title: a.title, hint: a.hint, text: "", ...(a.masked ? { masked: true } : {}), ...(a.optional ? { optional: true } : {}) };
       return { ...s, planning: p, content: planningContent(p), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 }, focus: s.pane };
     }
     case "plan.type": case "plan.backspace": {

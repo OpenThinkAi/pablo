@@ -116,7 +116,7 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   // ---- o: output and setup (AGT-2179, D-3): the CLI's output, review, publishing, voice-rule and model-config verbs; routed by verb-routes.ts
   { id: "output.add", states: OUTSIDE, needs: "book", prefix: "o", key: "a", label: "add output", description: "Add an output to the work: pick a type the track allows.", do: cmd("output.add") },
   { id: "output.critique", states: OUTSIDE, needs: "book", prefix: "o", key: "c", label: "critique", description: "Run the critic over the work's latest draft; its comments land on the draft's branch for review.", do: cmd("output.critique") },
-  { id: "output.check", states: OUTSIDE, needs: "book", prefix: "o", key: "k", label: "check", description: "Run the track's checks over the work and report the hits.", do: cmd("output.check") },
+  { id: "output.check", states: OUTSIDE, needs: "book", prefix: "o", key: "k", label: "check", description: "Run the work's checks and report the hits.", do: cmd("output.check") },
   { id: "output.publish", states: OUTSIDE, needs: "book", prefix: "o", key: "p", label: "publish", description: "Publish the work's output; if it has several, the refusal names them.", do: cmd("output.publish") },
   { id: "voice.edit", states: OUTSIDE, needs: "book", prefix: "o", key: "e", label: "voice: edit rule", description: "Edit a voice rule.", do: cmd("voice.edit") },
   { id: "voice.remove", states: OUTSIDE, needs: "book", prefix: "o", key: "x", label: "voice: remove rule", description: "Remove a voice rule.", do: cmd("voice.remove") },

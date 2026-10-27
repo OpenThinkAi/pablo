@@ -14,12 +14,13 @@ const mount = (calls: (readonly string[])[], result: VerbResult = { ok: true, li
 const chord = async (app: ReturnType<typeof mount>, second: string) => { app.stdin.write("o"); await sleep(30); app.stdin.write(second); await sleep(60); };
 const type = async (app: ReturnType<typeof mount>, text: string) => { app.stdin.write(text); await sleep(40); app.stdin.write("\r"); await sleep(80); };
 
-test("o k / o c / o p / o s run check, critique, publish and config show at once and show their output", async () => {
+test("o s runs config show at once; o k / o c / o p ask for an optional output (Enter alone runs as is), and show and show their output", async () => {
   const calls: (readonly string[])[] = [];
   const app = mount(calls, { ok: true, lines: ["3 hits"] });
   await sleep(30);
-  for (const k of ["k", "c", "p", "s"]) await chord(app, k);
-  expect(calls).toEqual([["check"], ["critique"], ["publish"], ["config", "show"]]);
+  await chord(app, "s");
+  for (const k of ["k", "c", "p"]) { await chord(app, k); await type(app, ""); }
+  expect(calls).toEqual([["config", "show"], ["check"], ["critique"], ["publish"]]);
   expect(plain(app.lastFrame())).toContain("3 hits");
 });
 
@@ -65,6 +66,14 @@ test("o S sets a config path; a key must be a reference, and a value is neither 
 test("a verb's refusal is shown, as the verb said it", async () => {
   const app = mount([], { ok: false, message: "two outputs: novel, radio" });
   await sleep(30);
-  await chord(app, "p");
+  await chord(app, "p"); await type(app, "");
   expect(plain(app.lastFrame())).toContain("two outputs: novel, radio");
+});
+
+test("o p with a typed output passes --output", async () => {
+  const calls: (readonly string[])[] = [];
+  const app = mount(calls);
+  await sleep(30);
+  await chord(app, "p"); await type(app, "radio");
+  expect(calls).toEqual([["publish", "--output", "radio"]]);
 });
