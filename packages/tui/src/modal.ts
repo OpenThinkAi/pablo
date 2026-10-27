@@ -5,13 +5,15 @@
 // mode types (edit-pane.ts's `paneKey`). Esc is never a row: it backs out a mode at a time, and in normal mode closes.
 //
 // A motion moves a buffer's cursor and nothing else, so the operators and text objects built on this (AGT-2170..2172)
-// can run one and take the range between the cursor before and after it. In select mode the cursor moves and the
+// can run one and take the range between the cursor before and after it. The operators, registers and `u`/`U` are
+// operators.ts (AGT-2171); `modalEdit` runs them by row id like the motions. In select mode the cursor moves and the
 // anchor stays: the selection is everything between them, both ends' characters included.
 
 import type { Pos, TextBuffer } from "./buffer";
 import { resolve, tokenOf, type InkKey } from "./chord";
 import { apply, paneKey, type EditText } from "./edit-pane";
 import type { Keymap } from "./keys";
+import { OPERATORS, pendingChar, type OpText } from "./operators";
 import type { Action, EditMode, EditPaneText, Pending } from "./state";
 import { selectObject, TEXT_MOTIONS } from "./text-objects";
 
@@ -129,13 +131,22 @@ export const MOTIONS: Readonly<Record<string, Motion>> = {
 };
 
 type Edit = (t: EditPaneText) => EditPaneText;
-const toMode = (t: EditText, mode: EditMode, anchor: Pos | null = null): EditText => ({ ...t, mode, anchor });
+/**
+ * `t` in `mode`. An insert session is one undo step (AGT-2171): entering insert mode opens a group on the buffer and
+ * leaving it closes the group (`c` opens its own before its deletion, operators.ts).
+ */
+const toMode = (t: EditText, mode: EditMode, anchor: Pos | null = null): EditText => {
+  const from = modeOf(t);
+  const next = from !== "insert" && mode === "insert" ? apply(t, (b) => b.beginGroup()) : from === "insert" && mode !== "insert" ? apply(t, (b) => b.endGroup()) : t;
+  return { ...next, mode, anchor };
+};
 
 /** The keys that change mode, by row id: each a whole edit of the pane's text (the buffer copied as `paneKey` does). */
 export const MODE_KEYS: Readonly<Record<string, (t: EditText) => EditText>> = {
   "editor.insert": (t) => toMode(t, "insert"),
   "editor.append": (t) => toMode(apply(t, (b) => { if (b.cursor.col < b.lines[b.cursor.row]!.length) b.right(); }), "insert"),
-  "editor.open_below": (t) => toMode(apply(t, (b) => { b.cursor = { row: b.cursor.row, col: b.lines[b.cursor.row]!.length }; b.insert("\n"); }), "insert"),
+  // Into insert mode first, so the new line is part of the session's one undo step.
+  "editor.open_below": (t) => apply(toMode(t, "insert"), (b) => { b.cursor = { row: b.cursor.row, col: b.lines[b.cursor.row]!.length }; b.insert("\n"); }),
   "editor.select": (t) => (modeOf(t) === "select" ? toMode(t, "normal") : toMode(t, "select", t.buffer.cursor)),
 };
 
@@ -146,7 +157,9 @@ export function modalEdit(id: string, c: MotionContext): Edit | null {
   const mode = MODE_KEYS[id];
   if (mode) return (t) => mode(t as EditText);
   const object = selectObject(id);
-  return object ? (t) => object(t as EditText) : null;
+  if (object) return (t) => object(t as EditText);
+  const op = OPERATORS[id];
+  return op ? (t) => op(t as OpText) : null;
 }
 
 /** Back to normal mode from insert or select (the selection goes). */
@@ -166,6 +179,9 @@ export function modalKey(mode: EditMode, pending: Pending | null, input: string,
     if (pending) return [{ type: "prefix.clear" }];
     return mode === "normal" ? "close" : [{ type: "pane.edit", edit: toNormal }];
   }
+  // `r` or `"` waiting for its character (operators.ts).
+  const waiting = pendingChar(pending, input, key);
+  if (waiting) return waiting;
   if (mode === "insert") {
     const edit = paneKey(input, key, c.width, c.height);
     return edit ? [{ type: "pane.edit", edit }] : [];

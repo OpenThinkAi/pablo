@@ -445,7 +445,7 @@ const voiceContent = (title: string, body: string): Content => ({ title, body, k
 const writingName = (output: string | undefined, unit: number) => (output === undefined || output === "novel" ? `chapter ${unit}` : `${output} ${unit}`);
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 /** What the editing pane's keys do, shown in the content area while it is open. */
-const PANE_KEYS = "i a o insert · v selects · Esc back to normal, and in normal closes · Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes · Ctrl+F focus · Ctrl+T typewriter";
+const PANE_KEYS = "i a o insert · v selects · d c y p P x r edit the selection (or the character), \" names a register · u U undo and redo · Esc back to normal, and in normal closes · Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes · Ctrl+F focus · Ctrl+T typewriter";
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");

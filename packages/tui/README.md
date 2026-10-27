@@ -24,11 +24,12 @@ src/layout.ts    the layout geometry, pure: region sizes at a terminal size, tex
 src/status.ts    the status area's fields (format, progress, branch, comment counts) and which drop when narrow
 src/resize.ts    the terminal size as state (below the model: plumbing, not where the author is)
 src/sanitize.ts  strips control characters from text that did not come from the keyboard
-src/buffer.ts    the editor's own text buffer (D-23), pure: grapheme cursor, cell-width soft-wrap, word-grouped undo
+src/buffer.ts    the editor's own text buffer (D-23), pure: grapheme cursor, cell-width soft-wrap, word-grouped undo with undo groups
 src/edit-pane.ts `v e` in place, pure: the `PaneSession` seam, the file to the buffer and back (`saveText`), rows, keys
 src/edit-modes.ts      focus and typewriter modes of the editing pane: paragraph and scroll rules, the toggles' config entry
 src/edit-pane-view.tsx  the editing pane as a component, drawn where the main pane is
 src/modal.ts     the editing pane's Helix-style modes (normal, insert, select) and motions, pure
+src/operators.ts the editing pane's operators (`d c y p P x r`), registers and `u`/`U`, pure
 src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
 src/source.ts    reads the file behind a rail row id from the project (the loader `App` is given as `load`)
 src/index.ts     the package's public surface (`runScreen`); the CLI imports it lazily, only for bare `pablo`
@@ -307,7 +308,13 @@ started (drawn shaded). These are `editor.*` rows in `keys.ts` in the `normal` a
 `chord.ts` like every other key, so the key panel lists them and `keys` in the config rebinds them; while the pane is open
 `keyStateOf` is its mode. A motion only moves the buffer's cursor (`MOTIONS` in `modal.ts`), so operators and text
 objects can take the range it covers. In **insert** mode keys type (`paneKey`): text, Enter, Backspace, arrows,
-Home/End, PgUp/PgDn. In every mode Ctrl+Z / Ctrl+Y undo and redo and Ctrl+S saves (a commit on the branch). Esc backs
+Home/End, PgUp/PgDn. The operators (`operators.ts`, AGT-2171) act on select mode's selection, or the character under
+the cursor in normal mode: `d` and `x` delete, `c` changes (deletes, then inserts), `y` yanks, `p`/`P` paste after/before,
+`r` then a key replaces every character with it. Deletes and yanks go to the default register `"` unless `"` then a
+name picks another for the next one; the registers live with the pane's text. `u`/`U` undo and redo in normal and select
+mode, and in every mode Ctrl+Z / Ctrl+Y do the same and Ctrl+S saves (a commit on the branch). An insert session (`i`
+to Esc, `o`'s new line and `c`'s deletion included) and each operator are one undo step: the buffer's
+`beginGroup`/`endGroup`/`group` (a save inside a group starts a new step, so undo always reaches the saved text). Esc backs
 out a mode at a time: insert or select to normal; in normal it closes (twice with unsaved changes; while the pane is
 still opening it cancels, and the branch the open made goes). Closing is the model's `paneEsc`, which the view also
 reads. A dirty marker (`[+]`) shows in the pane's title until a save.

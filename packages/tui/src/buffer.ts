@@ -2,7 +2,7 @@
 // the AGT-2149 spike (prototype A) and made grapheme- and cell-aware: logical lines (one paragraph per line), a cursor
 // that is a UTF-16 offset into its line but only ever moves by whole graphemes (`Intl.Segmenter`), word soft-wrap to
 // the pane width measured in terminal cells (`string-width`, the measure Ink itself uses), a viewport that follows the
-// cursor, and undo/redo by snapshot with typing coalesced into word-sized steps.
+// cursor, and undo/redo by snapshot with typing coalesced into word-sized steps (or grouped into one: an insert session, an operator, AGT-2171).
 //
 // One cell is reserved at the right edge for the end-of-line cursor.
 
@@ -83,6 +83,9 @@ export class TextBuffer {
   private undos: Snapshot[] = [];
   private redos: Snapshot[] = [];
   private lastKind: EditKind = null;
+  /** Open undo groups (AGT-2171): while one is open every edit joins one undo step, pushed at the group's first edit. */
+  private groupDepth = 0;
+  private groupStepped = false;
   private wrapCache = new Map<string, Segment[]>();
   private wrapWidth = -1;
   private graphemeCache = new Map<string, Grapheme[]>();
@@ -158,14 +161,68 @@ export class TextBuffer {
     this.edited();
   }
 
+  /** The text from `from` up to `to` (exclusive), in document order whichever way round they are given. */
+  slice(from: Pos, to: Pos): string {
+    const [a, b] = this.ordered(from, to);
+    if (a.row === b.row) return this.lines[a.row]!.slice(a.col, b.col);
+    return [this.lines[a.row]!.slice(a.col), ...this.lines.slice(a.row + 1, b.row), this.lines[b.row]!.slice(0, b.col)].join("\n");
+  }
+
+  /** Deletes from `from` up to `to` (exclusive) and puts the cursor where it began; returns the text it took. */
+  deleteRange(from: Pos, to: Pos): string {
+    const [a, b] = this.ordered(from, to);
+    if (a.row === b.row && a.col === b.col) return "";
+    const gone = this.slice(a, b);
+    this.checkpoint("delete");
+    this.lines.splice(a.row, b.row - a.row + 1, this.lines[a.row]!.slice(0, a.col) + this.lines[b.row]!.slice(b.col));
+    this.at = a;
+    this.edited();
+    return gone;
+  }
+
+  /**
+   * Where the character at `p` ends: after its grapheme, or at the start of the next line from a line's end (the line
+   * break is a character too), or `p` itself at the end of the document.
+   */
+  charEnd(p: Pos): Pos {
+    const { row, col } = this.clampPos(p);
+    if (col < this.lines[row]!.length) return { row, col: this.nextBoundary(row, col) };
+    return row < this.lines.length - 1 ? { row: row + 1, col: 0 } : { row, col };
+  }
+
+  /** `p` kept inside the document. */
+  clampPos(p: Pos): Pos {
+    const row = Math.max(0, Math.min(p.row, this.lines.length - 1));
+    return { row, col: Math.max(0, Math.min(p.col, this.lines[row]!.length)) };
+  }
+
+  /**
+   * Undo grouping (AGT-2171): every edit between `beginGroup` and its `endGroup` undoes as one step (an insert-mode
+   * session, an operator, a replace-all). Groups nest; the step is the outermost one's. An undo, redo or save inside a
+   * group ends the step it was building, so later edits in the group make a new one.
+   */
+  beginGroup(): void {
+    if (this.groupDepth++ === 0) { this.groupStepped = false; this.lastKind = null; }
+  }
+  endGroup(): void {
+    if (this.groupDepth === 0) return;
+    if (--this.groupDepth === 0) this.lastKind = null;
+  }
+  /** Runs `edit` as one undo step. */
+  group<T>(edit: () => T): T {
+    this.beginGroup();
+    try { return edit(); } finally { this.endGroup(); }
+  }
+
   undo(): boolean { return this.swap(this.undos, this.redos); }
   redo(): boolean { return this.swap(this.redos, this.undos); }
 
   /**
-   * Marks `text` (default: the buffer as it is) as what is saved: the next edit starts a fresh undo step. A save that
+   * Marks `text` (default: the buffer as it is) as what is saved: the next edit starts a fresh undo step, inside an open
+   * group too (an autosave mid insert session), so undo can always come back to the saved text. A save that
    * finishes after more typing passes the text it wrote, so the buffer stays dirty with what came after.
    */
-  saved(text: string = this.text()): void { this.savedText = text; this.dirty = this.text() !== text; this.lastKind = null; }
+  saved(text: string = this.text()): void { this.savedText = text; this.dirty = this.text() !== text; this.lastKind = null; this.groupStepped = false; }
 
   // --- movement ------------------------------------------------------------------------------------------------
 
@@ -304,16 +361,22 @@ export class TextBuffer {
   }
 
   private move(to: Pos): void {
-    const row = Math.max(0, Math.min(to.row, this.lines.length - 1));
-    this.at = { row, col: Math.max(0, Math.min(to.col, this.lines[row]!.length)) };
+    this.at = this.clampPos(to);
     this.goal = null;
     this.lastKind = null;
   }
 
   private charBefore(): string { return this.lines[this.cursor.row]!.charAt(this.cursor.col - 1); }
 
+  private ordered(from: Pos, to: Pos): [Pos, Pos] {
+    const a = this.clampPos(from), b = this.clampPos(to);
+    return a.row < b.row || (a.row === b.row && a.col <= b.col) ? [a, b] : [b, a];
+  }
+
   private checkpoint(kind: Exclude<EditKind, null>, wordStart = false): void {
-    if (kind !== this.lastKind || wordStart) {
+    const step = this.groupDepth > 0 ? !this.groupStepped : kind !== this.lastKind || wordStart;
+    if (this.groupDepth > 0) this.groupStepped = true;
+    if (step) {
       this.undos.push({ lines: [...this.lines], cursor: this.cursor });
       if (this.undos.length > 1000) this.undos.shift();
     }
@@ -331,6 +394,7 @@ export class TextBuffer {
     this.at = snap.cursor;
     this.lastKind = null;
     this.goal = null;
+    this.groupStepped = false;
     this.dirty = this.text() !== this.savedText;
     return true;
   }

@@ -35,7 +35,7 @@ const open = (body: string) => openText(body, "lines", 1);
 test("the pane opens in normal mode; letters move rather than type there", () => {
   const t = open("one two");
   expect(t.mode).toBe("normal");
-  const r = run(t, ["x", "q", "l"]);
+  const r = run(t, ["q", "Z", "l"]);
   expect(r.text.buffer.text()).toBe("one two");
   expect(r.at).toEqual({ row: 0, col: 1 });
 });
