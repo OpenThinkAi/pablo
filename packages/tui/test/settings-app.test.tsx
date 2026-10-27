@@ -47,7 +47,7 @@ test("pressing a key rebinds, a clash is refused, the editor is typed, and Esc t
   expect(await until(app, (f) => f.includes("refused"))).toContain("refused");
   // To the editor line (the last). One key per render: back-to-back escape sequences in one chunk are not
   // read as separate arrows, so each press waits for the screen to move before the next.
-  for (let i = 0; i < 60; i++) { const before = app.lastFrame(); app.stdin.write("\x1b[B"); await until(app, (f) => f !== before, 300); }
+  for (let i = 0; i < 90; i++) { const before = app.lastFrame(); app.stdin.write("\x1b[B"); await until(app, (f) => f !== before, 300); }
   await type(app, "\r", "h", "x", "\r");
   expect(await until(app, (f) => f.includes("hx"))).toContain("hx");
   await type(app, "\x1b");

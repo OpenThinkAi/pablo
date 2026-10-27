@@ -30,3 +30,20 @@ export function verbArgs(id: string, extra: readonly string[] = []): VerbArgs {
   }
   return { ok: true, argv: [...head, ...extra] };
 }
+
+/** What a routed verb asks for before it runs: nothing (it runs at once), or one line of arguments, with a hint. `masked`: the value after the first word is never drawn. */
+export interface VerbAsk { readonly title: string; readonly hint: string; readonly masked?: true }
+export const VERB_ASKS: Readonly<Record<string, VerbAsk>> = {
+  "output.add": { title: "Add an output", hint: "the type (and for narrated: narrated --from <output>)" },
+  "voice.edit": { title: "Edit a voice rule", hint: "the rule id, then the new text" },
+  "voice.remove": { title: "Remove a voice rule", hint: "the rule id" },
+  "voice.use": { title: "Use a voice", hint: "the voice's name" },
+  "config.set": { title: "Set a config path", hint: "path value (a key is env:NAME or keychain:service/account; the value is not shown)", masked: true },
+};
+
+/** The typed line as extra argv: split on spaces, the rule text of `voice edit` kept whole after its id. */
+export function verbExtra(id: string, line: string): string[] {
+  const words = line.trim().split(/\s+/).filter(Boolean);
+  if (id === "voice.edit" && words.length > 2) return [words[0]!, words.slice(1).join(" ")];
+  return words;
+}

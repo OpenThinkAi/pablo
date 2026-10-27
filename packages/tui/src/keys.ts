@@ -114,15 +114,15 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "fact.record", states: OUTSIDE, needs: "book", prefix: "r", key: "f", label: "record fact", description: "Record a fact (researched, invented or author's) where it belongs: continuity or a bible file.", do: cmd("fact.record") },
 
   // ---- o: output and setup (AGT-2179, D-3): the CLI's output, review, publishing, voice-rule and model-config verbs; routed by verb-routes.ts
-  { id: "output.add", states: OUTSIDE, needs: "book", prefix: "o", key: "a", label: "add output", description: "Add an output to the work (`output add`): pick a type the track allows.", do: cmd("output.add") },
-  { id: "output.critique", states: OUTSIDE, needs: "book", prefix: "o", key: "c", label: "critique", description: "Run the critic over the work's latest draft (`critique`); its comments land on the draft's branch for review.", do: cmd("output.critique") },
-  { id: "output.check", states: OUTSIDE, needs: "book", prefix: "o", key: "k", label: "check", description: "Run the track's checks over the work (`check`) and report the hits.", do: cmd("output.check") },
-  { id: "output.publish", states: OUTSIDE, needs: "book", prefix: "o", key: "p", label: "publish", description: "Publish the work's output (`publish`).", do: cmd("output.publish") },
-  { id: "voice.edit", states: OUTSIDE, needs: "book", prefix: "o", key: "e", label: "voice: edit rule", description: "Edit a voice rule (`voice edit`).", do: cmd("voice.edit") },
-  { id: "voice.remove", states: OUTSIDE, needs: "book", prefix: "o", key: "x", label: "voice: remove rule", description: "Remove a voice rule (`voice remove`).", do: cmd("voice.remove") },
-  { id: "voice.use", states: OUTSIDE, needs: "book", prefix: "o", key: "u", label: "voice: use", description: "Choose the voice this work uses (`voice use`).", do: cmd("voice.use") },
-  { id: "config.show", states: OUTSIDE, needs: "book", prefix: "o", key: "s", label: "config: show", description: "Show the model config and where each intent routes (`config show`); keys appear as references, never values.", do: cmd("config.show") },
-  { id: "config.set", states: OUTSIDE, needs: "book", prefix: "o", key: "S", label: "config: set", description: "Set a model config path (`config set`); a key is given as an env: or keychain: reference, never a value.", do: cmd("config.set") },
+  { id: "output.add", states: OUTSIDE, needs: "book", prefix: "o", key: "a", label: "add output", description: "Add an output to the work: pick a type the track allows.", do: cmd("output.add") },
+  { id: "output.critique", states: OUTSIDE, needs: "book", prefix: "o", key: "c", label: "critique", description: "Run the critic over the work's latest draft; its comments land on the draft's branch for review.", do: cmd("output.critique") },
+  { id: "output.check", states: OUTSIDE, needs: "book", prefix: "o", key: "k", label: "check", description: "Run the track's checks over the work and report the hits.", do: cmd("output.check") },
+  { id: "output.publish", states: OUTSIDE, needs: "book", prefix: "o", key: "p", label: "publish", description: "Publish the work's output; if it has several, the refusal names them.", do: cmd("output.publish") },
+  { id: "voice.edit", states: OUTSIDE, needs: "book", prefix: "o", key: "e", label: "voice: edit rule", description: "Edit a voice rule.", do: cmd("voice.edit") },
+  { id: "voice.remove", states: OUTSIDE, needs: "book", prefix: "o", key: "x", label: "voice: remove rule", description: "Remove a voice rule.", do: cmd("voice.remove") },
+  { id: "voice.use", states: OUTSIDE, needs: "book", prefix: "o", key: "u", label: "voice: use", description: "Choose the voice this work uses.", do: cmd("voice.use") },
+  { id: "config.show", states: OUTSIDE, needs: "book", prefix: "o", key: "s", label: "config: show", description: "Show the model config and where each intent routes; keys appear as references, never values.", do: cmd("config.show") },
+  { id: "config.set", states: OUTSIDE, needs: "book", prefix: "o", key: "S", label: "config: set", description: "Set a model config path; a key is given as an env: or keychain: reference, never a value.", do: cmd("config.set") },
 
   // ---- f: filter
   { id: "filter.all", states: OUTSIDE, needs: "review", prefix: "f", key: "a", label: "all changes", description: "Show every change in the review.", do: cmd("filter.all") },
