@@ -61,8 +61,6 @@ const PARITY: Readonly<Record<string, Entry>> = {
   search: support("read-only"),
   migrate: support("one-off migrations"),
   publish: support("export, not editing"),
-  share: support("review rounds; being removed (AGT-2094)"),
-  notes: support("review round notes; being removed (AGT-2094)"),
   mcp: support("serves the verbs to agents"),
   agent: support("headless harness entry"),
   web: support("agent-only web_search / web_fetch tools; no CLI form (AGT-2126)"),

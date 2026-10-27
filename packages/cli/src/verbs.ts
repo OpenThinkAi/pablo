@@ -95,9 +95,6 @@ import { proseCore } from "./prose";
 import { parseForEpisode, radioBind, radioCheck, radioStatus, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
 import { isOutputId, OUTPUTS, outputIds, resolveOutput } from "./outputs/registry";
-import { realRunner, shareRound } from "./share";
-import { listRoundStatus, notesPull } from "./notes";
-import type { Runner } from "./share";
 import { revisePassage } from "./screen-revise";
 import { reviseCore } from "./revise";
 import type { ReviseCoreArgs } from "./revise";
@@ -1086,101 +1083,6 @@ async function runPublishVerb(args: z.infer<typeof PUBLISH_ARGS>, ctx: VerbConte
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
   return publishOutput(resolved.projectPath, args.target, args.output);
-}
-
-// ---------------------------------------------------------------------------
-// share (AGT-1582)
-// ---------------------------------------------------------------------------
-
-const SHARE_ARGS = z.object({
-  project: projectField,
-  reader: z.string().optional().describe('A reader named in pablo\'s config "readers" (e.g. "atara"). Required to open a round.'),
-  chapters: z.string().optional().describe('The chapters to share, all on main: "3" or "3-5". Required to open a round.'),
-  output: outputField.optional(),
-});
-
-/**
- * `share` (and `share --list`, AGT-1588: the work's rounds and where each stands; a CLI flag, not a verb argument), with the `gh`/git runner injectable: `runShareVerb` (the verb's
- * `run`) passes `realRunner`; tests pass a fake so nothing reaches GitHub.
- */
-export async function shareWith(args: z.infer<typeof SHARE_ARGS> & { readonly list?: boolean }, ctx: VerbContext, run: Runner, acceptUrl?: (url: string, repo: string) => boolean): Promise<VerbResult> {
-  const resolved = resolveVerbProject(ctx, args.project);
-  if (!resolved.ok) return resolved.result;
-
-  const marker = readMarker(resolved.projectPath);
-  if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
-
-  if (args.list === true) {
-    const listed = listRoundStatus({ vaultRoot: resolved.vaultRoot, slug: marker.marker.slug, run });
-    return { body: { ok: true, rounds: listed.rounds, notices: listed.notices }, exitCode: 0 };
-  }
-
-  let readers;
-  try {
-    readers = loadConfig({ env: ctx.env, projectDir: resolved.projectPath }).readers;
-  } catch (error) {
-    return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
-  }
-
-  const outcome = shareRound({
-    vaultRoot: resolved.vaultRoot,
-    projectPath: resolved.projectPath,
-    slug: marker.marker.slug,
-    title: marker.marker.title,
-    reader: args.reader,
-    chapters: args.chapters,
-    output: args.output,
-    readers,
-    run,
-    ...(acceptUrl ? { acceptUrl } : {}),
-  });
-  if (!outcome.ok) {
-    return { body: { ok: false, code: outcome.code, message: outcome.message, ...(outcome.missing ? { missing: outcome.missing } : {}) }, exitCode: outcome.code };
-  }
-  return { body: { ok: true, ...outcome.round, record: outcome.recordPath, notices: outcome.notices }, exitCode: 0 };
-}
-
-// ---------------------------------------------------------------------------
-// notes pull (AGT-1587)
-// ---------------------------------------------------------------------------
-
-const NOTES_ARGS = z.object({
-  sub: z.string().describe('What to do with readers\' notes; only "pull" today.'),
-  project: projectField,
-});
-
-/**
- * `notes pull`, with the `gh`/git runner injectable: the verb's `run` passes
- * `realRunner`; tests pass a fake serving a recorded review.
- */
-export async function notesWith(args: z.infer<typeof NOTES_ARGS>, ctx: VerbContext, run: Runner, now?: () => Date): Promise<VerbResult> {
-  if (args.sub !== "pull") {
-    return { body: { ok: false, code: 2, message: `pablo: notes: unknown action "${args.sub}" (only "pull")` }, exitCode: 2 };
-  }
-  const resolved = resolveVerbProject(ctx, args.project);
-  if (!resolved.ok) return resolved.result;
-  const marker = readMarker(resolved.projectPath);
-  if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
-
-  let readers;
-  try {
-    readers = loadConfig({ env: ctx.env, projectDir: resolved.projectPath }).readers;
-  } catch (error) {
-    return { body: { ok: false, code: 1, message: (error as Error).message }, exitCode: 1 };
-  }
-  const outcome = notesPull({
-    vaultRoot: resolved.vaultRoot,
-    projectPath: resolved.projectPath,
-    slug: marker.marker.slug,
-    readers,
-    run,
-    env: ctx.env,
-    ...(now ? { now } : {}),
-  });
-  return {
-    body: { ok: outcome.code === 0, code: outcome.code, pulled: outcome.pulled, skipped: outcome.skipped, notices: outcome.notices },
-    exitCode: outcome.code,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2239,27 +2141,6 @@ export const VERBS: readonly Verb[] = [
       "Publish one of the work's outputs to a target. The novel and the story compile into one markdown file (frontmatter stripped, sentence lines joined into paragraphs, quotes curled) under .pablo/out/; the radio output's bundle copies every episode's script and, for each mixed episode, its audio and manifest into one directory (episodes not yet mixed are listed in notes); its stream target publishes each mixed episode (newest version's audio and manifest, with its time to first audio) to the listening directory .pablo/out/stream/, where the review player finds it.",
     args: PUBLISH_ARGS,
     run: runPublishVerb,
-  },
-  {
-    name: "share",
-    description:
-      "Open a reading round: push the named chapters (all on main) to the book's private reading repo as a PR the reader can comment on, request the reader's review, and record the round in the vault.",
-    args: SHARE_ARGS,
-    run: (args: z.infer<typeof SHARE_ARGS>, ctx: VerbContext) => shareWith(args, ctx, realRunner),
-    // Sending the manuscript to a person is the author's act: a model connected
-    // over MCP must not be able to do it, so this verb registers no MCP tool.
-    mcpTools: [],
-  },
-  {
-    name: "notes",
-    description:
-      "`notes pull`: turn each reader's submitted review of a reading round into a reader/<round> branch in the vault: one commit per suggestion, authored as the reader, and every comment in the branch's comment store for review mode.",
-    args: NOTES_ARGS,
-    run: (args: z.infer<typeof NOTES_ARGS>, ctx: VerbContext) => notesWith(args, ctx, realRunner),
-    positionalArgs: ["sub"],
-    // Reading a reader's review off GitHub and writing branches into the vault
-    // is the author's act, like `share`: no MCP tool.
-    mcpTools: [],
   },
   {
     name: "voice",

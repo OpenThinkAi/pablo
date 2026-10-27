@@ -59,7 +59,7 @@ llama.cpp, MLX) or an Anthropic API key.
   MCP, and the rules an agent should follow.
 - **[The vault](docs/vault.md):** every file, the `pablo.json` marker, and what pablo
   checks before it drafts.
-- **[Configuration](docs/configuration.md):** models, keys, routing, readers.
+- **[Configuration](docs/configuration.md):** models, keys, routing.
 - **[Command reference](docs/commands.md):** every command and flag.
 - **[Sharing with readers](docs/readers.md):** reading rounds and the reader's installer.
 

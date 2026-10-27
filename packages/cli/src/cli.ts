@@ -62,10 +62,8 @@ import { screenVoicer } from "./screen-voice";
 import { screenPlanner } from "./screen-planning";
 import { screenWriter } from "./screen-write";
 import { screenRefresh } from "./screen-refresh";
-import { deriveCliOptions, notesWith, publishOutput, runVoiceEdit, runVoiceList, runVoiceRemove, runVoiceRule, runVoiceUse, shareWith, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
+import { deriveCliOptions, publishOutput, runVoiceEdit, runVoiceList, runVoiceRemove, runVoiceRule, runVoiceUse, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
 import { guideText } from "./guide";
-import { realRunner } from "./share";
-import type { Runner } from "./share";
 import { openReview } from "./review-host";
 import { openMixer } from "./mixer-host";
 import { createNotesHost } from "./mixer-notes-host";
@@ -90,8 +88,6 @@ const P0_VERBS = [
   "migrate",
   "merge",
   "publish",
-  "share",
-  "notes",
   "output",
   "story",
   "mcp",
@@ -182,7 +178,7 @@ function helpText(): string {
     "                                            (historical-fiction when it names a period or event);",
     "                                            --review stops on every branch, and",
     "                                            pablo story --project <slug> continues the run",
-    "  check, publish and share take --output <type> the same way",
+    "  check and publish take --output <type> the same way",
     "  pablo check --project <slug> --output <type>",
     "                                            tells and provenance, plus the core check:",
     "                                            story-time and names the core does not know",
@@ -236,15 +232,6 @@ function helpText(): string {
     "                                            copy each mixed radio episode (newest version's",
     "                                            audio and manifest, with its time to first audio)",
     "                                            to the listening directory <work>/.pablo/out/stream/",
-    "  pablo share --project <slug> --reader <name> --chapters N|N-M",
-    "                                            open a reading round: push those chapters (all",
-    "                                            on main) to the book's private reading repo as a",
-    "                                            PR, request the reader's review, record the round",
-    "  pablo share --list --project <slug>       the work's rounds: open, submitted (waiting to",
-    "                                            pull), pulled",
-    "  pablo notes pull --project <slug>        each reader's submitted review becomes a",
-    "                                            reader/<round> branch: one commit per suggestion,",
-    "                                            authored as the reader; comments for review mode",
     "  pablo voice new <name> [--global]        scaffold a voice directory",
     "  pablo voice list [--project <slug>]      every voice, and every rule with its id",
     "  pablo voice show <name>                  the assembled voice as a model will see it",
@@ -450,7 +437,7 @@ interface ParsedArgs {
   readonly chapter: string | undefined;
   /** `migrate track --track <id>` (AGT-2104): the track to write into pablo.json. */
   readonly track: string | undefined;
-  /** `--output <type>` (AGT-1669): the output `write`, `status`, `check`, `publish` and `share` act on. */
+  /** `--output <type>` (AGT-1669): the output `write`, `status`, `check`, and `publish` act on. */
   readonly output: string | undefined;
   /** `write --unit N` (AGT-1669); validated by `runWrite`. */
   readonly unit: string | undefined;
@@ -502,14 +489,8 @@ interface ParsedArgs {
   readonly end: string | undefined;
   /** `publish --target draft|review|final` (AGT-1534). */
   readonly target: string | undefined;
-  /** `share --reader <name>` (AGT-1582): a reader named in the config's `readers`. */
-  readonly reader: string | undefined;
-  /** `share --chapters 3|3-5` (AGT-1582). */
-  readonly chapters: string | undefined;
   /** `agent --new` (AGT-1565): start a fresh harness session; the old one stays on disk. */
   readonly new: boolean;
-  /** `share --list`: the work's rounds. */
-  readonly list: boolean;
   /** Every parsed flag, raw (AGT-1679): the casting verbs build their args from it with `verbArgsFromCli`. */
   readonly values: Readonly<Record<string, unknown>>;
 }
@@ -542,7 +523,6 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       config: { type: "boolean", default: false },
       "tag-facts": { type: "boolean", default: false },
       new: { type: "boolean", default: false },
-      list: { type: "boolean", default: false },
       yes: { type: "boolean", default: false },
       // `audition -n 6` (AGT-1679): the derived `n` option, with its short form.
       n: { type: "string", short: "n" },
@@ -566,7 +546,6 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     starterConfig: values["config"] === true,
     tagFacts: values["tag-facts"] === true,
     new: values["new"] === true,
-    list: values["list"] === true,
     for: typeof values["for"] === "string" ? values["for"] : undefined,
     role: typeof values["role"] === "string" ? values["role"] : undefined,
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
@@ -599,8 +578,6 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     start: typeof values["start"] === "string" ? values["start"] : undefined,
     end: typeof values["end"] === "string" ? values["end"] : undefined,
     target: typeof values["target"] === "string" ? values["target"] : undefined,
-    reader: typeof values["reader"] === "string" ? values["reader"] : undefined,
-    chapters: typeof values["chapters"] === "string" ? values["chapters"] : undefined,
     values,
   };
 }
@@ -1463,6 +1440,14 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     return await runVerbEntry("guide", args, cwd, guideText);
   }
 
+  // Reading rounds are gone (AGT-2092, AGT-2094): `read --list` and `read <reader>-<date>` used to mean a round,
+  // and would otherwise fall through to the author's `read <path>` and a project-resolution refusal.
+  if (args.verb === "read" && (args.values["list"] === true || /^[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}-\d{2}-\d{2}$/.test(args.rest[0] ?? ""))) {
+    const message = "pablo: reading rounds were removed; a reader reviews through a GitHub pull request, and `pablo read <path> --project <slug>` reads a file in the work";
+    emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+    return EXIT_REFUSED;
+  }
+
   // `prose` (AGT-1241) has no `--project` at all — AC4 requires it to work
   // with no vault (a global voice, a brief anywhere), so it never enters the
   // shared `--project`/marker resolution below and is dispatched here,
@@ -1817,46 +1802,6 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     return result.exitCode;
   }
 
-  if (args.verb === "share") {
-    if (projectPath === undefined) {
-      const message = "pablo: share requires --project <slug>";
-      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
-      return EXIT_REFUSED;
-    }
-    if (args.list) {
-      const outcome = await shareWith({ project: args.project as string, list: true }, { cwd, env: process.env, stderr: process.stderr }, realRunner);
-      const body = outcome.body as { ok?: boolean; message?: string; rounds?: { id: string; chapters: number[]; status: string; closed?: boolean; prUrl: string }[]; notices?: string[] };
-      if (args.json) console.log(JSON.stringify(body));
-      else if (body.rounds === undefined) console.error(String(body.message));
-      else {
-        if (body.rounds.length === 0) console.log("pablo: no reading rounds for this project");
-        for (const r of body.rounds) console.log(`${r.id}  chapters ${r.chapters.join(", ") || "-"}  ${r.status}${r.status === "pulled" && r.closed === false ? " (not closed yet)" : ""}  ${r.prUrl}`);
-        for (const notice of body.notices ?? []) console.error(notice);
-      }
-      return outcome.exitCode;
-    }
-    if (!args.reader || !args.chapters) {
-      const message = `pablo: share requires ${args.reader ? "--chapters <N|N-M>" : "--reader <name>"}`;
-      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
-      return EXIT_REFUSED;
-    }
-    const outcome = await shareWith(
-      { project: args.project as string, reader: args.reader, chapters: args.chapters, output: args.output },
-      { cwd, env: process.env, stderr: process.stderr },
-      realRunner,
-    );
-    const body = outcome.body as Record<string, unknown>;
-    if (args.json) {
-      console.log(JSON.stringify(body));
-    } else if (body["ok"] === true) {
-      console.log(`pablo: opened round ${String(body["id"])}: ${String(body["prUrl"])}`);
-      for (const notice of body["notices"] as string[]) console.log(notice);
-    } else {
-      console.error(String(body["message"]));
-    }
-    return outcome.exitCode;
-  }
-
   // `promote` (AGT-1671), a `check --across` finding's action, runs off its one `VERBS` entry.
   if (args.verb === "promote") {
     if (projectPath === undefined) {
@@ -1900,35 +1845,6 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     else if ((result.body as { ok?: boolean }).ok === true) console.log(outputVerbText(result.body));
     else console.error(outputVerbText(result.body));
     return result.exitCode;
-  }
-
-  if (args.verb === "notes") {
-    if (args.rest[0] !== "pull" || projectPath === undefined) {
-      const message = args.rest[0] !== "pull" ? 'pablo: notes: the only action is "pull" (pablo notes pull --project <slug>)' : "pablo: notes pull requires --project <slug>";
-      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
-      return EXIT_REFUSED;
-    }
-    const outcome = await notesWith({ sub: "pull", project: args.project as string }, { cwd, env: process.env, stderr: process.stderr }, realRunner);
-    const body = outcome.body as {
-      ok?: boolean;
-      message?: string;
-      pulled?: { round: string; branch: string; commits: string[]; comments: number }[];
-      skipped?: { reason: string; message: string }[];
-      notices?: string[];
-    };
-    if (args.json) {
-      console.log(JSON.stringify(body));
-    } else if (body.pulled === undefined) {
-      console.error(String(body.message));
-    } else {
-      for (const p of body.pulled) {
-        console.log(`pablo: pulled round ${p.round} into ${p.branch} (${p.commits.length} suggestions, ${p.comments} comments)`);
-      }
-      for (const s of body.skipped ?? []) (s.reason === "error" || s.reason === "refused" ? console.error : console.log)(s.message);
-      for (const n of body.notices ?? []) console.log(n);
-      if (body.pulled.length === 0 && (body.skipped ?? []).length === 0) console.log("pablo: notes pull: no rounds for this work");
-    }
-    return outcome.exitCode;
   }
 
   if (args.verb === "voice") {

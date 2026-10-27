@@ -3,7 +3,7 @@
  * output type pablo knows, one row each, the single source the way `VERBS`
  * is for verbs. `pablo.json`'s `outputs` keys are checked against it
  * (`marker.ts`), `status` and `resume` report each declared output through
- * its `report`, and `write`, `check`, `publish`, `share`, `merge` and the
+ * its `report`, and `write`, `check`, `publish`, `merge` and the
  * rituals ask the work's output for its paths, preconditions, pack, branch
  * names, rituals and publish targets instead of naming the novel's.
  *
