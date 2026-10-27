@@ -41,6 +41,8 @@ import type { Marker } from "./marker";
 import { dirtyPaths } from "./migrate";
 import { LEDGER_TEMPLATE } from "./novel/continuity";
 import { renderNovelPlan } from "./outputs/novel/plan";
+import { ESSAY_ID } from "./outputs/essay/units";
+import { OUTLINE_FILE } from "./core/nonfiction";
 import { isNarratableSource } from "./outputs/narrated";
 import { OUTPUTS, outputDefinition, outputIds, outputsOnTrack } from "./outputs/registry";
 import type { OutputDefinition, PlanRow } from "./outputs/types";
@@ -133,7 +135,9 @@ export function renderPlan(def: OutputDefinition, rows: readonly PlanRow[]): str
   return [
     `# Plan: ${def.id}`,
     "",
-    `The ${def.id} output's units (${def.plural}) mapped onto the core beats in \`${BEATS_FILE}\`.`,
+    def.id === ESSAY_ID
+      ? `The essay's sections: on nonfiction the rows of \`${OUTLINE_FILE}\` (beats: the outline row), on a fiction track one section over the core beats.`
+      : `The ${def.id} output's units (${def.plural}) mapped onto the core beats in \`${BEATS_FILE}\`.`,
     `A unit whose ${def.noun} exists carries its status.`,
     "",
     "| unit | title | beats | status |",
@@ -247,7 +251,7 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
     const missing = coreStages(core)
       .filter((s) => !s.done && s.optional !== true && s.id !== "facts")
       .flatMap((s) => s.missing.map((m) => `core ${s.id}: ${m}`));
-    return refuse("add", `the story core is not at beats yet (${short})`, missing);
+    return refuse("add", core.track === "nonfiction" ? `the core is not complete yet (${short})` : `the story core is not at beats yet (${short})`, missing);
   }
 
   const plan = planFile(id);

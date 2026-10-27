@@ -11,6 +11,8 @@
  *      assembles, the fake writer's text lands at `artifactDir/unitFileName`,
  *      `unitOfPath` reads the unit back, `report` counts it drafted, and the
  *      after-merge rituals return without a failed step;
+ *      (a type whose units share one file, the essay, puts each unit into
+ *      that file through `shared.put`, keeping the units before it);
  *   4. `branch` and `unitOfBranch` round-trip;
  *   5. the first publish target publishes every unit.
  *
@@ -161,9 +163,20 @@ export async function runConformance(def: unknown, opts: ConformanceOptions): Pr
     const fileName = type.unitFileName(row.unit, row.title);
     const path = join(opts.workDir, type.artifactDir, fileName);
     const rel = relative(opts.workDir, path).split(sep).join("/");
-    if (type.unitOfPath(rel) !== row.unit) fail("unitOfPath", `${rel} does not read back as unit ${row.unit}`);
     mkdirSync(join(opts.workDir, type.artifactDir), { recursive: true });
-    writeFileSync(path, `${opts.writer(packed.pack.prompt, row.unit).trim()}\n`, "utf8");
+    const text = opts.writer(packed.pack.prompt, row.unit).trim();
+    if (type.shared === undefined) {
+      if (type.unitOfPath(rel) !== row.unit) fail("unitOfPath", `${rel} does not read back as unit ${row.unit}`);
+      writeFileSync(path, `${text}\n`, "utf8");
+    } else {
+      // A section of a shared file (the essay): the file reads as one of the type's, and the unit lands in it beside the others.
+      if (type.unitOfPath(rel) === undefined) fail("unitOfPath", `${rel} does not read back as a unit`);
+      const before = existsSync(path) ? readFileSync(path, "utf8") : undefined;
+      const after = type.shared.put(opts.workDir, before, row.unit, text, "---\nmodel: conformance-fake\nprompt_hash: conformance\n---");
+      if (!type.shared.has(opts.workDir, after, row.unit)) fail("shared.put", `unit ${row.unit} is not in ${rel} after it was put there`);
+      for (const done of units) if (!type.shared.has(opts.workDir, after, done)) fail("shared.put", `unit ${done} was lost from ${rel} when unit ${row.unit} was put there`);
+      writeFileSync(path, after, "utf8");
+    }
 
     const report = type.report(opts.workDir, readCoreState(opts.workDir));
     if (!report.units.some((u) => u.unit === row.unit && u.file !== undefined)) fail("report", `unit ${row.unit} is not reported drafted after it was written`);

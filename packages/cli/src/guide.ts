@@ -21,6 +21,7 @@ import { PERIOD_BRIEF_FILE } from "./core/machine";
 import { CHECKLIST_FILE } from "./core/checklist";
 import { CLAIMS_FILE, OUTLINE_FILE, THESIS_FILE } from "./core/nonfiction";
 import { isNarratableSource } from "./outputs/narrated";
+import { ESSAY_ID } from "./outputs/essay/units";
 import type { OutputDefinition } from "./outputs/types";
 import { DEFAULT_TRACK, isTrackId, trackDefinition, trackIds } from "./tracks/registry";
 import type { TrackId } from "./tracks/registry";
@@ -253,7 +254,8 @@ function waitingOn(def: OutputDefinition, track: TrackId): string | undefined {
 /** The steps that add `def` to a work on `track`; a derived output (narrated) first needs a written prose output to read. */
 function addSteps(def: OutputDefinition, track: TrackId): GuideStep[] {
   if (def.derive === undefined) {
-    return [{ phase: "output", title: `add the ${def.id} output (once the core is in)`, command: `pablo output add ${def.id} ${P}`, detail: `scaffolds outputs/${def.id}/ (plan.md: which units tell which beats; RULES.md)` }];
+    const plan = def.id === ESSAY_ID ? `plan.md: its sections, the rows of ${OUTLINE_FILE} on nonfiction` : "plan.md: which units tell which beats";
+    return [{ phase: "output", title: `add the ${def.id} output (once the core is in)`, command: `pablo output add ${def.id} ${P}`, detail: `scaffolds outputs/${def.id}/ (${plan}; RULES.md)` }];
   }
   const from = `<${proseSources(track).join("|")}>`;
   return [

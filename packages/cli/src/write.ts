@@ -11,7 +11,7 @@
  * commit (AGT-1231) is a separate concern and does not happen here.
  */
 
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import {
   createProviders,
@@ -366,7 +366,7 @@ export async function runWrite(
   }
 
   // The addressed output owns the preconditions, the pack, the file's place and the branch.
-  const resolved = resolveOutput(markerResult.marker.outputs, requestedOutput, "write");
+  const resolved = resolveOutput(markerResult.marker.outputs, requestedOutput, "write", trackOf(markerResult.marker));
   if (!resolved.ok) {
     emitError(resolved.message, resolved.missing, resolved.code, args.json);
     return resolved.code;
@@ -455,7 +455,14 @@ export async function runWrite(
   const workRelativePath = join(output.artifactDir, fileName).split(sep).join("/");
   const filePath = join(projectPath, output.artifactDir, fileName);
 
-  if (existsSync(filePath) && !args.force) {
+  // A unit that is a section of a shared file (the essay, AGT-2134) exists when the file has its text, not when the file does.
+  const shared = output.shared;
+  if (shared !== undefined) {
+    if (existsSync(filePath) && shared.has(projectPath, readFileSync(filePath, "utf8"), chapter) && !args.force) {
+      emitError(`pablo: ${output.noun} ${chapter} already has text in ${workRelativePath}; use --force to replace it`, undefined, 2, args.json);
+      return 2;
+    }
+  } else if (existsSync(filePath) && !args.force) {
     emitError(`pablo: ${workRelativePath} already exists; use --force to overwrite`, undefined, 2, args.json);
     return 2;
   }
@@ -629,12 +636,17 @@ export async function runWrite(
   // structure (a radio script: a speaker, a cue or the CAST: line per line, AGT-1686; a screenplay's Fountain,
   // AGT-2132) is stored as written.
   const asWritten = output.manuscript === "lines" || output.manuscript === "screenplay";
-  const fileContent = `${frontmatter}\n\n${asWritten ? normalized : splitManuscript(normalized)}\n`;
+  const body = asWritten ? normalized : splitManuscript(normalized);
 
   // The project's path inside the repo, so the file lands at the same place in the worktree.
   const projectInRepo = relative(realpathSync(repo), realpathSync(projectPath));
   const worktreeFile = join(worktree, projectInRepo, output.artifactDir, fileName);
   mkdirSync(dirname(worktreeFile), { recursive: true });
+  // A shared file (the essay) gets the unit put into the branch's copy, every other unit kept.
+  const fileContent =
+    shared === undefined
+      ? `${frontmatter}\n\n${body}\n`
+      : shared.put(projectPath, existsSync(worktreeFile) ? readFileSync(worktreeFile, "utf8") : undefined, chapter, body, frontmatter);
   writeFileSync(worktreeFile, fileContent, "utf8");
 
   const hits = checkFile(normalized, workRelativePath, loadCheckRules(vaultRoot));

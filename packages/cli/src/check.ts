@@ -382,7 +382,7 @@ export function isUnprovenanced(text: string): boolean {
  * `checkFile` + `isUnprovenanced` over each. `file`, when given, may be
  * work-relative or absolute — it must resolve inside `workDir`, or this
  * refuses (exit 2) instead of scanning outside the work. With no `file`,
- * every `*.md` (or `*.fountain`, a screenplay scene) file in the work's output directory (`artifactDir`) is
+ * every `*.md` (or `*.fountain`, a screenplay scene) unit file in the work's output directory (`artifactDir`; a file its `unitOfPath` reads as a unit, so never its `RULES.md` or `plan.md`) is
  * scanned, sorted by name.
  *
  * Otherwise always succeeds with exit 0 (AC3): a hit, or an unprovenanced
@@ -397,11 +397,13 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
   // several outputs and none named is a refusal naming them.
   let artifactDir: string | undefined;
   let named: OutputDefinition | undefined;
+  let scanned: OutputDefinition | undefined;
   if (file === undefined || output !== undefined) {
     const marker = readMarker(workDir);
-    const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, output, "check");
+    const resolved = resolveOutput(marker.ok ? marker.marker.outputs : {}, output, "check", marker.ok ? trackOf(marker.marker) : undefined);
     if (!resolved.ok) return { ok: false, code: 2, message: resolved.message, tried: [], missing: resolved.missing };
     artifactDir = resolved.output.artifactDir;
+    scanned = resolved.output;
     if (output !== undefined) named = resolved.output;
   }
 
@@ -430,6 +432,8 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     filePaths = existsSync(chaptersDir)
       ? readdirSync(chaptersDir)
           .filter((name) => name.endsWith(".md") || name.endsWith(FOUNTAIN_EXT))
+          // Only the output's units: an output whose units sit beside its RULES.md and plan.md (story, essay) scans neither.
+          .filter((name) => scanned?.unitOfPath(`${artifactDir as string}/${name}`) !== undefined)
           .sort()
           .map((name) => join(chaptersDir, name))
       : [];

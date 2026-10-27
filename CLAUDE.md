@@ -251,6 +251,19 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `outputs/narrated/casting/`; `state.ts`, `review-host.ts`
                 and the mixer hosts take the output as a parameter
                 (radio the default). `--stream`/`--all` stay radio's.
+                `essay` (AGT-2134, `src/outputs/essay/`, D-7, on every
+                track): on nonfiction one section per `core/outline.md`
+                row, every section in `outputs/essay/essay.md` under a
+                `## <title>` heading (`sections.ts`), on `draft/essay-NN`;
+                the optional `shared` field (`has`/`put`) is how `write`,
+                `merge` and conformance put one unit into a shared file,
+                and `unitText` is what `narrated` reads (citations
+                dropped). Its pack is core's essay specs (`DraftingInputs.
+                essay`): thesis, the section's claims as `[#n]`/`[@id]`
+                citations (note ids only, never notes), voice, the previous
+                section; a fiction track's essay is one section about the
+                story. Publish `draft|final` numbers citations into a
+                sources list.
                 `pablo story "<prompt>"` (AGT-1690, `src/story.ts`, one
                 `VERBS` entry; an MCP tool since AGT-2143 but, like `init` and
                 `merge`, `harness: false`, never one of the harness's own) creates a work under

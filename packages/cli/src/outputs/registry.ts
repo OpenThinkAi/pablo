@@ -25,6 +25,7 @@
 
 import type { Outputs } from "../marker";
 import { readMarker } from "../marker";
+import { ESSAY } from "./essay";
 import { NOVEL } from "./novel";
 import { NARRATED } from "./narrated";
 import { RADIO } from "./radio";
@@ -39,6 +40,7 @@ export const OUTPUTS = {
   screenplay: SCREENPLAY,
   radio: RADIO,
   narrated: NARRATED,
+  essay: ESSAY,
 } as const satisfies Readonly<Record<string, OutputDefinition>>;
 
 /** An output type's id: a key of `OUTPUTS` (or of a type a test registered). */
@@ -47,7 +49,7 @@ export type OutputId = string;
 /**
  * Types registered at run time by `registerOutput`: tests only (a fixture
  * type such as a `blog`, to exercise a type pablo does not ship). Production
- * types are rows of `OUTPUTS` (`novel`, `story`, `screenplay`, `radio`), never registered.
+ * types are rows of `OUTPUTS` (`novel`, `story`, `screenplay`, `radio`, `narrated`, `essay`), never registered.
  */
 const registered = new Map<string, OutputDefinition>();
 
@@ -142,10 +144,22 @@ export function outputChoice(declared: Outputs): string {
  * declares none may still name the novel, which it is read as). Without:
  * the one declared output, the novel for a work that declares none, and a
  * refusal naming every declared type when there are several. `verb` names
- * the verb in the message.
+ * the verb in the message. With `track`, a work that declares none is read as
+ * the novel only where the track allows one: a nonfiction work with no output
+ * is refused, naming the outputs it can add (`pablo output add essay`).
  */
-export function resolveOutput(declared: Outputs, requested: string | undefined, verb: string): ResolvedOutput {
+export function resolveOutput(declared: Outputs, requested: string | undefined, verb: string, track?: TrackId): ResolvedOutput {
   const types = Object.keys(declared);
+  if (types.length === 0 && track !== undefined && !OUTPUTS.novel.tracks.includes(track) && (requested === undefined || requested === OUTPUTS.novel.id)) {
+    // A derived output (narrated) reads another, so the first to add is one drafted from the core.
+    const allowed = outputsOnTrack(track).filter((id) => outputDefinition(id)?.derive === undefined);
+    return {
+      ok: false,
+      code: 2,
+      message: `pablo: ${verb}: the work has no output yet; a ${track} work adds one first (pablo output add ${allowed[0] ?? "<type>"})`,
+      missing: allowed.map((id) => `output ${id} (pablo output add ${id})`),
+    };
+  }
   if (requested !== undefined) {
     const def = outputDefinition(requested);
     if (def === undefined) {

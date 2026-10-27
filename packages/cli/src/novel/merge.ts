@@ -40,6 +40,11 @@ export type MergeDraftOptions = Omit<RitualOptions, "words" | "model" | "receipt
 function findChapterFile(output: OutputDefinition, projectPath: string, chapter: number): string | undefined {
   const dir = join(projectPath, output.artifactDir);
   if (!existsSync(dir)) return undefined;
+  // A section of a shared file (the essay, AGT-2134): the file, when it has the section's text.
+  if (output.shared !== undefined) {
+    const file = join(dir, output.unitFileName(chapter, ""));
+    return existsSync(file) && output.shared.has(projectPath, readFileSync(file, "utf8"), chapter) ? file : undefined;
+  }
   const name = readdirSync(dir)
     .sort()
     .find((f) => output.unitOfPath(`${output.artifactDir}/${f}`) === chapter);

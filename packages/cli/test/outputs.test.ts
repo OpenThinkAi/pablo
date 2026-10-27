@@ -82,7 +82,7 @@ async function conform(def: unknown) {
 for (const id of outputIds()) {
   test(`OUTPUTS.${id} passes the conformance run over the four-beat fixture`, async () => {
     const report = await conform(outputDefinition(id));
-    expect(report.units).toEqual(id === "story" ? [1] : [1, 2, 3, 4]);
+    expect(report.units).toEqual(id === "story" || id === "essay" ? [1] : [1, 2, 3, 4]);
     expect(existsSync(report.published)).toBe(true);
   });
 }
