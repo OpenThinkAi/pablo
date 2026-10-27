@@ -64,8 +64,7 @@ import { readFileSync } from "node:fs";
 import { CHECK_INTENT, createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
-import { checkWork, radioScriptsChecked } from "./check";
-import { anachronismBody, checkAnachronisms } from "./anachronism";
+import { checkWork, radioScriptsChecked, runModelChecks } from "./check";
 import { checkAcross, promoteFinding } from "./across";
 import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import type { Ask } from "./critique";
@@ -688,6 +687,7 @@ const CHECK_ARGS = z.object({
     .optional()
     .describe(`Work-relative or absolute path to scan; omit to scan every unit of the output (the novel's ${OUTPUTS.novel.artifactDir}/*.md).`),
   output: outputField.optional(),
+  unit: z.number().int().positive().optional().describe("With `output`: only this unit of the output."),
   across: z
     .boolean()
     .optional()
@@ -723,16 +723,17 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
   }
 
-  const outcome = checkWork(resolved.vaultRoot, resolved.projectPath, args.file, args.output);
+  const outcome = checkWork(resolved.vaultRoot, resolved.projectPath, args.file, args.output, args.unit);
   if (!outcome.ok) {
     return {
       body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried, ...(outcome.missing ? { missing: outcome.missing } : {}) },
       exitCode: outcome.code,
     };
   }
-  // A historical-fiction work also gets the anachronism check (AGT-2113): cached verdicts, else the `check` intent's model.
-  const anachronism = await checkAnachronisms(resolved.projectPath, outcome.scanned, { env: ctx.env, progress: (line) => ctx.stderr.write(`${line}\n`) });
-  const body: Record<string, unknown> = { ok: true, hits: [...outcome.hits, ...(anachronism?.hits ?? [])], unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}) };
+  // A historical-fiction work also gets the model-backed checks, on the `check` intent: anachronism (AGT-2113, cached
+  // verdicts first) and, with `output`, fact accuracy against facts/period.md (AGT-2112).
+  const model = await runModelChecks(outcome, resolved.projectPath, args.output, { env: ctx.env, progress: (line) => ctx.stderr.write(`${line}\n`) });
+  const body: Record<string, unknown> = { ok: true, hits: model.hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(model.factAccuracy ? { factAccuracy: model.factAccuracy } : {}) };
   // A radio work also gets its scripts read: unknown directions and unbound roles (AGT-1680).
   const radio = radioScriptsChecked(args.file, args.output) ? radioCheck({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath) : undefined;
   if (radio !== undefined) {
@@ -740,7 +741,7 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     const { ok: _ok, ...rest } = radio.body as Record<string, unknown>;
     body["radio"] = rest;
   }
-  if (anachronism !== undefined) body["anachronism"] = anachronismBody(anachronism);
+  if (model.anachronism !== undefined) body["anachronism"] = model.anachronism;
   return { body, exitCode: 0 };
 }
 
@@ -2080,7 +2081,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "check",
     description:
-      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. With `output` it adds the core check under `core`: story-time (a mention dated after the unit's year) and names the bible, facts.md and the output's own ledger do not know. With `across` it instead compares every output's continuity ledger and reports contradictions between tellings, each with a promote action. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`. On a historical-fiction work it also reports `anachronism` hits (a word out of the period in bible/period.md, with why and the period it belongs to), verdicts cached in facts/lexicon.json.",
+      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. With `output` it adds the core check under `core`: story-time (a mention dated after the unit's year) and names the bible, facts.md and the output's own ledger do not know. With `across` it instead compares every output's continuity ledger and reports contradictions between tellings, each with a promote action. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`. On a historical-fiction work it also reports `anachronism` hits (a word out of the period in bible/period.md, with why and the period it belongs to), verdicts cached in facts/lexicon.json. With `output` on a historical-fiction work it also runs fact-accuracy: each draft sentence a distilled period fact in facts/period.md contradicts is a `fact-accuracy` hit quoting the sentence, the fact and its source note (summary under `factAccuracy`). `unit` narrows it to one unit of the output.",
     args: CHECK_ARGS,
     run: runCheckVerb,
   },

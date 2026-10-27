@@ -1133,7 +1133,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         ...screen,
         stages: workBookStages(screen.dir, waiting?.ok ? waiting.branches : []),
         // A chapter opened there is scanned with `check`'s rules from the vault, each hit a box under its line (AGT-1528).
-        ...(vault.ok ? { checks: screenChecks(vault.path) } : {}),
+        ...(vault.ok ? { checks: screenChecks(vault.path, screen.dir) } : {}),
         // `a w` writes the selected chapter through the same `runWrite` the verb uses (AGT-1542).
         ...(vault.ok ? { writer: screenWriter(vault.path, screen.dir) } : {}),
         // `r ...` runs the planning and research verbs on a `plan/` branch (AGT-2178).

@@ -596,7 +596,7 @@ Outside a work, or without a terminal, bare `pablo` prints the help.
 ### check
 
 ```
-pablo check --project <slug> [--file F] [--output <type>]
+pablo check --project <slug> [--file F] [--output <type> [--unit N]]
 pablo check --project <slug> --across
 ```
 
@@ -659,10 +659,27 @@ overrule the model; a hand-edited verdict is used as is. A lexicon that does not
 is left alone and the check is skipped with a notice. Verdicts are keyed by the period
 text, so rewriting the brief's `## When and where` section starts a fresh set.
 
+On a **historical-fiction** work with `--output`, each unit also gets **fact accuracy**
+against the distilled period facts (`facts/period.md`, from `research distill`). This
+part calls a model: one call per unit, on the provider the `check` intent routes to, so
+on a local endpoint it takes a while; a line goes to stderr before each unit. The unit
+is held to the facts its drafting pack was given: every undated row, and every row
+dated on or before the unit's story date. The model names each sentence a fact
+contradicts. Each `fact-accuracy` hit in `hits[]` quotes the draft sentence
+(`excerpt`), the fact (`fact`) and its source note (`source`, `research/<id>.md`), with
+all three in `detail`. A unit with no relevant facts is not sent. `--unit N` checks only
+unit N of the output, on any track (every check above narrows to it); a unit it does not
+have, or `--unit` with `--file`, is a refusal, exit `2`.
+
+The summary is `factAccuracy: {checked, notice?}`: how many units were sent, and why
+the run stopped short (no model configured, or the model failed). A notice never fails
+the check. The hits are also kept in `.pablo/fact-accuracy.json`, so the screen shows
+them on a unit with its other check hits until the unit's text changes.
+
 Hits are data: exit is `0` either way.
 
 ```
-{ok: true, hits[], unprovenanced[], core?[], radio?, anachronism?{asked, notice?}}
+{ok: true, hits[], unprovenanced[], core?[], radio?, anachronism?{asked, notice?}, factAccuracy?{checked, notice?}}
 ```
 
 `--across` compares the continuity of every output instead. It reports facts the
