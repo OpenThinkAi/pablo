@@ -16,8 +16,8 @@ work has no valid `pablo.json` marker, and points you at `pablo init --adopt`. P
 
 `config` takes `--project` only to pick a work's `pablo.json` instead of the global file. These verbs take no `--project`: `guide`, `prose` and `doctor`. `init` and `story` take a slug in other ways, described below.
 `pablo --version` (or `-v`) prints the installed version. `pablo --help` lists
-the verbs; a verb has no help page of its own, so `pablo <verb> --help` prints
-the same list.
+the verbs with their usage. `pablo <verb> --help` (or `pablo help <verb>`) prints
+just that verb's usage, flags and an example; an unknown verb exits 1 naming it.
 
 Most writing verbs never touch `main`. They commit to a change branch (`draft/`,
 `revise/`, `edit/`, `plan/` or `reader/`), and you accept that branch when you have
