@@ -2,7 +2,7 @@
  * `pablo doctor`'s writing side (AGT-2146, D-16): the checks a writer needs
  * before the first draft, beside the casting report.
  *
- * - the config file is found (absent is a warning: pablo runs on defaults) and parses;
+ * - the config file is found (absent is a warning: pablo has no built-in model) and parses;
  * - every provider the config routes to answers (`config test`'s one tiny request);
  * - the vault is found and is a git repo;
  * - the search backend answers (absent is a warning: research then has no web).
@@ -72,8 +72,8 @@ export async function runWritingDoctor(deps: WritingDoctorDeps): Promise<Writing
         : {
             name: "config",
             status: "warn",
-            detail: `no config file at ${file}; running on the defaults (the local writer on 127.0.0.1:8002)`,
-            fix: "run `pablo config set default local` to write one, or ignore this if the defaults suit you",
+            detail: `no config file at ${file}; pablo has no built-in model`,
+            fix: "run `pablo init --config` to write a documented starter config, then `pablo config set` to fill in the model ids",
           },
     );
   } catch (error) {
@@ -82,7 +82,14 @@ export async function runWritingDoctor(deps: WritingDoctorDeps): Promise<Writing
   }
 
   // Providers.
-  if (config !== undefined) {
+  if (config !== undefined && config.providers.size === 0) {
+    checks.push({
+      name: "providers",
+      status: "fail",
+      detail: "no provider is configured, so no verb that needs a model can run",
+      fix: "run `pablo init --config` (or `pablo config set providers.<id>.endpoint <url>` and `.model <id>`), then `pablo config test`",
+    });
+  } else if (config !== undefined) {
     const test = await configTest({ env: deps.env }, deps.configTestDeps);
     const body = test.body as { providers?: Record<string, { ok: boolean; error?: string }> };
     for (const [id, state] of Object.entries(body.providers ?? {})) {

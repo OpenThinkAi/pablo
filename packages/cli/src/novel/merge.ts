@@ -13,7 +13,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createProviders, loadConfig } from "@openthink/pablo-core";
+import { NoModelConfiguredError, createProviders, loadConfig } from "@openthink/pablo-core";
 import type { Adapter, Intent } from "@openthink/pablo-core";
 import { deleteBranch, mergeBranch, repoRoot } from "../branch";
 import { readMarker } from "../marker";
@@ -168,8 +168,14 @@ export async function mergeDraftInProject(
   const extractor =
     extractorOverride ??
     (() => {
-      const providers = createProviders(loadConfig({ projectDir: projectPath }));
-      return providers.adapter(providers.route(CONTINUITY_INTENT));
+      try {
+        const providers = createProviders(loadConfig({ projectDir: projectPath }));
+        return providers.adapter(providers.route(CONTINUITY_INTENT));
+      } catch (error) {
+        // No model configured: the merge still lands, with continuity skipped (AGT-2131).
+        if (error instanceof NoModelConfiguredError) return undefined;
+        throw error;
+      }
     })();
   const merged = await mergeDraft(projectPath, branch, { slug: marker.marker.slug, env, extractor });
   if (!merged.ok) return { exitCode: 1, body: { ok: false, code: 1, message: merged.notice } };

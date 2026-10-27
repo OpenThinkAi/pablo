@@ -1,9 +1,11 @@
 /**
  * The provider configuration and its file.
  *
- * pablo runs with no config file at all: the default is the local writer on
- * `127.0.0.1:8002`, no key. A file adds named providers and per-intent
- * overrides; it never contains a key, only where to find one (see `keys.ts`).
+ * pablo has no built-in model (AGT-2131, D-13): with no config file there are
+ * no providers, and a verb that needs a model refuses with a pointer to
+ * `pablo init --config` (`NoModelConfiguredError`, thrown by `route`), which
+ * writes a documented starter file. The file names providers and per-intent overrides;
+ * it never contains a key, only where to find one (see `keys.ts`).
  *
  * Format — JSON at `$XDG_CONFIG_HOME/pablo/config.json`, else
  * `~/.config/pablo/config.json`. JSON because the core library has no
@@ -13,8 +15,8 @@
  * {
  *   "default": "local",
  *   "providers": {
- *     "local":     { "endpoint": "http://127.0.0.1:8002/v1", "model": "mlx-community/gemma-4-31b-it-4bit", "local": true },
- *     "anthropic": { "kind": "anthropic", "key": "keychain:ANTHROPIC_API_KEY_PERSONAL/mattpardini" }
+ *     "local":     { "endpoint": "http://127.0.0.1:8002/v1", "model": "my-local-model", "local": true },
+ *     "anthropic": { "kind": "anthropic", "endpoint": "https://api.anthropic.com/v1", "model": "<model id>", "key": "env:ANTHROPIC_API_KEY" }
  *   },
  *   "intents": { "research": "anthropic" },
  *   "readers": { "atara": { "github": "atara-login", "name": "Atara Example", "email": "atara@example.com" } }
@@ -107,26 +109,7 @@ export interface PabloConfig {
   readonly web?: WebConfig;
 }
 
-export const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:8002/v1";
-export const DEFAULT_LOCAL_MODEL = "mlx-community/gemma-4-31b-it-4bit";
 export const DEFAULT_TIMEOUT_MS = 60_000;
-
-export const DEFAULT_ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1";
-/**
- * The latest generally available model at build time (2026-09-02), read from
- * the current model list rather than recalled. A config entry may name another.
- */
-export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
-
-/**
- * What `kind` implies when an entry does not say. Anthropic has one endpoint
- * and a known current model, so `{ "kind": "anthropic", "key": "keychain:..." }`
- * is a complete provider — a key and a toggle, which is the requirement.
- */
-const KIND_DEFAULTS: Record<AdapterKind, { endpoint?: string; model?: string }> = {
-  "openai-compatible": {},
-  anthropic: { endpoint: DEFAULT_ANTHROPIC_ENDPOINT, model: DEFAULT_ANTHROPIC_MODEL },
-};
 
 /**
  * The directory pablo's own files (config, and — AGT-1240 — the global
@@ -144,27 +127,27 @@ export function configPath(env: Record<string, string | undefined> = process.env
   return join(configDir(env), "config.json");
 }
 
-/** The out-of-box configuration: the local writer, no key, nothing to set up. */
+/**
+ * The out-of-box configuration: no providers at all. Nothing here names an
+ * endpoint or a model; the author's config (or `pablo init --config`'s starter)
+ * does. `route` refuses on it with `NoModelConfiguredError`.
+ */
 export function defaultConfig(): PabloConfig {
-  const local: ProviderConfig = {
-    id: "local",
-    endpoint: DEFAULT_LOCAL_ENDPOINT,
-    model: DEFAULT_LOCAL_MODEL,
-    kind: "openai-compatible",
-    local: true,
-    key: keySourceFor("local"),
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-  };
-  return {
-    providers: new Map([[local.id, local]]),
-    defaultProvider: local.id,
-    intents: new Map(),
-    readers: new Map(),
-  };
+  return { providers: new Map(), defaultProvider: "", intents: new Map(), readers: new Map() };
 }
 
-/** Parses the config file's text. The default config is merged under it, so `local` always exists. */
-export function parseConfig(text: string, source = "the config file"): PabloConfig {
+/**
+ * Options for the loaders. `allowIncomplete` lets a provider entry lack its
+ * `endpoint` or `model`: `pablo config set` validates each edit with it, so a
+ * provider can be built up one field at a time. Nothing routes on such a
+ * config; the loaders every verb uses refuse the incomplete entry by name.
+ */
+export interface ParseOptions {
+  readonly allowIncomplete?: boolean;
+}
+
+/** Parses the config file's text. */
+export function parseConfig(text: string, source = "the config file", options: ParseOptions = {}): PabloConfig {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -178,7 +161,7 @@ export function parseConfig(text: string, source = "the config file"): PabloConf
   if (rawProviders !== undefined) {
     if (!isRecord(rawProviders)) throw new ProviderConfigError(`pablo: ${source}: "providers" must be an object`);
     for (const [id, entry] of Object.entries(rawProviders)) {
-      providers.set(id, readProvider(id, entry, source, providers.get(id)));
+      providers.set(id, readProvider(id, entry, source, providers.get(id), options.allowIncomplete === true));
     }
   }
 
@@ -189,7 +172,7 @@ export function parseConfig(text: string, source = "the config file"): PabloConf
   return { providers, defaultProvider, intents, readers, web };
 }
 
-export interface LoadConfigOptions {
+export interface LoadConfigOptions extends ParseOptions {
   /** Overrides the default location; tests and `--config` pass one. */
   readonly path?: string;
   readonly env?: Record<string, string | undefined>;
@@ -210,11 +193,11 @@ export function loadConfig(options: LoadConfigOptions = {}): PabloConfig {
   const path = options.path ?? configPath(options.env ?? process.env);
   const read = options.readFile ?? readFileIfPresent;
   const text = read(path);
-  const global = text === undefined ? defaultConfig() : parseConfig(text, path);
+  const global = text === undefined ? defaultConfig() : parseConfig(text, path, options);
   if (options.projectDir === undefined) return global;
   const projectPath = join(options.projectDir, "pablo.json");
   const projectText = (options.readProjectFile ?? readFileIfPresent)(projectPath);
-  return projectText === undefined ? global : mergeProjectConfig(global, projectText, projectPath);
+  return projectText === undefined ? global : mergeProjectConfig(global, projectText, projectPath, options);
 }
 
 /**
@@ -228,7 +211,7 @@ export function loadConfig(options: LoadConfigOptions = {}): PabloConfig {
  * (`checkWorkProvider`): it decides which provider each intent uses, but only
  * the global file decides which remote host a credential goes to.
  */
-export function mergeProjectConfig(base: PabloConfig, text: string, source = "pablo.json"): PabloConfig {
+export function mergeProjectConfig(base: PabloConfig, text: string, source = "pablo.json", options: ParseOptions = {}): PabloConfig {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -244,14 +227,16 @@ export function mergeProjectConfig(base: PabloConfig, text: string, source = "pa
     if (!isRecord(rawProviders)) throw new ProviderConfigError(`pablo: ${source}: "providers" must be an object`);
     for (const [id, entry] of Object.entries(rawProviders)) {
       const existing = providers.get(id);
-      const merged = readProvider(id, entry, source, existing);
+      const merged = readProvider(id, entry, source, existing, options.allowIncomplete === true);
       checkWorkProvider(merged, existing, source);
       providers.set(id, merged);
     }
   }
   const intents = new Map(base.intents);
   for (const [intent, id] of readIntents(raw["intents"], providers, source)) intents.set(intent, id);
-  return { ...base, providers, intents };
+  // A work may be the only place providers come from (no global file): the default is then its first.
+  const defaultProvider = base.defaultProvider !== "" ? base.defaultProvider : (providers.keys().next().value ?? "");
+  return { ...base, providers, intents, defaultProvider };
 }
 
 function readFileIfPresent(path: string): string | undefined {
@@ -268,6 +253,7 @@ function readProvider(
   entry: unknown,
   source: string,
   existing: ProviderConfig | undefined,
+  allowIncomplete = false,
 ): ProviderConfig {
   const where = `${source}: provider "${id}"`;
   if (!isRecord(entry)) throw new ProviderConfigError(`pablo: ${where} must be an object`);
@@ -276,10 +262,18 @@ function readProvider(
   if (!ADAPTER_KINDS.includes(kind as AdapterKind)) {
     throw new ProviderConfigError(`pablo: ${where}: unknown "kind" — known kinds are ${ADAPTER_KINDS.join(", ")}`);
   }
-  const defaults = KIND_DEFAULTS[kind as AdapterKind];
 
-  const endpoint = readEndpoint(entry["endpoint"] ?? existing?.endpoint ?? defaults.endpoint, where);
-  const model = readString(entry["model"] ?? existing?.model ?? defaults.model, `${where}: "model"`);
+  const rawEndpoint = entry["endpoint"] ?? existing?.endpoint;
+  const rawModel = entry["model"] ?? existing?.model;
+  if (!allowIncomplete && (rawEndpoint === undefined || rawModel === undefined)) {
+    const missing = [rawEndpoint === undefined ? '"endpoint"' : "", rawModel === undefined ? '"model"' : ""].filter(Boolean).join(" and ");
+    throw new ProviderConfigError(
+      `pablo: ${where}: ${missing} must be set — pablo has no built-in endpoint or model (not even for kind "anthropic"). ` +
+        `Run \`pablo init --config\` for a starter to copy, or \`pablo config set providers.${id}.<field> <value>\`.`,
+    );
+  }
+  const endpoint = allowIncomplete && rawEndpoint === undefined ? "" : readEndpoint(rawEndpoint, where);
+  const model = allowIncomplete && rawModel === undefined ? "" : readString(rawModel, `${where}: "model"`);
   const local = entry["local"] ?? existing?.local ?? false;
   if (typeof local !== "boolean") throw new ProviderConfigError(`pablo: ${where}: "local" must be true or false`);
 
@@ -350,6 +344,7 @@ function sameKey(a: KeySource, b: KeySource): boolean {
  */
 function checkWorkProvider(merged: ProviderConfig, existing: ProviderConfig | undefined, source: string): void {
   const where = `pablo: ${source}: provider "${merged.id}"`;
+  if (merged.endpoint === "") return; // incomplete (a `config set` in progress): no endpoint to judge yet
   const remote = !isLoopbackEndpoint(merged.endpoint);
   if (existing === undefined) {
     if (remote) {
@@ -386,7 +381,7 @@ function readEndpoint(value: unknown, where: string): string {
 }
 
 function readDefault(value: unknown, providers: ReadonlyMap<string, ProviderConfig>, source: string): string {
-  if (value === undefined) return "local";
+  if (value === undefined) return providers.keys().next().value ?? "";
   const id = readString(value, `${source}: "default"`);
   if (!providers.has(id)) throw new ProviderConfigError(`pablo: ${source}: "default" names no provider: ${id}`);
   return id;

@@ -24,20 +24,17 @@ export type {
 export {
   EndpointHung,
   EndpointUnreachable,
+  NoModelConfiguredError,
   NoToolCallError,
   ProviderConfigError,
   ProviderResponseError,
   ToolsDisabledError,
 } from "./errors";
-export type { AdapterKind, LoadConfigOptions, PabloConfig, ProviderConfig, ReaderConfig } from "./config";
+export type { AdapterKind, LoadConfigOptions, PabloConfig, ParseOptions, ProviderConfig, ReaderConfig } from "./config";
 export {
   configDir,
   configPath,
   defaultConfig,
-  DEFAULT_ANTHROPIC_ENDPOINT,
-  DEFAULT_ANTHROPIC_MODEL,
-  DEFAULT_LOCAL_ENDPOINT,
-  DEFAULT_LOCAL_MODEL,
   DEFAULT_TIMEOUT_MS,
   isLoopbackEndpoint,
   loadConfig,

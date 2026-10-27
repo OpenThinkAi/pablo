@@ -10,6 +10,9 @@ import { addComment, commentsPath, readComments } from "../src/comments";
 import { authorNotesOf, finishReview, screenCommenter, insideDir, revertLines, revertRejected, screenFinisher } from "../src/review-finish";
 import type { Rejected } from "../src/review-finish";
 import { runWrite } from "../src/write";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 /**
  * AGT-1540: finishing a review merges only the accepted changes, runs the after-write steps and deletes the branch.

@@ -25,6 +25,9 @@ import { buildChapterPack } from "../src/novel/pack";
 import { OUTPUTS } from "../src/outputs/registry";
 import { proseCore } from "../src/prose";
 import { runWrite } from "../src/write";
+import { writeLocalConfig, useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const NO_THINK_PATH = [dirname(Bun.which("bun") ?? "/usr/local/bin/bun"), "/usr/bin", "/bin"].join(":");
@@ -96,6 +99,7 @@ function setup(options: { voice?: readonly string[]; globalDefault?: boolean } =
   git(vault, "config", "commit.gpgsign", "false");
   git(vault, "add", ".");
   git(vault, "commit", "-q", "-m", "base");
+  writeLocalConfig(config);
   return { dir, vault, work, globalVoices, env: { XDG_CONFIG_HOME: config } };
 }
 

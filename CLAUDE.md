@@ -15,11 +15,12 @@ any agent a structured way in and out.
 
 Two invariants:
 
-1. **Prose is produced only through `pablo write`, on the configured local
+1. **Prose is produced only through `pablo write`, on the configured writer
    model.** The agent plans and discusses; it never drafts prose itself and
    never sends prose through its own context. pablo assembles the prompt,
-   sends it to the configured writer (the built-in `local` provider, an
-   OpenAI-compatible server on 127.0.0.1:8002, by default), writes
+   sends it to the configured writer (whatever the author's config routes the
+   `draft` intent to; pablo ships no endpoint or model id, and a verb that needs
+   a model refuses without one, pointing at `pablo init --config`), writes
    the file, and returns a receipt.
 2. **pablo enforces the framework, in two layers** (decided 2026-10-10, pm
    project `pablo-story-core`; it supersedes "a format is a stage machine").

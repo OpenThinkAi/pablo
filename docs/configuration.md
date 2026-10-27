@@ -1,10 +1,12 @@
 # Configuration
 
 pablo reads one file: `$XDG_CONFIG_HOME/pablo/config.json`, which is
-`~/.config/pablo/config.json` unless you set `XDG_CONFIG_HOME`. It is optional. With
-no file, pablo uses one provider called `local`: an OpenAI-compatible server at
-`http://127.0.0.1:8002/v1`, model `mlx-community/gemma-4-31b-it-4bit`. A work can
-route its own models on top of it from its `pablo.json` (see
+`~/.config/pablo/config.json` unless you set `XDG_CONFIG_HOME`. It is where
+your models are named. pablo has no built-in endpoint or model id: with no file there
+are no providers, and a verb that needs a model refuses with a pointer to
+`pablo init --config`, which writes a documented starter file (a local
+OpenAI-compatible server and Anthropic, both to edit). A work can route its own
+models on top of the file from its `pablo.json` (see
 [Per-work providers and intents](#per-work-providers-and-intents)).
 
 A mistake in the file (an unknown key kind, a bad URL, an API key written in plain
@@ -24,6 +26,8 @@ text) is reported by name the first time a command needs a model; nothing is sen
     },
     "anthropic": {
       "kind": "anthropic",
+      "endpoint": "https://api.anthropic.com/v1",
+      "model": "the-claude-model-id-you-use",
       "key": "keychain:anthropic-api-key"
     }
   },
@@ -43,14 +47,14 @@ text) is reported by name the first time a command needs a model; nothing is sen
 
 ## `providers`
 
-A map from a name you choose to one model endpoint. The built-in `local` provider is
-always present; an entry named `local` changes only the fields it sets.
+A map from a name you choose to one model endpoint. The names are yours: `local` and
+`anthropic` in the examples are just names. Nothing is present until you add it.
 
 | Field | Meaning | Default |
 |---|---|---|
 | `kind` | `"openai-compatible"` or `"anthropic"` | `"openai-compatible"` |
-| `endpoint` | Base URL, http or https (the `/chat/completions` or `/messages` path is added) | required for openai-compatible; `https://api.anthropic.com/v1` for anthropic |
-| `model` | Model id the endpoint expects | required for openai-compatible; `claude-opus-5` for anthropic |
+| `endpoint` | Base URL, http or https (the `/chat/completions` or `/messages` path is added) | required |
+| `model` | Model id the endpoint expects | required |
 | `local` | `true` for a model on your own machine. Local providers get one request at a time and are preferred for drafting | `false` |
 | `timeoutMs` | How long to wait with no tokens arriving before giving up | `60000` |
 | `temperature` | Sampling temperature, 0 to 2, used by `write` when you don't pass `--temperature` | `0.8` |
@@ -101,8 +105,9 @@ pablo sends eight kinds of request. Each is an *intent*:
 | `check` | the critic that judges a branch (`critique`, `check --across`) | the `plan` mapping when `check` is unmapped, else the first non-local provider |
 | `research` | `pablo story`'s research stage; `research distill` (`distill_facts`): research notes, raw, to period facts; `research plan` (`plan_research`): the period brief or thesis to a research checklist | the first non-local provider (map it to a local one to keep notes on this machine) |
 
-If no provider of the wanted sort exists, the request goes to `default` (which is
-`"local"` unless you set it). `intents` overrides the choice per intent. Every model
+If no provider of the wanted sort exists, the request goes to `default` (the first
+provider unless you set it). With no provider at all it refuses, naming
+`pablo init --config`. `intents` overrides the choice per intent. Every model
 call pablo makes goes through one of these intents, to a provider of any kind; pablo
 never runs `claude -p` or uses your Claude Code login.
 
@@ -115,12 +120,14 @@ A `local` provider needs no key and is never skipped. If every choice lacks a ke
 is used anyway and the request fails naming the missing key. A keyless server on another
 machine is not "local", so mark it `"local": true` to keep it from being skipped.
 
-Because the built-in `local` provider always exists, **a setup with no local model
-must map the four writing intents**, or drafting still goes to `127.0.0.1:8002`:
+A setup with a local provider and no local model it should draft with must map the
+four writing intents, or drafting goes to the local provider:
 
 ```json
 {
-  "providers": { "anthropic": { "kind": "anthropic" } },
+  "providers": {
+    "anthropic": { "kind": "anthropic", "endpoint": "https://api.anthropic.com/v1", "model": "the-claude-model-id-you-use" }
+  },
   "default": "anthropic",
   "intents": { "draft": "anthropic", "revise": "anthropic", "prose": "anthropic", "continuity": "anthropic" }
 }

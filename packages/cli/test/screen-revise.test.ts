@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { waitingBranches } from "../src/branch";
 import { locateSelection, replacementLines, revisePassage, screenReviser, shiftComments } from "../src/screen-revise";
+import { writeLocalConfig } from "./local-config";
 
 /**
  * The screen's reviser (AGT-1544): `reviseCore` against a fake Adapter and `take` on a temp git copy of the fixture
@@ -48,6 +49,7 @@ function setup() {
   git(vault, "add", ".");
   git(vault, "commit", "-q", "-m", "base");
   const env = { PATH: NO_THINK_PATH, XDG_CONFIG_HOME: join(dir, "config"), XDG_STATE_HOME: join(dir, "state"), PABLO_HOME: join(dir, "home") };
+  writeLocalConfig(env.XDG_CONFIG_HOME);
   return { vault, project, env };
 }
 

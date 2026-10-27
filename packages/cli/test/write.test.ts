@@ -3,6 +3,9 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 /**
  * `runWrite` itself does the printing (see `write.ts`), so these exercise it

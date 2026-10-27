@@ -24,6 +24,7 @@ import {
   loadConfig,
   mergeProjectConfig,
   parseConfig,
+  NoModelConfiguredError,
   ProviderConfigError,
   route,
 } from "@openthink/pablo-core";
@@ -113,7 +114,15 @@ export function configShow(scope: ConfigScope): ConfigResult {
     intents.push({ intent, provider, mapped: true });
   }
   for (const known of KNOWN_INTENTS) {
-    if (!seen.has(known.name)) intents.push({ intent: known.name, provider: route(config, known), mapped: false });
+    if (seen.has(known.name)) continue;
+    // With no provider configured an unmapped intent routes nowhere: show that rather than refuse the whole listing.
+    let provider = "(none)";
+    try {
+      provider = route(config, known);
+    } catch (error) {
+      if (!(error instanceof NoModelConfiguredError)) throw error;
+    }
+    intents.push({ intent: known.name, provider, mapped: false });
   }
   const body = {
     ok: true,
@@ -124,9 +133,9 @@ export function configShow(scope: ConfigScope): ConfigResult {
     intents,
   };
   const lines = [
-    `config: ${globalFile}${existsSync(globalFile) ? "" : " (not present: defaults)"}`,
+    `config: ${globalFile}${existsSync(globalFile) ? "" : " (not present: no model configured; `pablo init --config` writes a starter)"}`,
     ...(scope.projectDir === undefined ? [] : [`project: ${join(scope.projectDir, "pablo.json")}`]),
-    `default: ${config.defaultProvider}`,
+    `default: ${config.defaultProvider === "" ? "(none)" : config.defaultProvider}`,
     "",
     "providers:",
     ...providers.map((p) => {
@@ -209,8 +218,11 @@ export function configSet(scope: ConfigScope, path: string | undefined, value: s
     applySet(doc, path, value, project);
     const text = `${JSON.stringify(doc, null, 2)}\n`;
     // Validate with the loaders that will read it; nothing is written when they refuse.
-    if (project) mergeProjectConfig(loadConfig({ env: scope.env }), text, file);
-    else parseConfig(text, file);
+    // `allowIncomplete`: a provider is built up one field at a time, so a missing endpoint or model is
+    // fine here; every verb that routes to it refuses it by name.
+    const lenient = { allowIncomplete: true };
+    if (project) mergeProjectConfig(loadConfig({ env: scope.env, ...lenient }), text, file, lenient);
+    else parseConfig(text, file, lenient);
     mkdirSync(dirname(file), { recursive: true });
     const temp = `${file}.tmp-${process.pid}`;
     writeFileSync(temp, text);
@@ -240,6 +252,7 @@ export async function configTest(scope: ConfigScope, deps: ConfigTestDeps): Prom
   } catch (error) {
     return failure(error);
   }
+  if (config.providers.size === 0) return failure(new NoModelConfiguredError());
   // One request per mapped intent; with none mapped, the default route is the one thing to check.
   const targets: { intent: string; provider: string }[] = [...config.intents].map(([intent, provider]) => ({ intent, provider }));
   if (targets.length === 0) targets.push({ intent: "(default)", provider: config.defaultProvider });

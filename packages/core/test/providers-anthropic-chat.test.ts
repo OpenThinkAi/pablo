@@ -14,12 +14,12 @@ import {
   type ChatMessage,
   type ChatRequest,
   createAnthropicAdapter,
-  parseConfig,
   ProviderResponseError,
   type ProviderConfig,
   RateMeter,
   ToolsDisabledError,
 } from "../src/index";
+import { parseWithTestDefaults } from "./local-config";
 
 const FIXTURES = join(import.meta.dir, "fixtures", "anthropic-chat");
 const KEY = "not-a-real-key";
@@ -66,7 +66,7 @@ function fixture(name: string): string {
 }
 
 function adapterWith(fetchSeam: typeof fetch, extra: Record<string, unknown> = {}) {
-  const config = parseConfig(
+  const config = parseWithTestDefaults(
     JSON.stringify({
       providers: { anthropic: { kind: "anthropic", endpoint: "https://api.example.test/v1", ...extra } },
     }),

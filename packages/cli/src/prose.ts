@@ -32,6 +32,7 @@ import {
   createProviders,
   EndpointHung,
   fileReceiptSink,
+  NoModelConfiguredError,
   loadConfig,
   normalizeOutput,
   splitManuscript,
@@ -56,6 +57,7 @@ import { checkFile, checkRulesFromVoice } from "./check";
 import type { Hit } from "./check";
 import { FORMAT_STANZAS, KNOWN_FORMATS } from "./formats";
 import { gitCommit } from "./init";
+import { NO_WAIT_ESTIMATE_NOTE } from "./starter-config";
 import { parseFrontmatter } from "./novel/machine";
 import { jsonlReceiptSink, stateReceiptsPath } from "./paths";
 import { findVault } from "./project";
@@ -511,7 +513,12 @@ function routeProse(pack: Pack, voice: Voice, ctx: ProseCoreContext, deps: Prose
     }
     providerId = voice.model;
   } else {
-    providerId = providers.route(PROSE_INTENT);
+    try {
+      providerId = providers.route(PROSE_INTENT);
+    } catch (error) {
+      if (error instanceof ProviderConfigError) return refuse(2, error.message);
+      throw error;
+    }
   }
 
   try {
@@ -772,8 +779,21 @@ export async function runProse(args: ProseCliArgs, ctx: ProseCoreContext, deps: 
     return outcome.exitCode;
   }
 
-  const providers = createProviders(loadConfig({ env: ctx.env }));
-  const providerId = providers.route(PROSE_INTENT);
-  console.log(renderPack(outcome.pack as Pack, providers.rates(providerId)).text);
-  return outcome.exitCode;
+  try {
+    const providers = createProviders(loadConfig({ env: ctx.env }));
+    const providerId = providers.route(PROSE_INTENT);
+    console.log(renderPack(outcome.pack as Pack, providers.rates(providerId)).text);
+    return outcome.exitCode;
+  } catch (error) {
+    if (error instanceof NoModelConfiguredError) {
+      // The preview needs no model; only the wait estimate does.
+      console.log(`${renderPack(outcome.pack as Pack).text}\n\n${NO_WAIT_ESTIMATE_NOTE}`);
+      return outcome.exitCode;
+    }
+    if (error instanceof ProviderConfigError) {
+      console.error(error.message);
+      return 2;
+    }
+    throw error;
+  }
 }

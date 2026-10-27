@@ -12,7 +12,7 @@ const chapterOf = (a: Record<string, unknown>): string => {
   return file ? ` chapter ${Number(file[1])}` : "";
 };
 
-/** A tool call as a phrase: "researching 1919 grape prices", "drafting chapter 3 on Gemma". Unknown tools show their name. */
+/** A tool call as a phrase: "researching 1919 grape prices", "drafting chapter 3 on the writer model". Unknown tools show their name. */
 export function activityOf(tool: string, input: unknown): string {
   const a = record(input);
   switch (tool) {
@@ -22,9 +22,9 @@ export function activityOf(tool: string, input: unknown): string {
     case "timeline": return `checking the timeline${about("at ", a["date"])}`;
     case "WebSearch": return `researching${about("", a["query"])}`;
     case "WebFetch": return `researching${about("", a["url"])}`;
-    case "draft_chapter": case "write": return `drafting${chapterOf(a) || " prose"} on Gemma`;
-    case "draft_unit": return `drafting ${text(a["output"]) || "an output"} ${String(a["n"] ?? "")}`.trimEnd() + " on Gemma";
-    case "revise": return `revising${chapterOf(a) || " a passage"} on Gemma`;
+    case "draft_chapter": case "write": return `drafting${chapterOf(a) || " prose"} on the writer model`;
+    case "draft_unit": return `drafting ${text(a["output"]) || "an output"} ${String(a["n"] ?? "")}`.trimEnd() + " on the writer model";
+    case "revise": return `revising${chapterOf(a) || " a passage"} on the writer model`;
     case "check": return "checking the prose";
     case "save": return "saving";
     case "propose": return `proposing${about("", a["stage"])}`;

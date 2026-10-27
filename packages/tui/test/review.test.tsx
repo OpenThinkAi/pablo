@@ -429,7 +429,7 @@ test("a comments-only reader review: each comment is a row shown in context, and
   expect(plain(app.lastFrame())).toContain("discarded reader/atara-2026-10-04");
 });
 
-test("y on a reader's comment is accept and revise: the author's direction is required, Gemma's candidate is taken onto the review branch, and the review reads it again", async () => {
+test("y on a reader's comment is accept and revise: the author's direction is required, the writer model's candidate is taken onto the review branch, and the review reads it again", async () => {
   const asked: ReviseRequest[] = [];
   const taken: TakeRequest[] = [];
   let revised = false;
@@ -443,12 +443,12 @@ test("y on a reader's comment is accept and revise: the author's direction is re
   for (const k of [DOWN, DOWN, ENTER, DOWN]) { app.stdin.write(k); await sleep(30); } // onto "how young is cora?"
   app.stdin.write("y"); await sleep(40);
   let frame = plain(app.lastFrame());
-  expect(frame).toContain("Atara's note: tell Gemma what to revise here");
+  expect(frame).toContain("Atara's note: tell the writer model what to revise here");
   expect(frame).toContain('Atara: "how young is cora?"');
   expect(frame).toContain("On: The man was young, perhaps thirty-seven.");
   app.stdin.write(ENTER); await sleep(30);
   expect(asked).toHaveLength(0); // the note alone is not enough to go on
-  expect(plain(app.lastFrame())).toContain("Tell Gemma what to revise first");
+  expect(plain(app.lastFrame())).toContain("Tell the writer model what to revise first");
   for (const ch of "make him younger") { app.stdin.write(ch); await sleep(5); }
   app.stdin.write(ENTER); await sleep(60);
   expect(asked).toHaveLength(1);
@@ -461,7 +461,7 @@ test("y on a reader's comment is accept and revise: the author's direction is re
   expect(taken[0]).toMatchObject({ branch: "reader/atara-2026-10-04", candidate: "The man was young, no more than thirty.", offered: "The man was young, no more than thirty." });
   frame = plain(app.lastFrame());
   expect(frame).toContain("review reader/atara-2026-10-04"); // still in the same review
-  expect(frame).toContain("Gemma's version is now a change in this review");
+  expect(frame).toContain("The writer model's version is now a change in this review");
   expect(frame).toContain("~ The man was young, no"); // the review read the branch again
   expect(frame).toMatch(/0 accepted · 0 rejected · 2 pending/); // the new change and the other comment wait for a decision
 });
@@ -502,5 +502,5 @@ test("n on a reader's comment dismisses it with no model call; a keep comment's 
   expect(asked).toHaveLength(0);
   const frame = plain(app.lastFrame());
   expect(frame).toContain("1 accepted · 1 rejected · 0 pending");
-  expect(frame).not.toContain("tell Gemma what to revise");
+  expect(frame).not.toContain("tell the writer model what to revise");
 });

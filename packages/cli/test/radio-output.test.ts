@@ -45,6 +45,9 @@ import { publishOutput, unitStatus, VERBS } from "../src/verbs";
 import type { VerbContext } from "../src/verbs";
 import { runWrite } from "../src/write";
 import type { WriteArgs } from "../src/write";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const CONFORMANCE = fileURLToPath(new URL("./fixtures/conformance", import.meta.url));

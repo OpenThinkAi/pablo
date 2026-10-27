@@ -357,11 +357,11 @@ test("the screen shows the card in place, the author answers it there, and the c
 
 // ---------------------------------------------------------------- the activity line (AGT-1567)
 
-test("activityOf words a tool call: research, reading, drafting a chapter on Gemma; an unknown tool keeps its name", () => {
+test("activityOf words a tool call: research, reading, drafting a chapter on the writer model; an unknown tool keeps its name", () => {
   expect(activityOf("WebSearch", { query: "1919 grape prices" })).toBe("researching 1919 grape prices");
-  expect(activityOf("draft_chapter", { chapter: 3 })).toBe("drafting chapter 3 on Gemma");
-  expect(activityOf("write", { chapter: "4" })).toBe("drafting chapter 4 on Gemma");
-  expect(activityOf("revise", { file: "chapters/07-the-flood.md" })).toBe("revising chapter 7 on Gemma");
+  expect(activityOf("draft_chapter", { chapter: 3 })).toBe("drafting chapter 3 on the writer model");
+  expect(activityOf("write", { chapter: "4" })).toBe("drafting chapter 4 on the writer model");
+  expect(activityOf("revise", { file: "chapters/07-the-flood.md" })).toBe("revising chapter 7 on the writer model");
   expect(activityOf("read", { path: "bible/overview.md" })).toBe("reading bible/overview.md");
   expect(activityOf("search", { phrase: "Cora" })).toBe("searching for Cora");
   expect(activityOf("read", undefined)).toBe("reading the work");
@@ -377,10 +377,10 @@ const toolLine = (s: State) => composeLines(s.compose.entries, 80).find((l) => l
 test("a tool line carries its duration once it ends, not before", () => {
   let s = then(typed(initialState(), "go"), { type: "compose.submit" });
   s = then(s, { type: "compose.event", at: 1000, event: { kind: "tool_call", id: "t1", tool: "draft_chapter", input: { chapter: 3 } } });
-  expect(activityNow(s.compose)).toBe("drafting chapter 3 on Gemma");
-  expect(toolLine(s)).toBe("  → drafting chapter 3 on Gemma");
+  expect(activityNow(s.compose)).toBe("drafting chapter 3 on the writer model");
+  expect(toolLine(s)).toBe("  → drafting chapter 3 on the writer model");
   s = then(s, { type: "compose.event", at: 72_000, event: { kind: "tool_result", id: "t1", text: "ok", isError: false } });
-  expect(toolLine(s)).toBe("  → drafting chapter 3 on Gemma (71s)");
+  expect(toolLine(s)).toBe("  → drafting chapter 3 on the writer model (71s)");
   expect(activityNow(s.compose)).toBe("thinking");
   // Without a clock the line has no duration rather than a wrong one.
   const bare = then(typed(initialState(), "go"), { type: "compose.submit" }, ev({ kind: "tool_call", id: "t", tool: "check", input: {} }), ev({ kind: "tool_result", id: "t", text: "", isError: false }));

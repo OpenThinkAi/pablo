@@ -29,7 +29,7 @@ export function saveResearchTool(session: PlanSession, workPath: string): McpToo
   return {
     name: SAVE_RESEARCH_TOOL,
     description:
-      "Save a research finding with its sources to the work's research/ notes, on this session's plan branch. Records the retrieval date. You may read these notes later; the local writer never sees them.",
+      "Save a research finding with its sources to the work's research/ notes, on this session's plan branch. Records the retrieval date. You may read these notes later; the writer model never sees them.",
     args: ARGS,
     async run(raw) {
       const args = ARGS.parse(raw);

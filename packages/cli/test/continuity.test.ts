@@ -9,6 +9,9 @@ import type { RunWriteDeps, WriteArgs } from "../src/write";
 import { runWrite } from "../src/write";
 import { mergeDraft } from "../src/novel/merge";
 import { applyFacts, runContinuity } from "../src/novel/continuity";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 /**
  * `applyFacts` (the pure core, no I/O) and `runContinuity`/the `continuity`

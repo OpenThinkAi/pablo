@@ -7,6 +7,9 @@ import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { commitAs, createBranch } from "../src/branch";
 import { draftChapter, mergeDraft, mergeDraftInProject } from "../src/novel/merge";
 import { runWrite } from "../src/write";
+import { useLocalConfigHome } from "./local-config";
+
+useLocalConfigHome();
 
 /**
  * AGT-1536: `write` commits a chapter on `draft/chNN` and runs none of the

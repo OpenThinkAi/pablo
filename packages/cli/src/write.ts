@@ -18,6 +18,7 @@ import {
   DEFAULT_MIN_SCENES,
   EndpointHung,
   fileReceiptSink,
+  NoModelConfiguredError,
   loadConfig,
   normalizeOutput,
   packTimeoutMs,
@@ -27,10 +28,11 @@ import {
   splitManuscript,
   withReceipts,
 } from "@openthink/pablo-core";
-import type { Adapter, CompletionStats, Intent } from "@openthink/pablo-core";
+import type { Adapter, CompletionStats, Intent, PabloConfig, Providers } from "@openthink/pablo-core";
 import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./branch";
 import { checkFile, loadCheckRules } from "./check";
 import type { Hit } from "./check";
+import { NO_WAIT_ESTIMATE_NOTE } from "./starter-config";
 import { readMarker, trackOf } from "./marker";
 import { readCoreState, trackGate } from "./core/machine";
 import { novelUnitFileName, slugify } from "./outputs/novel/units";
@@ -137,6 +139,26 @@ function parseSeed(raw: string | undefined): number | undefined | null {
   if (!/^\d+$/.test(trimmed)) return null;
   const value = Number(trimmed);
   return Number.isSafeInteger(value) ? value : null;
+}
+
+/**
+ * The config and the provider the `draft` intent routes to, or the refusal that
+ * says why there is none: no model configured (AGT-2131) or a config pablo
+ * cannot read. Nothing is sent and nothing is created before this passes.
+ */
+function routeDraft(
+  projectPath: string,
+):
+  | { readonly ok: true; readonly config: PabloConfig; readonly providers: Providers; readonly providerId: string }
+  | { readonly ok: false; readonly message: string; readonly noModel: boolean } {
+  try {
+    const config = loadConfig({ projectDir: projectPath });
+    const providers = createProviders(config);
+    return { ok: true, config, providers, providerId: providers.route(DRAFT_INTENT) };
+  } catch (error) {
+    if (error instanceof ProviderConfigError) return { ok: false, message: error.message, noModel: error instanceof NoModelConfiguredError };
+    throw error;
+  }
 }
 
 function emitError(message: string, missing: readonly string[] | undefined, code: number, json: boolean): void {
@@ -410,9 +432,16 @@ export async function runWrite(
       };
       console.log(JSON.stringify(body));
     } else {
-      const providers = createProviders(loadConfig({ projectDir: projectPath }));
-      const providerId = providers.route(DRAFT_INTENT);
-      console.log(renderPack(pack, providers.rates(providerId)).text);
+      const routed = routeDraft(projectPath);
+      if (routed.ok) {
+        console.log(renderPack(pack, routed.providers.rates(routed.providerId)).text);
+      } else if (routed.noModel) {
+        // The preview is how an author inspects the pack before choosing a model: only the wait estimate needs one.
+        console.log(`${renderPack(pack).text}\n\n${NO_WAIT_ESTIMATE_NOTE}`);
+      } else {
+        emitError(routed.message, undefined, 2, args.json);
+        return 2;
+      }
     }
     return 0;
   }
@@ -428,6 +457,14 @@ export async function runWrite(
     emitError(`pablo: ${workRelativePath} already exists; use --force to overwrite`, undefined, 2, args.json);
     return 2;
   }
+
+  // No model configured is a refusal before anything is made: no branch, no worktree (AGT-2131).
+  const routed = routeDraft(projectPath);
+  if (!routed.ok) {
+    emitError(routed.message, undefined, 2, args.json);
+    return 2;
+  }
+  const { config, providers, providerId } = routed;
 
   // The chapter is committed on its own branch, never on main (AGT-1536). The
   // branch and worktree are made before the model is called so a project that
@@ -490,9 +527,6 @@ export async function runWrite(
     return 0;
   }
 
-  const config = loadConfig({ projectDir: projectPath });
-  const providers = createProviders(config);
-  const providerId = providers.route(DRAFT_INTENT);
   // The flag wins, then the routed provider's own config, then the default. The
   // pack (and so `prompt_hash`) never sees any of this: sampling is a property
   // of the call, recorded in the receipt's `params`.

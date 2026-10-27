@@ -868,7 +868,7 @@ const RECORD_FACT_MCP_ARGS = z.object({
 const SAVE_RESEARCH_MCP: McpToolSpec = {
   name: "save_research",
   description:
-    "Save a research finding with its sources to the work's research/ notes (research/<slug>.md, with the retrieval date), on a new plan/ branch the author reviews. At least one source is required. The local writer never sees these notes; distilled facts are what reach a draft.",
+    "Save a research finding with its sources to the work's research/ notes (research/<slug>.md, with the retrieval date), on a new plan/ branch the author reviews. At least one source is required. The writer model never sees these notes; distilled facts are what reach a draft.",
   args: SAVE_RESEARCH_MCP_ARGS,
   run: async (raw, ctx) => {
     const args = SAVE_RESEARCH_MCP_ARGS.parse(raw);
@@ -2126,14 +2126,14 @@ export const VERBS: readonly Verb[] = [
   {
     name: "write",
     description:
-      "Canonical drafting tool. Draft one unit of an output (`output` and `unit`; `chapter` is the novel's spelling) on the configured local model: check preconditions, assemble the pack, send, write, receipt (naming output and unit). A work with several outputs needs `output`.",
+      "Canonical drafting tool. Draft one unit of an output (`output` and `unit`; `chapter` is the novel's spelling) on the configured writer model: check preconditions, assemble the pack, send, write, receipt (naming output and unit). A work with several outputs needs `output`.",
     args: WRITE_ARGS,
     run: runWriteVerb,
   },
   {
     name: "draft_unit",
     description:
-      "Deprecated alias of `write` (kept for one release; use `write` with `output` and `unit`). Draft unit n of an output (e.g. output \"novel\", n 3 is chapter 3) on the local model (Gemma) from its beat, steered by an optional direction. The draft lands on the output's draft branch for the author to review. Returns the branch, path and receipt (naming output and unit), never the prose; read the unit to see it.",
+      "Deprecated alias of `write` (kept for one release; use `write` with `output` and `unit`). Draft unit n of an output (e.g. output \"novel\", n 3 is chapter 3) on the configured writer model from its beat, steered by an optional direction. The draft lands on the output's draft branch for the author to review. Returns the branch, path and receipt (naming output and unit), never the prose; read the unit to see it.",
     args: DRAFT_UNIT_ARGS,
     run: runDraftUnitVerb,
   },
@@ -2161,7 +2161,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "draft_chapter",
     description:
-      "Deprecated alias of `write` (kept for one release; use `write` with `chapter`). Draft chapter n on the local model (Gemma) from its beat, steered by an optional direction such as \"slower, stay on Cora\". The draft lands on a draft/chNN branch for the author to review. Returns the branch, path and receipt, never the prose; read the chapter to see it.",
+      "Deprecated alias of `write` (kept for one release; use `write` with `chapter`). Draft chapter n on the configured writer model from its beat, steered by an optional direction such as \"slower, stay on Cora\". The draft lands on a draft/chNN branch for the author to review. Returns the branch, path and receipt, never the prose; read the chapter to see it.",
     args: DRAFT_CHAPTER_ARGS,
     run: runDraftChapterVerb,
   },
@@ -2287,14 +2287,14 @@ export const VERBS: readonly Verb[] = [
   {
     name: "revise",
     description:
-      "Canonical revision tool (`branch: true` lands the result on a revise/ branch instead of returning it). Send one located passage of a manuscript to the local model and return a candidate: locate it (by quoted text or a start/end offset pair), assemble the pack with the project's own style and work rules, send once, and return {candidate, span, receipt} — never writes the file.",
+      "Canonical revision tool (`branch: true` lands the result on a revise/ branch instead of returning it). Send one located passage of a manuscript to the configured writer model and return a candidate: locate it (by quoted text or a start/end offset pair), assemble the pack with the project's own style and work rules, send once, and return {candidate, span, receipt} — never writes the file.",
     args: REVISE_ARGS,
     run: runReviseVerb,
   },
   {
     name: "revise_passage",
     description:
-      "Deprecated alias of `revise` with `branch: true` (kept for one release). Revise one passage of a chapter on the local model (Gemma) following an instruction such as \"tighten, keep the dread\". The revision lands on a revise/<id> branch for the author to review. Returns the branch, file and receipt, never the prose; read the branch to see it.",
+      "Deprecated alias of `revise` with `branch: true` (kept for one release). Revise one passage of a chapter on the configured writer model following an instruction such as \"tighten, keep the dread\". The revision lands on a revise/<id> branch for the author to review. Returns the branch, file and receipt, never the prose; read the branch to see it.",
     args: REVISE_PASSAGE_ARGS,
     run: runRevisePassageVerb,
   },

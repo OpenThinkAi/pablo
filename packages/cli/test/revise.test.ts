@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent, CompletionStats } from "@openthink/pablo-core";
 import type { ReviseCoreArgs, ReviseCoreContext, ReviseDeps, ReviseDryRunBody, ReviseSendBody } from "../src/revise";
 import { reviseCore } from "../src/revise";
+import { writeLocalConfig } from "./local-config";
 
 /**
  * `reviseCore`'s send path, exercised by calling it directly against a fake
@@ -39,12 +40,13 @@ function tempVault(): { vault: string; project: string } {
 }
 
 /**
- * `XDG_CONFIG_HOME` pointed at a fresh, empty temp directory on every context
+ * `XDG_CONFIG_HOME` pointed at a fresh temp directory holding the local test provider on every context
  * this file builds, so a call that reaches `loadConfig` never reads the real
  * `~/.config/pablo/config.json` on whatever machine the test runs on.
  */
 function ctxFor(vault: string, project: string): ReviseCoreContext {
   const configHome = tempDir("pablo-revise-config-");
+  writeLocalConfig(configHome);
   return { vaultRoot: vault, projectPath: project, env: { XDG_CONFIG_HOME: configHome } };
 }
 
