@@ -111,7 +111,7 @@ test("the toggles are listed only while the pane is open, and the model holds th
   let s = initialState({ focus: true, typewriter: false });
   expect(s.modes).toEqual({ focus: true, typewriter: false });
   expect(rowsOf({ state: "main", review: false, content: false }).map((r) => r.id)).not.toContain("edit.focus");
-  expect(rowsOf({ state: "main", review: false, content: false, pane: true }).map((r) => r.id)).toEqual(expect.arrayContaining(["edit.focus", "edit.typewriter"]));
+  expect(rowsOf({ state: "insert", review: false, content: false, pane: true }).map((r) => r.id)).toEqual(expect.arrayContaining(["edit.focus", "edit.typewriter"]));
   s = reduce(s, { type: "modes.set", modes: { focus: true, typewriter: true } });
   expect(s.modes.typewriter).toBe(true);
   expect(keyStateOf(s).pane).toBe(false);
