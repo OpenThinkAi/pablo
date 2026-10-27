@@ -207,6 +207,12 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "editor.search_replace", states: MODAL, key: "R", label: "replace", description: "Replace: type what to find, then what to put there. In select mode it replaces within the selection, else across the whole text; Ctrl+Z undoes it in one step.", do: cmd("editor.search_replace") },
   { id: "editor.unit_next", states: MODAL, prefix: "g", key: "n", label: "next unit", description: "Save this unit (the autosave's commit) and open the next one, in any output; the cursor comes back where you left it.", do: cmd("editor.unit_next") },
   { id: "editor.unit_prev", states: MODAL, prefix: "g", key: "p", label: "previous unit", description: "Save this unit (the autosave's commit) and open the previous one, in any output; the cursor comes back where you left it.", do: cmd("editor.unit_prev") },
+  // AI revisions inline (AGT-2177, inline-diff.ts): a pending `revise/` branch's edits shown under the text they change.
+  // Accept and reject act on the edit at or below the cursor; an accepted one autosaves to the edit branch.
+  { id: "editor.ai_next", states: MODAL, prefix: "g", key: "f", label: "next AI change", description: "Go to the next AI change shown inline, wrapping round at the end.", do: cmd("editor.ai_next") },
+  { id: "editor.ai_prev", states: MODAL, prefix: "g", key: "F", label: "previous AI change", description: "Go to the previous AI change shown inline, wrapping round at the start.", do: cmd("editor.ai_prev") },
+  { id: "editor.ai_accept", states: MODAL, prefix: "g", key: "a", label: "accept AI change", description: "Accept the AI change at or below the cursor: the text takes it and it saves to the edit branch.", do: cmd("editor.ai_accept") },
+  { id: "editor.ai_reject", states: MODAL, prefix: "g", key: "r", label: "reject AI change", description: "Reject the AI change at or below the cursor: the text stays as it is.", do: cmd("editor.ai_reject") },
 ];
 
 // ---------------------------------------------------------------- `r`: the planning and research verbs, as data

@@ -29,6 +29,7 @@ src/edit-pane.ts `v e` in place, pure: the `PaneSession` seam, the file to the b
 src/edit-modes.ts      focus and typewriter modes of the editing pane: paragraph and scroll rules, the toggles' config entry
 src/edit-pane-view.tsx  the editing pane as a component, drawn where the main pane is
 src/modal.ts     the editing pane's Helix-style modes (normal, insert, select) and motions, pure
+src/inline-diff.ts  AI revisions inline in the editing pane (AGT-2177), pure: a revise branch's edits placed, accepted, rejected
 src/operators.ts the editing pane's operators (`d c y p P x r`), registers and `u`/`U`, pure
 src/word-count.ts the editor's live word count and word targets (AGT-2175): pure parts and `useWordTargets`, the status line's `words` field
 src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
@@ -347,6 +348,17 @@ Enter sets, Esc cancels) and the field then shows the progress (`412 words · un
 An output's total is the other units' saved words (the rail's `words`) plus the live count, over the edited unit's output.
 Targets persist through the `targetStore` the CLI passes in: `<work>/.pablo/targets.json` (gitignored, so a target never
 rides an `edit/` branch).
+AI revisions show inline (AGT-2177, D-18, `inline-diff.ts`): once a unit is open, `PaneSession.revisions` (the CLI's
+`revisionsForPane`) hands over every `revise/` branch with commits main lacks that changes the file, as git's diff of the
+file since the branch left main. Each edit core's stitcher finds in it is drawn under the paragraph it changes (a header,
+the sentence out in red and in in green, the differing words marked) and the title counts them (`AI 2`). `g f` / `g F`
+go to the next or previous one; `g a` accepts the one at or below the cursor and `g r` rejects it (`editor.ai_*` rows).
+Accepting finds the diff hunk as the text holds it now (the branch's accepted edits applied; failing that, just the
+edit's own lines) and swaps in the hunk with this edit taken, as one undo step (`TextBuffer.group`), then asks for the
+pane's save, so it reaches the `edit/` branch through `saveText` like any edit. Rejecting changes nothing, so rejecting
+every edit leaves the edit branch as it was. An edit whose text the author has since changed "no longer matches" and can
+only be rejected; one an earlier session accepted and saved is found already applied and not offered again. The list is
+per unit: `g n` / `g p` open a new text and its own revisions are fetched. The revise branch is never written.
 `v s` saves it: the same `finisher` a review's `s` uses, with nothing rejected, so the merge into `main` and the
 after-write steps are the ones every branch gets. A document that is not one file (the bible, a missing chapter) has no
 `editable` path and `v e` says so.

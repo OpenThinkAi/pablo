@@ -11,6 +11,7 @@ import { useAutosave, type AutosaveOptions } from "./autosave";
 import { tokenOf } from "./chord";
 import { modeOfKey, toggled, NO_MODES, type Modes } from "./edit-modes";
 import { openText, paneHits, paneView, saveText, savedEdit, type EditText, type PaneSession } from "./edit-pane";
+import { aiRows, pendingCount, withRevisions } from "./inline-diff";
 import { DEFAULT_KEYMAP, type Keymap } from "./keys";
 import { modalKey, modeOf, MODE_TAG } from "./modal";
 import { promptKey, promptLine, searchStatus } from "./search";
@@ -67,6 +68,19 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
     return () => { live = false; };
   }, [file]);
 
+  // AI revisions inline (AGT-2177): once a unit is open on its branch, its pending revise branches are fetched and laid
+  // over its text. Per file: a unit switch opens a new text (no `ai`), and a fetch for the unit left behind is dropped.
+  const opened = phase !== "opening" && branch !== null;
+  useEffect(() => {
+    if (!opened || !session.revisions) return;
+    let live = true;
+    session.revisions(file).then(
+      (revs) => { if (live && revs.length > 0) dispatch({ type: "pane.edit", edit: (t) => withRevisions(t as EditText, revs) }); },
+      () => undefined,
+    );
+    return () => { live = false; };
+  }, [file, opened]);
+
   useAutosave(text, text?.dirty === true, phase !== "opening", () => dispatch({ type: "pane.save", auto: true }), autosave);
 
   // One commit per Ctrl+S: `saveSeq` changes only then. Typing may go on while it runs; the save marks clean only
@@ -114,11 +128,13 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
   const hits = useMemo(() => (text ? paneHits(text, file, checks) : new Map<number, CheckHit[]>()), [text, file, checks]);
   // The scroll is the model's `pane.top`: drawing reads it, and the effect below records where the draw put it.
   const prompt = text?.prompt ?? null;
-  const view = text ? paneView(text, inner, prompt ? Math.max(1, rows - 1) : rows, hits, { top, focus: modes.focus, typewriter: modes.typewriter }) : { rows: [], top };
+  const ai = useMemo(() => (text?.ai ? aiRows(text, inner) : undefined), [text, inner]);
+  const aiPending = pendingCount(text);
+  const view = text ? paneView(text, inner, prompt ? Math.max(1, rows - 1) : rows, hits, { top, focus: modes.focus, typewriter: modes.typewriter }, ai) : { rows: [], top };
   useEffect(() => { if (view.top !== top) dispatch({ type: "pane.scroll", top: view.top }); });
   const shown = view.rows;
   const status = text ? searchStatus(text) : "";
-  const title = ` ${text ? `${MODE_TAG[modeOf(text)]} ` : ""}${clean(file)}${text?.dirty ? " [+]" : ""}${status ? ` · ${clean(status)}` : ""}${branch ? ` · ${clean(branch)}` : ""}${phase === "saving" ? (pane.auto ? " · autosaving…" : " · saving…") : phase === "opening" ? " · opening…" : ""}${modes.focus ? " · focus" : ""}${modes.typewriter ? " · typewriter" : ""}`;
+  const title = ` ${text ? `${MODE_TAG[modeOf(text)]} ` : ""}${clean(file)}${text?.dirty ? " [+]" : ""}${status ? ` · ${clean(status)}` : ""}${branch ? ` · ${clean(branch)}` : ""}${aiPending > 0 ? ` · AI ${aiPending}` : ""}${phase === "saving" ? (pane.auto ? " · autosaving…" : " · saving…") : phase === "opening" ? " · opening…" : ""}${modes.focus ? " · focus" : ""}${modes.typewriter ? " · typewriter" : ""}`;
   return (
     <Box flexDirection="column" width={width} height={height}>
       <Text wrap="truncate" bold={text?.dirty === true} dimColor={text?.dirty !== true}>{title}</Text>
@@ -127,6 +143,13 @@ export function EditPaneView({ pane, session, checks, dispatch, keymap = DEFAULT
           return (
             <Text key={i} wrap="truncate" color={row.color} dimColor={row.dim === true}>
               {" "}{row.head !== undefined ? <>{row.head}{row.tag ? <Text dimColor>{row.tag}</Text> : null}{row.text.slice(row.head.length + (row.tag?.length ?? 0))}</> : row.text}
+            </Text>
+          );
+        }
+        if (row.kind === "diff") {
+          return (
+            <Text key={i} wrap="truncate" color={row.color} bold={row.bold === true} dimColor={row.dim === true}>
+              {" "}{row.parts.map((p, j) => (p.hl ? <Text key={j} inverse>{p.text}</Text> : p.text))}
             </Text>
           );
         }
