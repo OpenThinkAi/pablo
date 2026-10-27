@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { openSettings } from "../src/settings";
 import { DEFAULT_KEYMAP } from "../src/keys";
-import { initialState, pendingText, railRow, reduce, reviewCounts, shownRows, viewOf, type Action, type ActionType, type RailRow, type State } from "../src/state";
+import { initialState, paneEsc, pendingText, railRow, reduce, reviewCounts, shownRows, viewOf, type Action, type ActionType, type RailRow, type State } from "../src/state";
 
 /** A state after `actions`, from the initial one. */
 const after = (...actions: Action[]): State => actions.reduce(reduce, initialState());
@@ -476,4 +476,38 @@ test("finish.start shows the merge in progress; finish.done closes the review, s
   const b = book();
   expect(then(b, { type: "finish.start", branch: "x" })).toBe(b);
   expect(then(b, { type: "finish.done", branch: "x", lines: [] })).toBe(b);
+});
+
+// AGT-2173: the idle autosave rides `pane.save` with `auto`; Esc is one rule (`paneEsc`) for the reducer and the view.
+test("pane.save auto: saves only a dirty, non-blank text with the pane open, and says Autosaved", () => {
+  const book = reduce(initialState(), { type: "rail.loaded", rows: ROWS });
+  const open = reduce(reduce(book, { type: "pane.open", file: "chapters/01-a.md", storage: "sentences", line: 1 }), { type: "pane.opened", branch: "edit/ab12cd", text: { dirty: false, empty: false } });
+  expect(reduce(open, { type: "pane.save", auto: true })).toBe(open); // clean: nothing
+  const blank = reduce(open, { type: "pane.edit", edit: () => ({ dirty: true, empty: true }) });
+  expect(reduce(blank, { type: "pane.save", auto: true })).toBe(blank); // blank: only Ctrl+S's question saves it
+  const dirty = reduce(open, { type: "pane.edit", edit: () => ({ dirty: true, empty: false }) });
+  const saving = reduce(dirty, { type: "pane.save", auto: true });
+  expect(saving.editPane).toMatchObject({ phase: "saving", auto: true, saveSeq: 1 });
+  expect(reduce(saving, { type: "pane.save", auto: true })).toBe(saving); // one save at a time
+  const done = reduce(saving, { type: "pane.saved", branch: "edit/ab12cd", lines: ["committed"], edit: () => ({ dirty: false, empty: false }) });
+  expect(done.content?.title).toBe("Autosaved chapters/01-a.md on edit/ab12cd");
+  expect(done.editPane).toMatchObject({ phase: "open", auto: false });
+  expect(done.editBranch).toBe("edit/ab12cd");
+});
+
+test("paneEsc: opening leaves (a cancel), unsaved asks then leaves, a running save ignores; the reducer follows it", () => {
+  const book = reduce(initialState(), { type: "rail.loaded", rows: ROWS });
+  const opening = reduce(book, { type: "pane.open", file: "chapters/01-a.md", storage: "sentences", line: 1 });
+  expect(paneEsc(opening.editPane!)).toBe("leaves");
+  expect(reduce(opening, { type: "pane.close" }).editPane).toBeNull();
+  const open = reduce(opening, { type: "pane.opened", branch: "edit/ab12cd", text: { dirty: false, empty: false } });
+  expect(paneEsc(open.editPane!)).toBe("leaves");
+  const dirty = reduce(open, { type: "pane.edit", edit: () => ({ dirty: true, empty: false }) });
+  expect(paneEsc(dirty.editPane!)).toBe("asks");
+  const asked = reduce(dirty, { type: "pane.close" });
+  expect(paneEsc(asked.editPane!)).toBe("leaves");
+  expect(reduce(asked, { type: "pane.close" }).editPane).toBeNull();
+  const saving = reduce(dirty, { type: "pane.save" });
+  expect(paneEsc(saving.editPane!)).toBe("ignored");
+  expect(reduce(saving, { type: "pane.close" })).toBe(saving);
 });

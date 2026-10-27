@@ -218,6 +218,17 @@ export interface EditPane {
   readonly closing: boolean;
   /** Ctrl+S on an empty body asks; Ctrl+S again saves it empty. */
   readonly emptying: boolean;
+  /** The save running is the idle autosave (AGT-2173), not a Ctrl+S: it says so quietly instead of "Saving…". */
+  readonly auto: boolean;
+}
+
+/**
+ * Esc in the editing pane (AGT-2167, one rule for the reducer and the view): `leaves` when the pane closes now (still
+ * opening, nothing unsaved, or Esc a second time), `asks` when it has unsaved changes, `ignored` while a save runs.
+ */
+export function paneEsc(p: EditPane): "leaves" | "asks" | "ignored" {
+  if (p.phase === "saving") return "ignored";
+  return p.phase === "open" && p.text?.dirty && !p.closing ? "asks" : "leaves";
 }
 
 export interface State {
@@ -378,10 +389,10 @@ export type Action =
   // `v e` in place (AGT-2167): the pane opens (the branch is made and the file read), keys edit its text, Ctrl+S commits
   // it on the branch, Esc closes it (twice with unsaved changes).
   | { type: "pane.open"; file: string; storage: string; line: number }
-  | { type: "pane.opened"; branch: string; text: EditPaneText }
+  | { type: "pane.opened"; branch: string; text: EditPaneText; /** AGT-2173: commits an earlier session left on the branch that main does not have. */ unmerged?: number }
   | { type: "pane.failed"; message: string }
   | { type: "pane.edit"; edit: (text: EditPaneText) => EditPaneText }
-  | { type: "pane.save" }
+  | { type: "pane.save"; /** The idle autosave (AGT-2173): skipped unless there is something to save and the body is not blank. */ auto?: boolean }
   | { type: "pane.saved"; branch: string; lines: readonly string[]; edit: (text: EditPaneText) => EditPaneText }
   | { type: "pane.save_failed"; message: string }
   | { type: "pane.close" }
@@ -417,7 +428,7 @@ const voiceContent = (title: string, body: string): Content => ({ title, body, k
 const writingName = (output: string | undefined, unit: number) => (output === undefined || output === "novel" ? `chapter ${unit}` : `${output} ${unit}`);
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
 /** What the editing pane's keys do, shown in the content area while it is open. */
-const PANE_KEYS = "Ctrl+S saves (a commit on the edit branch) · Ctrl+Z undoes · Ctrl+Y redoes · Esc closes";
+const PANE_KEYS = "Ctrl+S saves (a commit on the edit branch; edits also autosave there after a pause) · Ctrl+Z undoes · Ctrl+Y redoes · Esc closes";
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
@@ -919,9 +930,16 @@ export function reduce(s: State, a: Action): State {
       return { ...s, editing: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "pane.open":
       if (s.mode.kind !== "book" || s.editPane !== null || s.editing !== null || s.finishing !== null || s.revise !== null || s.writing !== null) return s;
-      return { ...s, editPane: { file: a.file, storage: a.storage, line: a.line, phase: "opening", branch: null, text: null, saveSeq: 0, closing: false, emptying: false }, pending: null, full: false, content: writeContent(`Editing ${a.file}`, "opening the edit branch…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
-    case "pane.opened":
-      return s.editPane?.phase !== "opening" ? s : { ...s, editPane: { ...s.editPane, phase: "open", branch: a.branch, text: a.text }, content: writeContent(`Editing ${s.editPane.file} on ${a.branch}`, PANE_KEYS) };
+      return { ...s, editPane: { file: a.file, storage: a.storage, line: a.line, phase: "opening", branch: null, text: null, saveSeq: 0, closing: false, emptying: false, auto: false }, pending: null, full: false, content: writeContent(`Editing ${a.file}`, "opening the edit branch…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "pane.opened": {
+      if (s.editPane?.phase !== "opening") return s;
+      const opened = { ...s, editPane: { ...s.editPane, phase: "open" as const, branch: a.branch, text: a.text } };
+      if (!a.unmerged) return { ...opened, content: writeContent(`Editing ${s.editPane.file} on ${a.branch}`, PANE_KEYS) };
+      // An earlier session's edit branch, never merged: the pane carries on there, and `v s` can save it.
+      const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
+      const resumed = `Resuming ${a.branch}: ${a.unmerged} edit${a.unmerged === 1 ? "" : "s"} from earlier not saved into main yet (v s saves them).`;
+      return { ...opened, written, editBranch: a.branch, content: writeContent(`Editing ${s.editPane.file} on ${a.branch}`, `${resumed}\n${PANE_KEYS}`) };
+    }
     case "pane.failed":
       return s.editPane === null ? s : { ...s, editPane: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "pane.edit":
@@ -929,22 +947,25 @@ export function reduce(s: State, a: Action): State {
     case "pane.save": {
       const p = s.editPane;
       if (p?.phase !== "open" || p.text === null) return s;
+      if (a.auto) return !p.text.dirty || p.text.empty ? s : { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, auto: true } };
       if (!p.text.dirty) return { ...s, content: writeContent(`Editing ${p.file} on ${p.branch}`, `Nothing to save.\n${PANE_KEYS}`) };
       if (p.text.empty && !p.emptying) return { ...s, editPane: { ...p, emptying: true, closing: false }, content: writeContent(`${p.file} is empty`, "Saving it leaves the file only its frontmatter. Ctrl+S again saves it empty; any other key keeps editing.") };
-      return { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, closing: false, emptying: false }, content: writeContent(`Saving ${p.file}`, "committing…") };
+      return { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, closing: false, emptying: false, auto: false }, content: writeContent(`Saving ${p.file}`, "committing…") };
     }
     case "pane.saved": {
       const p = s.editPane;
       if (p?.phase !== "saving" || p.text === null) return s;
       const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
-      return { ...s, editPane: { ...p, phase: "open", text: a.edit(p.text) }, written, editBranch: a.branch, content: writeContent(`Saved ${p.file} on ${a.branch}`, [...a.lines, PANE_KEYS].join("\n")) };
+      return { ...s, editPane: { ...p, phase: "open", text: a.edit(p.text), auto: false }, written, editBranch: a.branch, content: writeContent(`${p.auto ? "Autosaved" : "Saved"} ${p.file} on ${a.branch}`, [...a.lines, PANE_KEYS].join("\n")) };
     }
     case "pane.save_failed":
-      return s.editPane?.phase !== "saving" ? s : { ...s, editPane: { ...s.editPane, phase: "open" }, content: writeContent("Not saved", a.message) };
+      return s.editPane?.phase !== "saving" ? s : { ...s, editPane: { ...s.editPane, phase: "open", auto: false }, content: writeContent(s.editPane.auto ? "Not autosaved" : "Not saved", a.message) };
     case "pane.close": {
       const p = s.editPane;
-      if (p === null || p.phase === "saving") return s;
-      if (p.text?.dirty && !p.closing) return { ...s, editPane: { ...p, closing: true }, content: writeContent(`Unsaved changes to ${p.file}`, "Esc again closes without saving them; Ctrl+S saves.") };
+      if (p === null) return s;
+      const esc = paneEsc(p);
+      if (esc === "ignored") return s;
+      if (esc === "asks") return { ...s, editPane: { ...p, closing: true }, content: writeContent(`Unsaved changes to ${p.file}`, "Esc again closes without saving them; Ctrl+S saves.") };
       return { ...s, editPane: null, content: s.editBranch === null ? null : writeContent(`Edits on ${s.editBranch}`, "v e edits it again; v s saves the branch into main") };
     }
     case "save.start":

@@ -297,7 +297,13 @@ an `edit/<short-id>` branch with its own worktree and reads the file there, `sav
 opaque: a key is a `pane.edit` whose function (`edit-pane.ts`'s `paneKey`) copies the buffer and edits the copy, so the
 state is never mutated. The app's own keys are off while the pane is open; `edit-pane-view.tsx` reads them: text, Enter,
 Backspace, arrows, Home/End, PgUp/PgDn, Ctrl+Z / Ctrl+Y undo and redo, Ctrl+S saves (a commit on the branch), Esc
-closes (twice with unsaved changes). A dirty marker (`[+]`) shows in the pane's title until a save. The frontmatter is
+closes (twice with unsaved changes; while the pane is still opening it cancels, and the branch the open made goes). Esc's
+rule is the model's `paneEsc`, which the view also reads. A dirty marker (`[+]`) shows in the pane's title until a save.
+Edits also autosave (AGT-2173, `autosave.ts`): once the text has sat dirty for `AUTOSAVE_MS` the pane dispatches
+`pane.save` with `auto`, the same save as Ctrl+S (a commit on the `edit/` branch, never `main`); a blank body is never
+autosaved. The wait runs on an injectable clock (`App`'s `autosave` prop) so tests fire it by hand. `main` changes only
+when `v s` merges the branch. An edit branch an earlier session left with commits main lacks is resumed on the next
+`v e` (its worktree added back if it went), and the pane says so; `save` refuses to write through a symlink. The frontmatter is
 never in the buffer: a `sentences` unit is shown one paragraph per line with a blank line between paragraphs, a `lines`
 or `screenplay` unit line for line, and both are loaded and saved through `edit-save.ts` (AGT-2168: only changed
 paragraphs re-split, the rest byte for byte); `saveText` is the pane's one call into it. Ctrl+S on an emptied pane asks

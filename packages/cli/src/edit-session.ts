@@ -9,7 +9,7 @@
 // a dependency. The tui cannot import this package, so cli.ts passes `screenEditor` in through runScreen's options.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { branchExists, branchIsEmpty, branchKind, createBranch, deleteBranch, ensureWorktree, listBranches, repoRoot, worktreePath } from "./branch";
 import type { Author } from "./branch";
@@ -78,10 +78,22 @@ function authorOf(repo: string): Author {
   return { name: get("user.name") || "author", email: get("user.email") || "author@localhost" };
 }
 
-/** The work's open edit branch: an `edit/` branch whose worktree exists under this slug. */
+/** How many commits `branch` holds that `main` does not; 0 when git cannot say. */
+function unmergedCount(repo: string, branch: string): number {
+  try { return Number(git(repo, ["rev-list", "--count", `main..${branch}`]).trim()) || 0; } catch { return 0; }
+}
+
+/**
+ * The work's open edit branch: an `edit/` branch whose worktree exists under this slug, else (AGT-2173) one an earlier
+ * session left with commits main does not have yet (autosaves never merged with `v s`), its worktree added back.
+ */
 function openEditBranch(repo: string, slug: string, env: Env): string | undefined {
   const listed = listBranches(repo);
-  return listed.ok ? listed.branches.edit.find((b) => existsSync(worktreePath(slug, b, env))) : undefined;
+  if (!listed.ok) return undefined;
+  const live = listed.branches.edit.find((b) => existsSync(worktreePath(slug, b, env)));
+  if (live !== undefined) return live;
+  const left = listed.branches.edit.find((b) => unmergedCount(repo, b) > 0);
+  return left !== undefined && ensureWorktree(repo, slug, left, env).ok ? left : undefined;
 }
 
 interface EditTree { readonly ok: true; readonly branch: string; readonly worktree: string; readonly inTree: string; readonly made: boolean; readonly discard: () => void }
@@ -196,10 +208,12 @@ export function screenEditor(projectPath: string, deps: EditDeps = {}): ScreenEd
 
 // `v e` in place (AGT-2167, D-18/D-23): the screen's own editing pane edits the unit on the same `edit/` branch the editor
 // launch above uses (one per work), so `v s` saves it the same way. `open` makes or reuses the branch and reads the file
-// there; `save` writes what the pane hands it and commits it as the author; `close` takes a branch `open` made back out
+// there (an earlier session's unmerged branch is reused, AGT-2173); `save` writes what the pane hands it and commits it as
+// the author (Ctrl+S, and the pane's autosave after an idle pause: main moves only on `v s`); `close` takes a branch `open` made back out
 // of the world when nothing was ever committed on it. No editor process runs.
 
-export type PaneOpen = { readonly ok: true; readonly branch: string; readonly text: string } | { readonly ok: false; readonly message: string };
+/** `unmerged` (AGT-2173): the commits the branch already holds that main does not (an earlier session's autosaves), when there are any. */
+export type PaneOpen = { readonly ok: true; readonly branch: string; readonly text: string; readonly unmerged?: number } | { readonly ok: false; readonly message: string };
 export type PaneSave = { readonly ok: true; readonly branch: string; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
 export interface EditPaneSession {
   open(file: string): Promise<PaneOpen>;
@@ -222,7 +236,9 @@ export async function openForPane(projectPath: string, file: string, deps: EditD
   const tree = editTree(projectPath, at.repo, at.slug, file, deps);
   if (!tree.ok) return tree;
   try {
-    return { ok: true, branch: tree.branch, text: readFileSync(tree.inTree, "utf8") };
+    const text = readFileSync(tree.inTree, "utf8");
+    const unmerged = tree.made ? 0 : unmergedCount(at.repo, tree.branch);
+    return { ok: true, branch: tree.branch, text, ...(unmerged > 0 ? { unmerged } : {}) };
   } catch (error) {
     tree.discard();
     return { ok: false, message: `pablo: edit: could not read ${file}: ${error instanceof Error ? error.message : String(error)}` };
@@ -240,6 +256,12 @@ export async function saveFromPane(projectPath: string, file: string, branch: st
   if (!existsSync(worktree)) return { ok: false, message: `pablo: edit: ${branch} has no worktree; open it again with v e` };
   const inTree = resolve(worktree, relative(at.repo, realpathSync(projectPath)), file);
   const path = relative(worktree, inTree);
+  // Never write through a link: a symlink in the worktree could point anywhere, main's checkout included.
+  try {
+    if (lstatSync(inTree, { throwIfNoEntry: false })?.isSymbolicLink()) return { ok: false, message: `pablo: edit: ${file} is a symbolic link; not writing through it` };
+  } catch (error) {
+    return { ok: false, message: `pablo: edit: could not check ${file}: ${error instanceof Error ? error.message : String(error)}` };
+  }
   try {
     writeFileSync(inTree, text);
   } catch (error) {
