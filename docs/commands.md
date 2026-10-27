@@ -613,10 +613,31 @@ A citation is a bracket of research note ids (`@<id>`) and/or claims row numbers
 (`#<n>`): `[@ice-harvest]`, `[#2]`, `[@ice-harvest; #3]`. A claim whose citation
 resolves is never a hit; a citation that resolves to nothing is named in the hit.
 
+On a **historical-fiction** work, every unit also gets the **anachronism** check
+(`rule: "anachronism"` in `hits[]`): a word, object or idiom out of the work's
+period. Each hit carries `term`, `why` (why it is out of period) and `belongs` (the
+period it belongs to); `detail` says the same in one line. The period is the
+`## When and where` section of `bible/period.md` (else its first paragraph); with no
+brief the check is skipped and `anachronism.notice` says so. The unit's distinct
+words, never its sentences, go to the model the `check` intent routes to, and every
+verdict is cached per (period, term) in the work's `facts/lexicon.json`, so a
+re-check asks only about words it has not seen and a fully cached one makes no model
+call. A first run on a long work can take a while: it says on stderr how many new
+words it is asking about and prints each batch as it goes. `anachronism.asked` is how
+many model calls the run made. When the model cannot be asked, the cached hits are
+still reported and `anachronism.notice` names what went wrong and where to look (the
+prose form prints it on stderr).
+
+`facts/lexicon.json` is part of the work, like `facts.md`: `check` writes it in the
+working tree and you commit it. Edit a verdict there (`inPeriod`, `why`, `belongs`) to
+overrule the model; a hand-edited verdict is used as is. A lexicon that does not parse
+is left alone and the check is skipped with a notice. Verdicts are keyed by the period
+text, so rewriting the brief's `## When and where` section starts a fresh set.
+
 Hits are data: exit is `0` either way.
 
 ```
-{ok: true, hits[], unprovenanced[], core?[], radio?}
+{ok: true, hits[], unprovenanced[], core?[], radio?, anachronism?{asked, notice?}}
 ```
 
 `--across` compares the continuity of every output instead. It reports facts the
