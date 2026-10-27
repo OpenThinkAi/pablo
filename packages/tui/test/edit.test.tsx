@@ -238,3 +238,18 @@ test("Backspace deletes before the cursor in the pane", async () => {
   expect(plain(app.lastFrame())).toContain("The well was dry. Nobody");
   expect(plain(app.lastFrame())).not.toContain("Nobody came.");
 });
+
+test("saving an emptied pane asks first: Ctrl+S again writes the frontmatter alone, any other key keeps editing", async () => {
+  const fake = fakeSession({ "chapters/01-cold-open.md": "---\nchapter: 1\n---\n\nAb\n" });
+  const app = mount({ session: fake.session });
+  await sleep(30);
+  await toChapterMain(app);
+  await vE(app);
+  await keys(app, "\x1b[F", BACKSPACE, BACKSPACE, CTRL_S);
+  expect(fake.log.saved).toEqual([]);
+  expect(plain(app.lastFrame())).toContain("chapters/01-cold-open.md is empty");
+  await keys(app, LEFT, CTRL_S); // a key in between: the question is asked again
+  expect(fake.log.saved).toEqual([]);
+  await keys(app, CTRL_S); await sleep(30);
+  expect(fake.log.saved.map((x) => x.text)).toEqual(["---\nchapter: 1\n---\n\n"]);
+});

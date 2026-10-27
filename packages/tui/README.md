@@ -298,9 +298,10 @@ opaque: a key is a `pane.edit` whose function (`edit-pane.ts`'s `paneKey`) copie
 state is never mutated. The app's own keys are off while the pane is open; `edit-pane-view.tsx` reads them: text, Enter,
 Backspace, arrows, Home/End, PgUp/PgDn, Ctrl+Z / Ctrl+Y undo and redo, Ctrl+S saves (a commit on the branch), Esc
 closes (twice with unsaved changes). A dirty marker (`[+]`) shows in the pane's title until a save. The frontmatter is
-never in the buffer: a `sentences` unit is shown one paragraph per line with a blank line between paragraphs and saved
-back through core's `splitManuscript`, a `lines` or `screenplay` unit line for line; `saveText` is the one save function
-(text the author did not change saves as the file was). `check` hits are re-run on the text as it would save and drawn as
+never in the buffer: a `sentences` unit is shown one paragraph per line with a blank line between paragraphs, a `lines`
+or `screenplay` unit line for line, and both are loaded and saved through `edit-save.ts` (AGT-2168: only changed
+paragraphs re-split, the rest byte for byte); `saveText` is the pane's one call into it. Ctrl+S on an emptied pane asks
+first (it would leave the file only its frontmatter); Ctrl+S again saves it. `check` hits are re-run on the text as it would save and drawn as
 boxes under their paragraph. The saved branch then waits in the book like any other. `e` in a review (AGT-1591) still
 opens the configured editor (`editSession`, `screenEditor`) on the review branch, leaving the alternate screen while it
 runs.

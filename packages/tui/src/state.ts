@@ -201,7 +201,7 @@ export interface Planning { readonly id: string; readonly title: string; readonl
  * edit-pane.ts's (the buffer, the file as opened, its storage); the model holds it opaquely and only ever replaces it
  * with what a `pane.edit` function returns, so a keystroke never mutates the state it was given.
  */
-export interface EditPaneText { readonly dirty: boolean }
+export interface EditPaneText { readonly dirty: boolean; /** Nothing but whitespace: a save would leave the file its frontmatter alone. */ readonly empty: boolean }
 export interface EditPane {
   readonly file: string;
   /** The unit's storage mode (`sentences`, `lines`, `screenplay`): how the text is shown and saved. */
@@ -216,6 +216,8 @@ export interface EditPane {
   readonly saveSeq: number;
   /** Esc once with unsaved changes asks; Esc again closes without saving. */
   readonly closing: boolean;
+  /** Ctrl+S on an empty body asks; Ctrl+S again saves it empty. */
+  readonly emptying: boolean;
 }
 
 export interface State {
@@ -917,18 +919,19 @@ export function reduce(s: State, a: Action): State {
       return { ...s, editing: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "pane.open":
       if (s.mode.kind !== "book" || s.editPane !== null || s.editing !== null || s.finishing !== null || s.revise !== null || s.writing !== null) return s;
-      return { ...s, editPane: { file: a.file, storage: a.storage, line: a.line, phase: "opening", branch: null, text: null, saveSeq: 0, closing: false }, pending: null, full: false, content: writeContent(`Editing ${a.file}`, "opening the edit branch…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+      return { ...s, editPane: { file: a.file, storage: a.storage, line: a.line, phase: "opening", branch: null, text: null, saveSeq: 0, closing: false, emptying: false }, pending: null, full: false, content: writeContent(`Editing ${a.file}`, "opening the edit branch…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "pane.opened":
       return s.editPane?.phase !== "opening" ? s : { ...s, editPane: { ...s.editPane, phase: "open", branch: a.branch, text: a.text }, content: writeContent(`Editing ${s.editPane.file} on ${a.branch}`, PANE_KEYS) };
     case "pane.failed":
       return s.editPane === null ? s : { ...s, editPane: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "pane.edit":
-      return s.editPane?.text == null || s.editPane.phase === "opening" ? s : { ...s, editPane: { ...s.editPane, text: a.edit(s.editPane.text), closing: false } };
+      return s.editPane?.text == null || s.editPane.phase === "opening" ? s : { ...s, editPane: { ...s.editPane, text: a.edit(s.editPane.text), closing: false, emptying: false } };
     case "pane.save": {
       const p = s.editPane;
       if (p?.phase !== "open" || p.text === null) return s;
       if (!p.text.dirty) return { ...s, content: writeContent(`Editing ${p.file} on ${p.branch}`, `Nothing to save.\n${PANE_KEYS}`) };
-      return { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, closing: false }, content: writeContent(`Saving ${p.file}`, "committing…") };
+      if (p.text.empty && !p.emptying) return { ...s, editPane: { ...p, emptying: true, closing: false }, content: writeContent(`${p.file} is empty`, "Saving it leaves the file only its frontmatter. Ctrl+S again saves it empty; any other key keeps editing.") };
+      return { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, closing: false, emptying: false }, content: writeContent(`Saving ${p.file}`, "committing…") };
     }
     case "pane.saved": {
       const p = s.editPane;

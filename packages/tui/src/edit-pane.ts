@@ -3,12 +3,12 @@
 // keypress as an edit. No Ink, no React: edit-pane-view.tsx draws what this returns and dispatches what it decides.
 //
 // The buffer holds the body, never the frontmatter: a `sentences` unit (a chapter, a story) one paragraph per line with a
-// blank line between paragraphs, as core's `joinManuscript` reads the file; a `lines` unit (a radio script, a narrated
-// reading) and a `screenplay` (Fountain) line for line, as stored. Saving puts the frontmatter back in front and the body
-// through `splitManuscript` (one sentence per line) or, line-stored, as typed. `saveText` is the one function that turns
-// the pane's text into the file: AGT-2168 replaces it with its paragraph-diff save.
+// blank line between paragraphs; a `lines` unit (a radio script, a narrated reading) and a `screenplay` (Fountain) line
+// for line, as stored. Loading and saving are AGT-2168's storage round-trip (edit-save.ts: `loadForEdit`, `saveEdited`):
+// the frontmatter kept byte for byte, only changed paragraphs re-split. `saveText` is the one place the pane calls it.
 
-import { splitManuscript, joinManuscript } from "@openthink/pablo-core";
+import { splitManuscript } from "@openthink/pablo-core";
+import { loadForEdit, saveEdited } from "./edit-save";
 import type { Storage } from "./book";
 import { TextBuffer } from "./buffer";
 import { tokenOf, type InkKey } from "./chord";
@@ -29,7 +29,7 @@ export interface PaneSession {
   close(branch: string): Promise<void>;
 }
 
-/** The model's opaque `EditPaneText`: the buffer, the file as last opened or saved, and how it is stored. */
+/** The model's opaque `EditPaneText` (`dirty`, and `empty` when the body is blank): the buffer, the file as last opened or saved, and how it is stored. */
 export interface EditText extends EditPaneText {
   readonly buffer: TextBuffer;
   readonly raw: string;
@@ -54,27 +54,14 @@ function partsOf(raw: string): Parts {
 
 const asStorage = (storage: string): Storage => (storage === "lines" || storage === "screenplay" ? storage : "sentences");
 
-/** The body as the buffer holds it: paragraphs on one line each for prose, line for line otherwise. */
-function bufferForm(body: string, storage: Storage): string {
-  return storage === "sentences" ? joinManuscript(body) : body;
-}
-
-/**
- * The file `edited` (the buffer's text) saves as: the frontmatter of `raw` kept, the body one sentence per line
- * (`splitManuscript`) or, line-stored, as typed; a trailing newline. Text the author did not change saves as `raw`, so
- * opening and saving never rewrites a file. The one save function: AGT-2168 replaces it.
- */
+/** The file `edited` (the buffer's text) saves as over `raw` (the file as opened): AGT-2168's `saveEdited`. */
 export function saveText(raw: string, edited: string, storage: string): string {
-  const s = asStorage(storage);
-  const { head, body } = partsOf(raw);
-  if (edited === bufferForm(body, s)) return raw;
-  const stored = s === "sentences" ? splitManuscript(edited) : edited.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
-  return `${head}${stored}\n`;
+  return saveEdited(raw, edited, asStorage(storage));
 }
 
 /**
- * The stored body lines `edited` saves as (the same text `splitManuscript` gives, built a block at a time) and, for each
- * stored line, the buffer row it comes from: a prose block's sentences belong to its last row (its paragraph), a block
+ * The body lines `edited` reads as when every paragraph is split (`splitManuscript`, a block at a time): the text the
+ * `check` hits are found in, so each can be placed under its paragraph. For each such line, the buffer row it comes from: a prose block's sentences belong to its last row (its paragraph), a block
  * that is not prose maps line to line, the blank line between blocks to the block before it.
  */
 function storedRows(edited: string, storage: Storage): { stored: string[]; rowOf: number[] } {
@@ -100,21 +87,24 @@ function storedRows(edited: string, storage: Storage): { stored: string[]; rowOf
 /** The pane's text for a file as opened: the body in the buffer, the cursor on the row that holds file line `line` (1-based, frontmatter counted). */
 export function openText(raw: string, storage: string, line: number): EditText {
   const s = asStorage(storage);
-  const { body, headLines } = partsOf(raw);
-  const buffer = new TextBuffer(bufferForm(body, s));
+  const { headLines } = partsOf(raw);
+  const buffer = new TextBuffer(loadForEdit(raw, s).text);
   const { rowOf } = storedRows(buffer.text(), s);
   const at = line - 1 - headLines;
   const row = rowOf.length === 0 ? 0 : rowOf[Math.max(0, Math.min(at, rowOf.length - 1))]!;
   buffer.cursor = { row, col: 0 };
-  return { buffer, raw, storage: s, dirty: false };
+  return { buffer, raw, storage: s, dirty: false, empty: blankText(buffer) };
 }
 
 /** `t` with its buffer copied and `op` applied to the copy; the state's own text is never changed. */
 function apply(t: EditText, op: (b: TextBuffer) => void): EditText {
   const buffer = t.buffer.clone();
   op(buffer);
-  return { ...t, buffer, dirty: buffer.dirty };
+  return { ...t, buffer, dirty: buffer.dirty, empty: blankText(buffer) };
 }
+
+/** A body with nothing but whitespace: saving it would leave the file its frontmatter alone, so the pane asks first. */
+const blankText = (b: TextBuffer) => b.lines.every((l) => l.trim() === "");
 
 /** After a save: `edited` (the buffer's text that was saved) is the clean state and `raw` the file it became. */
 export function savedEdit(edited: string, raw: string): (t: EditPaneText) => EditPaneText {
