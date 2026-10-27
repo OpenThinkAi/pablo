@@ -1,7 +1,7 @@
 // The keys, as data. Every action is a row: a stable id, the states it acts in, a primary key, an optional secondary
 // key (the vim/helix spelling), the label the key panel shows, and what it does (`do`: a model action from state.ts, or
 // a command for the layer above it). Arrows move around the screen; letter prefixes hold everything else: `a` AI,
-// `f` filter, `v` view, `g` go to, `r` research. A prefixed row's key is its second key, pressed after the prefix.
+// `f` filter, `v` view, `g` go to, `r` research, `o` output and setup. A prefixed row's key is its second key, pressed after the prefix.
 // Copied from prview's keys.ts and adapted (pablo's states are the rail, the main pane and the content area, and a review is a
 // mode of them); never shared with it, so the two may drift.
 //
@@ -19,7 +19,7 @@ import type { Action as ModelAction, State, VoiceChoiceInfo, VoiceKind, VoiceTar
 export const STATES = ["rail", "main", "content"] as const;
 export type KeyStateName = (typeof STATES)[number];
 
-export const PREFIXES = { a: "AI", f: "filter", v: "view", g: "go to", r: "research" } as const;
+export const PREFIXES = { a: "AI", f: "filter", v: "view", g: "go to", r: "research", o: "output & setup" } as const;
 export type Prefix = keyof typeof PREFIXES;
 export const isPrefix = (k: string): k is Prefix => k in PREFIXES;
 
@@ -112,6 +112,17 @@ export const DEFAULT_ACTIONS: readonly KeyAction[] = [
   { id: "research.link", states: OUTSIDE, needs: "book", prefix: "r", key: "l", label: "link note", description: "Link an existing research note to a checklist item.", do: cmd("research.link") },
   { id: "research.distill", states: OUTSIDE, needs: "book", prefix: "r", key: "d", label: "distill facts", description: "Distill the research notes into the period facts.", do: cmd("research.distill") },
   { id: "fact.record", states: OUTSIDE, needs: "book", prefix: "r", key: "f", label: "record fact", description: "Record a fact (researched, invented or author's) where it belongs: continuity or a bible file.", do: cmd("fact.record") },
+
+  // ---- o: output and setup (AGT-2179, D-3): the CLI's output, review, publishing, voice-rule and model-config verbs; routed by verb-routes.ts
+  { id: "output.add", states: OUTSIDE, needs: "book", prefix: "o", key: "a", label: "add output", description: "Add an output to the work: pick a type the track allows.", do: cmd("output.add") },
+  { id: "output.critique", states: OUTSIDE, needs: "book", prefix: "o", key: "c", label: "critique", description: "Run the critic over the work's latest draft; its comments land on the draft's branch for review.", do: cmd("output.critique") },
+  { id: "output.check", states: OUTSIDE, needs: "book", prefix: "o", key: "k", label: "check", description: "Run the work's checks and report the hits.", do: cmd("output.check") },
+  { id: "output.publish", states: OUTSIDE, needs: "book", prefix: "o", key: "p", label: "publish", description: "Publish the work's output; if it has several, the refusal names them.", do: cmd("output.publish") },
+  { id: "voice.edit", states: OUTSIDE, needs: "book", prefix: "o", key: "e", label: "voice: edit rule", description: "Edit a voice rule.", do: cmd("voice.edit") },
+  { id: "voice.remove", states: OUTSIDE, needs: "book", prefix: "o", key: "x", label: "voice: remove rule", description: "Remove a voice rule.", do: cmd("voice.remove") },
+  { id: "voice.use", states: OUTSIDE, needs: "book", prefix: "o", key: "u", label: "voice: use", description: "Choose the voice this work uses.", do: cmd("voice.use") },
+  { id: "config.show", states: OUTSIDE, needs: "book", prefix: "o", key: "s", label: "config: show", description: "Show the model config and where each intent routes; keys appear as references, never values.", do: cmd("config.show") },
+  { id: "config.set", states: OUTSIDE, needs: "book", prefix: "o", key: "S", label: "config: set", description: "Set a model config path; a key is given as an env: or keychain: reference, never a value.", do: cmd("config.set") },
 
   // ---- f: filter
   { id: "filter.all", states: OUTSIDE, needs: "review", prefix: "f", key: "a", label: "all changes", description: "Show every change in the review.", do: cmd("filter.all") },

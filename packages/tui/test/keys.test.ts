@@ -13,9 +13,9 @@ test("every action has a primary key and an optional secondary, and ids are uniq
   expect(keysOf(DEFAULT_ACTIONS.find((a) => a.id === "app.quit")!)).toEqual(["q"]);
 });
 
-test("a, f, v, g, r are the prefixes; each state has the prefixes that have second keys there", () => {
-  expect(prefixesOf(book("rail"))).toEqual(["a", "v", "r"]);
-  expect(prefixesOf(book("main"))).toEqual(["a", "v", "g", "r"]);
+test("a, f, v, g, r, o are the prefixes; each state has the prefixes that have second keys there", () => {
+  expect(prefixesOf(book("rail"))).toEqual(["a", "v", "r", "o"]);
+  expect(prefixesOf(book("main"))).toEqual(["a", "v", "g", "r", "o"]);
   expect(prefixesOf(review("main"))).toEqual(["a", "f", "v", "g"]);
   expect(prefixesOf(book("content", true))).toEqual(["v"]);
   expect(prefixRows(book("main"), "g").map((r) => r.id)).toEqual(["go.top", "go.end", "go.hit_next", "go.hit_prev", "go.line"]);
