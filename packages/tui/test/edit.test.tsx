@@ -6,6 +6,9 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
 import { App } from "../src/app";
 import { bookRail, type BookStage } from "../src/book";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileLineAt } from "../src/document";
 import { mainRows } from "../src/hits";
 import type { EditRequest, EditResult, Finisher } from "../src/screen";
@@ -372,4 +375,27 @@ test("the pane is modal (AGT-2169): it opens in normal mode, i inserts, v select
   expect(plain(app.lastFrame())).toContain("SEL chapters/01-cold-open.md");
   await keys(app, "v");
   expect(plain(app.lastFrame())).toContain("NOR chapters/01-cold-open.md");
+});
+
+test("Ctrl+F and Ctrl+T toggle focus and typewriter in the pane, show in its title, and persist to the config file", async () => {
+  const fake = fakeSession({ "chapters/01-cold-open.md": CHAPTER });
+  const configFile = join(mkdtempSync(join(tmpdir(), "pablo-edit-modes-")), "config.json");
+  const app = render(<App title="Ice House" format="novel" book={bookRail(STAGES)} load={load} editSession={noEditor} paneSession={fake.session} editor="vim" configFile={configFile} size={{ cols: 110, rows: 32 }} />);
+  await sleep(30);
+  await toChapterMain(app);
+  await vE(app);
+  expect(plain(app.lastFrame())).not.toContain("· focus");
+  await keys(app, "\x06"); // Ctrl+F
+  expect(plain(app.lastFrame())).toContain("· focus");
+  await keys(app, "\x14"); // Ctrl+T
+  const frame = plain(app.lastFrame());
+  expect(frame).toContain("· focus · typewriter");
+  expect(frame).not.toContain("fT"); // the keys were not typed as text
+  expect(JSON.parse(readFileSync(configFile, "utf8"))).toEqual({ editModes: { focus: true, typewriter: true } });
+  await keys(app, "\x06");
+  expect(JSON.parse(readFileSync(configFile, "utf8"))).toEqual({ editModes: { focus: false, typewriter: true } });
+  await keys(app, ESC); // back to normal mode: the toggles work there too
+  expect(plain(app.lastFrame())).toContain("NOR chapters");
+  await keys(app, "\x06");
+  expect(plain(app.lastFrame())).toContain("· focus · typewriter");
 });

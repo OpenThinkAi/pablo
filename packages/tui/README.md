@@ -26,6 +26,7 @@ src/resize.ts    the terminal size as state (below the model: plumbing, not wher
 src/sanitize.ts  strips control characters from text that did not come from the keyboard
 src/buffer.ts    the editor's own text buffer (D-23), pure: grapheme cursor, cell-width soft-wrap, word-grouped undo
 src/edit-pane.ts `v e` in place, pure: the `PaneSession` seam, the file to the buffer and back (`saveText`), rows, keys
+src/edit-modes.ts      focus and typewriter modes of the editing pane: paragraph and scroll rules, the toggles' config entry
 src/edit-pane-view.tsx  the editing pane as a component, drawn where the main pane is
 src/modal.ts     the editing pane's Helix-style modes (normal, insert, select) and motions, pure
 src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
@@ -323,6 +324,13 @@ boxes under their paragraph. An essay unit (AGT-2134) is a section of the one sh
 that file: `v e` on it edits the whole essay, the cursor on the section's line. The saved branch then waits in the book like any other. `e` in a review (AGT-1591) still
 opens the configured editor (`editSession`, `screenEditor`) on the review branch, leaving the alternate screen while it
 runs.
+Two modes make long sessions comfortable (AGT-2176, `edit-modes.ts`). Ctrl+F is focus mode: every row outside the
+cursor's paragraph (and its check boxes) is dimmed. Ctrl+T is typewriter mode: the cursor's row stays in the middle of the
+pane, with blank rows above the first line and below the last. The keys are the `edit.focus` and `edit.typewriter` rows (rebindable
+in the settings view, listed in the key panel while the pane is open); the pane's title names the modes that are on, and
+each toggle is written to `editModes` in the config file at once, so the next pane opens the same way. The scroll is the
+model's (`editPane.top`, set by `pane.scroll`), not the buffer's: `paneView` computes it without writing anything.
+
 `v s` saves it: the same `finisher` a review's `s` uses, with nothing rejected, so the merge into `main` and the
 after-write steps are the ones every branch gets. A document that is not one file (the bible, a missing chapter) has no
 `editable` path and `v e` says so.

@@ -14,6 +14,7 @@ import { TextBuffer, type Pos } from "./buffer";
 import { tokenOf, type InkKey } from "./chord";
 import { commentBox, type BoxPart } from "./comment-box";
 import { hitComment, type CheckHit } from "./hits";
+import { paragraphSpan, scrollTop, type Modes } from "./edit-modes";
 import { visible } from "./sanitize";
 import type { EditPaneText } from "./state";
 
@@ -166,8 +167,11 @@ export function paneHits(t: EditText, file: string, checks: ((file: string, text
 
 /** A row the pane draws: a display row of the text (the cursor's split around the character it is on), or a hit's box row. */
 export type PaneRow =
-  | { readonly kind: "text"; readonly text: string; readonly cursor?: { readonly before: string; readonly at: string; readonly after: string }; readonly parts?: readonly TextPart[] }
-  | { readonly kind: "box"; readonly part: BoxPart; readonly text: string; readonly head?: string; readonly tag?: string; readonly color: string };
+  | { readonly kind: "text"; readonly text: string; readonly cursor?: { readonly before: string; readonly at: string; readonly after: string }; readonly parts?: readonly TextPart[]; readonly dim?: true }
+  | { readonly kind: "box"; readonly part: BoxPart; readonly text: string; readonly head?: string; readonly tag?: string; readonly color: string; readonly dim?: true };
+
+/** How the pane is scrolled and which modes (edit-modes.ts) shape it. `top` is the first display row of the last draw. */
+export interface PaneLook extends Partial<Modes> { readonly top?: number }
 
 /** A run of a display row inside or around select mode's selection (AGT-2169): `sel` drawn as selected, `cursor` as the cursor. */
 export interface TextPart { readonly text: string; readonly sel?: boolean; readonly cursor?: boolean }
@@ -219,12 +223,15 @@ function selectedParts(line: string, start: number, end: number, cursor: number 
 }
 
 /**
- * The `height` rows the pane shows at `width`: every display row of the buffer, each hit's box under its paragraph,
- * scrolled so the cursor's row is on screen. The scroll is the buffer's `top`, counted in these rows, boxes included.
+ * The `height` rows the pane shows at `width`, and the scroll they were drawn at: every display row of the buffer, each
+ * hit's box under its paragraph, scrolled so the cursor's row is on screen (`scrollTop`: from `look.top`, counted in
+ * these rows, boxes included; centred in typewriter mode). Pure: the caller keeps the returned `top` for the next draw.
+ * Focus mode marks every row outside the cursor's paragraph (its boxes too) `dim`.
  */
-export function paneRows(t: EditText, width: number, height: number, hits: ReadonlyMap<number, readonly CheckHit[]>): PaneRow[] {
+export function paneView(t: EditText, width: number, height: number, hits: ReadonlyMap<number, readonly CheckHit[]>, look: PaneLook = {}): { rows: PaneRow[]; top: number } {
   const b = t.buffer;
   const all: PaneRow[] = [];
+  const source: number[] = [];
   let cursorAt = 0;
   for (let r = 0; r < b.lines.length; r++) {
     const line = b.lines[r]!;
@@ -233,6 +240,7 @@ export function paneRows(t: EditText, width: number, height: number, hits: Reado
     segs.forEach((seg, i) => {
       const text = line.slice(seg.start, seg.end);
       const here = r === b.cursor.row && b.cursor.col >= seg.start && (b.cursor.col < seg.end || i === segs.length - 1);
+      source.push(r);
       if (sel && sel[0] <= seg.end && sel[1] > seg.start) {
         if (here) cursorAt = all.length;
         return void all.push({ kind: "text", text: shown(text), parts: selectedParts(line, seg.start, seg.end, here ? b.cursor.col : null, sel) });
@@ -247,14 +255,21 @@ export function paneRows(t: EditText, width: number, height: number, hits: Reado
     for (const hit of hits.get(r) ?? []) {
       const c = hitComment(hit);
       for (const box of commentBox(c, Math.max(5, width - INDENT))) {
+        source.push(r);
         all.push({ kind: "box", part: box.part, text: `${" ".repeat(INDENT)}${box.text}`, ...(box.head !== undefined ? { head: `${" ".repeat(INDENT)}${box.head}` } : {}), ...(box.tag ? { tag: box.tag } : {}), color: c.color ?? "gray" });
       }
     }
   }
-  // The viewport follows the cursor (as the buffer's own `view` does); a hit's box below the cursor scrolls in with it.
+  const focused = look.focus === true ? paragraphSpan(b.lines, b.cursor.row) : null;
+  const marked = focused ? all.map((row, i): PaneRow => (source[i]! >= focused.first && source[i]! <= focused.last ? row : { ...row, dim: true })) : all;
   const h = Math.max(1, height);
-  if (cursorAt < b.top) b.top = cursorAt;
-  if (cursorAt >= b.top + h) b.top = cursorAt - h + 1;
-  b.top = Math.max(0, Math.min(b.top, Math.max(0, all.length - 1)));
-  return all.slice(b.top, b.top + h);
+  const top = scrollTop(look.top ?? b.top, cursorAt, h, marked.length, look.typewriter === true);
+  const rows: PaneRow[] = [];
+  for (let i = top; i < top + h; i++) rows.push(marked[i] ?? { kind: "text", text: "" });
+  // Normal scrolling stops at the last row, so a short document never shows blank padding; typewriter pads on purpose.
+  const shownRows = look.typewriter === true ? rows : marked.slice(top, top + h);
+  return { rows: shownRows, top };
 }
+
+/** `paneView`'s rows alone, scrolled from the buffer's own `top` (read, never written). */
+export const paneRows = (t: EditText, width: number, height: number, hits: ReadonlyMap<number, readonly CheckHit[]>, look: PaneLook = {}): PaneRow[] => paneView(t, width, height, hits, look).rows;

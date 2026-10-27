@@ -36,6 +36,7 @@ import { activityNow, composeAction, composeLayout, composeMeasure, type Compose
 import { ComposeView } from "./compose-view";
 import { EditPaneView } from "./edit-pane-view";
 import type { AutosaveOptions } from "./autosave";
+import { NO_MODES, saveModes, type Modes } from "./edit-modes";
 import type { PaneSession } from "./edit-pane";
 import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Planning, type Mark, type RailRow, type Revise, type State } from "./state";
 
@@ -92,6 +93,8 @@ export interface AppProps {
   readonly keymap?: Keymap;
   /** The editor command the config sets ("" for none); what the settings screen opens with. */
   readonly editor?: string;
+  /** Focus and typewriter as the config sets them (edit-modes.ts); both off when absent. */
+  readonly modes?: Modes;
   /** The config file the settings screen saves to. Tests pass a temporary one. */
   readonly configFile?: string;
   /** The harness session the compose view talks to (`a c`); absent, the view opens and says there is none. */
@@ -118,10 +121,10 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, planner, verbRunner, reviser, voicer, finisher, editSession, paneSession, autosave, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
+export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", modes: givenModes = NO_MODES, configFile, onCommand, load, checks, writer, planner, verbRunner, reviser, voicer, finisher, editSession, paneSession, autosave, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
-  const [state, dispatch] = useReducer(reduce, undefined, initialState);
+  const [state, dispatch] = useReducer(reduce, givenModes, initialState);
   // The book as last read (AGT-1640): each tick reads it again, and a write, a finish or a pull reads it at once. The
   // rail only reloads when what was read differs, so an unchanged book costs a read and nothing more.
   const snap = useMemo(() => refresh?.(), [refresh, state.tick, state.finished.length, state.written.length]);
@@ -139,6 +142,10 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
   // A save puts the new bindings in force at once; until one, the keymap and editor the screen opened with.
   const keymap = state.saved ? effectiveKeys(state.saved.overrides) : given;
   const editor = state.saved ? state.saved.editor : givenEditor;
+  // Focus and typewriter (AGT-2176): flipped by their keys in the pane (state.modes) and written to the config at once.
+  const saveModesNow = (next: Modes) => {
+    try { saveModes(configFile ?? configPath(), next); } catch (e) { dispatch({ type: "edit.refused", message: `The edit modes apply to this session only: ${e instanceof Error ? e.message : String(e)}` }); }
+  };
   const layout = layoutOf(size.cols, size.rows, { zen: state.zen, full: state.full });
   // While the editor has the terminal, this screen reads no keys: the editor's go to the editor.
   useInput((input, key) => {
@@ -526,7 +533,7 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
           {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} marks={state.marks} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
           {state.editPane && paneSession
-            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} keymap={keymap} pending={state.pending} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} {...(autosave ? { autosave } : {})} />
+            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} keymap={keymap} modes={state.modes} onModes={saveModesNow} pending={state.pending} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} {...(autosave ? { autosave } : {})} />
             : <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />}
         </Box>
       )}

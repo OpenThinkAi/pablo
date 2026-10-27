@@ -182,7 +182,7 @@ test("while the pane is open the key panel lists its mode's keys and is titled b
   const normal = entriesFor(s).map((e) => `${e.keys} ${e.label}`);
   expect(normal).toEqual(expect.arrayContaining(["h/j/k/l ←/↓/↑/→ move", "w/b/e word", "0/$ Home/End line", "i insert", "v select", "g go to…", "Esc close", "ctrl-s save"]));
   const ins = reduce(s, { type: "pane.edit", edit: (t) => run(t as EditText, ["i"]).text });
-  expect(entriesFor(ins).map((e) => `${e.keys} ${e.label}`)).toEqual(["Esc normal", "ctrl-s save", "ctrl-z undo", "ctrl-y redo"]);
+  expect(entriesFor(ins).map((e) => `${e.keys} ${e.label}`)).toEqual(["ctrl-f focus mode", "ctrl-t typewriter mode", "Esc normal", "ctrl-s save", "ctrl-z undo", "ctrl-y redo"]);
   expect(panelTitle(keyStateOf(ins))).toBe("edit: insert");
   // A rebinding shows in the panel.
   expect(entriesFor(s, effectiveKeys({ "editor.select": "s" })).map((e) => `${e.keys} ${e.label}`)).toContain("s select");
