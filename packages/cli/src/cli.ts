@@ -55,7 +55,7 @@ import { readTool, searchTool } from "./harness-tools";
 import { runResumeVerb } from "./resume";
 import { formatStatusProse, readWorkStatus } from "./work-state";
 import { runSave } from "./save";
-import { screenEditor } from "./edit-session";
+import { screenEditPane, screenEditor } from "./edit-session";
 import { screenCommenter, screenFinisher } from "./review-finish";
 import { screenReviser } from "./screen-revise";
 import { screenVerb } from "./screen-verb";
@@ -1150,8 +1150,10 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
         finisher: screenFinisher(screen.dir),
         // `c` in a review stores the author's own comment on the branch (AGT-1581).
         commentSaver: screenCommenter(screen.dir),
-        // `v e` edits on an `edit/` branch in its own worktree; `v s` saves it through the finisher above (AGT-1545).
+        // `e` in a review opens the editor on the review branch (AGT-1591).
         editSession: screenEditor(screen.dir),
+        // `v e` edits the unit in place, on an `edit/` branch in its own worktree; `v s` saves it through the finisher above (AGT-1545, AGT-2167).
+        paneSession: screenEditPane(screen.dir),
         // The rail reads the book again every few seconds, so a branch made outside the screen shows (AGT-1640).
         refresh: screenRefresh(screen.dir),
         ...(repo !== undefined && waiting?.ok ? { branches: waiting.branches, diffOf: (branch: string) => branchDiff(repo, branch), fileOf: (branch: string, path: string) => fileAt(repo, branch, path), commentsOf: (branch: string) => reviewCommentsOf(screen.dir, branch) } : {}),

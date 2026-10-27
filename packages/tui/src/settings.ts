@@ -187,7 +187,7 @@ export function describeField(s: SettingsModel, f: SettingsField): FieldView {
   const fi = flat(s.initial), fv = flat(s.values);
   const ch = (...paths: string[]) => paths.some((p) => fi[p] !== fv[p]);
   if (f.kind === "editor") {
-    return { label: "editor", value: s.values.editor || "(from $EDITOR, else hx)", changed: ch("editor"), description: "The command v e runs, with the file and line added. Empty: $EDITOR, else hx. Enter edits it." };
+    return { label: "editor", value: s.values.editor || "(from $EDITOR, else hx)", changed: ch("editor"), description: "The command e in a review runs, with the file and line added. Empty: $EDITOR, else hx. Enter edits it." };
   }
   const a = rowOf(f.id), b = s.values.keys[f.id]!;
   return {

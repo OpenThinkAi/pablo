@@ -25,6 +25,8 @@ src/status.ts    the status area's fields (format, progress, branch, comment cou
 src/resize.ts    the terminal size as state (below the model: plumbing, not where the author is)
 src/sanitize.ts  strips control characters from text that did not come from the keyboard
 src/buffer.ts    the editor's own text buffer (D-23), pure: grapheme cursor, cell-width soft-wrap, word-grouped undo
+src/edit-pane.ts `v e` in place, pure: the `PaneSession` seam, the file to the buffer and back (`saveText`), rows, keys
+src/edit-pane-view.tsx  the editing pane as a component, drawn where the main pane is
 src/document.ts  the main pane's text, pure: row id -> file, frontmatter hidden, sentence lines joined and wrapped
 src/source.ts    reads the file behind a rail row id from the project (the loader `App` is given as `load`)
 src/index.ts     the package's public surface (`runScreen`); the CLI imports it lazily, only for bare `pablo`
@@ -271,7 +273,7 @@ is open the screen takes every key itself (`settings.ts`, not the chord), so a k
 also run it. Every action's keys are listed; Enter on one captures the next key as its primary (→ first for the
 secondary, Backspace clears a secondary), and a key that clashes in one of the action's states is refused on the spot,
 with the same check that refuses a bad `keys` at startup. The last line is the editor command (`"editor"` in the config,
-what `v e` will run; empty means `$EDITOR`, else `hx`). Esc with changes asks to save: `y` writes `keys` and `editor`
+what `e` in a review runs; empty means `$EDITOR`, else `hx`). Esc with changes asks to save: `y` writes `keys` and `editor`
 into `$XDG_CONFIG_HOME/pablo/config.json` (default `~/.config/pablo/config.json`; every other entry is kept, a default key's entry is removed), and the new keys act
 at once; `n` discards. The file is re-parsed before it is written, and a save that would not read back writes nothing.
 
@@ -286,12 +288,24 @@ if it is a model action (above). A row that needs a command gets one in the laye
 
 ## Editing (`v e`) and saving (`v s`)
 
-`v e` in the main pane opens the editor on the file behind the pane at the cursor's line (`fileLineAt` in `document.ts`:
-the file line whose sentence ends on the cursor's display row, frontmatter counted). The screen cannot import the CLI, so
-`runScreen` takes an `editSession` (the CLI's `screenEditor`, `packages/cli/src/edit-session.ts`) and wraps it: the
-alternate screen is left while it runs and entered again after, and `useInput` is inactive while `state.editing` is set,
-so the editor gets every key. The session makes (or reuses: one per work) an `edit/<short-id>` branch with its own
-worktree, runs the editor there, and commits what it left as the author. The branch then waits in the book like any other.
+`v e` in the main pane edits the file behind the pane in place (AGT-2167, D-18/D-23): the editing pane takes the main
+pane's place, on pablo's own buffer (`buffer.ts`), with the cursor on the paragraph or line under the main pane's cursor
+(`fileLineAt` in `document.ts`). No editor process runs. The screen cannot import the CLI, so `runScreen` takes a
+`paneSession` (the CLI's `screenEditPane`, `packages/cli/src/edit-session.ts`): `open` makes (or reuses: one per work)
+an `edit/<short-id>` branch with its own worktree and reads the file there, `save` writes and commits it as the author,
+`close` deletes a branch it made that never got a commit. The model holds the pane (`state.editPane`) with its text
+opaque: a key is a `pane.edit` whose function (`edit-pane.ts`'s `paneKey`) copies the buffer and edits the copy, so the
+state is never mutated. The app's own keys are off while the pane is open; `edit-pane-view.tsx` reads them: text, Enter,
+Backspace, arrows, Home/End, PgUp/PgDn, Ctrl+Z / Ctrl+Y undo and redo, Ctrl+S saves (a commit on the branch), Esc
+closes (twice with unsaved changes). A dirty marker (`[+]`) shows in the pane's title until a save. The frontmatter is
+never in the buffer: a `sentences` unit is shown one paragraph per line with a blank line between paragraphs, a `lines`
+or `screenplay` unit line for line, and both are loaded and saved through `edit-save.ts` (AGT-2168: only changed
+paragraphs re-split, the rest byte for byte); `saveText` is the pane's one call into it. Ctrl+S on an emptied pane asks
+first (it would leave the file only its frontmatter); Ctrl+S again saves it. `check` hits are re-run on the text as it would save and drawn as
+boxes under their paragraph. An essay unit (AGT-2134) is a section of the one shared essay file, and its rail row names
+that file: `v e` on it edits the whole essay, the cursor on the section's line. The saved branch then waits in the book like any other. `e` in a review (AGT-1591) still
+opens the configured editor (`editSession`, `screenEditor`) on the review branch, leaving the alternate screen while it
+runs.
 `v s` saves it: the same `finisher` a review's `s` uses, with nothing rejected, so the merge into `main` and the
 after-write steps are the ones every branch gets. A document that is not one file (the bible, a missing chapter) has no
 `editable` path and `v e` says so.

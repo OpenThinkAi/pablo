@@ -74,7 +74,7 @@ const CACHE_LIMIT = 4096;
 
 export class TextBuffer {
   lines: string[];
-  cursor: Pos = { row: 0, col: 0 };
+  private at: Pos = { row: 0, col: 0 };
   /** The first visible display row; moved by `view` to keep the cursor on screen. */
   top = 0;
   dirty = false;
@@ -86,9 +86,27 @@ export class TextBuffer {
   private wrapCache = new Map<string, Segment[]>();
   private wrapWidth = -1;
   private graphemeCache = new Map<string, Grapheme[]>();
+  /** The text as last saved (or opened): `dirty` is whether the buffer differs from it, so undoing back to it is clean. */
+  private savedText: string;
 
+  /** CRLF and lone CR line ends read as "\n", so no zero-width "\r" is left at the end of a line. */
   constructor(text: string) {
-    this.lines = text.split("\n");
+    this.lines = text.split(/\r\n?|\n/);
+    this.savedText = this.text();
+  }
+
+  /** The cursor. Setting it is a move: the goal column of a run of up/down and the open undo step both end. */
+  get cursor(): Pos { return this.at; }
+  set cursor(to: Pos) { this.move(to); }
+
+  /** A copy that edits independently: the screen's model swaps buffers rather than mutating the one it holds. */
+  clone(): TextBuffer {
+    const b = Object.create(TextBuffer.prototype) as TextBuffer;
+    Object.assign(b, this);
+    b.lines = [...this.lines];
+    b.undos = [...this.undos];
+    b.redos = [...this.redos];
+    return b;
   }
 
   text(): string { return this.lines.join("\n"); }
@@ -96,7 +114,8 @@ export class TextBuffer {
   // --- editing -------------------------------------------------------------------------------------------------
 
   /** Inserts `s` at the cursor; "\n" in it splits the line. */
-  insert(s: string): void {
+  insert(text: string): void {
+    const s = text.replace(/\r\n?/g, "\n");
     if (!s) return;
     // A new undo step at the start of each word: typing "the cat" is two steps ("the ", "cat"), not seven.
     this.checkpoint("insert", !/^\s/.test(s) && /\s/.test(this.charBefore()));
@@ -106,7 +125,7 @@ export class TextBuffer {
     const tailLen = line.length - col;
     this.lines.splice(row, 1, ...parts);
     const last = row + parts.length - 1;
-    this.cursor = { row: last, col: this.lines[last]!.length - tailLen };
+    this.at = { row: last, col: this.lines[last]!.length - tailLen };
     this.edited();
   }
 
@@ -119,11 +138,11 @@ export class TextBuffer {
       const line = this.lines[row]!;
       const from = this.prevBoundary(row, col);
       this.lines[row] = line.slice(0, from) + line.slice(col);
-      this.cursor = { row, col: from };
+      this.at = { row, col: from };
     } else {
       const prev = this.lines[row - 1]!;
       this.lines.splice(row - 1, 2, prev + this.lines[row]!);
-      this.cursor = { row: row - 1, col: prev.length };
+      this.at = { row: row - 1, col: prev.length };
     }
     this.edited();
   }
@@ -142,8 +161,11 @@ export class TextBuffer {
   undo(): boolean { return this.swap(this.undos, this.redos); }
   redo(): boolean { return this.swap(this.redos, this.undos); }
 
-  /** Marks the buffer saved: the next edit starts a fresh undo step. */
-  saved(): void { this.dirty = false; this.lastKind = null; }
+  /**
+   * Marks `text` (default: the buffer as it is) as what is saved: the next edit starts a fresh undo step. A save that
+   * finishes after more typing passes the text it wrote, so the buffer stays dirty with what came after.
+   */
+  saved(text: string = this.text()): void { this.savedText = text; this.dirty = this.text() !== text; this.lastKind = null; }
 
   // --- movement ------------------------------------------------------------------------------------------------
 
@@ -276,12 +298,17 @@ export class TextBuffer {
       cells += g.width;
       col = g.end;
     }
-    this.cursor = { row, col };
+    this.at = { row, col };
     this.goal = goal;
     this.lastKind = null;
   }
 
-  private move(to: Pos): void { this.cursor = to; this.goal = null; this.lastKind = null; }
+  private move(to: Pos): void {
+    const row = Math.max(0, Math.min(to.row, this.lines.length - 1));
+    this.at = { row, col: Math.max(0, Math.min(to.col, this.lines[row]!.length)) };
+    this.goal = null;
+    this.lastKind = null;
+  }
 
   private charBefore(): string { return this.lines[this.cursor.row]!.charAt(this.cursor.col - 1); }
 
@@ -301,10 +328,10 @@ export class TextBuffer {
     if (!snap) return false;
     to.push({ lines: [...this.lines], cursor: this.cursor });
     this.lines = [...snap.lines];
-    this.cursor = snap.cursor;
+    this.at = snap.cursor;
     this.lastKind = null;
     this.goal = null;
-    this.dirty = true;
+    this.dirty = this.text() !== this.savedText;
     return true;
   }
 }

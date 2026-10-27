@@ -196,6 +196,30 @@ export interface VoiceRule { readonly sentences: readonly string[]; readonly tar
 /** `r c` / `r s` / `r w` / `r l` / `r f` (AGT-2178): a planning or research verb's one-line input, typed until Enter hands it to the planner or Esc cancels. `id` is the key row's id; `title` and `hint` say what to type. */
 export interface Planning { readonly id: string; readonly title: string; readonly hint: string; readonly text: string; /** AGT-2179: Enter on an empty line runs the verb as it is. */ readonly optional?: boolean; /** AGT-2179: everything after the first word is drawn as dots (a `config set` value). */ readonly masked?: boolean }
 
+/**
+ * `v e` in place (AGT-2167, D-18/D-23): the unit open in the editing pane on the work's `edit/` branch. The text is
+ * edit-pane.ts's (the buffer, the file as opened, its storage); the model holds it opaquely and only ever replaces it
+ * with what a `pane.edit` function returns, so a keystroke never mutates the state it was given.
+ */
+export interface EditPaneText { readonly dirty: boolean; /** Nothing but whitespace: a save would leave the file its frontmatter alone. */ readonly empty: boolean }
+export interface EditPane {
+  readonly file: string;
+  /** The unit's storage mode (`sentences`, `lines`, `screenplay`): how the text is shown and saved. */
+  readonly storage: string;
+  /** The file line `v e` was pressed on; the cursor opens there. */
+  readonly line: number;
+  /** `opening` while the branch and its worktree are made and the file read; `saving` while Ctrl+S commits. */
+  readonly phase: "opening" | "open" | "saving";
+  readonly branch: string | null;
+  readonly text: EditPaneText | null;
+  /** Counts the saves, so the layer above runs one commit per Ctrl+S. */
+  readonly saveSeq: number;
+  /** Esc once with unsaved changes asks; Esc again closes without saving. */
+  readonly closing: boolean;
+  /** Ctrl+S on an empty body asks; Ctrl+S again saves it empty. */
+  readonly emptying: boolean;
+}
+
 export interface State {
   readonly mode: Mode;
   readonly compose: Compose;
@@ -247,6 +271,8 @@ export interface State {
   readonly editBranch: string | null;
   /** Counts the refresh ticks: each one tells the layer above to read the book's stages and branches again (AGT-1640). */
   readonly tick: number;
+  /** `v e`: the unit open in the editing pane (AGT-2167), or null. */
+  readonly editPane: EditPane | null;
 }
 
 /**
@@ -349,6 +375,16 @@ export type Action =
   | { type: "edit.refused"; message: string }
   | { type: "edit.done"; branch: string | null; lines: readonly string[] }
   | { type: "edit.failed"; message: string }
+  // `v e` in place (AGT-2167): the pane opens (the branch is made and the file read), keys edit its text, Ctrl+S commits
+  // it on the branch, Esc closes it (twice with unsaved changes).
+  | { type: "pane.open"; file: string; storage: string; line: number }
+  | { type: "pane.opened"; branch: string; text: EditPaneText }
+  | { type: "pane.failed"; message: string }
+  | { type: "pane.edit"; edit: (text: EditPaneText) => EditPaneText }
+  | { type: "pane.save" }
+  | { type: "pane.saved"; branch: string; lines: readonly string[]; edit: (text: EditPaneText) => EditPaneText }
+  | { type: "pane.save_failed"; message: string }
+  | { type: "pane.close" }
   | { type: "save.start"; branch: string }
   | { type: "save.done"; branch: string; lines: readonly string[] }
   | { type: "save.failed"; message: string }
@@ -380,6 +416,8 @@ const voiceContent = (title: string, body: string): Content => ({ title, body, k
 /** What a write is called while it runs and in its receipt: `chapter 3` for the novel, `radio 3` for another output. */
 const writingName = (output: string | undefined, unit: number) => (output === undefined || output === "novel" ? `chapter ${unit}` : `${output} ${unit}`);
 const writeContent = (title: string, body: string): Content => ({ title, body, kind: "write" });
+/** What the editing pane's keys do, shown in the content area while it is open. */
+const PANE_KEYS = "Ctrl+S saves (a commit on the edit branch) · Ctrl+Z undoes · Ctrl+Y redoes · Esc closes";
 
 const splice = (text: string, at: number, drop: number, add: string): string => { const cs = [...text]; cs.splice(at, drop, ...add); return cs.join(""); };
 const withCursor = (text: string, at: number): string => splice(text, at, 0, "\u258f");
@@ -441,7 +479,7 @@ export const initialCompose = (): Compose => ({ entries: [], input: "", busy: fa
 
 export const initialState = (): State => ({
   mode: { kind: "book" }, compose: initialCompose(), book: emptyView(), review: emptyView(), marks: {},
-  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null,
+  pane: "rail", focus: "rail", content: null, contentScroll: { scroll: 0, length: 0, visible: 0 }, pending: null, zen: false, full: false, settings: null, saved: null, writing: null, writingOutput: null, commenting: null, commentSeq: 0, revise: null, reviseSeq: 0, written: [], voice: null, voiceRule: null, planning: null, finishing: null, finished: [], editing: null, editSeq: 0, reviewGen: 0, editBranch: null, editPane: null,
   tick: 0,
 });
 
@@ -879,6 +917,36 @@ export function reduce(s: State, a: Action): State {
     }
     case "edit.failed":
       return { ...s, editing: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "pane.open":
+      if (s.mode.kind !== "book" || s.editPane !== null || s.editing !== null || s.finishing !== null || s.revise !== null || s.writing !== null) return s;
+      return { ...s, editPane: { file: a.file, storage: a.storage, line: a.line, phase: "opening", branch: null, text: null, saveSeq: 0, closing: false, emptying: false }, pending: null, full: false, content: writeContent(`Editing ${a.file}`, "opening the edit branch…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "pane.opened":
+      return s.editPane?.phase !== "opening" ? s : { ...s, editPane: { ...s.editPane, phase: "open", branch: a.branch, text: a.text }, content: writeContent(`Editing ${s.editPane.file} on ${a.branch}`, PANE_KEYS) };
+    case "pane.failed":
+      return s.editPane === null ? s : { ...s, editPane: null, content: writeContent("Not edited", a.message), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
+    case "pane.edit":
+      return s.editPane?.text == null || s.editPane.phase === "opening" ? s : { ...s, editPane: { ...s.editPane, text: a.edit(s.editPane.text), closing: false, emptying: false } };
+    case "pane.save": {
+      const p = s.editPane;
+      if (p?.phase !== "open" || p.text === null) return s;
+      if (!p.text.dirty) return { ...s, content: writeContent(`Editing ${p.file} on ${p.branch}`, `Nothing to save.\n${PANE_KEYS}`) };
+      if (p.text.empty && !p.emptying) return { ...s, editPane: { ...p, emptying: true, closing: false }, content: writeContent(`${p.file} is empty`, "Saving it leaves the file only its frontmatter. Ctrl+S again saves it empty; any other key keeps editing.") };
+      return { ...s, editPane: { ...p, phase: "saving", saveSeq: p.saveSeq + 1, closing: false, emptying: false }, content: writeContent(`Saving ${p.file}`, "committing…") };
+    }
+    case "pane.saved": {
+      const p = s.editPane;
+      if (p?.phase !== "saving" || p.text === null) return s;
+      const written = s.written.includes(a.branch) ? s.written : [...s.written, a.branch];
+      return { ...s, editPane: { ...p, phase: "open", text: a.edit(p.text) }, written, editBranch: a.branch, content: writeContent(`Saved ${p.file} on ${a.branch}`, [...a.lines, PANE_KEYS].join("\n")) };
+    }
+    case "pane.save_failed":
+      return s.editPane?.phase !== "saving" ? s : { ...s, editPane: { ...s.editPane, phase: "open" }, content: writeContent("Not saved", a.message) };
+    case "pane.close": {
+      const p = s.editPane;
+      if (p === null || p.phase === "saving") return s;
+      if (p.text?.dirty && !p.closing) return { ...s, editPane: { ...p, closing: true }, content: writeContent(`Unsaved changes to ${p.file}`, "Esc again closes without saving them; Ctrl+S saves.") };
+      return { ...s, editPane: null, content: s.editBranch === null ? null : writeContent(`Edits on ${s.editBranch}`, "v e edits it again; v s saves the branch into main") };
+    }
     case "save.start":
       return s.finishing !== null || s.editing !== null || s.mode.kind !== "book" ? s : { ...s, finishing: a.branch, content: writeContent(`Saving ${a.branch}`, "merging…"), contentScroll: { ...s.contentScroll, scroll: 0, length: 0 } };
     case "save.done":

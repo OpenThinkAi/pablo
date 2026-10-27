@@ -34,6 +34,8 @@ import type { Planner, VerbRunner, Voicer, Writer } from "./screen";
 import { VERB_ASKS, VERB_ROUTES, verbArgs, verbExtra } from "./verb-routes";
 import { activityNow, composeAction, composeLayout, composeMeasure, type Composer } from "./compose";
 import { ComposeView } from "./compose-view";
+import { EditPaneView } from "./edit-pane-view";
+import type { PaneSession } from "./edit-pane";
 import { initialState, pendingText, placeOf, railRow, reduce, reviewCounts, selectedRange, shownRows, viewOf, type LineSpan, type Planning, type Mark, type RailRow, type Revise, type State } from "./state";
 
 export interface AppProps {
@@ -79,8 +81,10 @@ export interface AppProps {
   readonly fileOf?: (branch: string, path: string) => string | undefined;
   /** The critic's comments on a branch (the `critique` tool's survivors): review mode shows each under the edit it is on. */
   readonly commentsOf?: (branch: string) => readonly ReviewComment[];
-  /** `v e`: opens the editor on the cursor's file and line on an `edit/` branch (the CLI's `screenEditor`, passed in). */
+  /** `e` in a review: opens the editor on the change's file and line in the review branch's worktree (the CLI's `screenEditor`, passed in). */
   readonly editSession?: EditSession;
+  /** `v e`: the unit edited in place on the work's `edit/` branch (the CLI's `screenEditPane`, passed in; AGT-2167). */
+  readonly paneSession?: PaneSession;
   /** The key rows with the author's overrides laid over them; the defaults when absent. */
   readonly keymap?: Keymap;
   /** The editor command the config sets ("" for none); what the settings screen opens with. */
@@ -111,7 +115,7 @@ const NO_SENTENCES: readonly LineSpan[] = [];
 
 const fit = (text: string, width: number) => [...clean(text)].slice(0, Math.max(0, width)).join("");
 
-export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, planner, verbRunner, reviser, voicer, finisher, editSession, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
+export function App({ title, format, drafted: givenDrafted = 0, total: givenTotal = 0, branch = "main", comments = {}, book: givenBook, rows: givenRows, labels: givenLabels, branches: givenBranches = NO_BRANCHES, diffOf, fileOf, commentsOf, commentSaver, mainTitle = "", lines = NO_LINES, size: override, keymap: given = DEFAULT_KEYMAP, editor: givenEditor = "", configFile, onCommand, load, checks, writer, planner, verbRunner, reviser, voicer, finisher, editSession, paneSession, composer, refresh, refreshMs = REFRESH_MS }: AppProps) {
   const { exit } = useApp();
   const size = useTerminalSize(override);
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
@@ -216,16 +220,18 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
       else if (action.id === "view.save") startSave();
       else onCommand?.(action, selectedOf(viewOf(state).main, pane.sentences) ?? undefined);
     }
-  }, { isActive: state.editing === null });
+  }, { isActive: state.editing === null && state.editPane === null });
 
-  // `v e`: the file behind the main pane, at the line under the cursor. The session runs from the effect below, once the
-  // screen has stopped reading keys.
+  // `v e` (AGT-2167): the file behind the main pane opens in place in the editing pane, at the line under the cursor, on
+  // the work's `edit/` branch; the pane reads the keys until Esc closes it.
   function startEdit() {
-    if (state.editing !== null || state.finishing !== null) return;
+    if (state.editing !== null || state.editPane !== null || state.finishing !== null) return;
     const file = doc?.editable;
-    if (!editSession) return void dispatch({ type: "edit.failed", message: "Editing is not available here." });
-    if (state.mode.kind !== "book" || !doc || file === undefined) return void dispatch({ type: "edit.failed", message: state.mode.kind !== "book" ? "Edit from the book, not a review." : "Select a chapter or file to edit." });
-    dispatch({ type: "edit.start", file, line: fileLineAt(doc.text, layout.mainInner, paneRows, viewOf(state).main.cursor, doc.storage) });
+    if (!paneSession) return void dispatch({ type: "edit.refused", message: "Editing is not available here." });
+    if (state.mode.kind !== "book" || !doc || file === undefined) return void dispatch({ type: "edit.refused", message: state.mode.kind !== "book" ? "Edit from the book, not a review." : "Select a chapter or file to edit." });
+    if (state.writing !== null) return void dispatch({ type: "edit.refused", message: `${state.writingOutput ?? "Chapter"} ${state.writing} is being written; edit when it is done.` });
+    if (state.revise !== null) return void dispatch({ type: "edit.refused", message: "A revise is open; finish or cancel it first." });
+    dispatch({ type: "pane.open", file, storage: doc.storage ?? "sentences", line: fileLineAt(doc.text, layout.mainInner, paneRows, viewOf(state).main.cursor, doc.storage) });
   }
 
   // `e` in a review (AGT-1591): the editor opens on the change under the cursor, in the review branch's own worktree. What
@@ -516,7 +522,9 @@ export function App({ title, format, drafted: givenDrafted = 0, total: givenTota
         <Box height={layout.middleH}>
           {layout.zen ? null : <Rail layout={layout} view={view} labels={labels} title={review ? "CHANGES" : "BOOK"} marks={state.marks} active={state.focus === "rail"} />}
           {layout.zen ? null : <Box width={1} height={layout.middleH} borderStyle="single" borderTop={false} borderBottom={false} borderRight={false} borderColor="gray" />}
-          <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />
+          {state.editPane && paneSession
+            ? <EditPaneView pane={state.editPane} session={paneSession} {...(checks ? { checks } : {})} dispatch={dispatch} width={layout.mainW} height={layout.middleH} inner={layout.mainInner} rows={layout.mainRows} />
+            : <Main layout={layout} view={view} title={changes ? changes.title : shownTitle} rows={paneRows} changes={changes?.rows} active={state.focus === "main"} />}
         </Box>
       )}
       {state.mode.kind === "compose" ? null : <Box height={layout.bottomH}>
