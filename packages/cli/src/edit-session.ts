@@ -8,9 +8,9 @@
 // a dependency. The tui cannot import this package, so cli.ts passes `screenEditor` in through runScreen's options.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { branchExists, branchKind, createBranch, deleteBranch, ensureWorktree, listBranches, repoRoot, worktreePath } from "./branch";
+import { branchExists, branchIsEmpty, branchKind, createBranch, deleteBranch, ensureWorktree, listBranches, repoRoot, worktreePath } from "./branch";
 import type { Author } from "./branch";
 import { commitAs } from "./branch";
 import { readMarker } from "./marker";
@@ -83,6 +83,36 @@ function openEditBranch(repo: string, slug: string, env: Env): string | undefine
   return listed.ok ? listed.branches.edit.find((b) => existsSync(worktreePath(slug, b, env))) : undefined;
 }
 
+interface EditTree { readonly ok: true; readonly branch: string; readonly worktree: string; readonly inTree: string; readonly made: boolean; readonly discard: () => void }
+
+/**
+ * The work's open edit branch (made, with its worktree, if there is none) and where the project-relative `file` is in
+ * that worktree. A file that is not on main yet is refused, and a branch made for it goes again.
+ */
+function editTree(projectPath: string, repo: string, slug: string, file: string, deps: EditDeps): EditTree | { ok: false; message: string } {
+  const env = deps.env ?? process.env;
+  if (insideDir(projectPath, file) === undefined) return { ok: false, message: `pablo: edit: "${file}" is not a path inside the project` };
+  let branch = openEditBranch(repo, slug, env);
+  let made = false;
+  if (branch === undefined) {
+    const id = (deps.shortId ?? defaultShortId)();
+    branch = `edit/${id}`;
+    if (branchExists(repo, branch)) return { ok: false, message: `pablo: edit: ${branch} already exists without a worktree; finish or delete it first` };
+    const created = createBranch(repo, slug, branch, env);
+    if (!created.ok) return { ok: false, message: created.notice };
+    made = true;
+  }
+  const open = branch;
+  const worktree = worktreePath(slug, open, env);
+  const inTree = resolve(worktree, relative(repo, realpathSync(projectPath)), file);
+  const discard = () => { if (made) deleteBranch(repo, slug, open, { force: true, env }); };
+  if (!existsSync(inTree)) {
+    discard();
+    return { ok: false, message: `pablo: edit: ${file} is not on main yet; commit it first` };
+  }
+  return { ok: true, branch: open, worktree, inTree, made, discard };
+}
+
 /**
  * Opens `request.file` of the project at `request.line` in the editor, in the open edit branch's worktree (made if there
  * is none), then commits what the editor left as the author. A launch that changes nothing leaves a branch it just made
@@ -95,26 +125,9 @@ export async function editInProject(projectPath: string, request: ScreenEditRequ
   const repo = repoRoot(projectPath);
   if (repo === undefined) return { ok: false, message: `pablo: edit: ${projectPath} is not in a git repository` };
   if (request.branch !== undefined) return editOnReviewBranch(repo, marker.marker.slug, request.branch, request, deps);
-  if (insideDir(projectPath, request.file) === undefined) return { ok: false, message: `pablo: edit: "${request.file}" is not a path inside the project` };
-  const slug = marker.marker.slug;
-
-  let branch = openEditBranch(repo, slug, env);
-  let made = false;
-  if (branch === undefined) {
-    const id = (deps.shortId ?? defaultShortId)();
-    branch = `edit/${id}`;
-    if (branchExists(repo, branch)) return { ok: false, message: `pablo: edit: ${branch} already exists without a worktree; finish or delete it first` };
-    const created = createBranch(repo, slug, branch, env);
-    if (!created.ok) return { ok: false, message: created.notice };
-    made = true;
-  }
-  const worktree = worktreePath(slug, branch, env);
-  const inTree = resolve(worktree, relative(repo, realpathSync(projectPath)), request.file);
-  const discard = () => { if (made) deleteBranch(repo, slug, branch, { force: true, env }); };
-  if (!existsSync(inTree)) {
-    discard();
-    return { ok: false, message: `pablo: edit: ${request.file} is not on main yet; commit it first` };
-  }
+  const tree = editTree(projectPath, repo, marker.marker.slug, request.file, deps);
+  if (!tree.ok) return tree;
+  const { branch, worktree, inTree, made, discard } = tree;
 
   const argv = editorArgs(editorCommand(request.editor, env), inTree, request.line, worktree);
   let code: number;
@@ -178,4 +191,90 @@ async function editOnReviewBranch(repo: string, slug: string, branch: string, re
 
 export function screenEditor(projectPath: string, deps: EditDeps = {}): ScreenEditor {
   return (request) => editInProject(projectPath, request, deps);
+}
+
+// `v e` in place (AGT-2167, D-18/D-23): the screen's own editing pane edits the unit on the same `edit/` branch the editor
+// launch above uses (one per work), so `v s` saves it the same way. `open` makes or reuses the branch and reads the file
+// there; `save` writes what the pane hands it and commits it as the author; `close` takes a branch `open` made back out
+// of the world when nothing was ever committed on it. No editor process runs.
+
+export type PaneOpen = { readonly ok: true; readonly branch: string; readonly text: string } | { readonly ok: false; readonly message: string };
+export type PaneSave = { readonly ok: true; readonly branch: string; readonly lines: readonly string[] } | { readonly ok: false; readonly message: string };
+export interface EditPaneSession {
+  open(file: string): Promise<PaneOpen>;
+  save(file: string, branch: string, text: string): Promise<PaneSave>;
+  close(branch: string): Promise<void>;
+}
+
+function paneRepo(projectPath: string): { ok: true; repo: string; slug: string } | { ok: false; message: string } {
+  const marker = readMarker(projectPath);
+  if (!marker.ok) return { ok: false, message: marker.message };
+  const repo = repoRoot(projectPath);
+  if (repo === undefined) return { ok: false, message: `pablo: edit: ${projectPath} is not in a git repository` };
+  return { ok: true, repo, slug: marker.marker.slug };
+}
+
+/** Reads the project-relative `file` on the work's edit branch, making the branch and its worktree if there is none. */
+export async function openForPane(projectPath: string, file: string, deps: EditDeps = {}): Promise<PaneOpen> {
+  const at = paneRepo(projectPath);
+  if (!at.ok) return at;
+  const tree = editTree(projectPath, at.repo, at.slug, file, deps);
+  if (!tree.ok) return tree;
+  try {
+    return { ok: true, branch: tree.branch, text: readFileSync(tree.inTree, "utf8") };
+  } catch (error) {
+    tree.discard();
+    return { ok: false, message: `pablo: edit: could not read ${file}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+/** Writes `text` as the project-relative `file` in `branch`'s worktree and commits it as the author; an unchanged file commits nothing. */
+export async function saveFromPane(projectPath: string, file: string, branch: string, text: string, deps: EditDeps = {}): Promise<PaneSave> {
+  const env = deps.env ?? process.env;
+  const at = paneRepo(projectPath);
+  if (!at.ok) return at;
+  if (branchKind(branch) !== "edit" || !branchExists(at.repo, branch)) return { ok: false, message: `pablo: edit: "${branch}" is not an edit branch` };
+  if (insideDir(projectPath, file) === undefined) return { ok: false, message: `pablo: edit: "${file}" is not a path inside the project` };
+  const worktree = worktreePath(at.slug, branch, env);
+  if (!existsSync(worktree)) return { ok: false, message: `pablo: edit: ${branch} has no worktree; open it again with v e` };
+  const inTree = resolve(worktree, relative(at.repo, realpathSync(projectPath)), file);
+  const path = relative(worktree, inTree);
+  try {
+    writeFileSync(inTree, text);
+  } catch (error) {
+    return { ok: false, message: `pablo: edit: could not write ${file}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  let dirty: boolean;
+  try {
+    dirty = git(worktree, ["status", "--porcelain", "--", path]).trim() !== "";
+  } catch (error) {
+    return { ok: false, message: `pablo: edit: git status failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!dirty) return { ok: true, branch, lines: [`no change to ${file}`] };
+  const committed = commitAs(worktree, { message: `edit ${file}`, author: authorOf(at.repo), paths: [path] });
+  if (!committed.ok) return { ok: false, message: committed.notice };
+  return { ok: true, branch, lines: [`committed ${file} on ${branch} (${(committed.sha ?? "").slice(0, 7)})`, "v s saves it into main"] };
+}
+
+/** The pane closed: an edit branch with nothing committed and nothing left in its worktree is deleted with its worktree. */
+export async function closePane(projectPath: string, branch: string, deps: EditDeps = {}): Promise<void> {
+  const env = deps.env ?? process.env;
+  const at = paneRepo(projectPath);
+  if (!at.ok || branchKind(branch) !== "edit" || !branchExists(at.repo, branch)) return;
+  const worktree = worktreePath(at.slug, branch, env);
+  try {
+    if (existsSync(worktree) && git(worktree, ["status", "--porcelain"]).trim() !== "") return;
+    if (git(at.repo, ["rev-list", "--count", `main..${branch}`]).trim() !== "0" || !branchIsEmpty(at.repo, branch)) return;
+  } catch {
+    return;
+  }
+  deleteBranch(at.repo, at.slug, branch, { force: true, env });
+}
+
+export function screenEditPane(projectPath: string, deps: EditDeps = {}): EditPaneSession {
+  return {
+    open: (file) => openForPane(projectPath, file, deps),
+    save: (file, branch, text) => saveFromPane(projectPath, file, branch, text, deps),
+    close: (branch) => closePane(projectPath, branch, deps),
+  };
 }

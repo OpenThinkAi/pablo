@@ -137,3 +137,53 @@ test("view reports the cursor's x in cells", () => {
   b.cursor = { row: 0, col: 2 };
   expect(b.view(20, 3).cursor).toEqual({ x: 4, y: 0 });
 });
+
+// AGT-2166 review follow-ups, fixed for the editing pane (AGT-2167).
+
+test("undo back to the saved text is clean; redo away from it is dirty again", () => {
+  const b = new TextBuffer("abc");
+  b.insert("x");
+  expect(b.dirty).toBe(true);
+  b.undo();
+  expect(b.dirty).toBe(false);
+  b.redo();
+  expect(b.dirty).toBe(true);
+  b.saved();
+  b.undo();
+  expect(b.dirty).toBe(true); // the saved text is now "xabc"
+  b.saved("abc"); // a save that wrote "abc" while "abc" is what the buffer holds
+  expect(b.dirty).toBe(false);
+});
+
+test("setting the cursor is a move: the goal column of an earlier run of up/down does not survive it", () => {
+  const b = new TextBuffer("abcdef\nab\nabcdef");
+  b.cursor = { row: 0, col: 5 };
+  b.down(20); // goal 5, clamped to "ab"
+  b.cursor = { row: 0, col: 1 };
+  b.down(20);
+  b.down(20);
+  expect(b.cursor).toEqual({ row: 2, col: 1 });
+  b.cursor = { row: 9, col: 99 }; // clamped into the text
+  expect(b.cursor).toEqual({ row: 2, col: 6 });
+});
+
+test("CRLF and lone CR line ends leave no zero-width \\r, opened or pasted", () => {
+  const b = new TextBuffer("one\r\ntwo\rthree");
+  expect(b.lines).toEqual(["one", "two", "three"]);
+  b.cursor = { row: 2, col: 5 };
+  b.insert("\r\nfour");
+  expect(b.lines).toEqual(["one", "two", "three", "four"]);
+  expect(b.dirty).toBe(true);
+});
+
+test("clone edits independently of the buffer it came from", () => {
+  const a = new TextBuffer("abc");
+  const c = a.clone();
+  c.insert("x");
+  expect(a.text()).toBe("abc");
+  expect(a.dirty).toBe(false);
+  expect(c.text()).toBe("xabc");
+  c.undo();
+  expect(c.text()).toBe("abc");
+  expect(a.undo()).toBe(false);
+});

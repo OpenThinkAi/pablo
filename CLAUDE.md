@@ -168,7 +168,8 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `book.ts` feeds the screen's table of contents; the screen's
                 seams are `screen-{write,revise,voice,reviews}.ts`,
                 `edit-session.ts` (`v e`, an `edit/` branch in a worktree,
-                AGT-1545) and `review-finish.ts`; `critique.ts` is the critic
+                AGT-1545; edited in place through `screenEditPane`,
+                AGT-2167) and `review-finish.ts`; `critique.ts` is the critic
                 (AGT-1564, on the `check` intent) and `comments.ts` the per-branch comment store
                 (`.pablo/comments/<branch>.json`, AGT-1580); `migrate.ts`
                 (`migrate lines`) and `migrate-outputs.ts` (`migrate

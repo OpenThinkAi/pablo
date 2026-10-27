@@ -197,8 +197,8 @@ configured, the agent runs on the local model.
 
 ## The screen: `keys` and `editor`
 
-`editor` is the command the screen runs to edit a file by hand (empty means
-`$EDITOR`, then `hx`). `keys` overrides the screen's key bindings by action id; the
+`editor` is the command the screen runs when you edit a change in a review with
+`e` (empty means `$EDITOR`, then `hx`); `v e` edits in the screen's own pane. `keys` overrides the screen's key bindings by action id; the
 screen's settings view (`\`) edits them for you and writes them here.
 
 ## Environment variables

@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter } from "@openthink/pablo-core";
 import { createBranch, listBranches, worktreePath } from "../src/branch";
-import { editInProject, editorArgs, editorCommand, screenEditor } from "../src/edit-session";
+import { closePane, editInProject, editorArgs, editorCommand, openForPane, saveFromPane, screenEditPane, screenEditor } from "../src/edit-session";
 import { screenFinisher } from "../src/review-finish";
 
 /**
@@ -203,4 +203,46 @@ test("e in a review: refusals run no editor (not a change branch, a path out of 
   const broken = await editInProject(project, { file: VCH1, line: 1, editor: "vim", branch: "revise/ch01" }, { env, run: async () => { throw new Error("spawn ENOENT"); } });
   expect(broken.ok).toBe(false);
   if (!broken.ok) expect(broken.message).toContain("could not run vim");
+});
+
+// AGT-2167: `v e` in place. The screen's pane opens the file on the work's edit branch, saves by writing and committing
+// as the author, and a branch it made and never committed goes again when it closes. No editor process runs.
+
+test("the pane opens the file on a new edit branch's worktree, and saving commits it there as the author; main is untouched", async () => {
+  const { project, vault, env } = setup();
+  const opened = await openForPane(project, CH1, { env, shortId: () => "ab12cd" });
+  expect(opened).toEqual({ ok: true, branch: "edit/ab12cd", text: BASE });
+  const edited = BASE.replace("from the doorway", "from the scale house");
+  const saved = await saveFromPane(project, CH1, "edit/ab12cd", edited, { env });
+  expect(saved.ok).toBe(true);
+  if (!saved.ok) return;
+  expect(saved.lines[0]).toMatch(/^committed chapters\/01-the-last-full-cut\.md on edit\/ab12cd \([0-9a-f]{7}\)$/);
+  expect(git(vault, "show", `edit/ab12cd:novels/ice-house/${CH1}`)).toBe(edited.trimEnd());
+  expect(git(vault, "log", "-1", "--format=%an <%ae>|%s", "edit/ab12cd")).toBe(`Matt Test <matt@example.com>|edit ${CH1}`);
+  expect(readFileSync(join(project, CH1), "utf8")).toBe(BASE);
+  // Saving what is already there commits nothing.
+  expect(await saveFromPane(project, CH1, "edit/ab12cd", edited, { env })).toEqual({ ok: true, branch: "edit/ab12cd", lines: [`no change to ${CH1}`] });
+  // A second open reuses the open edit branch and reads the edited file from it; closing keeps it (it has a commit).
+  expect(await openForPane(project, CH1, { env, shortId: () => "ffffff" })).toEqual({ ok: true, branch: "edit/ab12cd", text: edited });
+  await closePane(project, "edit/ab12cd", { env });
+  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ab12cd"] } });
+});
+
+test("closing the pane with nothing committed takes the branch it made away again", async () => {
+  const { project, vault, env } = setup();
+  const session = screenEditPane(project, { env, shortId: () => "ab12cd" });
+  expect((await session.open(CH1)).ok).toBe(true);
+  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(true);
+  await session.close("edit/ab12cd");
+  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: [] } });
+  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(false);
+});
+
+test("the pane refuses a file that is not on main, a path outside the project, and saving to a branch that is not an edit branch", async () => {
+  const { project, vault, env } = setup();
+  const missing = await openForPane(project, "chapters/09-nope.md", { env, shortId: () => "ab12cd" });
+  expect(missing).toEqual({ ok: false, message: "pablo: edit: chapters/09-nope.md is not on main yet; commit it first" });
+  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: [] } });
+  expect((await openForPane(project, "../../escape.md", { env })).ok).toBe(false);
+  expect(await saveFromPane(project, CH1, "main", "x", { env })).toEqual({ ok: false, message: 'pablo: edit: "main" is not an edit branch' });
 });

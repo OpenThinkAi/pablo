@@ -7,5 +7,6 @@ export type { BookRail, BookStage, StageStatus, Storage, UnitRef, WriteTarget } 
 export type { BranchDiff } from "./review";
 export type { CheckHit } from "./hits";
 export type { Composer } from "./compose";
+export type { PaneOpenResult, PaneSaveResult, PaneSession } from "./edit-pane";
 export type { ComposeEvent } from "./state";
 export type { ReviseRequest, ReviseResult, Reviser, TakeRequest, TakeResult } from "./revise";
