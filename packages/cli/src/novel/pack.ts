@@ -32,7 +32,7 @@ import {
 import { existsSync, readFileSync } from "node:fs";
 import { mentions, NAMES_FILE, parseNameMap, swapNames } from "../distill";
 import type { Marker } from "../marker";
-import { realNamesOf, trackOf } from "../marker";
+import { realNamesOf } from "../marker";
 import { ESSAY_ID } from "../outputs/essay/units";
 import { NOVEL_ID } from "../outputs/novel/units";
 import { joinSources, layerOf, mergeVoice, packVoice, resolveVoiceLayers } from "../voice-layers";
@@ -169,8 +169,9 @@ export function packFromInputs(
   const proseFiction = output !== ESSAY_ID;
   const sourceOf = (source: TextSource): TextSource => ({ ...source, text: applyFictionOnly(source.text, proseFiction) });
   const { distilledFacts: _distilled, periodFacts: _period, ...rest } = inputs;
-  // A plain fiction track sends no `STYLE.md` period section (AGT-2189); that section is for historical-fiction.
-  const periodless = trackOf(options.marker) === "fiction";
+  // A work that says `track: "fiction"` sends no `STYLE.md` period section (AGT-2189); a work with no `track` key
+  // predates tracks, so its section keeps going out.
+  const periodless = options.marker.track === "fiction";
   const filtered: DraftingInputs = {
     ...rest,
     // The work's title is `pablo.json`'s, never `STYLE.md`'s heading.

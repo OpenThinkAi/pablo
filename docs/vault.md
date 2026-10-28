@@ -130,7 +130,7 @@ agent's* prompt and in the writer's.
 Wrap fiction-craft rules (dialogue tags, how a scene ends) in `<!-- fiction-only -->` ...
 `<!-- /fiction-only -->` to keep them out of an essay's pack; every other output sends them,
 without the fence lines. A pack's working title is `pablo.json`'s `title`, never the heading of
-`STYLE.md`, and a plain `fiction` work sends no `STYLE.md` period section (only `historical-fiction` does; a `facts/period.md` is always sent).
+`STYLE.md`, and a work with `"track": "fiction"` sends no `STYLE.md` period section (`historical-fiction` and a `pablo.json` with no `track` key do; a `facts/period.md` is always sent).
 
 The voice grows from your edits. `pablo voice flag` records a line you rejected as a
 `Flagged:` example (and `pablo check` will catch it next time), `voice rule` adds a

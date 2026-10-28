@@ -70,11 +70,17 @@ test("AC2: a screenplay pack has no POV line or chapter wording, and asks for on
   expect(prompt).toContain("Write the scene now: one scene");
 });
 
-test("AC3: the fiction track sends no period slice; historical-fiction keeps it", () => {
-  const plain = setup();
+test("AC3: an explicit fiction track sends no period slice; historical-fiction and track-less works keep it", () => {
+  const plain = setup("fiction");
   const fiction = buildChapterPack(plain.vault, plain.work, 2, { marker: markerOf(plain.work) });
   if (!fiction.ok) throw new Error(fiction.message);
   expect(fiction.pack.slices.map((s) => s.name)).not.toContain("period");
+
+  // A marker with no `track` key predates tracks: its period section keeps going out.
+  const legacy = setup();
+  const old = buildChapterPack(legacy.vault, legacy.work, 2, { marker: markerOf(legacy.work) });
+  if (!old.ok) throw new Error(old.message);
+  expect(old.pack.slices.map((s) => s.name)).toContain("period");
 
   const historical = setup("historical-fiction");
   const kept = buildChapterPack(historical.vault, historical.work, 2, { marker: markerOf(historical.work) });
