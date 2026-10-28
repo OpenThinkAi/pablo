@@ -30,7 +30,7 @@ export {
   ProviderResponseError,
   ToolsDisabledError,
 } from "./errors";
-export type { AdapterKind, LoadConfigOptions, PabloConfig, ParseOptions, ProviderConfig } from "./config";
+export type { AdapterKind, DroppedKey, LoadConfigOptions, PabloConfig, ParseOptions, ProviderConfig } from "./config";
 export {
   configDir,
   configPath,
@@ -38,6 +38,7 @@ export {
   DEFAULT_TIMEOUT_MS,
   isLoopbackEndpoint,
   loadConfig,
+  keyDropNotice,
   mergeProjectConfig,
   parseConfig,
   refuseWorkKey,

@@ -130,7 +130,37 @@ export function defaultConfig(): PabloConfig {
  */
 export interface ParseOptions {
   readonly allowIncomplete?: boolean;
+  /**
+   * Told when a work's pablo.json repoints a global provider that had a key, so the merged provider has none
+   * (AGT-2274). The default writes `keyDropNotice` to stderr, once per provider and file per process.
+   */
+  readonly onKeyDropped?: (dropped: DroppedKey) => void;
+  /** Where an `env:` key is looked up to decide whether a dropped one mattered; defaults to `process.env`. */
+  readonly env?: Record<string, string | undefined>;
 }
+
+/** A global provider whose key a work's pablo.json dropped by changing its endpoint, kind or local flag. */
+export interface DroppedKey {
+  readonly provider: string;
+  /** The pablo.json that repointed it. */
+  readonly source: string;
+  /** What it changed: some of "endpoint", "kind", "local". */
+  readonly changed: readonly string[];
+  /** The global key reference that is no longer sent: `env:<NAME>` or `keychain:<service>`. */
+  readonly key: string;
+}
+
+/** The default one-line notice for a dropped key: which provider, why, and the fix. */
+export function keyDropNotice(dropped: DroppedKey): string {
+  const fields = dropped.changed.join(", ");
+  return (
+    `pablo: ${dropped.source} changes provider "${dropped.provider}"'s ${fields}, so its global key (${dropped.key}) is not sent ` +
+    `and it has none. If that server needs a key, make the change in the global config, where keys are bound ` +
+    `(\`pablo config set providers.${dropped.provider}.${dropped.changed[0] ?? "endpoint"} <value>\`, without --project), and drop it from ${dropped.source}.`
+  );
+}
+
+const toldDropped = new Set<string>();
 
 /** Parses the config file's text. */
 export function parseConfig(text: string, source = "the config file", options: ParseOptions = {}): PabloConfig {
@@ -218,9 +248,11 @@ export function mergeProjectConfig(base: PabloConfig, text: string, source = "pa
       // Overriding a global provider keeps its key (readProvider inherits it); a provider the work adds has none,
       // and so does one whose endpoint, kind or local flag the work changes (`repoints`): the global key was bound
       // to the global endpoint, and a work must not send it to another port of its choosing (AGT-2230).
-      const merged: ProviderConfig = existing === undefined || repoints(read, existing) ? { ...read, key: { from: "none" } } : read;
+      const repointed = existing !== undefined && repoints(read, existing);
+      const merged: ProviderConfig = existing === undefined || repointed ? { ...read, key: { from: "none" } } : read;
       checkWorkProvider(merged, existing, source);
       providers.set(id, merged);
+      if (repointed) noticeDroppedKey(id, read, existing, source, options);
     }
   }
   const intents = new Map(base.intents);
@@ -335,6 +367,33 @@ export function refuseWorkKey(id: string, entry: unknown, source: string): void 
       `(\`pablo config set providers.${id}.key env:<NAME>\` or \`keychain:<service>\`, without --project); ` +
       `a work's provider uses the key of the global provider of the same name, or none. Remove "key" from ${source}.`,
   );
+}
+
+/**
+ * Says so when a repoint dropped a key that would have been sent (AGT-2274): a Keychain reference, or an
+ * `env:` variable that is set. An unset variable (often the `<ID>_API_KEY` convention on a server that needs
+ * no auth) sent nothing before either, so it gets no notice.
+ */
+function noticeDroppedKey(id: string, read: ProviderConfig, existing: ProviderConfig, source: string, options: ParseOptions): void {
+  const key = existing.key;
+  if (key.from === "none") return;
+  if (key.from === "env" && !(options.env ?? process.env)[key.variable]) return;
+  const changed = [
+    read.endpoint !== existing.endpoint ? "endpoint" : "",
+    read.kind !== existing.kind ? "kind" : "",
+    read.local !== existing.local ? "local" : "",
+  ].filter(Boolean);
+  const dropped: DroppedKey = {
+    provider: id,
+    source,
+    changed,
+    key: key.from === "env" ? `env:${key.variable}` : `keychain:${key.service}${key.account === undefined ? "" : `/${key.account}`}`,
+  };
+  if (options.onKeyDropped !== undefined) return options.onKeyDropped(dropped);
+  const told = `${source}\0${id}`;
+  if (toldDropped.has(told)) return;
+  toldDropped.add(told);
+  process.stderr.write(`${keyDropNotice(dropped)}\n`);
 }
 
 /** Whether a work's entry changes where (or how) the global provider's requests go, rather than only what they ask. */

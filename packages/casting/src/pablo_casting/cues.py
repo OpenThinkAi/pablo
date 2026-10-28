@@ -63,6 +63,7 @@ import numpy as np
 
 from pablo_casting.audio import file_sha256, read_audio, resample, write_wav
 from pablo_casting.loudness import DEFAULT_TARGETS, PEAK_CEILING, PEAK_CEILINGS, integrated_lufs, normalisation
+from pablo_casting.pins import pinned
 from pablo_casting.receipts import now
 from pablo_casting.sounds import Match, SoundLibrary, rhythm_loop
 from pablo_casting.takes import canonical_json
@@ -76,6 +77,8 @@ STOP_WORDS = ("off", "out", "stop", "none")
 """A `[BED: off]` ends the running bed instead of naming a sound."""
 STAGING_PREFIX = ".staging-"
 SAO_MODEL = "stabilityai/stable-audio-open-1.0"
+SAO_REVISION = pinned(SAO_MODEL)
+"""The commit Stable Audio Open is fetched at (`pins.py`, AGT-2274)."""
 SAO_STEPS = 60
 SAO_NEGATIVE = "low quality, distorted, speech, voices"
 PROMPTS = {
@@ -441,9 +444,9 @@ class StableAudioGenerator:
         cosine.BrownianTreeNoiseSampler = GaussianNoise
         device = "mps" if torch.backends.mps.is_available() else "cpu"
         try:
-            self._pipe = StableAudioPipeline.from_pretrained(SAO_MODEL, torch_dtype=torch.float32).to(device)
+            self._pipe = StableAudioPipeline.from_pretrained(SAO_MODEL, revision=SAO_REVISION, torch_dtype=torch.float32).to(device)
         except OSError as missing:
-            raise CueUnavailable(f"Stable Audio Open weights ({SAO_MODEL}) could not be loaded: {missing}") from missing
+            raise CueUnavailable(f"Stable Audio Open weights ({SAO_MODEL}@{SAO_REVISION[:12]}) could not be loaded: {missing}") from missing
         self._torch = torch
 
     def generate(self, kind: str, desc: str, seed: int) -> np.ndarray:

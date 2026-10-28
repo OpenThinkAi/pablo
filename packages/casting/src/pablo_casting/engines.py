@@ -84,6 +84,7 @@ import numpy as np
 from pablo_casting.directions import NONVERBALS
 from pablo_casting.lexicon import PARAM as LEXICON_PARAM, Entry, apply as apply_lexicon, params_for as lexicon_params
 from pablo_casting.numerals import spell_numbers
+from pablo_casting.pins import pinned
 from pablo_casting.takes import EngineId, Synthesis, TakeInputs
 from pablo_casting.wav import Audio
 
@@ -272,7 +273,7 @@ class EngineSpec:
 TURBO = EngineSpec(
     name="chatterbox-turbo",
     repo="mlx-community/chatterbox-turbo-fp16",
-    revision="b2d0a13aa7cfff0a06d9acb247ae91c8f19a6d75",
+    revision=pinned("mlx-community/chatterbox-turbo-fp16"),
     license="MIT / MIT",
     grouping="line",
     pace="stretch",
@@ -281,7 +282,7 @@ TURBO = EngineSpec(
 DIA = EngineSpec(
     name="dia",
     repo="mlx-community/Dia-1.6B",
-    revision="de4fa8c178ca5cc4e9d884b55b03fcfaa0995162",
+    revision=pinned("mlx-community/Dia-1.6B"),
     license="Apache-2.0 / Apache-2.0",
     grouping="dia",
     pace="stretch",
@@ -290,7 +291,7 @@ DIA = EngineSpec(
 CHATTERBOX = EngineSpec(
     name="chatterbox",
     repo="mlx-community/Chatterbox-TTS-fp16",
-    revision="77c7c8f9307beb5dc6c03cebc7942c4de9d617c9",
+    revision=pinned("mlx-community/Chatterbox-TTS-fp16"),
     license="MIT / MIT",
     grouping="line",
     pace="stretch",

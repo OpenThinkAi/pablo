@@ -128,13 +128,14 @@ from pathlib import Path
 
 from pablo_casting import __version__, outputs
 from pablo_casting.binding import BindingRefusal, bind, episode_files, library_dir, read_cast, read_episode
-from pablo_casting.config import CastingConfig, ConfigRefusal, load_config
+from pablo_casting.config import CastingConfig, ConfigRefusal, WeightSpec, load_config
 from pablo_casting.engines import EngineFactory, real_engine
 from pablo_casting.mix import Seams
 from pablo_casting.gate_command import cmd_calibrate, cmd_gate
 from pablo_casting.hfcache import hub_cache, is_cached
 from pablo_casting.library import Library, LibraryRefusal, card_hash, check_slug, resolve_root, slugify
 from pablo_casting.manifest import ManifestError, referenced_takes, write_version
+from pablo_casting.pins import is_commit
 from pablo_casting.receipts import append_receipt, now
 from pablo_casting.scorers import ScorerFactory, describe, real_scorers
 from pablo_casting.sounds import Sound, SoundLibrary, SoundRefusal, open_sounds, sounds_dir_for
@@ -160,7 +161,8 @@ EXIT_REFUSED = 2
 
 Body = dict[str, object]
 Result = tuple[Body, int]
-Downloader = Callable[[str], str]
+Downloader = Callable[[str, "str | None"], str]
+"""Downloads a Hub model id at a revision (`None`: the Hub's current one) and returns its local path."""
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
 COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix", "mixer", "castpanel", "sounds")
@@ -253,12 +255,12 @@ def _parser() -> _Parser:
     return parser
 
 
-def _default_downloader(model_id: str) -> str:
+def _default_downloader(model_id: str, revision: str | None) -> str:
     # Imported here, not at module load: only `pull` needs it, and `doctor`
     # must stay cheap and offline.
     from huggingface_hub import snapshot_download
 
-    return snapshot_download(repo_id=model_id)
+    return snapshot_download(repo_id=model_id, revision=revision)
 
 
 def _default_toolkit(env: Mapping[str, str], config: CastingConfig) -> Toolkit:
@@ -281,7 +283,7 @@ def cmd_doctor(env: Mapping[str, str]) -> Result:
         "executable": sys.executable,
         "config": config.as_body(),
         "hfCache": str(hub_cache(env)),
-        "weights": [{"id": model_id, "cached": is_cached(model_id, env)} for model_id in config.weights],
+        "weights": [{"id": w.id, "revision": w.revision, "cached": is_cached(w.id, env, w.revision)} for w in config.weights],
         "scorers": _scorers_body(env),
     }, EXIT_OK
 
@@ -292,8 +294,20 @@ def _scorers_body(env: Mapping[str, str]) -> list[dict[str, object]]:
     for scorer in out:
         weights = str(scorer["weights"])
         # Hub ids look like `org/name`; UTMOS (torch.hub) and DNSMOS (an ONNX file) live in their own caches.
-        scorer["cached"] = is_cached(weights, env) if weights.count("/") == 1 and " " not in weights else None
+        revision = scorer.get("revision")
+        pin = revision if isinstance(revision, str) else None
+        scorer["cached"] = is_cached(weights, env, pin) if weights.count("/") == 1 and " " not in weights else None
     return out
+
+
+def _unpinned_warning(weight: WeightSpec) -> str | None:
+    """The stderr line for a casting.json weight that is not pinned to a commit (AGT-2274), else `None`."""
+    pin = f'pin it: {{"id": "{weight.id}", "revision": "<commit sha>"}}'
+    if weight.revision is None:
+        return f"pablo casting: warning: casting.json weights entry {weight.id} has no `revision`, so it fetches the Hub's current revision; {pin}"
+    if not is_commit(weight.revision):
+        return f'pablo casting: warning: casting.json weights entry {weight.id} is at "{weight.revision}", a branch or tag that can move; {pin}'
+    return None
 
 
 def cmd_pull(env: Mapping[str, str], work: Path | None, downloader: Downloader) -> Result:
@@ -302,20 +316,25 @@ def cmd_pull(env: Mapping[str, str], work: Path | None, downloader: Downloader) 
     except ConfigRefusal as refusal:
         return refused(str(refusal))
     pulled: list[dict[str, object]] = []
-    for model_id in config.weights:
-        if is_cached(model_id, env):
-            pulled.append({"id": model_id, "cached": True})
+    for weight in config.weights:
+        model_id, revision = weight.id, weight.revision
+        warning = _unpinned_warning(weight)
+        if warning is not None:
+            print(warning, file=sys.stderr, flush=True)
+        if is_cached(model_id, env, revision if revision is not None and is_commit(revision) else None):
+            pulled.append({"id": model_id, "revision": revision, "cached": True})
             continue
-        print(f"pablo casting: pulling {model_id} into {hub_cache(env)}", file=sys.stderr, flush=True)
+        at = f"@{revision}" if revision is not None else ""
+        print(f"pablo casting: pulling {model_id}{at} into {hub_cache(env)}", file=sys.stderr, flush=True)
         started = time.monotonic()
         try:
-            path = downloader(model_id)
+            path = downloader(model_id, revision)
         except Exception as failure:  # a network or hub failure is an error, not a refusal
-            return error(f"pulling {model_id} failed: {failure}")
+            return error(f"pulling {model_id}{at} failed: {failure}")
         wall = round(time.monotonic() - started, 3)
-        pulled.append({"id": model_id, "cached": False, "path": path, "wall": wall})
+        pulled.append({"id": model_id, "revision": revision, "cached": False, "path": path, "wall": wall})
         if work is not None:
-            append_receipt(work, {"intent": "pull", "weights": model_id, "path": path, "wall": wall})
+            append_receipt(work, {"intent": "pull", "weights": model_id, "revision": revision, "path": path, "wall": wall})
     return {"ok": True, "weights": pulled}, EXIT_OK
 
 

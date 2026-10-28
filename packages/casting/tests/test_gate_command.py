@@ -346,8 +346,12 @@ def test_calibrate_refuses_or_errors(env: dict[str, str], tmp_path: Path, argv: 
 
 
 def test_doctor_lists_every_scorer_with_weights_license_and_version(env: dict[str, str]) -> None:
-    snapshot_dir = Path(env["HF_HUB_CACHE"]) / "models--speechbrain--spkrec-ecapa-voxceleb" / "snapshots" / "abc"
+    from pablo_casting.pins import pinned
+
+    # Cached means the pinned snapshot (AGT-2274): another revision of the same repo does not count.
+    snapshot_dir = Path(env["HF_HUB_CACHE"]) / "models--speechbrain--spkrec-ecapa-voxceleb" / "snapshots" / pinned("speechbrain/spkrec-ecapa-voxceleb")
     snapshot_dir.mkdir(parents=True)
+    (Path(env["HF_HUB_CACHE"]) / "models--mlx-community--whisper-large-v3-turbo" / "snapshots" / "an-older-revision").mkdir(parents=True)
     (body, code), _ = run(["doctor", "--json"], env)
     assert code == 0
     scorers = body["scorers"]

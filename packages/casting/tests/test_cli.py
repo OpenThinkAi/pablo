@@ -11,6 +11,8 @@ import pytest
 
 from pablo_casting.cli import main, run
 
+PIN = "0123456789abcdef0123456789abcdef01234567"
+
 
 @pytest.fixture
 def env(tmp_path: Path) -> dict[str, str]:
@@ -38,7 +40,7 @@ def test_version_is_ok(env: dict[str, str]) -> None:
 
 
 def test_doctor_without_a_config_reports_defaults_and_downloads_nothing(env: dict[str, str]) -> None:
-    def no_download(model_id: str) -> str:
+    def no_download(model_id: str, revision: str | None) -> str:
         raise AssertionError("doctor must never download")
 
     (body, code), _ = run(["doctor", "--json"], env, downloader=no_download)
@@ -52,17 +54,31 @@ def test_doctor_without_a_config_reports_defaults_and_downloads_nothing(env: dic
 
 
 def test_doctor_reports_whether_each_configured_weight_is_cached(env: dict[str, str]) -> None:
-    write_config(env, {"weights": ["org/cached", "org/missing"]})
+    write_config(env, {"weights": ["org/cached", "org/missing", {"id": "org/pinned", "revision": PIN}]})
     snapshot = Path(env["HF_HUB_CACHE"]) / "models--org--cached" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)
+    # A pinned entry is cached only at its own revision.
+    (Path(env["HF_HUB_CACHE"]) / "models--org--pinned" / "snapshots" / "abc").mkdir(parents=True)
     (body, code), _ = run(["doctor", "--json"], env)
     assert code == 0
-    assert body["weights"] == [{"id": "org/cached", "cached": True}, {"id": "org/missing", "cached": False}]
+    assert body["weights"] == [
+        {"id": "org/cached", "revision": None, "cached": True},
+        {"id": "org/missing", "revision": None, "cached": False},
+        {"id": "org/pinned", "revision": PIN, "cached": False},
+    ]
+    assert body["config"]["weights"][2] == {"id": "org/pinned", "revision": PIN}
 
 
 @pytest.mark.parametrize(
     "config",
-    ["{not json", "[]", {"weights": "org/one"}, {"engines": {"dia": 3}}, {"pace": {"default": -1}}, {"library": 4}],
+    [
+        "{not json",
+        "[]",
+        {"weights": "org/one"},
+        {"weights": [{"revision": PIN}]},
+        {"weights": [{"id": "org/one", "revision": 3}]},
+        {"weights": [{"id": "org/one", "rev": PIN}]},
+        {"engines": {"dia": 3}}, {"pace": {"default": -1}}, {"library": 4}],
 )
 def test_an_unusable_config_is_a_refusal_naming_the_file(env: dict[str, str], config: object) -> None:
     path = write_config(env, config)
@@ -98,7 +114,7 @@ def test_audition_dry_run_loads_no_model_and_a_real_audition_needs_a_role(env: d
 
 
 def test_pull_with_no_weights_configured_downloads_nothing(env: dict[str, str], tmp_path: Path) -> None:
-    (body, code), _ = run(["pull", "--json", "--work", str(tmp_path)], env, downloader=lambda _: pytest.fail("no download"))
+    (body, code), _ = run(["pull", "--json", "--work", str(tmp_path)], env, downloader=lambda *_: pytest.fail("no download"))
     assert code == 0
     assert body["weights"] == []
     assert not (tmp_path / ".pablo").exists()
@@ -108,26 +124,57 @@ def test_pull_downloads_uncached_weights_and_leaves_a_receipt(env: dict[str, str
     write_config(env, {"weights": ["org/model"]})
     work = tmp_path / "work"
     work.mkdir()
-    pulled: list[str] = []
+    pulled: list[tuple[str, str | None]] = []
 
-    def fake(model_id: str) -> str:
-        pulled.append(model_id)
+    def fake(model_id: str, revision: str | None) -> str:
+        pulled.append((model_id, revision))
         return f"/cache/{model_id}"
 
     (body, code), _ = run(["pull", "--json", "--work", str(work)], env, downloader=fake)
     assert code == 0
-    assert pulled == ["org/model"]
+    assert pulled == [("org/model", None)]
     lines = (work / ".pablo" / "casting" / "receipts.jsonl").read_text(encoding="utf-8").splitlines()
     receipt = json.loads(lines[0])
     assert receipt["intent"] == "pull"
     assert receipt["weights"] == "org/model"
+    assert receipt["revision"] is None
     assert "at" in receipt and "wall" in receipt
+
+
+def test_pull_passes_a_configured_revision_and_warns_only_for_unpinned_weights(
+    env: dict[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """AGT-2274: a casting.json entry's `revision` reaches the downloader; one without (or on a branch) warns."""
+    write_config(env, {"weights": [{"id": "org/pinned", "revision": PIN}, "org/loose", {"id": "org/branch", "revision": "main"}]})
+    pulled: list[tuple[str, str | None]] = []
+
+    def fake(model_id: str, revision: str | None) -> str:
+        pulled.append((model_id, revision))
+        return f"/cache/{model_id}"
+
+    (body, code), _ = run(["pull", "--json"], env, downloader=fake)
+    assert code == 0, body
+    assert pulled == [("org/pinned", PIN), ("org/loose", None), ("org/branch", "main")]
+    err = capsys.readouterr().err
+    warnings = [line for line in err.splitlines() if "warning:" in line]
+    assert len(warnings) == 2
+    assert "org/loose has no `revision`" in warnings[0] and '"revision": "<commit sha>"' in warnings[0]
+    assert 'org/branch is at "main", a branch or tag that can move' in warnings[1]
+    assert "org/pinned" not in "\n".join(warnings)
+
+
+def test_pull_skips_a_pinned_weight_already_cached_at_its_revision(env: dict[str, str]) -> None:
+    write_config(env, {"weights": [{"id": "org/pinned", "revision": PIN}]})
+    (Path(env["HF_HUB_CACHE"]) / "models--org--pinned" / "snapshots" / PIN).mkdir(parents=True)
+    (body, code), _ = run(["pull", "--json"], env, downloader=lambda *_: pytest.fail("no download"))
+    assert code == 0
+    assert body["weights"] == [{"id": "org/pinned", "revision": PIN, "cached": True}]
 
 
 def test_a_failed_download_is_an_error(env: dict[str, str]) -> None:
     write_config(env, {"weights": ["org/model"]})
 
-    def broken(model_id: str) -> str:
+    def broken(model_id: str, revision: str | None) -> str:
         raise OSError("network down")
 
     (body, code), _ = run(["pull", "--json"], env, downloader=broken)
@@ -159,5 +206,5 @@ def test_pull_downloads_a_real_model_into_the_hf_cache(tmp_path: Path) -> None: 
     """Hand-run only (`uv run pytest -m models`): a real, tiny download through huggingface_hub."""
     from pablo_casting.cli import _default_downloader
 
-    path = Path(_default_downloader("hf-internal-testing/tiny-random-bert"))
+    path = Path(_default_downloader("hf-internal-testing/tiny-random-bert", None))
     assert path.is_dir()

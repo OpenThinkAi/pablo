@@ -26,11 +26,26 @@ class ConfigRefusal(Exception):
 
 
 @dataclass(frozen=True)
+class WeightSpec:
+    """One `weights` entry: a Hub model id and the commit it is pulled at (AGT-2274).
+
+    casting.json takes either `"org/name"` or `{"id": "org/name", "revision": "<commit sha>"}`;
+    without a revision `pull` fetches the Hub's current one and warns.
+    """
+
+    id: str
+    revision: str | None = None
+
+    def as_body(self) -> dict[str, object]:
+        return {"id": self.id, "revision": self.revision}
+
+
+@dataclass(frozen=True)
 class CastingConfig:
     path: Path
     exists: bool
     engines: dict[str, dict[str, object]] = field(default_factory=dict)
-    weights: list[str] = field(default_factory=list)
+    weights: list[WeightSpec] = field(default_factory=list)
     library: str | None = None
     pace: dict[str, float] = field(default_factory=lambda: {"default": 1.0})
     matching: dict[str, object] = field(default_factory=dict)
@@ -46,7 +61,7 @@ class CastingConfig:
             "path": str(self.path),
             "exists": self.exists,
             "engines": self.engines,
-            "weights": self.weights,
+            "weights": [w.as_body() for w in self.weights],
             "library": self.library,
             "pace": self.pace,
             "matching": self.matching,
@@ -77,9 +92,7 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
     engines = raw.get("engines", {})
     if not isinstance(engines, dict) or not all(isinstance(v, dict) for v in engines.values()):
         raise ConfigRefusal(f"{path}: `engines` must be an object of objects")
-    weights = raw.get("weights", [])
-    if not isinstance(weights, list) or not all(isinstance(w, str) and w for w in weights):
-        raise ConfigRefusal(f"{path}: `weights` must be a list of Hugging Face model ids")
+    weights = _read_weights(raw.get("weights", []), path)
     library = raw.get("library")
     if library is not None and not isinstance(library, str):
         raise ConfigRefusal(f"{path}: `library` must be a path string")
@@ -115,7 +128,7 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
         path=path,
         exists=True,
         engines=engines,
-        weights=list(weights),
+        weights=weights,
         library=library,
         pace={k: float(v) for k, v in pace.items()},
         matching=dict(matching),
@@ -123,3 +136,24 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
         sounds=sounds,
         loudness={k: float(v) for k, v in loudness.items()},
     )
+
+
+def _read_weights(raw: object, path: Path) -> list[WeightSpec]:
+    shape = f'{path}: `weights` must be a list of Hugging Face model ids, each "org/name" or {{"id": "org/name", "revision": "<commit sha>"}}'
+    if not isinstance(raw, list):
+        raise ConfigRefusal(shape)
+    out: list[WeightSpec] = []
+    for entry in raw:
+        if isinstance(entry, str) and entry:
+            out.append(WeightSpec(entry))
+        elif (
+            isinstance(entry, dict)
+            and not set(entry) - {"id", "revision"}
+            and isinstance(entry.get("id"), str)
+            and entry["id"]
+            and (entry.get("revision") is None or (isinstance(entry["revision"], str) and entry["revision"]))
+        ):
+            out.append(WeightSpec(entry["id"], entry.get("revision")))
+        else:
+            raise ConfigRefusal(shape)
+    return out

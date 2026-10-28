@@ -100,6 +100,23 @@ def designer_model(name: str, engines: Mapping[str, Mapping[str, object]]) -> st
     return DEFAULT_DESIGNER_MODELS[name]
 
 
+def designer_revision(name: str, engines: Mapping[str, Mapping[str, object]]) -> str | None:
+    """The revision a designer's weights are fetched at (AGT-2274).
+
+    The default model's is its pin (`pins.py`); an `engines.designers.<name>.model` the
+    author names carries its own optional `revision`, and `None` (the Hub's current
+    revision, which `real_toolkit` warns about) when it has none.
+    """
+    from pablo_casting.pins import pinned
+
+    designers = engines.get("designers")
+    entry = designers.get(name) if isinstance(designers, Mapping) else None
+    if isinstance(entry, Mapping) and isinstance(entry.get("model"), str):
+        revision = entry.get("revision")
+        return revision if isinstance(revision, str) and revision else None
+    return pinned(DEFAULT_DESIGNER_MODELS[name])
+
+
 def select_toolkit(env: Mapping[str, str], engines: Mapping[str, Mapping[str, object]]) -> Toolkit:
     if env.get(TOOLKIT_ENV) == "fake":
         from pablo_casting.fakes import fake_toolkit

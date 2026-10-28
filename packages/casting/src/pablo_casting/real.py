@@ -14,6 +14,7 @@ exercised only by `-m models` tests, run by hand on the Studio.
 
 from __future__ import annotations
 
+import sys
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -24,7 +25,7 @@ import numpy as np
 from pablo_casting.audio import resample, write_wav
 from pablo_casting.hfcache import weights_sha256
 from pablo_casting.scorers import ALIGNER, ECAPA, UTMOS, AlignerScorer, EcapaScorer, ScorerUnavailable, Take, UtmosScorer
-from pablo_casting.toolkit import DESIGNER_NAMES, Toolkit, ToolkitUnavailable, Word, designer_model
+from pablo_casting.toolkit import DESIGNER_NAMES, Toolkit, ToolkitUnavailable, Word, designer_model, designer_revision
 
 SR_16K = 16_000
 
@@ -50,16 +51,17 @@ def _loaded(scorer: Any) -> Any:
 class _MlxDesigner:
     """Shared by both designers: load through mlx-audio, seed MLX's RNG, concatenate the chunks."""
 
-    def __init__(self, name: str, engine: str, env: Mapping[str, str]) -> None:
+    def __init__(self, name: str, engine: str, env: Mapping[str, str], revision: str | None = None) -> None:
         utils = _need("mlx_audio.tts.utils", "mlx-audio")
         self._mx = _need("mlx.core", "mlx")
         self.name = name
         self.engine = engine
+        self.revision = revision
         self._env = env
-        self._model = utils.load_model(engine)
+        self._model = utils.load_model(engine) if revision is None else utils.load_model(engine, revision=revision)
 
     def weights_sha256(self) -> str:
-        return weights_sha256(self.engine, self._env) or "unknown"
+        return weights_sha256(self.engine, self._env, self.revision) or "unknown"
 
     def _chunks(self, instruct: str, text: str) -> Any:
         raise NotImplementedError
@@ -129,6 +131,14 @@ def real_toolkit(env: Mapping[str, str], engines: Mapping[str, Mapping[str, obje
         if name not in DESIGNER_NAMES:
             raise ToolkitUnavailable(f'unknown designer "{name}": one of {", ".join(DESIGNER_NAMES)}')
         engine = designer_model(name, engines)
-        return QwenDesigner(name, engine, env) if name == "qwen3" else VoxcpmDesigner(name, engine, env)
+        revision = designer_revision(name, engines)
+        if revision is None:
+            print(
+                f"pablo casting: designer {name} model {engine} has no `revision` in casting.json, so it fetches the Hub's "
+                f'current revision; pin one with engines.designers.{name}.revision: "<commit sha>"',
+                file=sys.stderr,
+                flush=True,
+            )
+        return (QwenDesigner if name == "qwen3" else VoxcpmDesigner)(name, engine, env, revision)
 
     return Toolkit(designer=designer, embedder=EcapaEmbedder, mos=UtmosMos, aligner=ForcedAligner, kind="real")

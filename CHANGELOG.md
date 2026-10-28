@@ -22,6 +22,17 @@ Notable changes per release of `@openthink/pablo`, `@openthink/pablo-core` and
 
 ### Changed
 
+- Every model the radio tools download by default is fetched at a pinned commit
+  revision (`packages/casting/src/pablo_casting/pins.py`): the gate scorers (Whisper,
+  the aligner, ECAPA, Audiobox, emotion2vec), the voice designers and the Stable Audio
+  Open cue model join the engines and UTMOS. A `casting.json` `weights` entry may be
+  `{"id": "org/name", "revision": "<commit sha>"}`, and an `engines.designers.<name>`
+  override may carry a `revision`; without one, pablo warns on stderr that it fetches
+  the repo's current revision. `pablo doctor` reports a pinned model as cached only at
+  its pinned revision.
+- When a work's `pablo.json` repoints a global provider (its `endpoint`, `kind` or
+  `local`) and so drops a key that would have been sent, pablo prints a one-line stderr
+  notice naming the provider and the fix, instead of the local server failing on auth.
 - `@openthink/ui-leaf` is pinned to an exact version (`1.6.0`), so `bun pm -g trust
   @openthink/ui-leaf` covers only the ui-leaf a pablo release names. The trust step is
   now documented as optional (only `read`, `review` and `mixer` need it).
