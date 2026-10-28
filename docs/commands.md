@@ -32,7 +32,7 @@ read it. See [Reviewing and accepting](#reviewing-and-accepting).
 ```
 pablo guide
 pablo guide --track <t>
-pablo guide --track <t> --output <type>
+pablo guide --track <t> --output <type> [--project <slug>]
 ```
 
 Start here. With a track and an output, `guide` prints the path from nothing to a
@@ -46,7 +46,10 @@ optional note), `output add` (for `narrated`, first a prose output to read and t
 and for performed outputs `cast --auto`, `perform`, `mix`, `fix`), `check`, and
 `publish` with the output's targets. A step the track gates is marked `(gate)`;
 `write` refuses until it is met. Commands carry placeholders (`<slug>`, `N`) for
-you to fill.
+you to fill. The draft step names the writer model your config routes the `draft`
+intent to (`anthropic (the-model-id)`); with `--project` it reads that work's
+`pablo.json` routing too, and with no model configured it says so. On
+`nonfiction` the outline step notes the `#N` convention below.
 
 The path is composed from the track and output registries, not written per pair,
 so it follows them (a stage with no step fails the guide test). With no
@@ -322,8 +325,8 @@ plus the work's track. Always exits `0`.
 - **`units[].words`** is a drafted unit's word count (absent for units that share one file, like the essay's sections): the unit file's body (frontmatter left out) split on whitespace. The screen's editor counts the same way, so its live count for a saved file equals this number.
 - **`waiting`** lists the change branches with commits that `main` lacks.
 - **`next`** is one of:
-  - `core: <action>` while the core is short
-  - `add an output` when the core is ready but nothing derives from it
+  - `core: <action>` while the core is short. Once any bible file exists the bible counts as done, so `next` moves on to acts or beats; it then appends `; the bible still lacks: <files>` naming the bible files still to save (`pablo save --stage bible/<file>`)
+  - `add an output (pablo output add <type>|... --project <slug>)` when the core is ready but nothing derives from it, listing the outputs the track allows
   - `<type>: <action>` for the first output with a unit left to draft
   - `all outputs drafted`
 
@@ -395,6 +398,15 @@ A claim row needs three columns (`# | Claim | Sources`), and its sources cell na
 least one research note id: the note's path under `research/` without `.md`
 (`printing-press` for `research/printing-press.md`), comma separated. A section row
 needs three (`# | Section | What it covers`). Each track refuses the other's stages.
+
+A section's claims are chosen in its "What it covers" cell: write `#2, #3` and the
+section's draft pack carries claims 2 and 3 (a number the claims table lacks
+refuses the draft); a cell with no `#N` gives the section every claim.
+
+`save` commits straight to the work's current branch (main), with no `plan/`
+review branch; the verbs that write a `plan/` branch are `research save`,
+`research plan`, `research distill`, `fact record` and the other research and fact
+verbs.
 
 ---
 

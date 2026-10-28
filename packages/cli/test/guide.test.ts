@@ -136,3 +136,19 @@ test("pablo guide runs with no vault: the list, a path, --json, and a refusal ex
   expect(refused.exitCode).toBe(2);
   expect(refused.stderr).toContain("not allowed on the nonfiction track");
 });
+
+// AGT-2193: the draft step names the configured writer model, and the outline step the `#N` claim convention.
+test("the draft step names the configured writer model, or says none is configured", () => {
+  const draft = (g: Guide) => g.steps.find((s) => s.phase === "write")!.title;
+  expect(draft(ok("fiction", "novel"))).toContain("the configured writer model");
+  expect(draft(ok("fiction", "novel"))).not.toContain("local model");
+  const named = buildGuide("fiction", "novel", "anthropic (some-model)");
+  if (!named.ok) throw new Error(named.message);
+  expect(draft(named)).toBe("draft each chapter on anthropic (some-model)");
+  expect(guide({ track: "fiction", output: "novel" }, "local (qwen)")).toMatchObject({ ok: true });
+});
+
+test("the nonfiction outline step explains the #N claim convention", () => {
+  const step = ok("nonfiction", "essay").steps.find((s) => s.stage === "outline")!;
+  expect(step.detail).toContain("#2, #3");
+});

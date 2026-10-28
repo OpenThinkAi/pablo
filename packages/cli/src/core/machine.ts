@@ -509,10 +509,20 @@ export function coreNext(state: CoreState): string | undefined {
     case "bible":
       return "write the bible (bible/characters/, bible/places.md, bible/timeline.md)";
     case "acts":
-      return "save the acts table (pablo save --stage acts)";
+      return `save the acts table (pablo save --stage acts)${bibleGap(state)}`;
     default:
-      return "save the beats (pablo save --stage beats)";
+      return `save the beats (pablo save --stage beats)${bibleGap(state)}`;
   }
+}
+
+/**
+ * The bible counts as done once any bible file exists, so `next` goes on to acts; this names what the bible still lacks
+ * (`; the bible still lacks: bible/places.md, ...`, each saved with `pablo save --stage bible/<file>`), or nothing when it is whole.
+ */
+function bibleGap(state: CoreState): string {
+  const bible = coreStages(state).find((s) => s.id === "bible");
+  if (bible === undefined || bible.missing.length === 0) return "";
+  return `; the bible still lacks: ${bible.missing.join(", ")} (pablo save --stage bible/<file>)`;
 }
 
 /** A track gate that is shut: the stage, the refusal line naming the track, and what is missing. */

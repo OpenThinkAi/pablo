@@ -167,12 +167,12 @@ test("status --json on a core with no outputs shows the core alone and next: add
   const body = JSON.parse(r.stdout);
   expect(body.core.stages).toHaveLength(6);
   expect(body.outputs).toEqual({});
-  expect(body.next).toBe("add an output");
+  expect(body.next).toStartWith("add an output (pablo output add ");
 
   const prose = runCli(["status", "--project", "ice-house"], vault).stdout;
   expect(prose).toContain("outputs: none");
   expect(prose).not.toContain("novel:");
-  expect(prose.trimEnd().split("\n").at(-1)).toBe("next: add an output");
+  expect(prose.trimEnd().split("\n").at(-1)).toStartWith("next: add an output (pablo output add ");
 });
 
 test("the core still comes first when it is short, even with an output declared", () => {
@@ -218,6 +218,18 @@ test("resume on a core with no outputs says so and asks for one", async () => {
   const result = await buildResume(work, "ice-house", { env: NO_THINK });
   expect(result.format).toBe("core");
   expect(result.outputs).toEqual({});
-  expect(result.next).toBe("add an output");
+  expect(result.next).toStartWith("add an output (pablo output add ");
   expect(formatResumeProse(result)).toContain("\noutputs: none\n");
+});
+
+// AGT-2193: status `next` names the command, and does not skip a half-written bible.
+test("next names the command to add an output, and what the bible still lacks once acts is next", () => {
+  const { work } = tempVault();
+  expect(workNext(readCoreState(work), {})).toBe("add an output (pablo output add novel|story|screenplay|radio|essay --project <slug>)");
+
+  writeFileSync(join(work, "outline", "chapters.md"), "# Outline\n");
+  rmSync(join(work, "bible", "places.md"));
+  expect(workNext(readCoreState(work), {})).toBe(
+    "core: save the acts table (pablo save --stage acts); the bible still lacks: bible/places.md does not exist (pablo save --stage bible/<file>)",
+  );
 });

@@ -192,9 +192,9 @@ test("the instructions say to call guide first, and guide returns what the CLI's
   const instructions = client.getInstructions() ?? "";
   expect(instructions).toMatch(/Call `guide` first/);
   expect(instructions.indexOf("`guide`")).toBeLessThan(instructions.indexOf("`resume`"));
-  const { guide } = await import("../src/guide");
+  const { guide, writerModel } = await import("../src/guide");
   const body = parseTextBody(await client.callTool({ name: "guide", arguments: { track: "historical-fiction", output: "novel" } }));
-  expect(body).toEqual(JSON.parse(JSON.stringify(guide({ track: "historical-fiction", output: "novel" }))));
+  expect(body).toEqual(JSON.parse(JSON.stringify(guide({ track: "historical-fiction", output: "novel" }, writerModel(process.env)))));
   const index = parseTextBody(await client.callTool({ name: "guide", arguments: {} })) as { ok: boolean; tracks: unknown[] };
   expect(index.ok).toBe(true);
   expect(index.tracks.length).toBeGreaterThan(0);

@@ -78,3 +78,18 @@ test("every verb named in --help is runnable, and dry-run is not a verb (AGT-209
   expect(dry.exitCode).not.toBe(0);
   expect(dry.stdout + dry.stderr).toContain("write --dry-run");
 }, 60_000);
+
+// AGT-2193: help text matches what the verbs do.
+test("help save says it commits to the current branch and explains the outline #N convention", () => {
+  const text = verbHelp("save", ALL_VERBS)!;
+  expect(text).toContain("committed straight to the work's");
+  expect(text).not.toContain("plan/ branch");
+  expect(text).toContain("#2, #3");
+});
+
+test("help check names anachronism and claim-support", () => {
+  const text = verbHelp("check", ALL_VERBS)!;
+  expect(text).toContain("anachronism");
+  expect(text).toContain("claim-support");
+  expect(text).toContain("fact-accuracy");
+});
