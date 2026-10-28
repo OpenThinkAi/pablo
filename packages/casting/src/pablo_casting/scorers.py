@@ -381,10 +381,23 @@ class UtmosScorer(_Lazy):
         return {"utmos": round(float(mos.item()), 3)}
 
 
+AUDIOBOX_COPIED_FROM = "0.0.4"
+"""The audiobox-aesthetics release `AudioboxScorer`'s `setup_model` copy was taken from (AGT-2274)."""
+
+
 class AudioboxScorer(_Lazy):
     info = AUDIOBOX
 
     def _load(self) -> object:
+        installed = self.info.version()
+        if installed is not None and installed != AUDIOBOX_COPIED_FROM:
+            # The pinned loader below is a copy of that release's AesPredictor.setup_model; a different
+            # release may set the predictor up differently, so refuse rather than run a stale copy.
+            raise RuntimeError(
+                f"the audiobox scorer's pinned loader is copied from audiobox-aesthetics {AUDIOBOX_COPIED_FROM}, but "
+                f"{installed} is installed: re-check AesPredictor.setup_model against PinnedPredictor in scorers.py, "
+                f"then update AUDIOBOX_COPIED_FROM (and the audiobox pin in pins.py if the weights moved)"
+            )
         from audiobox_aesthetics.infer import AesPredictor
         from audiobox_aesthetics.model.aes import AesMultiOutput
 

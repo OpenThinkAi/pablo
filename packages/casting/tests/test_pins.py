@@ -161,12 +161,26 @@ def test_audiobox_loads_the_pinned_revision(monkeypatch: pytest.MonkeyPatch) -> 
         def setup_model(self) -> None:  # the unpinned original
             raise AssertionError("the library's own setup_model fetches the Hub's current revision")
 
+    monkeypatch.setattr(scorers, "dist_version", lambda package: scorers.AUDIOBOX_COPIED_FROM)
     fake_torch(monkeypatch)
     fake_module(monkeypatch, "audiobox_aesthetics.model.aes", AesMultiOutput=AesMultiOutput)
     fake_module(monkeypatch, "audiobox_aesthetics.infer", AesPredictor=AesPredictor)
     predictor = scorers.AudioboxScorer().model()
     assert calls == [("facebook/audiobox-aesthetics", {"revision": pinned("facebook/audiobox-aesthetics")})]
     assert isinstance(predictor.model, Model)  # type: ignore[attr-defined]
+
+
+def test_audiobox_refuses_an_audiobox_release_other_than_the_one_its_loader_copies(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[str] = []
+    monkeypatch.setattr(scorers, "dist_version", lambda package: asked.append(package) or "0.0.5")
+    # Nothing may be imported or loaded before the version is checked.
+    fake_module(monkeypatch, "audiobox_aesthetics.infer", AesPredictor=lambda **_: pytest.fail("loaded despite the version"))
+    with pytest.raises(RuntimeError) as refused:
+        scorers.AudioboxScorer().model()
+    message = str(refused.value)
+    assert "audiobox-aesthetics 0.0.4" in message and "0.0.5 is installed" in message
+    assert "pins.py" in message and "AUDIOBOX_COPIED_FROM" in message
+    assert asked == ["audiobox_aesthetics"]
 
 
 def test_emotion2vec_loads_from_the_pinned_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
