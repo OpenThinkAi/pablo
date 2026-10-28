@@ -17,7 +17,7 @@
  * the previous message's returned history back in.
  */
 
-import type { ChatMessage, ReceiptSink } from "@openthink/pablo-core";
+import type { ChatMessage } from "@openthink/pablo-core";
 import type { McpToolSpec, VerbContext } from "../verbs";
 import type { AskAuthor } from "./ask-author";
 import { runLoop } from "./loop";
@@ -59,7 +59,7 @@ export interface HarnessSpec {
   /** Tools built for this session (plan-branch tools), offered after `tools`. */
   readonly sessionTools?: readonly McpToolSpec[];
   /** Where each turn's receipt is appended, and the intent it names (AGT-2191). */
-  readonly receipts?: { readonly sink: ReceiptSink; readonly intent: string };
+  readonly receipts?: LoopSpec["receipts"];
 }
 
 /** The tools a session offers: `tools` (or every `pablo mcp` tool), then the session's own. */

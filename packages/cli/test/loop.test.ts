@@ -244,6 +244,8 @@ describe("runLoop", () => {
     expect(logged).toHaveLength(2);
     expect(logged[0]).toMatchObject({ intent: "research", provider: "scripted", model: "claude-opus-5-5", tokens_read: 1000, tokens_written: 500, tool_calls: ["status", "status"] });
     expect(logged[0]!.cost_usd).toBeCloseTo(0.004 + 0.01, 10);
+    // A turn that only calls tools still has a time to first token.
+    expect(typeof logged[0]!.ttft_ms).toBe("number");
     expect(logged[1]).toMatchObject({ tokens_read: 2000, tokens_written: 100 });
     expect(logged[1]!.tool_calls).toBeUndefined();
 

@@ -181,8 +181,10 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
       try {
         for await (const event of inner(request)) {
           if (event.type === "done") usage = event.usage;
-          else if (event.type === "tool_call") toolNames.push(event.call.name);
-          else if (firstAt === undefined) firstAt = now();
+          else {
+            if (event.type === "tool_call") toolNames.push(event.call.name);
+            if (firstAt === undefined) firstAt = now();
+          }
           yield event;
         }
       } catch (error) {
