@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { deflateSync } from "node:zlib";
 import { WebFetchError, htmlToMarkdown, webFetch, type WebFetchFn } from "../src/web/fetch";
 
 const PAGE = `<!doctype html><html><head><title>A &amp; B</title><style>.x{}</style><script>evil()</script></head>
@@ -112,5 +113,49 @@ describe("webFetch", () => {
 describe("htmlToMarkdown", () => {
   test("decodes entities and falls back to the body", () => {
     expect(htmlToMarkdown("<body><p>a&nbsp;&lt;b&gt; &#65;</p></body>").markdown).toBe("a <b> A");
+  });
+});
+
+// A tiny hand-built PDF (AGT-2192): one page whose content stream shows text with Tj and TJ, optionally Flate-compressed.
+function pdfBytes(...pages: Array<{ content: string; flate: boolean }>): Uint8Array {
+  const parts: Buffer[] = [Buffer.from("%PDF-1.4\n", "latin1")];
+  pages.forEach(({ content, flate }, i) => {
+    const body = flate ? deflateSync(Buffer.from(content, "latin1")) : Buffer.from(content, "latin1");
+    parts.push(Buffer.from(`${i + 1} 0 obj\n<< /Length ${body.length}${flate ? " /Filter /FlateDecode" : ""} >>\nstream\n`, "latin1"), body, Buffer.from("\nendstream\nendobj\n", "latin1"));
+  });
+  parts.push(Buffer.from("trailer\n<< /Root 1 0 R >>\n%%EOF\n", "latin1"));
+  return new Uint8Array(Buffer.concat(parts));
+}
+const PDF_CONTENT = "BT /F1 12 Tf 72 700 Td (Canyon Brochure \\(2026\\)) Tj 0 -14 Td [(Trails) -300 (open) 20 (daily)] TJ 0 -14 Td <48656C6C6F> Tj ET";
+function fakeBytes(bytes: Uint8Array, type: string): WebFetchFn {
+  return async () => new Response(Buffer.from(bytes), { status: 200, headers: { "content-type": type } });
+}
+
+describe("webFetch PDFs", () => {
+  for (const flate of [false, true]) {
+    test(`extracts text from a ${flate ? "Flate-compressed" : "plain"} PDF`, async () => {
+      const r = await webFetch("https://nps.gov/b.pdf", { resolveHost: publicDns, fetch: fakeBytes(pdfBytes({ content: PDF_CONTENT, flate }), "application/pdf") });
+      // "Trails" and "opendaily" join: a TJ kern of 20 is not a word gap (-300 is)
+      expect(r.markdown).toBe("Canyon Brochure (2026)\nTrails opendaily\nHello");
+    });
+  }
+
+  test("reads every content stream of a multi-object PDF, in order", async () => {
+    const bytes = pdfBytes({ content: "BT (Page one) Tj ET", flate: false }, { content: "BT (Page two) Tj ET", flate: true }, { content: "BT (Page three) Tj ET", flate: false });
+    const r = await webFetch("https://a.com/m.pdf", { resolveHost: publicDns, fetch: fakeBytes(bytes, "application/pdf") });
+    expect(r.markdown).toBe("Page one\n\nPage two\n\nPage three");
+  });
+
+  test("a decompression bomb is skipped, not inflated, and later streams still read", async () => {
+    const bomb = deflateSync(Buffer.alloc(64 * 1024 * 1024)); // ~64 KiB compressed, 64 MiB inflated
+    const head = Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Length ${bomb.length} /Filter /FlateDecode >>\nstream\n`, "latin1");
+    const mid = Buffer.from("\nendstream\nendobj\n2 0 obj\n<< /Length 20 >>\nstream\nBT (Still here) Tj ET\nendstream\nendobj\n%%EOF\n", "latin1");
+    const r = await webFetch("https://a.com/bomb.pdf", { resolveHost: publicDns, fetch: fakeBytes(new Uint8Array(Buffer.concat([head, bomb, mid])), "application/pdf") });
+    expect(r.markdown).toBe("Still here");
+  });
+
+  test("a PDF over the byte cap is refused, and one with no text is unsupported", async () => {
+    await expect(webFetch("https://a.com/b.pdf", { resolveHost: publicDns, maxBytes: 50, fetch: fakeBytes(pdfBytes({ content: PDF_CONTENT, flate: false }), "application/pdf") })).rejects.toMatchObject({ code: "too-large" });
+    await expect(webFetch("https://a.com/s.pdf", { resolveHost: publicDns, fetch: fakeBytes(pdfBytes({ content: "0 0 m 10 10 l S", flate: false }), "application/pdf") })).rejects.toMatchObject({ code: "unsupported-type" });
   });
 });

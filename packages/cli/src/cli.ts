@@ -57,7 +57,7 @@ import { formatStatusProse, readWorkStatus } from "./work-state";
 import { runSave } from "./save";
 import { screenEditPane, screenEditor, screenTargetStore } from "./edit-session";
 import { screenCommenter, screenFinisher } from "./review-finish";
-import { screenReviser } from "./screen-revise";
+import { runReviseBranch, screenReviser } from "./screen-revise";
 import { screenVerb } from "./screen-verb";
 import { screenVoicer } from "./screen-voice";
 import { screenPlanner } from "./screen-planning";
@@ -1659,6 +1659,9 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return vaultResult.code;
     }
     const reviseCtx: ReviseCoreContext = { vaultRoot: vaultResult.path, projectPath, env: process.env };
+    if (args.values["branch"] === true) {
+      return await runReviseBranch({ file: args.file, passage: args.passage, instruction: args.instruction, dryRun: args.dryRun, json: args.json }, reviseCtx);
+    }
     return await runRevise(
       {
         file: args.file,

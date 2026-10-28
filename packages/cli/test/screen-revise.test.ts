@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { waitingBranches } from "../src/branch";
-import { locateSelection, replacementLines, revisePassage, screenReviser, shiftComments } from "../src/screen-revise";
+import { parseCliArgs } from "../src/cli";
+import { locateSelection, replacementLines, revisePassage, runReviseBranch, screenReviser, shiftComments } from "../src/screen-revise";
 import { writeLocalConfig } from "./local-config";
 
 /**
@@ -231,4 +232,47 @@ test("shiftComments: a revision's lines move the comments below it and gather th
   // stored lines 4..5 (lines 5-6) became three lines
   const out = shiftComments([c(3), c(5), c(6, 5), c(9), c(9, undefined, "b.md"), { path: "a.md" }], "a.md", 4, 5, 3);
   expect(out).toEqual([c(3), c(7), c(7, 7), c(10), c(9, undefined, "b.md"), { path: "a.md" }]);
+});
+
+test("`pablo revise --branch` parses and lands the candidate on a revise/ branch from the CLI path (AGT-2192)", async () => {
+  const parsed = parseCliArgs(["revise", "--project", "ice-house", "--file", FILE, "--passage", "x", "--instruction", "y", "--branch"]);
+  expect(parsed.values["branch"]).toBe(true);
+
+  const { vault, project, env } = setup();
+  const mainBefore = git(vault, "rev-parse", "main");
+  const logged: string[] = [];
+  const spy = console.log;
+  console.log = (line?: unknown) => { logged.push(String(line)); };
+  let code: number;
+  try {
+    code = await runReviseBranch(
+      { file: FILE, passage: "Odile heard it from the scale house doorway.", instruction: "tighten", dryRun: false, json: true },
+      { vaultRoot: vault, projectPath: project, env },
+      { adapter: adapter("Odile heard the pond.") },
+    );
+  } finally { console.log = spy; }
+  expect(code).toBe(0);
+  const body = JSON.parse(logged.join("\n")) as { ok: boolean; branch: string };
+  expect(body.ok).toBe(true);
+  expect(body.branch).toMatch(/^revise\/[0-9a-f]{7}$/);
+  expect(git(vault, "branch", "--list", "revise/*")).toContain(body.branch);
+  expect(git(vault, "rev-parse", "main")).toBe(mainBefore);
+});
+
+test("`revise --branch` refuses without a passage or with --dry-run (AGT-2192)", async () => {
+  const { vault, project, env } = setup();
+  const errs: string[] = [];
+  const spy = console.error;
+  console.error = (line?: unknown) => { errs.push(String(line)); };
+  try {
+    const ctx = { vaultRoot: vault, projectPath: project, env };
+    expect(await runReviseBranch({ file: FILE, passage: undefined, instruction: "x", dryRun: false, json: false }, ctx)).toBe(2);
+    expect(await runReviseBranch({ file: FILE, passage: "p", instruction: "x", dryRun: true, json: false }, ctx)).toBe(2);
+    expect(await runReviseBranch({ file: FILE, passage: "p", instruction: undefined, dryRun: false, json: false }, ctx)).toBe(2);
+    expect(await runReviseBranch({ file: "../../etc/passwd", passage: "p", instruction: "x", dryRun: false, json: false }, ctx)).toBe(2);
+  } finally { console.error = spy; }
+  expect(errs.length).toBe(4);
+  expect(errs[3]).toContain("pablo: revise file must be inside the project");
+  expect(errs[2]).toContain("--instruction");
+  expect(git(vault, "branch", "--list", "revise/*")).toBe("");
 });

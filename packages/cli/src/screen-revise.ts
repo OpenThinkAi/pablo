@@ -62,6 +62,10 @@ export interface ScreenReviser {
 export interface ScreenReviserDeps {
   readonly adapter?: Adapter | undefined;
   readonly env?: Record<string, string | undefined>;
+  /** Where `revisePassage` streams progress (AGT-2192); silent when omitted, as the harness tool wants. */
+  readonly stderr?: { write(text: string): void } | undefined;
+  /** How `revisePassage` names itself in a refusal; defaults to the harness tool's `revise_passage`. */
+  readonly label?: string | undefined;
 }
 
 /** The selection as offsets into the raw file text, and what the first and last stored lines keep around it. */
@@ -292,14 +296,14 @@ export async function revisePassage(vaultRoot: string, projectPath: string, requ
   const env = deps.env ?? process.env;
   const fail = (code: number, message: string): RevisePassageResult => ({ ok: false, code, message });
   const full = insideDir(projectPath, request.file);
-  if (full === undefined) return fail(2, `pablo: revise_passage file must be inside the project (${request.file})`);
+  if (full === undefined) return fail(2, `pablo: ${deps.label ?? "revise_passage"} file must be inside the project (${request.file})`);
   let raw: string;
   try { raw = readFileSync(full, "utf8"); } catch { return fail(2, `pablo: cannot read ${request.file}`); }
 
   const outcome = await withWriteLock(() => reviseCore(
     { file: request.file, passage: request.passage, start: undefined, end: undefined, instruction: request.instruction, dryRun: false },
     { vaultRoot, projectPath, env },
-    { adapter: deps.adapter, stderr: { write: () => {} } },
+    { adapter: deps.adapter, stderr: deps.stderr ?? { write: () => {} } },
   ));
   const body = outcome.body;
   if (!body.ok) return fail(outcome.exitCode || body.code, body.message);
@@ -317,4 +321,29 @@ export async function revisePassage(vaultRoot: string, projectPath: string, requ
   });
   if (!taken.ok) return fail(1, taken.message);
   return { ok: true, branch: taken.branch, path: request.file, receipt: { ...r } };
+}
+
+/**
+ * `pablo revise --branch` (AGT-2192): the CLI half of what the MCP `revise` tool does with `branch`. Needs `--passage`,
+ * refuses `--dry-run`, lands the candidate on a `revise/<id>` branch and prints the branch, file and receipt (never the prose).
+ * Returns the exit code.
+ */
+export async function runReviseBranch(
+  args: { readonly file: string | undefined; readonly passage: string | undefined; readonly instruction: string | undefined; readonly dryRun: boolean; readonly json: boolean },
+  ctx: { readonly vaultRoot: string; readonly projectPath: string; readonly env: NodeJS.ProcessEnv },
+  deps: ScreenReviserDeps = {},
+): Promise<number> {
+  const say = (code: number, message: string): number => {
+    if (args.json) console.log(JSON.stringify({ ok: false, code, message }));
+    else console.error(message);
+    return code;
+  };
+  if (args.file === undefined) return say(2, "pablo: revise requires --file <path>");
+  if (args.passage === undefined || args.dryRun) return say(2, 'pablo: revise --branch needs --passage "<quoted text>" (not --start/--end) and cannot be combined with --dry-run');
+  if (args.instruction === undefined || args.instruction.trim() === "") return say(2, 'pablo: revise --branch requires --instruction "<text>"');
+  const result = await revisePassage(ctx.vaultRoot, ctx.projectPath, { file: args.file, passage: args.passage, instruction: args.instruction }, { stderr: process.stderr, label: "revise", ...deps, env: ctx.env });
+  if (!result.ok) return say(result.code, result.message);
+  if (args.json) console.log(JSON.stringify(result));
+  else console.log(`pablo: revised ${result.path} on ${result.branch}\n  receipt ${String(result.receipt["prompt_hash"] ?? "").slice(0, 12)}\n  review the branch in the screen (pablo), then merge it`);
+  return 0;
 }
