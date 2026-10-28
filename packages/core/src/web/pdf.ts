@@ -9,8 +9,11 @@ import { inflateSync } from "node:zlib";
 
 const latin1 = new TextDecoder("latin1");
 
-/** The bytes of every content stream in the file, inflated when FlateDecode'd. */
-function streams(pdf: Uint8Array): string[] {
+/** Total inflated bytes read across all streams: a small file must not expand into memory without bound. */
+export const PDF_MAX_INFLATED_BYTES = 16 * 1024 * 1024;
+
+/** The bytes of every content stream in the file, inflated when FlateDecode'd, within a shared output budget. */
+function streams(pdf: Uint8Array, budget: number): string[] {
   const text = latin1.decode(pdf);
   const out: string[] = [];
   const re = /stream\r?\n/g;
@@ -24,12 +27,17 @@ function streams(pdf: Uint8Array): string[] {
     if (/\/Subtype\s*\/(Image|Form)\b|\/Type\s*\/(XRef|ObjStm|Metadata)\b|\/FontFile/.test(dict)) continue;
     const raw = pdf.subarray(start, end);
     if (/\/FlateDecode/.test(dict)) {
+      if (budget <= 0) break;
       try {
-        out.push(latin1.decode(inflateSync(raw)));
+        // maxOutputLength makes a decompression bomb throw instead of allocating
+        const inflated = inflateSync(raw, { maxOutputLength: budget });
+        budget -= inflated.length;
+        out.push(latin1.decode(inflated));
       } catch {
-        // a damaged or unsupported (e.g. predictor) stream: skip it
+        // a damaged, unsupported (e.g. predictor) or oversized stream: skip it
       }
     } else if (!/\/Filter/.test(dict)) {
+      budget -= raw.length;
       out.push(latin1.decode(raw));
     }
   }
@@ -78,10 +86,10 @@ function contentText(content: string): string {
 }
 
 /** Extract plain text from a PDF's bytes; "" when it has none this reader can see. */
-export function pdfToText(pdf: Uint8Array): string {
+export function pdfToText(pdf: Uint8Array, maxInflatedBytes: number = PDF_MAX_INFLATED_BYTES): string {
   if (latin1.decode(pdf.subarray(0, 8)).indexOf("%PDF") < 0) return "";
   if (/\/Encrypt\b/.test(latin1.decode(pdf.subarray(Math.max(0, pdf.length - 2048))))) return "";
-  const pages = streams(pdf).map(contentText).filter((t) => t.trim() !== "");
+  const pages = streams(pdf, maxInflatedBytes).map(contentText).filter((t) => t.trim() !== "");
   return pages
     .join("\n\n")
     // printable text only: drop the control bytes a custom-encoded font leaves behind

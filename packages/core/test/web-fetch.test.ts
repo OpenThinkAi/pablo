@@ -146,6 +146,14 @@ describe("webFetch PDFs", () => {
     expect(r.markdown).toBe("Page one\n\nPage two\n\nPage three");
   });
 
+  test("a decompression bomb is skipped, not inflated, and later streams still read", async () => {
+    const bomb = deflateSync(Buffer.alloc(64 * 1024 * 1024)); // ~64 KiB compressed, 64 MiB inflated
+    const head = Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Length ${bomb.length} /Filter /FlateDecode >>\nstream\n`, "latin1");
+    const mid = Buffer.from("\nendstream\nendobj\n2 0 obj\n<< /Length 20 >>\nstream\nBT (Still here) Tj ET\nendstream\nendobj\n%%EOF\n", "latin1");
+    const r = await webFetch("https://a.com/bomb.pdf", { resolveHost: publicDns, fetch: fakeBytes(new Uint8Array(Buffer.concat([head, bomb, mid])), "application/pdf") });
+    expect(r.markdown).toBe("Still here");
+  });
+
   test("a PDF over the byte cap is refused, and one with no text is unsupported", async () => {
     await expect(webFetch("https://a.com/b.pdf", { resolveHost: publicDns, maxBytes: 50, fetch: fakeBytes(pdfBytes({ content: PDF_CONTENT, flate: false }), "application/pdf") })).rejects.toMatchObject({ code: "too-large" });
     await expect(webFetch("https://a.com/s.pdf", { resolveHost: publicDns, fetch: fakeBytes(pdfBytes({ content: "0 0 m 10 10 l S", flate: false }), "application/pdf") })).rejects.toMatchObject({ code: "unsupported-type" });
