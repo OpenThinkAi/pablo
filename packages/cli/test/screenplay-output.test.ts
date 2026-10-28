@@ -356,10 +356,7 @@ test("AGT-2194: action never breaks a page with fewer than two lines on either s
       const action = Array.from({ length: size }, (_, i) => `word${i} `.repeat(11).trim()).join(" ");
       const text = compileScreenplay("T", [`INT. ROOM - DAY\n\n${filler}\n\n${action}\n\nThe end.`]);
       const { pages } = layoutScreenplay(text);
-      for (const page of pages.slice(1)) {
-        expect(page.length).toBeLessThanOrEqual(54);
-        // Every run of action lines (x = 108, unbroken) that touches a page edge holds at least two lines, unless the whole block does not.
-      }
+      for (const page of pages) expect(page.length).toBeLessThanOrEqual(54);
       const flat = pages.slice(1).map((p) => p.filter((l) => l.text !== "").map((l) => l.text));
       flat.forEach((lines, i) => {
         const tail = lines.filter((t) => t.startsWith("word"));
