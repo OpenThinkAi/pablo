@@ -268,7 +268,11 @@ test("`revise --branch` refuses without a passage or with --dry-run (AGT-2192)",
     const ctx = { vaultRoot: vault, projectPath: project, env };
     expect(await runReviseBranch({ file: FILE, passage: undefined, instruction: "x", dryRun: false, json: false }, ctx)).toBe(2);
     expect(await runReviseBranch({ file: FILE, passage: "p", instruction: "x", dryRun: true, json: false }, ctx)).toBe(2);
+    expect(await runReviseBranch({ file: FILE, passage: "p", instruction: undefined, dryRun: false, json: false }, ctx)).toBe(2);
+    expect(await runReviseBranch({ file: "../../etc/passwd", passage: "p", instruction: "x", dryRun: false, json: false }, ctx)).toBe(2);
   } finally { console.error = spy; }
-  expect(errs.length).toBe(2);
+  expect(errs.length).toBe(4);
+  expect(errs[3]).toContain("pablo: revise file must be inside the project");
+  expect(errs[2]).toContain("--instruction");
   expect(git(vault, "branch", "--list", "revise/*")).toBe("");
 });

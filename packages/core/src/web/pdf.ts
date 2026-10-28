@@ -20,7 +20,7 @@ function streams(pdf: Uint8Array): string[] {
     if (end < 0) break;
     const dictStart = text.lastIndexOf("obj", m.index);
     const dict = dictStart >= 0 ? text.slice(dictStart, m.index) : "";
-    re.lastIndex = end;
+    re.lastIndex = end + "endstream".length; // past the terminator, which itself ends in "stream"
     if (/\/Subtype\s*\/(Image|Form)\b|\/Type\s*\/(XRef|ObjStm|Metadata)\b|\/FontFile/.test(dict)) continue;
     const raw = pdf.subarray(start, end);
     if (/\/FlateDecode/.test(dict)) {
