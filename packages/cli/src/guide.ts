@@ -81,7 +81,7 @@ function coreStep(stage: CoreStageId, track: TrackId): GuideStep[] {
           gate: true,
           title: `distill the research into sourced period facts (${PERIOD_FACTS_FILE})`,
           command: `pablo research distill ${P}`,
-          detail: "the only research the drafting model sees; accept its plan/ branch in the screen (bare `pablo`)",
+          detail: `the only research the drafting model sees; accept its plan/ branch (pablo merge ${P} <branch>, or the screen)`,
         },
       ];
     case "bible":
@@ -146,7 +146,7 @@ function researchSteps(track: TrackId): GuideStep[] {
       gate: true,
       title: `plan the research checklist (${CHECKLIST_FILE})`,
       command: `pablo research plan ${P}`,
-      detail: "accept its plan/ branch in the screen (bare `pablo`) before sourcing or waiving items",
+      detail: `accept its plan/ branch (pablo merge ${P} <branch>, or the screen) before sourcing or waiving items`,
     },
     {
       phase: "research",
@@ -161,7 +161,7 @@ function researchSteps(track: TrackId): GuideStep[] {
       gate: true,
       title: "or waive items, with a reason",
       command: `pablo research waive <#,#,a-b> "<reason>" ${P}`,
-      detail: "several items go on one branch; accept a waive or link branch in the screen before starting the next (two unaccepted ones conflict); the gate opens when every item is sourced or waived",
+      detail: `several items go on one branch; accept a waive or link branch (pablo merge ${P} <branch>, or the screen) before starting the next (two unaccepted ones conflict); the gate opens when every item is sourced or waived`,
     },
   ];
 }
@@ -210,7 +210,7 @@ function outputStageSteps(def: OutputDefinition, stage: string): GuideStep[] | u
           optional: true,
           title: `revise passages of ${each}`,
           command: `pablo revise ${P} --file <file> --passage "<text>" --instruction "<text>" --branch`,
-          detail: "or revise in the screen (bare `pablo`); accept the revise/ branch there",
+          detail: `or revise in the screen (bare \`pablo\`); accept the revise/ branch there or with pablo merge ${P} <branch>`,
         },
       ];
     case "cast":

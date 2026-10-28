@@ -13,10 +13,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NoModelConfiguredError, createProviders, loadConfig } from "@openthink/pablo-core";
-import type { Adapter, Intent } from "@openthink/pablo-core";
 import { deleteBranch, mergeBranch, repoRoot } from "../branch";
-import { readMarker } from "../marker";
 import { OUTPUTS, outputForBranch, outputForWork } from "../outputs/registry";
 import type { OutputDefinition } from "../outputs/types";
 import type { Ritual, RitualOptions } from "./rituals";
@@ -146,46 +143,4 @@ export async function mergeChanges(projectPath: string, branch: string, opts: Me
   const rituals: Ritual[] = [];
   for (const chapter of chapters) rituals.push(...(await output.rituals.afterRevision(projectPath, chapter, revision)));
   return { ok: true, sha: merged.sha as string, chapters, rituals, notices };
-}
-
-/** The intent continuity extraction routes under (AGT-1232): `extraction` routes local, same as drafting. */
-const CONTINUITY_INTENT: Intent = { name: "continuity", kind: "extraction" };
-
-/**
- * `mergeDraft` as the `merge` verb runs it: the slug comes from the project's
- * marker and the continuity extractor from the routed provider. The result
- * carries the exit code the CLI contract wants: 2 for a refusal (not a draft
- * branch, no marker), 1 for a git failure such as a conflict.
- */
-export async function mergeDraftInProject(
-  projectPath: string,
-  branch: string,
-  env: Record<string, string | undefined> = process.env,
-  /** Overrides the routed extraction adapter; tests inject a fake so no model is called. */
-  extractorOverride?: Adapter,
-): Promise<{ readonly exitCode: number; readonly body: Record<string, unknown> }> {
-  if (outputForBranch(projectPath, branch) === undefined) {
-    return { exitCode: 2, body: { ok: false, code: 2, message: `pablo: merge: "${branch}" is not a draft branch (draft/chNN)` } };
-  }
-  const marker = readMarker(projectPath);
-  if (!marker.ok) return { exitCode: marker.code, body: { ok: false, code: marker.code, message: marker.message } };
-
-  const extractor =
-    extractorOverride ??
-    (() => {
-      try {
-        const providers = createProviders(loadConfig({ projectDir: projectPath }));
-        return providers.adapter(providers.route(CONTINUITY_INTENT));
-      } catch (error) {
-        // No model configured: the merge still lands, with continuity skipped (AGT-2131).
-        if (error instanceof NoModelConfiguredError) return undefined;
-        throw error;
-      }
-    })();
-  const merged = await mergeDraft(projectPath, branch, { slug: marker.marker.slug, env, extractor });
-  if (!merged.ok) return { exitCode: 1, body: { ok: false, code: 1, message: merged.notice } };
-  return {
-    exitCode: 0,
-    body: { ok: true, branch, chapter: merged.chapter, commit: merged.sha, rituals: merged.rituals, notices: merged.notices },
-  };
 }

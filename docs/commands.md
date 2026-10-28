@@ -584,11 +584,14 @@ on their own branch:
 ### merge
 
 ```
-pablo merge --project <slug> <draft-branch>
+pablo merge --project <slug> <branch>
+pablo merge --project <slug> --reject <branch>
 ```
 
-Merges a reviewed draft branch (`draft/chNN`, `draft/story`, ...) into `main`, then
-runs the after-write steps for that unit, in this order:
+Accepts any change branch pablo made (`draft/`, `revise/`, `edit/`, `plan/`) onto
+`main`, the way accepting it in the screen does with nothing rejected. A draft
+branch (`draft/chNN`, `draft/story`, ...) merges and runs the after-write steps for
+that unit, in this order:
 
 1. **Outline tick**: the unit's row in the beats file moves to `draft`.
 2. **Note**: a dated note under `notes/`.
@@ -598,8 +601,22 @@ runs the after-write steps for that unit, in this order:
 6. **think sync**: runs only when the `think` CLI is on your `PATH`. Otherwise this step is reported as `skipped`. It is also `skipped` when the environment sets `PABLO_NO_THINK` (anything but empty, `0` or `false`) or the work's `pablo.json` has `"think": false`; use either for scratch and test vaults so they never write to your real cortex. A timeout (20s) or a non-zero exit is reported as `failed`.
 
 Each step is reported (`ran`, `skipped` or `failed`), and a failing step never
-undoes the merge. A conflicting merge changes nothing and runs no steps. A branch
-that isn't a draft branch is refused.
+undoes the merge. A `revise/` or `edit/` branch merges and runs the after-revision
+steps for each unit it changes (your own comments on it become notes). A `plan/`
+branch (`research plan|save|waive|link|distill`, `promote`, `fact record`, an agent
+session's planning writes) merges with no steps: its files are core material, not
+units. A branch that changes nothing on `main` is discarded instead (`merged: false`).
+
+`--reject` deletes the branch, its worktree and its comments; `main` is not touched.
+
+Either way the branch's worktree under `~/.cache/pablo/worktrees/` (or
+`$PABLO_HOME/worktrees/`) is removed, along with the directories it leaves empty.
+A conflicting merge changes nothing and runs no steps. A branch that is not a change
+branch, a branch of a kind that does not exist in the work, or a draft branch that is
+no unit of the work's outputs is refused (exit 2), naming the kind. `--json` returns
+`{ok, branch, kind, merged, commit, chapter (a draft), chapters, rituals, notices}`,
+or `{ok, branch, kind, rejected: true}` with `--reject`. Over MCP: the `merge` tool,
+with `reject: true` for `--reject`.
 
 ### The screen (bare `pablo`)
 
@@ -613,7 +630,7 @@ the branches waiting for review with their diffs and comments. You can:
 
 - draft a unit, revise a selection, or add a selection to the voice
 - edit by hand on an `edit/` branch
-- comment on a branch, and accept it (accepting runs the same after-write steps as `merge`)
+- comment on a branch, and accept it (accepting runs the same steps as `merge`)
 - compose a message to the agent
 
 Outside a work, or without a terminal, bare `pablo` prints the help.
@@ -1067,15 +1084,15 @@ It serves:
 | Writing | `write`, `prose`, `revise` (deprecated aliases, removed next release: `draft_unit`, `draft_chapter` for `write`; `revise_passage` for `revise` with `branch`) |
 | Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `distill_facts`, `plan_research`, `waive_research_item`, `link_research_item`, `record_fact` |
 | Starting a work | `guide` (call it first), `init`, `story`, `output_add` |
-| Accepting a draft | `merge` |
+| Accepting or rejecting a change branch | `merge` |
 | Setup and publishing | `output` (list, remove, plan), `migrate`, `publish` |
 | Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule`, `voice_edit`, `voice_remove`, `voice_use` |
 | Reading | `read`, `search`, `web_search`, `web_fetch` |
 | Radio | `bind`, `audition`, `cast`, `voices`, `describe_voice`, `perform`, `mix`, `fix` |
 
 `init`, `story`, `output_add` and `merge` take the same arguments as the verbs and
-refuse the same way. `merge` accepts a draft: an agent calls it only when you tell
-it to. Those three (`init`, `story`, `merge`) are never offered to pablo's own
+refuse the same way. `merge` accepts a change branch of any kind (or with `reject`
+deletes one): an agent calls it only when you tell it to. Those three (`init`, `story`, `merge`) are never offered to pablo's own
 agent (`pablo agent`, the screen's compose view): it does not start works, run the
 drafting pipeline or land its own drafts. There is also no `voice new` tool.
 

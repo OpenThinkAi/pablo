@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { commitAs, createBranch } from "../src/branch";
-import { draftChapter, mergeDraft, mergeDraftInProject } from "../src/novel/merge";
+import { draftChapter, mergeDraft } from "../src/novel/merge";
+import { acceptBranchInProject } from "../src/review-finish";
 import { runWrite } from "../src/write";
 import { useLocalConfigHome } from "./local-config";
 
@@ -172,7 +173,7 @@ test("pablo merge: a non-draft branch is refused (exit 2) by the CLI verb; the v
   expect(JSON.parse(refused.stdout.toString())).toMatchObject({ ok: false, code: 2 });
 
   // The CLI's success path routes a real extraction adapter; the verb's entry takes a fake instead.
-  const outcome = await mergeDraftInProject(project, "draft/ch02", env, adapter);
+  const outcome = await acceptBranchInProject(project, "draft/ch02", env, adapter);
   expect(outcome.exitCode).toBe(0);
   expect(outcome.body).toMatchObject({ ok: true, branch: "draft/ch02", chapter: 2 });
   expect(existsSync(join(project, "chapters", "02-black-ice.md"))).toBe(true);

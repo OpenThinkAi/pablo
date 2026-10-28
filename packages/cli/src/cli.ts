@@ -27,7 +27,6 @@ import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
 import { migrateTrack } from "./migrate-track";
 import { migrateStyle } from "./migrate-style";
-import { mergeDraftInProject } from "./novel/merge";
 import { initBody, initWork } from "./init";
 import type { TrackChoice } from "./tracks/infer";
 import type { InitOk, InitRefusal } from "./init";
@@ -56,7 +55,7 @@ import { runResumeVerb } from "./resume";
 import { formatStatusProse, readWorkStatus } from "./work-state";
 import { runSave } from "./save";
 import { screenEditPane, screenEditor, screenTargetStore } from "./edit-session";
-import { screenCommenter, screenFinisher } from "./review-finish";
+import { acceptBranchInProject, rejectBranchInProject, screenCommenter, screenFinisher } from "./review-finish";
 import { runReviseBranch, screenReviser } from "./screen-revise";
 import { screenVerb } from "./screen-verb";
 import { screenVoicer } from "./screen-voice";
@@ -1543,22 +1542,30 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   if (args.verb === "merge") {
     const [branch] = args.rest;
+    const reject = args.values["reject"] === true;
     if (projectPath === undefined || branch === undefined) {
-      const message = "pablo: usage: pablo merge --project <slug> <draft/chNN>";
+      const message = "pablo: usage: pablo merge --project <slug> [--reject] <branch>";
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
-    const outcome = await mergeDraftInProject(projectPath, branch);
+    // AGT-2181: any change branch (draft/, revise/, edit/, plan/), accepted the way the screen accepts it, or rejected.
+    const outcome = reject ? rejectBranchInProject(projectPath, branch) : await acceptBranchInProject(projectPath, branch);
     if (args.json) {
       console.log(JSON.stringify(outcome.body));
-    } else if (outcome.body["ok"] === true) {
-      console.log(`pablo: merged ${branch} to main (${String(outcome.body["commit"]).slice(0, 7)})`);
+    } else if (outcome.body["ok"] !== true) {
+      console.error(outcome.body["message"]);
+    } else if (reject) {
+      console.log(`pablo: rejected ${branch}: branch and worktree deleted, main untouched`);
+    } else {
+      console.log(
+        outcome.body["merged"] === true
+          ? `pablo: merged ${branch} to main (${String(outcome.body["commit"]).slice(0, 7)})`
+          : `pablo: ${branch} changes nothing on main: discarded`,
+      );
       for (const r of outcome.body["rituals"] as { name: string; status: string; detail: string }[]) {
         console.log(`ritual ${r.name}: ${r.status} — ${r.detail}`);
       }
       for (const n of outcome.body["notices"] as string[]) console.log(n);
-    } else {
-      console.error(outcome.body["message"]);
     }
     return outcome.exitCode;
   }

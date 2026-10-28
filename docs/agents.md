@@ -90,9 +90,13 @@ them without reading this page.
    `{ok: false, missing: [...]}` is telling you what to plan next. Steer the author
    there; don't work around it.
 5. **Leave acceptance to the author.** Every change lands on a branch (`draft/`,
-   `revise/`, `plan/`). Tell the author what is waiting; they accept it with
-   `pablo merge` or in the screen. The `merge` tool is for when the author has
-   read the branch and tells your agent to accept it, never on the agent's own call.
+   `revise/`, `edit/`, `plan/`). Tell the author what is waiting; they accept it with
+   `pablo merge --project <slug> <branch>` (any kind, including the `plan/` branches
+   research and planning land on) or in the screen, and drop one with
+   `pablo merge --reject`. The `merge` tool (with `reject` to drop) is for when the
+   author has read the branch and tells your agent to accept or reject it, never on
+   the agent's own call. Don't `git merge` a branch yourself: `merge` runs the
+   steps the screen runs and removes the branch's worktree.
 6. **Ask about the author's calls, assume the rest.** Plot direction, a character's
    fate or motive, and any open `[pick]` are theirs. For everything else proceed with
    a stated assumption, and batch your questions.
@@ -142,7 +146,7 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `init` | Start a new work: a slug, a title, and a track (core only) or the novel output |
 | `story` | Write a whole story from a prompt, end to end (or resume a run with `project`) |
 | `output` / `output_add` | List, remove or re-plan outputs / add one (novel, story, screenplay, radio, narrated, essay) once the core is complete |
-| `merge` | Accept a draft branch onto main, when the author says so |
+| `merge` | Accept any change branch (draft, revise, edit, plan) onto main, or with `reject` delete it, when the author says so |
 | `publish` | Compile the drafted text into one file |
 | `voice_list` / `voice_show` / `voice_flag` / `voice_exemplar` / `voice_rule` / `voice_edit` / `voice_remove` / `voice_use` | Inspect and grow the voice: list rules with ids, add, edit or remove one, add a named voice to a work |
 | `prose` | One-off copy in a named voice, outside any work |

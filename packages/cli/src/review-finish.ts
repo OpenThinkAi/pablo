@@ -15,9 +15,11 @@
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { createProviders, loadConfig, parseDiff } from "@openthink/pablo-core";
+import { NoModelConfiguredError, createProviders, loadConfig, parseDiff } from "@openthink/pablo-core";
 import type { Adapter, FileDiff, Intent, LineRef } from "@openthink/pablo-core";
-import { branchDiff, branchIsEmpty, commitAs, deleteBranch, ensureWorktree, fileAt, mergeBaseOf, repoRoot } from "./branch";
+import { BRANCH_KINDS, branchDiff, branchExists, branchIsEmpty, branchKind, commitAs, deleteBranch, ensureWorktree, fileAt, mergeBaseOf, repoRoot } from "./branch";
+import type { BranchKind } from "./branch";
+import { outputForBranch } from "./outputs/registry";
 import { readMarker } from "./marker";
 import { addComment, commentsPath, readComments } from "./comments";
 import type { StoredComment } from "./comments";
@@ -168,7 +170,7 @@ export function authorNotesOf(projectPath: string, repo: string, branch: string)
 const dropComments = (projectPath: string, branch: string): void => rmSync(commentsPath(projectPath, branch), { force: true });
 
 export type FinishResult =
-  | { readonly ok: true; readonly merged: boolean; readonly commit?: string; readonly rituals: readonly Ritual[]; readonly notices: readonly string[] }
+  | { readonly ok: true; readonly merged: boolean; readonly commit?: string; readonly chapters: readonly number[]; readonly rituals: readonly Ritual[]; readonly notices: readonly string[] }
   | { readonly ok: false; readonly notice: string };
 
 /**
@@ -193,12 +195,12 @@ export async function finishReview(projectPath: string, branch: string, rejected
     const removed = deleteBranch(repo, opts.slug, branch, { force: true, env });
     // A discarded branch's comments are written nowhere.
     dropComments(projectPath, branch);
-    return { ok: true, merged: false, rituals: [], notices: removed.ok ? [] : [removed.notice] };
+    return { ok: true, merged: false, chapters: [], rituals: [], notices: removed.ok ? [] : [removed.notice] };
   }
   const merged = await mergeChanges(projectPath, branch, { ...opts, ...(authorNotes.length > 0 ? { authorNotes } : {}) });
   if (!merged.ok) return merged;
   dropComments(projectPath, branch);
-  return { ok: true, merged: true, commit: merged.sha, rituals: merged.rituals, notices: merged.notices };
+  return { ok: true, merged: true, commit: merged.sha, chapters: merged.chapters, rituals: merged.rituals, notices: merged.notices };
 }
 
 /** What the screen gets back: lines to show, or the reason the review did not finish. */
@@ -233,6 +235,91 @@ export function screenFinisher(projectPath: string, deps: { env?: Record<string,
     lines.push(...result.notices);
     return { ok: true, lines };
   };
+}
+
+/** What `merge` (accept or `--reject`) hands the CLI and the MCP tool: the exit code (2 a refusal, 1 a git failure) and the JSON body. */
+export interface BranchVerbOutcome { readonly exitCode: number; readonly body: Record<string, unknown> }
+
+const refusal = (message: string): BranchVerbOutcome => ({ exitCode: 2, body: { ok: false, code: 2, message } });
+
+/**
+ * The checks `merge` and `merge --reject` share: a change branch of a kind pablo makes, that exists in the work's
+ * repository, and (a draft) that is a unit of one of the work's outputs. A refusal names the kind.
+ */
+function changeBranchIn(projectPath: string, branch: string, verb: string): { ok: true; repo: string; slug: string; kind: BranchKind } | { ok: false; outcome: BranchVerbOutcome } {
+  const kind = branchKind(branch);
+  if (kind === undefined) {
+    return { ok: false, outcome: refusal(`pablo: ${verb}: "${branch}" is not a change branch (${BRANCH_KINDS.map((k) => `${k}/`).join(", ")})`) };
+  }
+  if (kind === "draft" && outputForBranch(projectPath, branch) === undefined) {
+    return { ok: false, outcome: refusal(`pablo: ${verb}: "${branch}" is a draft branch of no unit of this work's outputs (draft/chNN, draft/story, ...)`) };
+  }
+  const marker = readMarker(projectPath);
+  if (!marker.ok) return { ok: false, outcome: { exitCode: marker.code, body: { ok: false, code: marker.code, message: marker.message } } };
+  const repo = repoRoot(projectPath);
+  if (repo === undefined) return { ok: false, outcome: { exitCode: 1, body: { ok: false, code: 1, message: `pablo: ${verb}: ${projectPath} is not in a git repository` } } };
+  if (!branchExists(repo, branch)) return { ok: false, outcome: refusal(`pablo: ${verb}: no ${kind} branch "${branch}" in this work`) };
+  return { ok: true, repo, slug: marker.marker.slug, kind };
+}
+
+/**
+ * `pablo merge <branch>` and the MCP `merge` tool (AGT-2181): accepts any change branch (draft, revise, edit, reader,
+ * plan) the way the screen accepts a review with nothing rejected, through `finishReview`: a draft merges and runs the
+ * after-write steps for its unit; any other kind merges and runs the after-revision steps for each unit it changes
+ * (none for a plan/ branch, whose files are core material); a branch that changes nothing is discarded. The branch and
+ * its worktree are removed afterwards. A conflict changes nothing (exit 1).
+ */
+export async function acceptBranchInProject(
+  projectPath: string,
+  branch: string,
+  env: Record<string, string | undefined> = process.env,
+  /** Overrides the routed extraction adapter; tests inject a fake so no model is called. */
+  extractorOverride?: Adapter,
+): Promise<BranchVerbOutcome> {
+  const found = changeBranchIn(projectPath, branch, "merge");
+  if (!found.ok) return found.outcome;
+  const extractor =
+    extractorOverride ??
+    (() => {
+      try {
+        const providers = createProviders(loadConfig({ projectDir: projectPath }));
+        return providers.adapter(providers.route(CONTINUITY_INTENT));
+      } catch (error) {
+        // No model configured: the merge still lands, with continuity skipped (AGT-2131).
+        if (error instanceof NoModelConfiguredError) return undefined;
+        throw error;
+      }
+    })();
+  const result = await finishReview(projectPath, branch, { removed: [], added: [] }, { slug: found.slug, env, ...(extractor ? { extractor } : {}) });
+  if (!result.ok) return { exitCode: 1, body: { ok: false, code: 1, message: result.notice } };
+  return {
+    exitCode: 0,
+    body: {
+      ok: true,
+      branch,
+      kind: found.kind,
+      merged: result.merged,
+      ...(result.commit !== undefined ? { commit: result.commit } : {}),
+      // A draft's one unit, as `merge` has always reported it.
+      ...(found.kind === "draft" && result.chapters.length > 0 ? { chapter: result.chapters[0] } : {}),
+      chapters: result.chapters,
+      rituals: result.rituals,
+      notices: result.notices,
+    },
+  };
+}
+
+/**
+ * `pablo merge --reject <branch>` and the MCP `merge` tool with `reject` (AGT-2181): the screen's "reject everything"
+ * without the screen. The branch, its worktree and its comments are deleted; `main` is not touched.
+ */
+export function rejectBranchInProject(projectPath: string, branch: string, env: Record<string, string | undefined> = process.env): BranchVerbOutcome {
+  const found = changeBranchIn(projectPath, branch, "merge --reject");
+  if (!found.ok) return found.outcome;
+  const removed = deleteBranch(found.repo, found.slug, branch, { force: true, env });
+  if (!removed.ok) return { exitCode: 1, body: { ok: false, code: 1, message: removed.notice } };
+  dropComments(projectPath, branch);
+  return { exitCode: 0, body: { ok: true, branch, kind: found.kind, rejected: true } };
 }
 
 /** The screen's `CommentSaver` (`c` in a review, AGT-1581): stores the author's comment on the branch under the project's author name. */
