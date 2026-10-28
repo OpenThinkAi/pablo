@@ -109,8 +109,8 @@ test("write puts the track's check hits in the receipt and leaves the draft as w
   expect(code).toBe(0);
   const hits = body["check"] as Array<{ rule: string; path: string }>;
   expect(hits.some((h) => h.rule === "fact-accuracy" && h.path === "chapters/02-black-ice.md")).toBe(true);
-  // The anachronism model failed: a notice, not a failed write.
-  expect(body["checkNotices"].join("\n")).toContain("anachronism");
+  // The anachronism model failed: a check error in the notices (AGT-2187), not a failed write.
+  expect(body["checkNotices"].join("\n")).toContain("pablo: check error: anachronism");
   // Never a rewrite: the committed text is the model's, whole.
   const file = join(body["worktree"], "novels", "ice-house", "chapters", "02-black-ice.md");
   expect(readFileSync(file, "utf8")).toContain("The storm came up from the coast.");

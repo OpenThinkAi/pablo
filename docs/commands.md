@@ -529,8 +529,11 @@ every track, anachronism and fact accuracy on `historical-fiction`, claim suppor
 Their hits are reported (`check[]` in the JSON, one line each in the prose form) but never change
 the exit code, and a hit never rewrites the draft. A check that cannot run (no model configured,
 a model error) is reported in `checkNotices[]` (stderr in the prose form) and does not fail the
-write. `--no-check` skips the track's checks and keeps only the mechanical tells. The checks run in
-the draft branch's worktree, so the lexicon and fact-accuracy caches they write stay there.
+write; an anachronism run that left words unjudged is reported there as a `pablo: check error`.
+`--no-check` skips the track's checks and keeps only the mechanical tells. The checks run in
+the draft branch's worktree; the fact-accuracy cache they write stays there, while the anachronism
+lexicon goes to the work's `.pablo/lexicon.json` in the main checkout, so it outlives the worktree
+and nothing untracked is left in it.
 
 ```
 {ok, path, branch, worktree, commit, receipt, check[]}      // success
@@ -705,20 +708,31 @@ period. Each hit carries `term`, `why` (why it is out of period) and `belongs` (
 period it belongs to); `detail` says the same in one line. The period is the
 `## When and where` section of `bible/period.md` (else its first paragraph); with no
 brief the check is skipped and `anachronism.notice` says so. The unit's distinct
-words, never its sentences, go to the model the `check` intent routes to, and every
-verdict is cached per (period, term) in the work's `facts/lexicon.json`, so a
-re-check asks only about words it has not seen and a fully cached one makes no model
-call. A first run on a long work can take a while: it says on stderr how many new
-words it is asking about and prints each batch as it goes. `anachronism.asked` is how
-many model calls the run made. When the model cannot be asked, the cached hits are
-still reported and `anachronism.notice` names what went wrong and where to look (the
-prose form prints it on stderr).
+words, never its sentences, go to the model the `check` intent routes to. Function
+words, month and day names, and capitalised names the bible, `facts.md` or a
+continuity ledger already uses mid-sentence are never sent. The model lists only the
+words that are out of period, one `term | why | belongs` line each, then a line `END`;
+a reply that never reaches `END` (cut short, or in another shape) leaves the words it
+did not list unjudged rather than passing them. Every verdict is cached per (period,
+term) in the work's `.pablo/lexicon.json`, so a re-check asks only about words it has
+not seen and a fully cached one makes no model call. A first run on a long work can
+take a while: it says on stderr how many new words it is asking about and prints each
+batch as it goes. `anachronism.asked` is how many model calls the run made.
 
-`facts/lexicon.json` is part of the work, like `facts.md`: `check` writes it in the
-working tree and you commit it. Edit a verdict there (`inPeriod`, `why`, `belongs`) to
-overrule the model; a hand-edited verdict is used as is. A lexicon that does not parse
-is left alone and the check is skipped with a notice. Verdicts are keyed by the period
-text, so rewriting the brief's `## When and where` section starts a fresh set.
+When any word goes unjudged (no model configured, a model error, a reply missing
+verdicts) the check fails: the hits it did find are still reported,
+`anachronism.notice` names what went wrong and where to look, `anachronism.failed` is
+`true`, the prose form prints `pablo: check error: anachronism: ...` on stderr, and
+`check` exits `1`. It is never a silent pass.
+
+The lexicon is machine state under the work's `.pablo/` (gitignored), and always the
+one in the repository's main checkout: a check run in a draft branch's worktree writes
+there too, so the cache survives the merge that removes the worktree. Edit a verdict
+there (`inPeriod`, `why`, `belongs`) to overrule the model; a hand-edited verdict is
+used as is. A lexicon that does not parse is left alone and the check fails with a
+notice. A `facts/lexicon.json` from an earlier pablo seeds a missing cache and is never
+written. Verdicts are keyed by the period text, so rewriting the brief's
+`## When and where` section starts a fresh set.
 
 On a **historical-fiction** work with `--output`, each unit also gets **fact accuracy**
 against the distilled period facts (`facts/period.md`, from `research distill`). This
@@ -744,20 +758,23 @@ output)` (JSON: `notice`) instead of `no hits`.
 
 `--strict` makes the run exit `1` when any hit is reported (`hits[]` or `core[]`; provenance
 gaps and radio findings are not counted); without it a hit never changes the exit code. A
-refusal is still `2`. Exit `1` with `ok: true` in the JSON means hits.
+refusal is still `2`. Exit `1` with `ok: true` in the JSON means hits, or (with or without
+`--strict`) an anachronism run that left words unjudged (`anachronism.failed`).
 
 Checking a pending draft adds the branch's git worktree under `$PABLO_HOME/worktrees/` when
-it has none (never in the vault tree); the model checks' caches land there too.
+it has none (never in the vault tree); the fact-accuracy cache lands there too, while the
+anachronism lexicon goes to the main checkout's `.pablo/lexicon.json`.
 
 The summary is `factAccuracy: {checked, notice?}`: how many units were sent, and why
 the run stopped short (no model configured, or the model failed). A notice never fails
 the check. The hits are also kept in `.pablo/fact-accuracy.json`, so the screen shows
 them on a unit with its other check hits until the unit's text changes.
 
-Hits are data: exit is `0` either way.
+Hits are data: without `--strict` exit is `0` either way, except an anachronism run
+that left words unjudged (exit `1`, `anachronism.failed`).
 
 ```
-{ok: true, hits[], unprovenanced[], core?[], radio?, anachronism?{asked, notice?}, factAccuracy?{checked, notice?}}
+{ok: true, hits[], unprovenanced[], core?[], radio?, anachronism?{asked, notice?, failed?}, factAccuracy?{checked, notice?}}
 ```
 
 `--across` compares the continuity of every output instead. It reports facts the

@@ -753,7 +753,8 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     body["radio"] = rest;
   }
   if (model.anachronism !== undefined) body["anachronism"] = model.anachronism;
-  return { body, exitCode: args.strict && strictFails(model.hits, outcome.core) ? 1 : 0 };
+  // Terms the anachronism check could not judge fail the check (AGT-2187): `anachronism.failed`, exit 1.
+  return { body, exitCode: model.anachronism?.failed || (args.strict && strictFails(model.hits, outcome.core)) ? 1 : 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -2117,7 +2118,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "check",
     description:
-      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. With `output` it adds the core check under `core`: story-time (a mention dated after the unit's year) and names the bible, facts.md and the output's own ledger do not know. With `across` it instead compares every output's continuity ledger and reports contradictions between tellings, each with a promote action. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`. On a historical-fiction work it also reports `anachronism` hits (a word out of the period in bible/period.md, with why and the period it belongs to), verdicts cached in facts/lexicon.json. With `output` on a historical-fiction work it also runs fact-accuracy: each draft sentence a distilled period fact in facts/period.md contradicts is a `fact-accuracy` hit quoting the sentence, the fact and its source note (summary under `factAccuracy`). `unit` narrows it to one unit of the output; a unit not on main yet is checked on its pending draft branch (or name one with `branch`). With nothing drafted it says so (`notice`). `strict` exits 1 when any hit is reported.",
+      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. With `output` it adds the core check under `core`: story-time (a mention dated after the unit's year) and names the bible, facts.md and the output's own ledger do not know. With `across` it instead compares every output's continuity ledger and reports contradictions between tellings, each with a promote action. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`. On a historical-fiction work it also reports `anachronism` hits (a word out of the period in bible/period.md, with why and the period it belongs to), verdicts cached in the work's .pablo/lexicon.json; words it could not judge set `anachronism.failed` and exit 1. With `output` on a historical-fiction work it also runs fact-accuracy: each draft sentence a distilled period fact in facts/period.md contradicts is a `fact-accuracy` hit quoting the sentence, the fact and its source note (summary under `factAccuracy`). `unit` narrows it to one unit of the output; a unit not on main yet is checked on its pending draft branch (or name one with `branch`). With nothing drafted it says so (`notice`). `strict` exits 1 when any hit is reported.",
     args: CHECK_ARGS,
     run: runCheckVerb,
   },
