@@ -115,7 +115,7 @@ const STAGE_CALLS: Readonly<Record<string, readonly Call[]>> = {
   beats: [["propose", { stage: "beats", content: BEATS }]],
 };
 
-const stageOf = (message: string) => /Stage \d of 5, (\w+)\./.exec(message)?.[1] ?? "unknown";
+const stageOf = (message: string) => /Stage \d+ of \d+, ([\w-]+)\./.exec(message)?.[1] ?? "unknown";
 
 /** pablo's own agent loop on a scripted model: reads the stage off the message, calls that stage's tools, then answers. */
 function fakeHarness(): { agent: HarnessProvider; stages: string[]; prompts: string[] } {

@@ -1068,7 +1068,7 @@ pablo story --project <slug>
 Writes a work end to end from a prompt. It:
 
 1. Creates the work, under `stories/` for a story or `novels/` for a novel.
-2. Builds the story core through the agent harness (research, premise, bible, acts, beats), each stage on a `plan/` branch.
+2. Builds the story core through the agent harness (research, premise, bible, acts, beats), each stage on a `plan/` branch. A `historical-fiction` run builds that track's core instead: premise, the period brief (`bible/period.md`), the research checklist (pablo runs `research plan` on the brief), research (the agent sources each open item with `save_research` or waives it with a reason, every write on the stage's one branch), period facts (pablo runs `research distill`), then bible, acts and beats.
 3. Drafts, merges and publishes each requested output.
 
 `--output` is repeatable. The default is one written output, `story` or `novel`
@@ -1086,8 +1086,9 @@ track's core files (see `init`) and returns `track: {track, inferred, why}` in i
 result (`why` is `--track` for a named one). If the planner can't be reached or answers
 with something unreadable, the run stays on `fiction` and `why` says so. An unknown
 track, or a requested output the track does not allow, is refused before anything is
-written. A historical-fiction run's drafts still wait on the period brief and period
-facts (`write`'s track gate).
+written. A historical-fiction run reaches the draft through its own core, so
+`write`'s track gate is open by the time a unit is drafted; the checklist and the
+period facts ask the `research` intent's provider, as `research plan|distill` do.
 
 By default every branch is accepted as soon as it lands. The agent's questions are
 answered by stated assumptions, which are kept with the run. An `--output essay` on a

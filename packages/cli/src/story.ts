@@ -5,7 +5,8 @@
  * `novels/` when a novel is asked for: the category is the output kind),
  * builds its story core stage by stage (research -> premise -> bible -> acts
  * -> beats, each stage one harness message whose writes land on its own
- * `plan/` branch), then runs each requested output's units through that
+ * `plan/` branch; a historical-fiction work runs its track's core instead,
+ * `HISTORICAL_STORY_STAGES`, AGT-2184), then runs each requested output's units through that
  * output's machine (`output add`, `write`, merge with the after-write
  * rituals) and publishes it through the output's first publish target.
  *
@@ -53,6 +54,7 @@ import { PLAN_INTENT, WORK_RULES_FILE, createPlanner, createProviders, fileRecei
 import type { Adapter, Intent, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
 import { coreStages, readCoreState } from "./core/machine";
+import { itemLabel } from "./core/checklist";
 import { ensureGitignoreEntry, gitCommit, SLUG_PATTERN } from "./init";
 import type { CastingDeps } from "./radio";
 import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, readMarker, trackOf, writeMarker } from "./marker";
@@ -69,6 +71,7 @@ import { startPlanSession } from "./plan";
 import { findVault, resolveProject } from "./project";
 import type { AskAuthor } from "./harness/ask-author";
 import { RESEARCH_INTENT } from "./distill";
+import { distillFactsInProject, planChecklist } from "./research-verbs";
 import { harnessProvider, LOCAL_FALLBACK_NOTICE, shouldWarnLocal } from "./harness/provider";
 import type { HarnessProvider } from "./harness/provider";
 import { planTools } from "./harness/plan-tools";
@@ -86,9 +89,30 @@ import { captureConsoleLog, withWriteLock } from "./verbs";
 import type { VerbContext, VerbResult } from "./verbs";
 import { runWrite } from "./write";
 
-/** The core stages `pablo story` runs, in order: each is one harness message and, when it writes, one `plan/` branch. */
+/** The core stages `pablo story` runs on fiction, in order: each is one harness message and, when it writes, one `plan/` branch. */
 export const STORY_CORE_STAGES = ["research", "premise", "bible", "acts", "beats"] as const;
-export type StoryCoreStage = (typeof STORY_CORE_STAGES)[number];
+
+/**
+ * The historical-fiction core as `pablo story` runs it (AGT-2184, D-5, D-9, D-10, D-22): the premise, then the period
+ * brief, then guided research (pablo plans the checklist from the brief, the harness sources or waives every item),
+ * then pablo distils the notes into period facts, then the bible, acts and beats. `research-plan` and `period-facts`
+ * are pablo's own steps (`research plan`, `research distill` on the `research` intent), not harness messages; every
+ * step's writes land on a `plan/` branch accepted or stopped on like any other stage's.
+ */
+export const HISTORICAL_STORY_STAGES = ["premise", "period", "research-plan", "research", "period-facts", "bible", "acts", "beats"] as const;
+
+export type StoryCoreStage = (typeof STORY_CORE_STAGES)[number] | (typeof HISTORICAL_STORY_STAGES)[number];
+
+/** The stages pablo runs itself rather than as a harness message. */
+const PABLO_STAGES: readonly StoryCoreStage[] = ["research-plan", "period-facts"];
+
+/** The core stages a run on `track` goes through, in order (an absent track is a run started before tracks: fiction). */
+export function storyStages(track: TrackId | undefined): readonly StoryCoreStage[] {
+  return track === "historical-fiction" ? HISTORICAL_STORY_STAGES : STORY_CORE_STAGES;
+}
+
+/** The harness's tools a story stage never offers: pablo plans and distils itself, so the agent's own calls would only leave stray branches. */
+const PABLO_RUN_TOOLS = new Set(["plan_research", "distill_facts"]);
 
 /** A prompt asking for this many words or more is a novel; fewer is a story. */
 export const NOVEL_WORDS = 20_000;
@@ -199,6 +223,11 @@ export interface StoryDeps {
    * type's own seam (`radioMachine`). Never touched by a run with no radio output.
    */
   readonly casting?: CastingDeps;
+  /**
+   * The research agent a historical-fiction run plans the checklist and distils the period facts with (AGT-2184);
+   * absent, the config's `research` intent, as for `pablo research plan|distill`. A fake in tests.
+   */
+  readonly researcher?: Adapter;
   /**
    * The planner `story` asks, once, which track an unflagged prompt is on (AGT-2103); absent, pablo's planner
    * (`createPlanner`). A fake in tests. Never called when `--track` is given or a run resumes.
@@ -385,16 +414,16 @@ function freeSlug(vault: string, title: string): string {
   return slug;
 }
 
-const STAGE_TEXT: Readonly<Record<StoryCoreStage, string>> = {
+/** What each fiction stage asks; the "Stage k of n, <stage>." prefix is `stageMessage`'s. */
+const STAGE_TEXT: Readonly<Record<(typeof STORY_CORE_STAGES)[number], string>> = {
   research:
-    "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice). You have no web access: work from the work's saved notes and what you know with confidence, and keep each finding with save_research, citing only sources you can name exactly (author, title and year); never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
+    "Find what this story needs to be true to (its period, place, work and practice). You have no web access: work from the work's saved notes and what you know with confidence, and keep each finding with save_research, citing only sources you can name exactly (author, title and year); never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
   premise:
-    'Stage 2 of 5, premise. Read the research notes (read, search) and propose the premise with propose (stage "premise"): bible/overview.md with ## Title (the work\'s own short title, two to six words, about the story and not the request), ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure.',
+    'Read the research notes (read, search) and propose the premise with propose (stage "premise"): bible/overview.md with ## Title (the work\'s own short title, two to six words, about the story and not the request), ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure.',
   bible:
-    'Stage 3 of 5, bible. Propose the cast (propose stage "cast", one character per call, with a lowercase-hyphen name) and the places (stage "places"), and the timeline (stage "timeline": a | Year | Real events | In the story | table with a row for every year a beat will be set in). Record any other fact the story stands on with record_fact, tagged researched with its source, or invented.',
-  acts: 'Stage 4 of 5, acts. Propose the acts table with propose (stage "acts"): rows of | Act | Years | What it accomplishes |.',
-  beats:
-    'Stage 5 of 5, beats. Propose the beats with propose (stage "beats"): one row per story unit, | # | Story date | Title (working) | Beat | POV | Status |, status "outline".',
+    'Propose the cast (propose stage "cast", one character per call, with a lowercase-hyphen name) and the places (stage "places"), and the timeline (stage "timeline": a | Year | Real events | In the story | table with a row for every year a beat will be set in). Record any other fact the story stands on with record_fact, tagged researched with its source, or invented.',
+  acts: 'Propose the acts table with propose (stage "acts"): rows of | Act | Years | What it accomplishes |.',
+  beats: 'Propose the beats with propose (stage "beats"): one row per story unit, | # | Story date | Title (working) | Beat | POV | Status |, status "outline".',
 };
 
 /**
@@ -402,14 +431,49 @@ const STAGE_TEXT: Readonly<Record<StoryCoreStage, string>> = {
  * `web_search` and `web_fetch` and must use them, so every note cites at least one page it fetched.
  */
 const RESEARCH_WEB =
-  "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice). Search the web with web_search, read the promising pages with web_fetch (a search snippet is not a source), and keep each finding with save_research. Every note cites at least one page you fetched, by the url web_fetch returned, with its retrievedAt date (e.g. \"https://... (retrieved 2026-10-27)\"); when no page exists for a finding, cite a book by author, title and year and say in the note why no page was found. Never cite general knowledge or memory, never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.";
+  "Find what this story needs to be true to (its period, place, work and practice). Search the web with web_search, read the promising pages with web_fetch (a search snippet is not a source), and keep each finding with save_research. Every note cites at least one page you fetched, by the url web_fetch returned, with its retrievedAt date (e.g. \"https://... (retrieved 2026-10-27)\"); when no page exists for a finding, cite a book by author, title and year and say in the note why no page was found. Never cite general knowledge or memory, never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.";
+
+/** What the historical-fiction harness stages ask where they differ from fiction's (AGT-2184). */
+const HISTORICAL_TEXT: Readonly<Partial<Record<StoryCoreStage, string>>> = {
+  premise:
+    'This is historical fiction: the story is set in a real period and place. Propose the premise with propose (stage "premise"): bible/overview.md with ## Title (the work\'s own short title, two to six words, about the story and not the request), ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure. Research comes after the period brief; save nothing yet.',
+  period:
+    'Write the period brief with propose (stage "period"): bible/period.md with ## When and where (the years and the place), ## The events (the real history the story runs through) and ## What the story must be true to (the people, places, technology, language, daily life, politics and dates a reader could check). pablo derives the research checklist from it. Propose nothing else.',
+  bible:
+    'Propose the cast (propose stage "cast", one character per call, with a lowercase-hyphen name) and the places (stage "places"), and the timeline (stage "timeline": a | Year | Real events | In the story | table with a row for every year a beat will be set in). Keep them true to the period brief and the distilled period facts (facts/period.md). Record any other fact the story stands on with record_fact, tagged researched with its source, or invented.',
+};
+
+/**
+ * The research stage's text on historical fiction: the checklist pablo planned from the period brief, and its open
+ * items by number, each to be sourced (save_research with items, or link_research_item) or waived with a reason.
+ */
+function historicalResearchText(work: string | undefined, web: boolean): string {
+  const items = work === undefined ? [] : (readCoreState(work, "historical-fiction").checklist?.items ?? []).filter((i) => i.status === "open");
+  const list = items.length === 0 ? "" : `\n\nOpen checklist items:\n${items.map((i) => `- ${itemLabel(i)}`).join("\n")}`;
+  return (
+    `pablo planned the research checklist (research/checklist.md) from the period brief. Close every open item: keep a finding with save_research, passing items (the numbers it sources). ${web ? "Search the web with web_search and read the promising pages with web_fetch (a search snippet is not a source); cite each page by the url web_fetch returned, with its retrievedAt date, or a book by author, title and year" : "Cite only sources you can name exactly: a book by author, title and year, or a URL with its retrieval date"}; never cite general knowledge or memory, never invent a source or a retrieval date. A note already saved can close an item with link_research_item. An item the story does not need is waived with waive_research_item and a reason (items closes several at once). Propose nothing yet.` +
+    list
+  );
+}
 
 const ON_DEMAND =
   "This is an on-demand run: nobody reviews the stages as they land. When a call is the author's, ask_author answers with an instruction to assume: make the most plausible choice, state it as an assumption (record_fact, kind invented), and continue.";
 const REVIEW_MODE = "This is a review run: the author reviews this stage's plan branch before the next stage starts. Use ask_author only for what you cannot reasonably assume.";
 
-/** The harness message for one core stage. `web` is whether the run has a web search backend (`webConfigured`). */
-export function stageMessage(stage: StoryCoreStage, state: Pick<StoryState, "prompt" | "outputs" | "review">, title: string, slug: string, web = false): string {
+/**
+ * The harness message for one core stage. `web` is whether the run has a web search backend (`webConfigured`);
+ * `work` (the work's directory) lists a historical run's open checklist items (AGT-2184).
+ */
+export function stageMessage(stage: StoryCoreStage, state: Pick<StoryState, "prompt" | "outputs" | "review" | "track">, title: string, slug: string, web = false, work?: string): string {
+  const track = state.track?.track;
+  const harnessStages = storyStages(track).filter((s) => !PABLO_STAGES.includes(s));
+  const historical = track === "historical-fiction";
+  const text =
+    historical && stage === "research"
+      ? historicalResearchText(work, web)
+      : stage === "research" && web
+        ? RESEARCH_WEB
+        : ((historical ? HISTORICAL_TEXT[stage] : undefined) ?? STAGE_TEXT[stage as (typeof STORY_CORE_STAGES)[number]] ?? "");
   const length =
     stage === "beats"
       ? state.outputs.includes("novel")
@@ -421,7 +485,7 @@ export function stageMessage(stage: StoryCoreStage, state: Pick<StoryState, "pro
     "",
     `> ${state.prompt.replace(/\n/g, "\n> ")}`,
     "",
-    `${stage === "research" && web ? RESEARCH_WEB : STAGE_TEXT[stage]}${length}`,
+    `Stage ${harnessStages.indexOf(stage) + 1} of ${harnessStages.length}, ${stage}. ${text}${length}`,
     "",
     state.review ? REVIEW_MODE : ON_DEMAND,
   ].join("\n");
@@ -590,7 +654,7 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
     work: prompt.work,
     provider,
     ctx: { ...run.ctx, caller: "mcp" as const },
-    tools: web ? harnessTools(ask) : harnessTools(ask).filter((tool) => !WEB_TOOLS.has(tool.name)),
+    tools: harnessTools(ask).filter((tool) => !PABLO_RUN_TOOLS.has(tool.name) && (web || !WEB_TOOLS.has(tool.name))),
     sessionTools: planTools(session, run.work),
     // Every agent-loop turn keeps a receipt in the work's log, under the stage's intent (AGT-2191).
     receipts: { sink: fileReceiptSink(run.work), intent: stageIntent(stage).name },
@@ -598,7 +662,7 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
   const entries: TranscriptEntry[] = [];
   let finished: { ok: boolean; text: string; errors: readonly string[] } | undefined;
   try {
-    for await (const entry of runHarness(stageMessage(stage, run.state, run.title, run.slug, web), spec, run.deps.query ?? loopQuery)) {
+    for await (const entry of runHarness(stageMessage(stage, run.state, run.title, run.slug, web, run.work), spec, run.deps.query ?? loopQuery)) {
       entries.push(entry);
       if (entry.kind === "result") finished = entry;
     }
@@ -616,11 +680,34 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
   return { ok: true, branch: session.branch, sha: git(run.repo, ["rev-parse", session.branch]) };
 }
 
+/**
+ * pablo's own historical steps (AGT-2184): `research-plan` plans `research/checklist.md` from the period brief,
+ * `period-facts` distils the notes into `facts/period.md`, each on a `plan/` branch as `pablo research plan|distill`
+ * write it. A step whose file is already in place (a resumed run, or the author did it by hand) writes nothing.
+ */
+async function runPabloStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true; branch?: string; sha?: string } | { ok: false; result: VerbResult }> {
+  if (stageMissing(run.work, stage) === undefined) return { ok: true };
+  const deps = { researcher: run.deps.researcher, stderr: run.ctx.stderr };
+  const result = stage === "research-plan" ? await planChecklist(run.work, run.ctx.env, deps) : await distillFactsInProject(run.work, run.ctx.env, deps);
+  const body = result.body as Record<string, unknown>;
+  if (result.exitCode !== 0 || body["ok"] !== true) {
+    return { ok: false, result: { body: { ...body, stage, message: `pablo: story: the ${stage} stage stopped: ${String(body["message"] ?? "")}` }, exitCode: result.exitCode === 0 ? 1 : result.exitCode } };
+  }
+  const branch = body["branch"] as string;
+  return { ok: true, branch, sha: git(run.repo, ["rev-parse", branch]) };
+}
+
 /** What a required core stage still lacks after its branch landed, or undefined when it is met. */
 function stageMissing(work: string, stage: StoryCoreStage): readonly string[] | undefined {
-  if (stage === "research") return undefined;
   const marker = readMarker(work);
-  const found = coreStages(readCoreState(work, marker.ok ? trackOf(marker.marker) : undefined)).find((s) => s.id === stage);
+  const track = marker.ok ? trackOf(marker.marker) : undefined;
+  // Research is optional on fiction: a run that needed none saves nothing.
+  if (stage === "research" && track !== "historical-fiction") return undefined;
+  const state = readCoreState(work, track);
+  if (stage === "research-plan") {
+    return state.checklist !== undefined && state.checklist.items.length > 0 ? undefined : ["research/checklist.md has no items yet (pablo research plan)"];
+  }
+  const found = coreStages(state).find((s) => s.id === stage);
   return found === undefined || found.done ? undefined : found.missing;
 }
 
@@ -844,12 +931,13 @@ async function advance(run: Run): Promise<VerbResult> {
   const { state } = run;
   const env = run.ctx.env;
 
-  for (const stage of STORY_CORE_STAGES) {
+  const stages = storyStages(state.track?.track);
+  for (const stage of stages) {
     retitleFromPremise(run);
     const step = `core:${stage}`;
     if (state.done.includes(step)) continue;
-    progress(run, `${stage} (core stage ${STORY_CORE_STAGES.indexOf(stage) + 1} of ${STORY_CORE_STAGES.length})`);
-    const ran = await runCoreStage(run, stage);
+    progress(run, `${stage} (core stage ${stages.indexOf(stage) + 1} of ${stages.length})`);
+    const ran = PABLO_STAGES.includes(stage) ? await runPabloStage(run, stage) : await runCoreStage(run, stage);
     if (!ran.ok) return ran.result;
     if (ran.branch === undefined) {
       const missing = stageMissing(run.work, stage);
