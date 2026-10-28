@@ -70,6 +70,7 @@ function failure(error: unknown): ConfigResult {
 /** A key as the config names it: never its value. */
 export function keyReference(provider: ProviderConfig): string {
   const key = provider.key;
+  if (key.from === "none") return "none";
   if (key.from === "env") return `env:${key.variable}`;
   return key.account === undefined ? `keychain:${key.service}` : `keychain:${key.service}/${key.account}`;
 }

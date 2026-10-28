@@ -137,9 +137,9 @@ model you run. A hosted model works for every step; it just costs per chapter.
 
 A work's `pablo.json` may carry its own `providers` and `intents`, in the same shape as
 above. They are merged over this file for every command run on that work: a provider
-entry changes only the fields it sets on the global one of the same name (its key
-reference included), a new name adds a provider, and an intent mapping replaces the
-global one for that intent. `default` and the rest stay global.
+entry changes only the fields it sets on the global one of the same name, a new name
+adds a provider, and an intent mapping replaces the global one for that intent.
+`default`, every provider's `key` and the rest stay global.
 
 ```json
 {
@@ -155,8 +155,15 @@ global one for that intent. `default` and the rest stay global.
 `pablo.json` is committed with the work and can come from a co-author or a merged
 branch, so it is trusted less than this file:
 
-- `key` is `env:<NAME>` or `keychain:...`, never the key itself. Every command
-  refuses a work whose `pablo.json` holds a key until it is removed.
+- `pablo.json` may not set `key` on any provider, not even an `env:<NAME>` or
+  `keychain:...` reference. Every command refuses a work whose `pablo.json` has a
+  `key` until it is removed, naming the provider. Keys are set in this file only. A
+  provider the work overrides keeps the key of the global provider of the same name;
+  a provider the work adds has no key at all (the `<NAME>_API_KEY` convention does not
+  apply to it). Otherwise a committed file could choose which secret, any environment
+  variable or Keychain item, is sent to a port on this machine. If a local server a
+  work uses needs a key, declare that provider here with its `key`, and override only
+  its `model` from `pablo.json`.
 - A work may add a provider, or change any field of one, only on this machine
   (`127.0.0.1`, `localhost` or `::1`). On a remote provider (Anthropic, a hosted
   endpoint) it may change only `model`, `timeoutMs`, `temperature`, `thinking` and `tools`.

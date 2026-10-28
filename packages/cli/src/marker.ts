@@ -59,8 +59,8 @@
  * `providers` and `intents` (AGT-2129, D-13) route this work's model calls
  * over the global config; core's `loadConfig({ projectDir })` reads and
  * validates them. One check is made here too, so every verb refuses it: a
- * provider's `key` written inline (anything but `env:<NAME>` or
- * `keychain:<service>[/<account>]`), since this file is committed.
+ * provider entry that sets `key` at all (AGT-2228, D-4: keys are bound only in
+ * the global config, since this file is committed; core's `refuseWorkKey`).
  *
  * A missing required key is refused by name (`message` names the exact key).
  * A directory with no `pablo.json` at all is refused with a pointer at
@@ -69,7 +69,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { keySourceFor } from "@openthink/pablo-core";
+import { refuseWorkKey } from "@openthink/pablo-core";
 import { NOVEL_DIR } from "./outputs/novel/units";
 import type { OutputId } from "./outputs/registry";
 import { isOutputId, outputIds } from "./outputs/registry";
@@ -291,8 +291,8 @@ export function readMarker(workDir: string): MarkerResult {
   if (think !== undefined && typeof think !== "boolean") {
     return refuse(`pablo: ${path} has an invalid "think" (${JSON.stringify(think)}); it is true or false`, [path]);
   }
-  const inlineKey = inlineKeyRefusal(data["providers"], path);
-  if (inlineKey !== undefined) return inlineKey;
+  const workKey = workKeyRefusal(data["providers"], path);
+  if (workKey !== undefined) return workKey;
 
   const marker: Marker = {
     title: data["title"] as string,
@@ -319,15 +319,12 @@ export function readMarker(workDir: string): MarkerResult {
   return { ok: true, marker };
 }
 
-/** A provider entry whose `key` is not an `env:` or `keychain:` reference, as a refusal; the rest of `providers` is core's to validate. */
-function inlineKeyRefusal(providers: unknown, path: string): Refusal | undefined {
+/** A provider entry that sets `key` (any value, a reference included), as a refusal; the rest of `providers` is core's to validate. */
+function workKeyRefusal(providers: unknown, path: string): Refusal | undefined {
   if (!isObject(providers)) return undefined;
   for (const [id, entry] of Object.entries(providers)) {
-    if (!isObject(entry) || entry["key"] === undefined) continue;
-    const key = entry["key"];
-    if (typeof key !== "string") return refuse(`pablo: ${path}: provider "${id}": "key" must be a string`, [path]);
     try {
-      keySourceFor(id, key, `${path}: provider "${id}"`);
+      refuseWorkKey(id, entry, path);
     } catch (error) {
       return refuse((error as Error).message, [path]);
     }

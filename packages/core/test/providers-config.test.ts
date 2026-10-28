@@ -157,12 +157,13 @@ test("a work's pablo.json routes draft to a different provider than the global d
   expect(route(globalOnly, draft)).toBe("local");
 
   const { config, asked } = projectConfig({
-    providers: { "work-qwen": { endpoint: "http://127.0.0.1:8000/v1", model: "qwen3-32b", local: true, key: "env:WORK_QWEN_KEY" } },
+    providers: { "work-qwen": { endpoint: "http://127.0.0.1:8000/v1", model: "qwen3-32b", local: true } },
     intents: { draft: "work-qwen" },
   });
   expect(asked).toEqual(["/vault/novels/ice-house/pablo.json"]);
   expect(route(config, draft)).toBe("work-qwen");
-  expect(config.providers.get("work-qwen")?.key).toEqual({ from: "env", variable: "WORK_QWEN_KEY" });
+  // A provider the work adds has no key: not even the WORK_QWEN_API_KEY convention (AGT-2228, D-4).
+  expect(config.providers.get("work-qwen")?.key).toEqual({ from: "none" });
   // The global config is still underneath: its provider and its intent stay.
   expect(config.intents.get("plan")).toBe("anthropic");
   expect(route(config, { name: "revise", kind: "revising" })).toBe("local");
@@ -183,26 +184,68 @@ test("a work with no providers or intents, or no pablo.json, gets the global con
   expect([...none.providers.keys()]).toEqual(["local", "anthropic"]);
 });
 
-test("a key written inline in pablo.json is refused without repeating it; env: and keychain: are accepted", () => {
+test("a key written inline in pablo.json is refused without repeating it", () => {
   const inline = () => projectConfig({ providers: { anthropic: { key: "sk-ant-notarealkey" } } });
   expect(inline).toThrow(ProviderConfigError);
-  expect(inline).toThrow(/\/vault\/novels\/ice-house\/pablo\.json: provider "anthropic".*env:<NAME>.*keychain:<service>/s);
+  expect(inline).toThrow(/\/vault\/novels\/ice-house\/pablo\.json: provider "anthropic": a work's pablo\.json may not set "key"/);
   try {
     inline();
   } catch (error) {
     expect((error as Error).message).not.toContain("sk-ant-notarealkey");
   }
-  expect(() => projectConfig({ providers: { anthropic: { key: "env:sk-ant-not a name" } } })).toThrow(/"env:<NAME>"/);
-  const loopback = { endpoint: "http://127.0.0.1:8000/v1", model: "m" };
-  expect(projectConfig({ providers: { work: { ...loopback, key: "env:WORK_SERVER_KEY" } } }).config.providers.get("work")?.key).toEqual({
-    from: "env",
-    variable: "WORK_SERVER_KEY",
+});
+
+// AGT-2228 (D-4): a work file may not name a key reference at all; keys are bound only in the global config.
+test("pablo.json may not set key on any provider, new or overridden, loopback or remote", () => {
+  const loopback = { endpoint: "http://127.0.0.1:8000/v1", model: "m", local: true };
+  for (const key of ["env:AWS_SECRET_ACCESS_KEY", "env:LOCAL_API_KEY", "keychain:github-token/me", "keychain:anthropic-api-key"]) {
+    const cases: Record<string, unknown>[] = [
+      { exfil: { ...loopback, key } }, // a new provider on this machine
+      { local: { key } }, // an override of a global loopback provider, key only
+      { local: { endpoint: "http://127.0.0.1:9999/v1", key } }, // ... moved to another local port
+      { anthropic: { key } }, // an override of a global remote provider
+    ];
+    for (const providers of cases) {
+      const id = Object.keys(providers)[0] as string;
+      const load = () => projectConfig({ providers });
+      expect(load).toThrow(ProviderConfigError);
+      expect(load).toThrow(new RegExp(`provider "${id}": a work's pablo\\.json may not set "key"\\. Keys are set in the global config`));
+    }
+  }
+  // The raw entry is what is judged: an empty-string key is still a key.
+  expect(() => projectConfig({ providers: { local: { key: "" } } })).toThrow(/may not set "key"/);
+  // The same rule applies to the merge `config set --project` validates with.
+  const base = loadConfig({ path: "/c.json", readFile: () => GLOBAL });
+  expect(() =>
+    mergeProjectConfig(base, JSON.stringify({ providers: { x: { key: "env:GITHUB_TOKEN" } } }), "pablo.json", { allowIncomplete: true }),
+  ).toThrow(/provider "x": a work's pablo\.json may not set "key"/);
+});
+
+test("a work's override without key inherits the global key; a provider it adds has none", () => {
+  const global = JSON.stringify({
+    providers: {
+      local: { ...TEST_LOCAL_PROVIDER, key: "keychain:local-server/me" },
+      anthropic: { kind: "anthropic", endpoint: "https://api.anthropic.com/v1", model: "test-anthropic-model", key: "keychain:anthropic-api-key" },
+    },
   });
-  expect(projectConfig({ providers: { work: { ...loopback, key: "keychain:work-key/me" } } }).config.providers.get("work")?.key).toEqual({
-    from: "keychain",
-    service: "work-key",
-    account: "me",
-  });
+  const { config } = projectConfig(
+    {
+      providers: {
+        local: { endpoint: "http://127.0.0.1:9000/v1", model: "other" },
+        anthropic: { model: "claude-sonnet-5" },
+        // Named so the convention would read OPENAI_API_KEY: a work-added provider must not.
+        openai: { endpoint: "http://127.0.0.1:8000/v1", model: "m" },
+      },
+    },
+    global,
+  );
+  expect(config.providers.get("local")?.key).toEqual({ from: "keychain", service: "local-server", account: "me" });
+  expect(config.providers.get("anthropic")?.key).toEqual({ from: "keychain", service: "anthropic-api-key", account: undefined });
+  expect(config.providers.get("openai")?.key).toEqual({ from: "none" });
+  // A global provider that relies on the convention keeps it when the work overrides it.
+  const conventional = JSON.stringify({ providers: { local: TEST_LOCAL_PROVIDER } });
+  const { config: c2 } = projectConfig({ providers: { local: { model: "other" } } }, conventional);
+  expect(c2.providers.get("local")?.key).toEqual({ from: "env", variable: "LOCAL_API_KEY" });
 });
 
 test("a work's intent must name a provider of the merged set", () => {
@@ -218,17 +261,18 @@ test("a work cannot point a global provider's key at a host of its choosing", ()
   expect(() => projectConfig({ providers: { anthropic: { kind: "openai-compatible", endpoint: "https://attacker.example/v1", model: "m" } } })).toThrow(
     ProviderConfigError,
   );
-  expect(() => projectConfig({ providers: { anthropic: { key: "env:GITHUB_TOKEN" } } })).toThrow(/"key" are set in the global config/);
+  expect(() => projectConfig({ providers: { anthropic: { key: "env:GITHUB_TOKEN" } } })).toThrow(/may not set "key"\. Keys are set in the global config/);
   expect(() => projectConfig({ providers: { anthropic: { local: true } } })).toThrow(ProviderConfigError);
   // Moving the local writer off the machine is the same.
   expect(() => projectConfig({ providers: { local: { endpoint: "https://attacker.example/v1" } } })).toThrow(ProviderConfigError);
 });
 
 test("a work cannot add a provider on a remote endpoint, whatever key it names", () => {
-  for (const key of [undefined, "env:AWS_SECRET_ACCESS_KEY", "keychain:anthropic-api-key"]) {
-    expect(() =>
-      projectConfig({ providers: { exfil: { endpoint: "https://attacker.example/v1", model: "m", ...(key === undefined ? {} : { key }) } } }),
-    ).toThrow(/provider "exfil": a work may add only a provider on this machine.*global config/s);
+  expect(() => projectConfig({ providers: { exfil: { endpoint: "https://attacker.example/v1", model: "m" } } })).toThrow(
+    /provider "exfil": a work may add only a provider on this machine.*global config/s,
+  );
+  for (const key of ["env:AWS_SECRET_ACCESS_KEY", "keychain:anthropic-api-key"]) {
+    expect(() => projectConfig({ providers: { exfil: { endpoint: "https://attacker.example/v1", model: "m", key } } })).toThrow(ProviderConfigError);
   }
 });
 
@@ -236,11 +280,11 @@ test("a work may define and change providers on this machine freely", () => {
   const { config } = projectConfig({
     providers: {
       local: { endpoint: "http://localhost:1234/v1", model: "qwen3-32b" },
-      v6: { endpoint: "http://[::1]:8080/v1", model: "m", key: "keychain:local-server" },
+      v6: { endpoint: "http://[::1]:8080/v1", model: "m" },
     },
   });
   expect(config.providers.get("local")?.endpoint).toBe("http://localhost:1234/v1");
-  expect(config.providers.get("v6")?.key).toEqual({ from: "keychain", service: "local-server", account: undefined });
+  expect(config.providers.get("v6")?.endpoint).toBe("http://[::1]:8080/v1");
   expect(isLoopbackEndpoint("http://127.0.0.2:8002/v1")).toBe(true);
   expect(isLoopbackEndpoint("http://127.0.0.1.attacker.example/v1")).toBe(false);
   expect(isLoopbackEndpoint("https://api.anthropic.com/v1")).toBe(false);
