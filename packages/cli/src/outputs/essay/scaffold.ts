@@ -27,6 +27,12 @@ import { essayTrack, ESSAY_OUTLINE_FILE, ESSAY_THESIS_FILE } from "./sections";
 
 const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 
+/** An act's plain label, as the beats file's headings name it: `Act I` for an act named `I`, the name when it already says `Act`. */
+export function actLabel(act: ActRow): string {
+  const name = act.act.trim();
+  return /^act\b/i.test(name) ? name : `Act ${name}`;
+}
+
 /**
  * An act's section title: the act's own title when its name carries one (`Act I: The Crossing`, `I - The Crossing`),
  * else the opening clause of what it accomplishes; a bare `Act I` only when the row says nothing else.

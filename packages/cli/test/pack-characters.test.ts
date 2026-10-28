@@ -196,15 +196,15 @@ function fictionEssay(beats: string): { vault: string; work: string; marker: Mar
 
 test("AGT-2183: a fiction essay's act section carries that act's beat rows, from the act headings", () => {
   const { vault, work, marker } = fictionEssay(ACTS_HEADED);
-  // Sections: 1 The story, 2 The world it is drawn from, 3 Act I, 4 Act II, 5 What the story argues.
-  const act1 = packOf(buildEssayPack(vault, work, 3, { marker, output: "essay" }));
+  // Sections: 1 The story, 2 Act I, 3 Act II, 4 What the story argues (plain fiction has no period section, AGT-2195).
+  const act1 = packOf(buildEssayPack(vault, work, 2, { marker, output: "essay" }));
   const beats1 = act1.slices.find((s) => s.name === "actBeats");
   expect(beats1?.source).toBe("novels/four-beats/outline/beats.md");
   expect(beats1?.text).toContain('- Beat 1 (October 1930, POV Ines), "The Letter": The board\'s letter arrives.');
   expect(beats1?.text).toContain("Beat 3");
   expect(beats1?.text).not.toContain("Beat 4");
 
-  const act2 = packOf(buildEssayPack(vault, work, 4, { marker, output: "essay" }));
+  const act2 = packOf(buildEssayPack(vault, work, 3, { marker, output: "essay" }));
   const beats2 = act2.slices.find((s) => s.name === "actBeats")?.text ?? "";
   expect(beats2).toContain('"The Last Watch"');
   expect(beats2).not.toContain("Beat 1 ");
@@ -221,12 +221,12 @@ test("AGT-2183: a fiction essay's act section carries that act's beat rows, from
 
 test("AGT-2183: with every beat under one heading the beats split over the acts in order, and the acts table is never a beat", () => {
   const { vault, work, marker } = fictionEssay(ACTS_FLAT);
-  const act1 = packOf(buildEssayPack(vault, work, 3, { marker, output: "essay" })).slices.find((s) => s.name === "actBeats")?.text ?? "";
+  const act1 = packOf(buildEssayPack(vault, work, 2, { marker, output: "essay" })).slices.find((s) => s.name === "actBeats")?.text ?? "";
   expect(act1).toContain('"The Letter"');
   expect(act1).toContain('"The Engineer"');
   expect(act1).not.toContain('"The Storm"');
   expect(act1).not.toContain("Letter |");
-  const act2 = packOf(buildEssayPack(vault, work, 4, { marker, output: "essay" })).slices.find((s) => s.name === "actBeats")?.text ?? "";
+  const act2 = packOf(buildEssayPack(vault, work, 3, { marker, output: "essay" })).slices.find((s) => s.name === "actBeats")?.text ?? "";
   expect(act2).toContain('"The Storm"');
   expect(act2).toContain('"The Last Watch"');
   expect(act2).not.toContain('"The Letter"');

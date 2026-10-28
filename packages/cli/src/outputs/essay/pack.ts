@@ -27,7 +27,7 @@ import { CAST_ENDS_AT, packFromInputs } from "../../novel/pack";
 import { frontmatterField } from "../novel/plan";
 import type { TrackId } from "../../tracks/registry";
 import type { PlanRow, UnitPackOptions, UnitPackOutcome, UnitPreconditions } from "../types";
-import { actTitle } from "./scaffold";
+import { actLabel, actTitle } from "./scaffold";
 import { ESSAY_OUTLINE_FILE, ESSAY_PATH, ESSAY_THESIS_FILE, essayOutline, essayTrack, readEssayFile, sectionBody, sectionClaims } from "./sections";
 import { ESSAY_ID } from "./units";
 
@@ -124,8 +124,8 @@ function fold(text: string): string {
 }
 
 /**
- * The beat rows a fiction essay's act section tells (AGT-2183): the section whose title is an act's (`Act I`, as
- * the scaffold writes it) gets the beats under that act's `## Act I` heading in the beats file, when the file
+ * The beat rows a fiction essay's act section tells (AGT-2183): the section whose title is an act's (by its own
+ * title, as the scaffold writes it) gets the beats under that act's `## Act I` heading in the beats file, when the file
  * splits its beats across two or more act headings; otherwise the beats split over the acts in order, as evenly as
  * they go (a beats file that lists every beat under one heading says nothing finer). `undefined` for a section that
  * is not an act's. `source` labels the rows (the vault-relative beats file).
@@ -135,7 +135,8 @@ export function actBeatsFor(workDir: string, track: TrackId, section: EssaySecti
   const index = acts.findIndex((a) => fold(actTitle(a)) === fold(section.title));
   if (index === -1) return undefined;
   const beats = parseHeadedBeatRows(read(join(workDir, beatsFile(workDir))) ?? "", source);
-  const actOf = (heading: string): number => acts.findIndex((a) => fold(actTitle(a)) === fold(heading));
+  // The beats file's headings name an act by its plain label (`## Act I`); the section is titled by the act's own title.
+  const actOf = (heading: string): number => acts.findIndex((a) => fold(actLabel(a)) === fold(heading) || fold(actTitle(a)) === fold(heading));
   const headed = new Set(beats.map((b) => actOf(b.heading)).filter((i) => i !== -1));
   if (headed.size >= 2) return beats.filter((b) => actOf(b.heading) === index).map((b) => b.row);
   const from = Math.floor((index * beats.length) / acts.length);
