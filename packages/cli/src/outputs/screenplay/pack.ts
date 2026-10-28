@@ -152,6 +152,7 @@ export function buildScreenplayPack(vaultRoot: string, workDir: string, scene: n
     {
       ...rest,
       unitLabel: `scene ${scene}`,
+      scriptUnit: true,
       ...(summary !== undefined ? { previousTail: summary } : {}),
     },
     { ...options, output: SCREENPLAY_ID },

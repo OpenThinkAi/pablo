@@ -440,7 +440,7 @@ shows the script as the pack's one `source` section. `--words`, `--scenes`,
 | Flag | Meaning |
 |---|---|
 | `--words W` | target length; default is the output's own (1800 for a chapter; for a story, 600 per beat and at least 1800) |
-| `--scenes S` | minimum scenes; default 3 |
+| `--scenes S` | minimum scenes; default 3 (a screenplay scene is always one scene) |
 | `--temperature T` | 0 to 2; default is the provider's `temperature` in config, else 0.8 |
 | `--seed N` | sampling seed, for a repeatable draw |
 | `--direction "..."` | a steer beyond the beat ("slower, stay on Cora"); sent as its own section and recorded as `direction:` in the frontmatter |

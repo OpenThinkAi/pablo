@@ -22,6 +22,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import type { DraftingInputs, Pack, TextSource } from "@openthink/pablo-core";
 import {
   AGENT_SECTION_HEADING,
+  applyFictionOnly,
   assemblePack,
   DEFAULT_MIN_SCENES,
   outputRulesFile,
@@ -31,7 +32,8 @@ import {
 import { existsSync, readFileSync } from "node:fs";
 import { mentions, NAMES_FILE, parseNameMap, swapNames } from "../distill";
 import type { Marker } from "../marker";
-import { realNamesOf } from "../marker";
+import { realNamesOf, trackOf } from "../marker";
+import { ESSAY_ID } from "../outputs/essay/units";
 import { NOVEL_ID } from "../outputs/novel/units";
 import { joinSources, layerOf, mergeVoice, packVoice, resolveVoiceLayers } from "../voice-layers";
 
@@ -163,14 +165,24 @@ export function packFromInputs(
       : { ...inputs.distilledFacts, facts: inputs.distilledFacts.facts.map((f) => ({ ...f, fact: swapNames(f.fact, nameMap) })) };
 
   // `inputs.style` (the reader's `style/`) is replaced: the resolver's vault layer reads the same files.
+  // Fiction-only style rules (AGT-2189) reach every output but an essay, which gets them cut.
+  const proseFiction = output !== ESSAY_ID;
+  const sourceOf = (source: TextSource): TextSource => ({ ...source, text: applyFictionOnly(source.text, proseFiction) });
+  const { distilledFacts: _distilled, periodFacts: _period, ...rest } = inputs;
+  // A plain fiction track sends no `STYLE.md` period section (AGT-2189); that section is for historical-fiction.
+  const periodless = trackOf(options.marker) === "fiction";
   const filtered: DraftingInputs = {
-    ...inputs,
+    ...rest,
+    // The work's title is `pablo.json`'s, never `STYLE.md`'s heading.
+    work: { ...inputs.work, title: options.marker.title },
+    ...(periodless || inputs.periodFacts === undefined ? {} : { periodFacts: inputs.periodFacts }),
+    // `facts/period.md` is the author's own distilled file: it stays whatever the track.
     ...(distilledFacts === undefined ? {} : { distilledFacts }),
-    style: filterVoice(mergeVoice(below).rules),
-    workRules,
-    outputRules: outputPiece?.rules[0],
-    never: all.never,
-    exemplars: all.exemplars,
+    style: filterVoice(mergeVoice(below).rules).map(sourceOf),
+    workRules: workRules === undefined ? undefined : sourceOf(workRules),
+    outputRules: outputPiece?.rules[0] === undefined ? undefined : sourceOf(outputPiece.rules[0]),
+    never: all.never.map(sourceOf),
+    exemplars: all.exemplars.map(sourceOf),
     voiceLayers: packVoice(resolved),
     ...(options.direction === undefined ? {} : { direction: options.direction }),
   };
