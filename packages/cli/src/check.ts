@@ -414,7 +414,6 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
   // Which output's units a whole-work scan reads (AGT-1669): `--output`, else the work's one output;
   // several outputs and none named is a refusal naming them.
   let artifactDir: string | undefined;
-  let named: OutputDefinition | undefined;
   let scanned: OutputDefinition | undefined;
   if (file === undefined || output !== undefined) {
     const marker = readMarker(workDir);
@@ -422,7 +421,6 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     if (!resolved.ok) return { ok: false, code: 2, message: resolved.message, tried: [], missing: resolved.missing };
     artifactDir = resolved.output.artifactDir;
     scanned = resolved.output;
-    if (output !== undefined) named = resolved.output;
   }
 
   if (file !== undefined) {
@@ -489,7 +487,7 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     if (drift !== undefined) hits.push({ path: label, line: drift.line, rule: "narration-drift", excerpt: excerptOf(drift.excerpt), detail: drift.detail });
   }
 
-  // `--output <type>` adds the core check (AGT-1671): the units against the bible, the timeline and facts.md.
+  // The resolved output (named, or the work's one output) adds the core check (AGT-1671, AGT-2197): the units against the bible, the timeline and facts.md.
   return { ok: true, code: 0, hits, unprovenanced, scanned: filePaths, ...(file === undefined && scanned !== undefined ? { scannedOutput: scanned } : {}), ...(scanned !== undefined ? { core: coreCheck(workDir, scanned, filePaths) } : {}) };
 }
 

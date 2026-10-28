@@ -31,7 +31,7 @@ const MONTHS_AND_DAYS = new Set(
   "January February March April May June July August September October November December Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split(" "),
 );
 /** Capitalised words that are not names: honorifics and the pronoun. */
-const NOT_NAMES = new Set(["I", "Mr", "Mrs", "Ms", "Miss", "Dr", "Doctor", "God", "Sir", "Madam", "Ma", "Pa", "United", "States", "America", "American", "Americans"]);
+const NOT_NAMES = new Set(["I", "Mr", "Mrs", "Ms", "Miss", "Dr", "Doctor", "God", "Sir", "Madam", "Ma", "Pa"]);
 const STOP = new Set("the a an and or but of to in on at by for with from as is was are were be been it its this that his her their".split(" "));
 
 function read(path: string): string {
@@ -126,6 +126,7 @@ function namesOn(line: string): string[] {
     const raw = line.slice(0, match.index);
     const before = raw.replace(/["'“‘(\s]+$/, "");
     if (before === "" || /[.!?:]$/.test(before)) continue;
+    // The strip above handles an opening quote after sentence punctuation; this handles one mid-sentence.
     // Straight after an opening quote (not a mid-word apostrophe): a quoted sign or line, which starts like a sentence.
     if (/(?:^|[\s(])["“‘]$/.test(raw)) continue;
     const word = match[0].replace(/'s$/, "");
