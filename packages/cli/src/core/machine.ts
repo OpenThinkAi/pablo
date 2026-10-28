@@ -49,7 +49,7 @@ import type { BeatRow } from "@openthink/pablo-core";
 import type { TrackId } from "../tracks/registry";
 import { CLAIMS_FILE, hasProse, OUTLINE_FILE, parseClaims, parseSections, researchNoteId, THESIS_FILE } from "./nonfiction";
 import type { ClaimRow, SectionRow } from "./nonfiction";
-import { CHECKLIST_FILE, checklistItems, itemLabel, parseChecklist } from "./checklist";
+import { CHECKLIST_FILE, checklistItems, itemLabel, noteHasSources, parseChecklist } from "./checklist";
 import type { ChecklistItem } from "./checklist";
 
 /** One of `bible/characters/*.md`, `bible/places.md`, `bible/timeline.md`. */
@@ -215,19 +215,6 @@ function parseActs(outline: string): ActRow[] {
   return rows;
 }
 
-/** True if `text` has a `## Sources` heading with at least one `- `/`* ` entry under it (`renderResearchNote`'s shape). */
-function hasSources(text: string): boolean {
-  let inSources = false;
-  for (const line of text.split("\n")) {
-    if (/^##\s/.test(line)) {
-      inSources = /^##\s+Sources\b/i.test(line);
-      continue;
-    }
-    if (inSources && /^\s*[-*]\s+\S/.test(line)) return true;
-  }
-  return false;
-}
-
 /**
  * The fact rows in a period-facts file: table data rows (not the header or
  * its `---` separator) and bullets. The row format is `distill_facts`'s
@@ -282,7 +269,7 @@ export function readCoreState(workDir: string, track: TrackId = "fiction"): Core
   // Frontmatter and headings alone are not a brief.
   const period = (read(join(workDir, PERIOD_BRIEF_FILE)) ?? "").replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/^#[^\n]*$/gm, "").trim() !== "";
   const research = listFiles(workDir, join(workDir, "research"));
-  const sourcedResearch = research.filter((rel) => rel.endsWith(".md") && hasSources(read(join(workDir, rel)) ?? ""));
+  const sourcedResearch = research.filter((rel) => rel.endsWith(".md") && noteHasSources(read(join(workDir, rel)) ?? ""));
   const checklistText = read(join(workDir, CHECKLIST_FILE));
   const sourcedIds = new Set(sourcedResearch.map((rel) => researchNoteId(rel.split("\\").join("/"))));
   const checklist = checklistText === undefined ? undefined : { file: CHECKLIST_FILE, items: checklistItems(parseChecklist(checklistText), sourcedIds) };

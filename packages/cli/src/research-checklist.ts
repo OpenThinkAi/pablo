@@ -20,8 +20,12 @@ import {
   type ChecklistItem,
   type ChecklistRow,
   checklistItems,
+  defaultChecklistMax,
+  MAX_CHECKLIST_ITEMS,
   MAX_ITEM_CHARS,
   mergeChecklist,
+  noteHasSources,
+  parseItemSpec,
   PERIOD_CATEGORIES,
   type ProposedItem,
   parseChecklist,
@@ -31,6 +35,7 @@ import {
 import { PERIOD_BRIEF_FILE, readCoreState } from "./core/machine";
 import { CLAIMS_FILE, hasProse, researchNoteId, THESIS_FILE } from "./core/nonfiction";
 import { completeText, RESEARCH_INTENT } from "./distill";
+import { fileAt, listBranches } from "./branch";
 import { readMarker, trackOf } from "./marker";
 import { type PlanSession, planWrite } from "./plan";
 import type { TrackId } from "./tracks/registry";
@@ -60,7 +65,7 @@ function categoriesFor(origin: ChecklistOrigin): readonly string[] {
 }
 
 /** The prompt the research agent answers. Pure. */
-export function planPrompt(origin: ChecklistOrigin, source: string, opts: { claims?: string; existing?: readonly ChecklistRow[] } = {}): string {
+export function planPrompt(origin: ChecklistOrigin, source: string, opts: { claims?: string; existing?: readonly ChecklistRow[]; limit?: number } = {}): string {
   const ask =
     origin === "thesis"
       ? [
@@ -77,6 +82,7 @@ export function planPrompt(origin: ChecklistOrigin, source: string, opts: { clai
   return [
     ...ask,
     `Keep each item under 200 characters. ${existing.length > 0 ? "The checklist already has the items listed below; do not repeat them." : ""}`.trim(),
+    ...(opts.limit !== undefined ? [`Size the list to the work: give at most ${opts.limit} items in all, the ones the work would most likely get wrong first; do not pad a short work.`] : []),
     'Answer with JSON only, no prose and no code fence: {"items": [{"category": "...", "item": "..."}]}',
     "",
     origin === "thesis" ? "## Thesis" : "## Period brief",
@@ -123,6 +129,8 @@ export type PlanSessionFor = (projectPath: string) => { ok: true; session: PlanS
 export interface PlanDeps {
   readonly researcher?: Adapter | undefined;
   readonly stderr?: { write(text: string): unknown } | undefined;
+  /** `--max N` (AGT-2186): the most items the checklist may hold in all; default sized to the work (`defaultChecklistMax`). */
+  readonly max?: number | undefined;
 }
 
 /**
@@ -147,6 +155,14 @@ export async function planChecklistInProject(
     return refuse(`pablo: research plan: ${sourceFile} has no text; write ${what} first, the checklist is derived from it`, { missing: [sourceFile] });
   }
   const existing = parseChecklist(readIfPresent(join(projectPath, CHECKLIST_FILE)) ?? "");
+  if (deps.max !== undefined && (!Number.isInteger(deps.max) || deps.max < 1 || deps.max > MAX_CHECKLIST_ITEMS)) {
+    return refuse(`pablo: research plan: --max is a whole number from 1 to ${MAX_CHECKLIST_ITEMS}, got ${String(deps.max)}`);
+  }
+  const words = sourceText.split(/\s+/).filter(Boolean).length;
+  const max = deps.max ?? defaultChecklistMax(words, Object.keys(marker.marker.outputs).length);
+  if (existing.length >= max) {
+    return refuse(`pablo: research plan: the checklist already has ${existing.length} items, at its cap of ${max}; nothing written (raise it with --max N, or max over MCP)`, { max });
+  }
   const claims = origin === "thesis" ? readIfPresent(join(projectPath, CLAIMS_FILE)) : undefined;
 
   let adapter: Adapter;
@@ -159,7 +175,7 @@ export async function planChecklistInProject(
   deps.stderr?.write(`pablo: research plan: asking ${adapter.id} (${adapter.model}) for the checklist from ${sourceFile}\n`);
   let answer: string;
   try {
-    answer = await completeText(adapter, planPrompt(origin, sourceText, { ...(claims ? { claims } : {}), existing }));
+    answer = await completeText(adapter, planPrompt(origin, sourceText, { ...(claims ? { claims } : {}), existing, limit: max - existing.length }));
   } catch (error) {
     if (error instanceof EndpointHung || error instanceof ProviderResponseError) return fail(error.message);
     if (error instanceof ProviderConfigError) return refuse(error.message);
@@ -170,7 +186,7 @@ export async function planChecklistInProject(
     return fail(`pablo: research plan: the research agent (${adapter.id}) did not answer with the checklist JSON asked for; run it again, or route the research intent to another provider`);
   }
 
-  const merged = mergeChecklist(existing, proposed, categoriesFor(origin));
+  const merged = mergeChecklist(existing, proposed, categoriesFor(origin), max);
   if (merged.added === 0) {
     return refuse("pablo: research plan: nothing new for the checklist; nothing written", { rejected: merged.rejected });
   }
@@ -191,6 +207,7 @@ export async function planChecklistInProject(
       branch: planned.session.branch,
       ...(written.sha ? { sha: written.sha } : {}),
       added: merged.added,
+      max,
       items: items.map((i) => ({ number: i.number, category: i.category, item: i.item, status: i.status })),
       rejected: merged.rejected,
       from: sourceFile,
@@ -208,12 +225,21 @@ export function parseItemNumber(raw: string | number | undefined): number | unde
 }
 
 /** The work's checklist rows and track, or a refusal naming `research plan`. */
-function readChecklistFor(projectPath: string, verb: string): { ok: true; rows: ChecklistRow[]; track: TrackId } | { ok: false; result: VerbResult } {
+function readChecklistFor(
+  projectPath: string,
+  verb: string,
+  planSessionFor?: PlanSessionFor,
+): { ok: true; rows: ChecklistRow[]; track: TrackId } | { ok: false; result: VerbResult } {
   const marker = readMarker(projectPath);
   if (!marker.ok) return { ok: false, result: refuse(marker.message) };
   const text = readIfPresent(join(projectPath, CHECKLIST_FILE));
   if (text === undefined) {
-    return { ok: false, result: refuse(`pablo: research ${verb}: ${CHECKLIST_FILE} does not exist; run \`pablo research plan\` and merge its branch first`) };
+    const planned = planSessionFor?.(projectPath);
+    const listed = planned?.ok ? listBranches(planned.session.repo) : undefined;
+    const path = planned?.ok ? `${planned.dir ? `${planned.dir}/` : ""}${CHECKLIST_FILE}` : CHECKLIST_FILE;
+    const holding = planned?.ok && listed?.ok ? listed.branches.plan.filter((b) => fileAt(planned.session.repo, b, path) !== undefined) : [];
+    const where = holding.length > 0 ? `accept ${holding.join(", ")} first (it holds the planned checklist)` : "run `pablo research plan` and merge its branch first";
+    return { ok: false, result: refuse(`pablo: research ${verb}: ${CHECKLIST_FILE} does not exist; ${where}`, holding.length > 0 ? { acceptFirst: holding } : {}) };
   }
   return { ok: true, rows: parseChecklist(text), track: trackOf(marker.marker) };
 }
@@ -232,62 +258,119 @@ function writeRows(session: PlanSession, dir: string, rows: readonly ChecklistRo
   return { path, items, written: planWrite(session, { path, content: renderChecklist(items, checklistOrigin(track)), message }) };
 }
 
-/** `research waive <item> "<reason>"`: the item is waived with the reason, on a new `plan/` branch. */
-export function waiveItemInProject(projectPath: string, item: string | undefined, reason: string | undefined, planSessionFor: PlanSessionFor): VerbResult {
-  const number = parseItemNumber(item);
-  if (number === undefined) return refuse(`pablo: research waive: name the item by its number (pablo research waive <#> "<reason>"), got "${item ?? ""}"`);
-  const why = (reason ?? "").replace(/\s+/g, " ").trim();
-  if (why === "") return refuse(`pablo: research waive: a waived item needs a reason (pablo research waive ${number} "<reason>")`);
-  if (why.length > MAX_ITEM_CHARS) return refuse(`pablo: research waive: keep the reason under ${MAX_ITEM_CHARS} characters`);
-  const read = readChecklistFor(projectPath, "waive");
-  if (!read.ok) return read.result;
-  const unknown = unknownItems(read.rows, [number], "waive");
-  if (unknown) return unknown;
-  const rows = read.rows.map((r) => (r.number === number ? { ...r, waived: why } : r));
-  const planned = planSessionFor(projectPath);
-  if (!planned.ok) return planned.result;
-  const out = writeRows(planned.session, planned.dir, rows, read.track, sourcedNoteIds(projectPath, read.track), `research: waive checklist item #${number}`);
-  if (!out.written.ok) return fail(out.written.notice);
-  const it = out.items.find((i) => i.number === number);
-  return {
-    body: { ok: true, path: out.path, branch: planned.session.branch, ...(out.written.sha ? { sha: out.written.sha } : {}), item: it, open: out.items.filter((i) => i.status === "open").length },
-    exitCode: 0,
-  };
+/** What `waive`/`link` take to name items: `3`, `#3`, `1,3,5-8`, or an array of those (MCP). */
+export type ItemSelector = string | number | readonly (string | number)[] | undefined;
+
+/** The item numbers `item` names, or a refusal for `verb` (`usage` shows the call's shape). */
+function selectItems(item: ItemSelector, verb: string, usage: string): { ok: true; numbers: number[] } | { ok: false; result: VerbResult } {
+  const spec = parseItemSpec(item);
+  if (spec.ok) return spec;
+  return { ok: false, result: refuse(`pablo: research ${verb}: name the items by number (${usage}): ${spec.message}`) };
 }
 
-/** `research link <item> <note>`: an existing sourced note is added to the item's Sources, on a new `plan/` branch. */
-export function linkItemInProject(projectPath: string, item: string | undefined, note: string | undefined, planSessionFor: PlanSessionFor): VerbResult {
-  const number = parseItemNumber(item);
-  if (number === undefined) return refuse(`pablo: research link: name the item by its number (pablo research link <#> <note>), got "${item ?? ""}"`);
-  const id = researchNoteId(note ?? "");
-  if (id !== "" && !/^[\w.-]+(\/[\w.-]+)*$/.test(id)) return refuse("pablo: research link: a note id is a path under research/ without .md, e.g. ice-harvest or trade/ice-prices");
-  if (id === "") return refuse(`pablo: research link: name the research note (its id, the path under research/ without .md): pablo research link ${number} <note>`);
-  const read = readChecklistFor(projectPath, "link");
+/** `#1, #3`: items named in a commit message. */
+function numbersLabel(numbers: readonly number[]): string {
+  return numbers.map((n) => `#${n}`).join(", ");
+}
+
+/**
+ * `research waive <#,#,a-b> "<reason>"`: every named item is waived with the reason, on one new `plan/` branch
+ * (AGT-2186: closing a batch is one branch, not one per item).
+ */
+export function waiveItemInProject(projectPath: string, item: ItemSelector, reason: string | undefined, planSessionFor: PlanSessionFor): VerbResult {
+  const selected = selectItems(item, "waive", 'pablo research waive <#,#,a-b> "<reason>"');
+  if (!selected.ok) return selected.result;
+  const numbers = selected.numbers;
+  const why = (reason ?? "").replace(/\s+/g, " ").trim();
+  if (why === "") return refuse(`pablo: research waive: a waived item needs a reason (pablo research waive ${numbers.join(",")} "<reason>")`);
+  if (why.length > MAX_ITEM_CHARS) return refuse(`pablo: research waive: keep the reason under ${MAX_ITEM_CHARS} characters`);
+  const read = readChecklistFor(projectPath, "waive", planSessionFor);
   if (!read.ok) return read.result;
-  const unknown = unknownItems(read.rows, [number], "link");
+  const unknown = unknownItems(read.rows, numbers, "waive");
   if (unknown) return unknown;
-  const sourced = sourcedNoteIds(projectPath, read.track);
-  if (!sourced.has(id)) {
-    const exists = existsSync(join(projectPath, "research", `${id}.md`));
-    return refuse(
-      exists
-        ? `pablo: research link: research/${id}.md has no ## Sources entry, so it cannot source an item`
-        : `pablo: research link: research/${id}.md does not exist (keep the finding with \`pablo research save --item ${number}\`)`,
-    );
-  }
-  const rows = read.rows.map((r) => (r.number === number && !r.sources.includes(id) ? { ...r, sources: [...r.sources, id] } : r));
+  const rows = read.rows.map((r) => (numbers.includes(r.number) ? { ...r, waived: why } : r));
   const planned = planSessionFor(projectPath);
   if (!planned.ok) return planned.result;
-  const out = writeRows(planned.session, planned.dir, rows, read.track, sourced, `research: link ${id} to checklist item #${number}`);
+  const out = writeRows(planned.session, planned.dir, rows, read.track, sourcedNoteIds(projectPath, read.track), `research: waive checklist item${numbers.length === 1 ? "" : "s"} ${numbersLabel(numbers)}`);
   if (!out.written.ok) return fail(out.written.notice);
+  const waived = out.items.filter((i) => numbers.includes(i.number));
   return {
     body: {
       ok: true,
       path: out.path,
       branch: planned.session.branch,
       ...(out.written.sha ? { sha: out.written.sha } : {}),
-      item: out.items.find((i) => i.number === number),
+      ...(waived.length === 1 ? { item: waived[0] } : {}),
+      items: waived,
       open: out.items.filter((i) => i.status === "open").length,
+    },
+    exitCode: 0,
+  };
+}
+
+/** A research note not on main yet, found on a `plan/` branch. */
+export interface PendingNote {
+  readonly note: string;
+  readonly branch: string;
+}
+
+/** The `plan/` branches whose copy of `research/<id>.md` has a `## Sources` entry, as the repo holds them (none outside a repo). */
+function pendingNoteBranches(planSessionFor: PlanSessionFor, projectPath: string, id: string): string[] {
+  const planned = planSessionFor(projectPath);
+  if (!planned.ok) return [];
+  const listed = listBranches(planned.session.repo);
+  if (!listed.ok) return [];
+  const path = `${planned.dir ? `${planned.dir}/` : ""}research/${id}.md`;
+  return listed.branches.plan.filter((branch) => {
+    const text = fileAt(planned.session.repo, branch, path);
+    return text !== undefined && noteHasSources(text);
+  });
+}
+
+/**
+ * `research link <#,#,a-b> <note>`: the sourced note joins each named item's Sources, on one new `plan/` branch. A
+ * note that is still on an unmerged `plan/` branch (`research save` without `--item`, not accepted yet) links all
+ * the same, and the result names the branch to accept with it (AGT-2186).
+ */
+export function linkItemInProject(projectPath: string, item: ItemSelector, note: string | undefined, planSessionFor: PlanSessionFor): VerbResult {
+  const selected = selectItems(item, "link", "pablo research link <#,#,a-b> <note>");
+  if (!selected.ok) return selected.result;
+  const numbers = selected.numbers;
+  const id = researchNoteId(note ?? "");
+  if (id !== "" && !/^[\w.-]+(\/[\w.-]+)*$/.test(id)) return refuse("pablo: research link: a note id is a path under research/ without .md, e.g. ice-harvest or trade/ice-prices");
+  if (id === "") return refuse(`pablo: research link: name the research note (its id, the path under research/ without .md): pablo research link ${numbers.join(",")} <note>`);
+  const read = readChecklistFor(projectPath, "link", planSessionFor);
+  if (!read.ok) return read.result;
+  const unknown = unknownItems(read.rows, numbers, "link");
+  if (unknown) return unknown;
+  const sourced = sourcedNoteIds(projectPath, read.track);
+  let pending: PendingNote[] = [];
+  if (!sourced.has(id)) {
+    const exists = existsSync(join(projectPath, "research", `${id}.md`));
+    if (exists) return refuse(`pablo: research link: research/${id}.md has no ## Sources entry, so it cannot source an item`);
+    const branches = pendingNoteBranches(planSessionFor, projectPath, id);
+    if (branches.length === 0) {
+      return refuse(`pablo: research link: research/${id}.md does not exist (keep the finding with \`pablo research save --item ${numbers.join(",")}\`)`);
+    }
+    pending = branches.map((branch) => ({ note: id, branch }));
+    sourced.add(id);
+  }
+  const rows = read.rows.map((r) => (numbers.includes(r.number) && !r.sources.includes(id) ? { ...r, sources: [...r.sources, id] } : r));
+  const planned = planSessionFor(projectPath);
+  if (!planned.ok) return planned.result;
+  const out = writeRows(planned.session, planned.dir, rows, read.track, sourced, `research: link ${id} to checklist item${numbers.length === 1 ? "" : "s"} ${numbersLabel(numbers)}`);
+  if (!out.written.ok) return fail(out.written.notice);
+  const linked = out.items.filter((i) => numbers.includes(i.number));
+  return {
+    body: {
+      ok: true,
+      path: out.path,
+      branch: planned.session.branch,
+      ...(out.written.sha ? { sha: out.written.sha } : {}),
+      ...(linked.length === 1 ? { item: linked[0] } : {}),
+      items: linked,
+      open: out.items.filter((i) => i.status === "open").length,
+      ...(pending.length > 0 ? { pending } : {}),
     },
     exitCode: 0,
   };

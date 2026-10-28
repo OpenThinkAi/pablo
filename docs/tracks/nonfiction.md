@@ -27,7 +27,7 @@ The stages, in order: `thesis`, `research`, `claims`, `outline`.
 |---|---|
 | Save the thesis, `core/thesis.md` (gate) | `pablo save --stage thesis` |
 | Plan the research checklist (gate) | `pablo research plan` |
-| Source each item, or waive it with a reason (gate) | `pablo research save ... --item <#>` / `pablo research waive <#> "<reason>"` |
+| Source each item, or waive it with a reason (gate) | `pablo research save ... --item <#>` / `pablo research waive <#,#,a-b> "<reason>"` |
 | Save the claims, `core/claims.md` (gate) | `pablo save --stage claims` |
 | Save the outline sections, `core/outline.md` (gate) | `pablo save --stage outline` |
 

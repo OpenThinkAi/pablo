@@ -37,7 +37,7 @@ import { readMarker, realNamesOf } from "./marker";
 import { type PlanSession, planWrite, startPlanSession } from "./plan";
 import { type RecordFactArgs, recordFact } from "./record-fact";
 import { saveResearch, type SaveResearchInput } from "./research";
-import { checkSaveItems, linkItemInProject, linkSavedNote, type PlanDeps, planChecklistInProject, waiveItemInProject } from "./research-checklist";
+import { checkSaveItems, type ItemSelector, linkItemInProject, linkSavedNote, type PlanDeps, planChecklistInProject, waiveItemInProject } from "./research-checklist";
 import type { VerbResult } from "./verbs";
 
 const REFUSED = 2;
@@ -88,13 +88,13 @@ export function planChecklist(projectPath: string, env: NodeJS.ProcessEnv, deps:
   return planChecklistInProject(projectPath, env, (p) => planSessionFor(p, env), deps);
 }
 
-/** `research waive <item> "<reason>"` (AGT-2111). */
-export function waiveChecklistItem(projectPath: string, item: string | undefined, reason: string | undefined, env: NodeJS.ProcessEnv): VerbResult {
+/** `research waive <#,#,a-b> "<reason>"` (AGT-2111; several items on one branch, AGT-2186). */
+export function waiveChecklistItem(projectPath: string, item: ItemSelector, reason: string | undefined, env: NodeJS.ProcessEnv): VerbResult {
   return waiveItemInProject(projectPath, item, reason, (p) => planSessionFor(p, env));
 }
 
-/** `research link <item> <note>` (AGT-2111). */
-export function linkChecklistItem(projectPath: string, item: string | undefined, note: string | undefined, env: NodeJS.ProcessEnv): VerbResult {
+/** `research link <#,#,a-b> <note>` (AGT-2111; several items on one branch, AGT-2186). */
+export function linkChecklistItem(projectPath: string, item: ItemSelector, note: string | undefined, env: NodeJS.ProcessEnv): VerbResult {
   return linkItemInProject(projectPath, item, note, (p) => planSessionFor(p, env));
 }
 

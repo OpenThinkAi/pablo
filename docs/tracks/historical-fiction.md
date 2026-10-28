@@ -31,7 +31,7 @@ The stages, in order: `premise`, `period`, `research`, `period-facts`, `bible`, 
 | 2 | Save the period brief, `bible/period.md` (gate) | `pablo save --stage bible/period.md` |
 | 3 | Plan the research checklist, `research/checklist.md` (gate) | `pablo research plan` |
 | 4 | Source each item with a note (gate) | `pablo research save --title ... --note ... --source <url> --item <#>` |
-| 5 | Or waive an item with a reason (gate) | `pablo research waive <#> "<reason>"` |
+| 5 | Or waive an item with a reason (gate) | `pablo research waive <#,#,a-b> "<reason>"` |
 | 6 | Distill the research into period facts, `facts/period.md` (gate) | `pablo research distill` |
 | 7 | Bible, acts, beats, decide every `[pick]` | `pablo save --stage ...` |
 
@@ -41,13 +41,15 @@ How the research steps work:
   read `bible/period.md` and list what to look up under people, places, technology,
   language, daily life, politics and dates. Each row is `open`, `sourced` (it names a
   research note that has a `## Sources` entry) or `waived` (it gives a reason). Running
-  `plan` again keeps existing rows and appends only new ones. It writes on a `plan/` branch.
+  `plan` again keeps existing rows and appends only new ones. The list is sized to the work
+  (`--max N` sets the cap). It writes on a `plan/` branch.
 - **The gate.** It passes when every item is sourced or waived. `status` and `resume`
   list the open ones, and `write` names the first: `historical-fiction: checklist item #3
   people: Who ran the ice houses is open`.
 - **Merge order.** `waive` and `link` rewrite the whole checklist from main, so accept
   each `plan/` branch in the screen (bare `pablo`) before the next; two unaccepted ones
-  conflict.
+  conflict. Name several items at once (`waive 3,5-8 "..."`, `link 1,2 <note>`) to close
+  them on one branch.
 - **Distill.** `research distill` turns the notes into short, sourced rows
   (`| Fact | Source | Story date |`) in `facts/period.md`, replacing the file's earlier
   rows. A fact with no source, a source that is not a note, over 280 characters or with a
