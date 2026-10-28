@@ -428,8 +428,8 @@ export async function runWrite(
   const { pack } = packResult;
 
   if (args.dryRun) {
-    const warning = notReady ? `warning: ${output.noun} ${chapter} is not ready to draft: ${preconditions.missing.join("; ")}` : undefined;
-    if (warning !== undefined && !args.json) console.error(warning);
+    const notReadyMessage = `${output.noun} ${chapter} is not ready to draft`;
+    if (notReady && !args.json) console.error(`warning: ${notReadyMessage}: ${preconditions.missing.join("; ")}`);
     if (args.json) {
       const actionByName = new Map(pack.adjustments.map((a) => [a.name, a.action]));
       const body = {
@@ -452,7 +452,7 @@ export async function runWrite(
         expectedOutputTokens: pack.expectedOutputTokens,
         prompt_hash: pack.hash,
         adjustments: pack.adjustments,
-        ...(notReady ? { warnings: [{ kind: "preconditions", message: `${output.noun} ${chapter} is not ready to draft`, missing: preconditions.missing }] } : {}),
+        ...(notReady ? { warnings: [{ kind: "preconditions", message: notReadyMessage, missing: preconditions.missing }] } : {}),
         // The layered voice (AGT-2139): every layer used, lowest first, and any voice pablo.json names that was not found.
         ...(pack.voiceLayers === undefined ? {} : { voiceLayers: pack.voiceLayers }),
         // AGT-2110: how many facts/period.md rows the prompt carries, when the work has the file.

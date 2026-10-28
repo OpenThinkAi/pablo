@@ -33,7 +33,10 @@ const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ")
  */
 export function actTitle(act: ActRow): string {
   const name = act.act.trim();
-  const own = name.replace(/^act\b\s*/i, "").replace(/^(?:[ivxlcdm]+|\d+)\b\s*[:.\u2014\u2013-]?\s*/i, "").trim();
+  const own = name
+    .replace(/^act\s+/i, "")
+    .replace(/^(?:[ivxlcdm]+|\d+)(?:\s*[:.\u2014\u2013-]\s*|\s*$)/i, "")
+    .trim();
   if (own !== "") return own;
   const first = act.summary.trim().split(/(?<=[.!?;:])\s|\s[\u2014\u2013]\s/)[0]?.replace(/[.!?;:]+$/, "").trim() ?? "";
   if (first !== "") return first.length <= 60 ? first : `${first.slice(0, 57).replace(/\s+\S*$/, "")}...`;
@@ -46,7 +49,7 @@ export function actTitle(act: ActRow): string {
  */
 export function fictionEssaySections(
   acts: readonly ActRow[],
-  track: TrackId = "fiction",
+  track: TrackId,
 ): { readonly title: string; readonly covers: string }[] {
   const rows = [
     { title: "The story", covers: "what the story is and what happens in it (the overview and the cast), set against the thesis" },
@@ -66,7 +69,7 @@ export function fictionEssaySections(
 }
 
 /** `outputs/essay/outline.md`'s text for `acts`. */
-export function renderFictionEssayOutline(acts: readonly ActRow[], track: TrackId = "fiction"): string {
+export function renderFictionEssayOutline(acts: readonly ActRow[], track: TrackId): string {
   return [
     "# Essay outline",
     "",

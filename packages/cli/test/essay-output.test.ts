@@ -432,8 +432,12 @@ test("AGT-2135 AC1: output add essay on a fiction work needs a thesis, then writ
   expect(outline).toContain("| 2 | The light is to be automated | The light is to be automated; Ines keeps it anyway. (1930) |");
   expect(essayDefaultPlan(work).map((r) => r.title)).toEqual(["The story", "The light is to be automated", "What the story argues"]);
   // AGT-2195 AC1: plain fiction has no period section; historical fiction does; an act with its own title keeps it.
-  const acts = [{ act: "Act I: The Crossing", years: "", summary: "They leave." }, { act: "II", years: "", summary: "" }];
-  expect(fictionEssaySections(acts).map((r) => r.title)).toEqual(["The story", "The Crossing", "Act II", "What the story argues"]);
+  const acts = [
+    { act: "Act I: The Crossing", years: "", summary: "They leave." },
+    { act: "II", years: "", summary: "" },
+    { act: "Civil War", years: "", summary: "Fighting." },
+  ];
+  expect(fictionEssaySections(acts, "fiction").map((r) => r.title)).toEqual(["The story", "The Crossing", "Act II", "Civil War", "What the story argues"]);
   expect(fictionEssaySections(acts, "historical-fiction").map((r) => r.title)).toContain("The world it is drawn from");
   expect(essayDefaultPlan(work)[0]!.beats).toEqual([1, 2, 3, 4]);
   expect(readFileSync(join(work, "outputs", "essay", "plan.md"), "utf8")).toContain("| 3 | What the story argues | 1, 2, 3, 4 | beat |");
