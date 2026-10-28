@@ -116,7 +116,7 @@ export const USAGE_LINES: readonly string[] = [
     "                                            edit/, plan/) onto main as the screen does: a",
     "                                            draft runs the after-write steps (outline, note,",
     "                                            README, continuity, commit, think sync); --reject",
-    "                                            deletes it instead. Its worktree is removed",
+    "                                            deletes it instead. Its worktree is removed.",
     "  pablo publish --project <slug> [--output <type>] --target <target>",
     "                                            targets per output: novel and story draft|review|",
     "                                            final; screenplay draft|final|fountain; essay",
