@@ -407,15 +407,23 @@ export async function runWrite(
     return 2;
   }
 
-  const packResult = output.pack(vaultRoot, projectPath, chapter, {
-    words,
-    scenes,
-    marker: markerResult.marker,
-    direction,
-    output: output.id,
-    ...(deps.env === undefined ? {} : { env: deps.env }),
-    ...(args.voices === undefined ? {} : { voices: args.voices }),
-  });
+  // A dry run with unmet preconditions may find the pack cannot be built at all (a unit with no row throws): that is the refusal.
+  let packResult: ReturnType<typeof output.pack>;
+  try {
+    packResult = output.pack(vaultRoot, projectPath, chapter, {
+      words,
+      scenes,
+      marker: markerResult.marker,
+      direction,
+      output: output.id,
+      ...(deps.env === undefined ? {} : { env: deps.env }),
+      ...(args.voices === undefined ? {} : { voices: args.voices }),
+    });
+  } catch (error) {
+    if (!notReady) throw error;
+    emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
+    return 2;
+  }
   if (!packResult.ok) {
     if (notReady) {
       emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
