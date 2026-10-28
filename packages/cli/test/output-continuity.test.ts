@@ -454,3 +454,27 @@ test("AGT-2190: a name only an unconfirmed ledger bullet carries stays an unknow
   writeFileSync(ledger, `${original}\n- Halvorsen runs the hoist. [ep02]\n`);
   expect(unknown()).toEqual([]);
 });
+
+// --- AGT-2197: write and check agree on unknown names, with fewer false positives ---------------------------------
+
+test("AGT-2197: check without --output runs the same core check as with it; headings, title, period facts, quoted signs are not names", () => {
+  const { vault, work } = twoOutputWork();
+  const path = join(work, "outputs", "radio", "episodes", "02-black-ice.md");
+  mkdirSync(join(work, "facts"), { recursive: true });
+  writeFileSync(join(work, "facts", "period.md"), "# Period facts\n\n- The Bantley Building opened in 1925.\n");
+  writeFileSync(
+    path,
+    `${EPISODE_TWO}## The Ice House\nODILE: Meet me at the Bantley Building.\nWILFRED: The sign said "Please wait" at the Ice House.\nODILE: Ask Halvorsen about the hoist.\n`,
+  );
+  const named = checkWork(vault, work, undefined, "radio");
+  if (!named.ok) throw new Error(named.message);
+  expect((named.core ?? []).filter((h) => h.rule === "unknown-name").map((h) => h.detail)).toEqual(["Halvorsen"]);
+
+  // The work has two outputs here, so a bare check is refused; a one-output work gets the core check without --output.
+  const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as { outputs: Record<string, unknown> };
+  delete marker.outputs["novel"];
+  writeFileSync(join(work, "pablo.json"), `${JSON.stringify(marker, null, 2)}\n`);
+  const bare = checkWork(vault, work);
+  if (!bare.ok) throw new Error(bare.message);
+  expect((bare.core ?? []).map((h) => `${h.rule}:${h.detail}`)).toEqual((named.core ?? []).map((h) => `${h.rule}:${h.detail}`));
+});

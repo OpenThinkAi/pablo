@@ -70,7 +70,7 @@ export interface CheckSuccess {
   readonly unprovenanced: readonly string[];
   /**
    * `check --output <type>` (AGT-1671): the core check's hits (`core-check.ts`: `story-time`, `unknown-name`) over
-   * that output's units. Absent when no output was named.
+   * that output's units. Run on the resolved output (named, or the work's one output), so `write` and `check` agree; absent for a bare `--file`.
    */
   readonly core?: readonly Hit[];
   /** The absolute paths scanned, for the model-backed checks that run after (`anachronism`, AGT-2113; `fact-accuracy`, AGT-2112). */
@@ -490,7 +490,7 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
   }
 
   // `--output <type>` adds the core check (AGT-1671): the units against the bible, the timeline and facts.md.
-  return { ok: true, code: 0, hits, unprovenanced, scanned: filePaths, ...(file === undefined && scanned !== undefined ? { scannedOutput: scanned } : {}), ...(named !== undefined ? { core: coreCheck(workDir, named, filePaths) } : {}) };
+  return { ok: true, code: 0, hits, unprovenanced, scanned: filePaths, ...(file === undefined && scanned !== undefined ? { scannedOutput: scanned } : {}), ...(scanned !== undefined ? { core: coreCheck(workDir, scanned, filePaths) } : {}) };
 }
 
 /** `draft/essay-03-v2` -> 2, `draft/essay-03` -> 1: a re-draft's version, so the newest draft of a unit sorts last. */

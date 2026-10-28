@@ -10,7 +10,9 @@
  * - **unknown-name**: a capitalised name, not at the start of a sentence, that nothing in the core knows: not the
  *   bible, the timeline, the beats, `facts.md`, nor this output's own ledger (names and places, against the bible
  *   and `facts.md`). Another output's ledger is not consulted: a name only the novel established is unknown to the
- *   radio show until it is promoted.
+ *   radio show until it is promoted. Also known (AGT-2197): the work's own title, the period facts
+ *   (`facts/period.md`), and on a nonfiction work the research notes. Headings are not scanned, and a word right
+ *   after an opening quote (a sign's "Please") is not a name.
  *
  * Pure over the work directory: reads, never writes. The hits use `check`'s `Hit` shape, so `check` prints them
  * like any other.
@@ -18,8 +20,9 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { FACTS_FILE, beatsFile, continuityFile, gateTimeline, parseBeatRows } from "@openthink/pablo-core";
+import { FACTS_FILE, PERIOD_FACTS_FILE, beatsFile, continuityFile, gateTimeline, parseBeatRows } from "@openthink/pablo-core";
 import type { Hit } from "./check";
+import { readMarker, trackOf } from "./marker";
 import { parseFrontmatter } from "./novel/machine";
 import type { OutputDefinition } from "./outputs/types";
 
@@ -28,7 +31,7 @@ const MONTHS_AND_DAYS = new Set(
   "January February March April May June July August September October November December Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split(" "),
 );
 /** Capitalised words that are not names: honorifics and the pronoun. */
-const NOT_NAMES = new Set(["I", "Mr", "Mrs", "Ms", "Miss", "Dr", "Doctor", "God", "Sir", "Madam", "Ma", "Pa"]);
+const NOT_NAMES = new Set(["I", "Mr", "Mrs", "Ms", "Miss", "Dr", "Doctor", "God", "Sir", "Madam", "Ma", "Pa", "United", "States", "America", "American", "Americans"]);
 const STOP = new Set("the a an and or but of to in on at by for with from as is was are were be been it its this that his her their".split(" "));
 
 function read(path: string): string {
@@ -72,7 +75,13 @@ function knownWords(workDir: string, output: string): Set<string> {
       .split("\n")
       .filter((line) => !/, unconfirmed\]\s*$/.test(line))
       .join("\n"),
+    read(join(workDir, PERIOD_FACTS_FILE)),
   ];
+  const marker = readMarker(workDir);
+  if (marker.ok) {
+    texts.push(marker.marker.title);
+    if (trackOf(marker.marker) === "nonfiction") texts.push(...markdownUnder(join(workDir, "research")));
+  }
   const known = new Set<string>();
   for (const text of texts) for (const word of text.match(/[A-Za-z][A-Za-z'-]*/g) ?? []) known.add(word.replace(/'s$/, ""));
   return known;
@@ -114,8 +123,11 @@ function namesOn(line: string): string[] {
   const re = /[A-Z][a-z][A-Za-z'-]*/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(line)) !== null) {
-    const before = line.slice(0, match.index).replace(/["'“‘(\s]+$/, "");
+    const raw = line.slice(0, match.index);
+    const before = raw.replace(/["'“‘(\s]+$/, "");
     if (before === "" || /[.!?:]$/.test(before)) continue;
+    // Straight after an opening quote (not a mid-word apostrophe): a quoted sign or line, which starts like a sentence.
+    if (/(?:^|[\s(])["“‘]$/.test(raw)) continue;
     const word = match[0].replace(/'s$/, "");
     if (MONTHS_AND_DAYS.has(word) || NOT_NAMES.has(word)) continue;
     names.push(word);
@@ -143,7 +155,7 @@ export function coreCheck(workDir: string, def: OutputDefinition, files: readonl
     const start = front === null ? 0 : front[0].replace(/\r?\n$/, "").split("\n").length;
     for (let i = start; i < lines.length; i++) {
       const line = lines[i] as string;
-      if (line.trim() === "") continue;
+      if (line.trim() === "" || /^\s*#{1,6}\s/.test(line)) continue;
       const found: Hit[] = [];
       if (year !== undefined) {
         for (const m of line.matchAll(/\b(1[6-9]\d{2}|20\d{2})\b/g)) {
