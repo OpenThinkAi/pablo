@@ -132,7 +132,8 @@ function fold(text: string): string {
  */
 export function actBeatsFor(workDir: string, track: TrackId, section: EssaySection, source: string): readonly BeatRow[] | undefined {
   const { acts } = readCoreState(workDir, track);
-  const index = acts.findIndex((a) => fold(actTitle(a)) === fold(section.title));
+  // An outline scaffolded before act titles (or edited back) names the section `Act I`: the label still finds the act.
+  const index = acts.findIndex((a) => fold(actTitle(a)) === fold(section.title) || fold(actLabel(a)) === fold(section.title));
   if (index === -1) return undefined;
   const beats = parseHeadedBeatRows(read(join(workDir, beatsFile(workDir))) ?? "", source);
   // The beats file's headings name an act by its plain label (`## Act I`); the section is titled by the act's own title.

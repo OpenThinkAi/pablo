@@ -219,6 +219,16 @@ test("AGT-2183: a fiction essay's act section carries that act's beat rows, from
   expect(act1.prompt).toContain("A lighthouse keeper's daughter keeps the lamp lit");
 });
 
+test("AGT-2195: an outline that still names the act section `Act I` finds that act's beats", () => {
+  const { vault, work, marker } = fictionEssay(ACTS_HEADED);
+  const outline = join(work, "outputs", "essay", "outline.md");
+  writeFileSync(outline, readFileSync(outline, "utf8").replace("| 2 | The letter comes |", "| 2 | Act I |"));
+  expect(readFileSync(outline, "utf8")).toContain("| 2 | Act I |");
+  const beats = packOf(buildEssayPack(vault, work, 2, { marker, output: "essay" })).slices.find((s) => s.name === "actBeats")?.text ?? "";
+  expect(beats).toContain('"The Letter"');
+  expect(beats).not.toContain("Beat 4");
+});
+
 test("AGT-2183: with every beat under one heading the beats split over the acts in order, and the acts table is never a beat", () => {
   const { vault, work, marker } = fictionEssay(ACTS_FLAT);
   const act1 = packOf(buildEssayPack(vault, work, 2, { marker, output: "essay" })).slices.find((s) => s.name === "actBeats")?.text ?? "";
