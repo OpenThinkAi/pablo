@@ -40,6 +40,7 @@ export {
   loadConfig,
   mergeProjectConfig,
   parseConfig,
+  refuseWorkKey,
 } from "./config";
 export type { KeyLookup, KeySource } from "./keys";
 export { envVariableFor, keySourceFor, readKeychain, resolveKey } from "./keys";

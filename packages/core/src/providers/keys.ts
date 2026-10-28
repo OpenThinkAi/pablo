@@ -2,10 +2,15 @@
  * Where a provider's API key comes from: the environment or the Keychain, nowhere else.
  *
  * - the environment: by convention `<PROVIDER>_API_KEY` (`ANTHROPIC_API_KEY`),
- *   or a variable named in the config as `"key": "env:<NAME>"` (AGT-2129, so a
- *   work's `pablo.json` can point one provider at its own variable);
+ *   or a variable named in the global config as `"key": "env:<NAME>"`;
  * - the macOS Keychain, named in the config file as
  *   `"key": "keychain:<service>[/<account>]"`.
+ *
+ * A provider a work's `pablo.json` defines (one the global config does not
+ * name) has no key at all (`{ from: "none" }`, AGT-2228 D-4): a work file may
+ * not name a key reference, and the `<PROVIDER>_API_KEY` convention is not
+ * applied to it either, so a committed file cannot pick which secret a local
+ * port receives by choosing a provider id.
  *
  * A key written into the config file is rejected at load. Resolved keys are
  * returned to the adapter that sends them and are never logged, put in an
@@ -16,7 +21,8 @@ import { ProviderConfigError } from "./errors";
 
 export type KeySource =
   | { readonly from: "env"; readonly variable: string }
-  | { readonly from: "keychain"; readonly service: string; readonly account: string | undefined };
+  | { readonly from: "keychain"; readonly service: string; readonly account: string | undefined }
+  | { readonly from: "none" };
 
 const KEYCHAIN_PREFIX = "keychain:";
 const ENV_PREFIX = "env:";
@@ -91,6 +97,7 @@ export interface KeyLookup {
  * endpoint needs no key and must not be blocked by asking for one.
  */
 export function resolveKey(source: KeySource, lookup: Partial<KeyLookup> = {}): string | undefined {
+  if (source.from === "none") return undefined;
   if (source.from === "env") return (lookup.env ?? process.env)[source.variable] || undefined;
   return (lookup.keychain ?? readKeychain)(source.service, source.account);
 }

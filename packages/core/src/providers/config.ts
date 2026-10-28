@@ -27,11 +27,13 @@
  * `loadConfig({ projectDir })` merges them over the global file — a provider
  * entry over the global one of the same name (fields it does not set are
  * kept, its key reference included), an intent over the global mapping.
- * The rule is the same as the global file's: a key is never written there,
- * only `env:<NAME>` or `keychain:<service>[/<account>]`. pablo.json is
- * trusted less than the global file: it may add or change providers on this
- * machine, but on a remote provider only `model`, `timeoutMs`, `temperature`,
- * `thinking` and `tools` (`checkWorkProvider`).
+ * pablo.json is trusted less than the global file: it may add or change
+ * providers on this machine, but on a remote provider only `model`,
+ * `timeoutMs`, `temperature`, `thinking` and `tools` (`checkWorkProvider`).
+ * It may not set `key` at all (AGT-2228, decision D-4): keys are bound only in
+ * the global file. A provider it overrides keeps the global entry's key; one
+ * it adds has none (`{ from: "none" }`), not even the `<ID>_API_KEY`
+ * convention.
  */
 
 import { readFileSync } from "node:fs";
@@ -185,8 +187,9 @@ export function loadConfig(options: LoadConfigOptions = {}): PabloConfig {
 /**
  * Merges a work's `pablo.json` `providers` and `intents` over `base`. Only
  * those two keys are read; the rest of the marker is `readMarker`'s. A
- * provider entry is validated exactly as the global file's are (so an inline
- * key is refused); an intent must name a provider of the merged set.
+ * provider entry is validated as the global file's are, except that it may
+ * not set `key` (`refuseWorkKey`); an intent must name a provider of the
+ * merged set.
  *
  * The global file is the author's own; `pablo.json` is committed and can
  * arrive from a co-author, a clone or a merged branch, so it is trusted less
@@ -209,7 +212,10 @@ export function mergeProjectConfig(base: PabloConfig, text: string, source = "pa
     if (!isRecord(rawProviders)) throw new ProviderConfigError(`pablo: ${source}: "providers" must be an object`);
     for (const [id, entry] of Object.entries(rawProviders)) {
       const existing = providers.get(id);
-      const merged = readProvider(id, entry, source, existing, options.allowIncomplete === true);
+      refuseWorkKey(id, entry, source);
+      const read = readProvider(id, entry, source, existing, options.allowIncomplete === true);
+      // Overriding a global provider keeps its key (readProvider inherits it); a provider the work adds has none.
+      const merged: ProviderConfig = existing === undefined ? { ...read, key: { from: "none" } } : read;
       checkWorkProvider(merged, existing, source);
       providers.set(id, merged);
     }
@@ -312,7 +318,24 @@ export function isLoopbackEndpoint(endpoint: string): boolean {
   return host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/.test(host);
 }
 
+/**
+ * Refuses a `key` on a work's provider entry, whatever it names (AGT-2228,
+ * D-4). Judged on the raw entry, not the merged provider, which legitimately
+ * carries the global key. A key reference in a committed file would let it
+ * choose which secret (any environment variable, any Keychain item) goes to
+ * the endpoint it names.
+ */
+export function refuseWorkKey(id: string, entry: unknown, source: string): void {
+  if (!isRecord(entry) || entry["key"] === undefined) return;
+  throw new ProviderConfigError(
+    `pablo: ${source}: provider "${id}": a work's pablo.json may not set "key". Keys are set in the global config ` +
+      `(\`pablo config set providers.${id}.key env:<NAME>\` or \`keychain:<service>\`, without --project); ` +
+      `a work's provider uses the key of the global provider of the same name, or none. Remove "key" from ${source}.`,
+  );
+}
+
 function sameKey(a: KeySource, b: KeySource): boolean {
+  if (a.from === "none" || b.from === "none") return a.from === b.from;
   return a.from === "env" && b.from === "env"
     ? a.variable === b.variable
     : a.from === "keychain" && b.from === "keychain" && a.service === b.service && a.account === b.account;
@@ -322,7 +345,8 @@ function sameKey(a: KeySource, b: KeySource): boolean {
  * Refuses a work's provider entry that would choose where a credential is
  * sent: a new provider on a remote endpoint, or a change to a remote
  * provider's `endpoint`, `kind`, `local` or `key`. Providers on loopback
- * endpoints (a local model server) are the work's to define and change.
+ * endpoints (a local model server) are the work's to define and change,
+ * except their key (`refuseWorkKey` has already refused one).
  */
 function checkWorkProvider(merged: ProviderConfig, existing: ProviderConfig | undefined, source: string): void {
   const where = `pablo: ${source}: provider "${merged.id}"`;

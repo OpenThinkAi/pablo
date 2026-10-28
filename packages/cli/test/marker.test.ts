@@ -224,7 +224,7 @@ test("malformed outputs entries are refused by their exact key", () => {
   }
 });
 
-test("readMarker refuses a provider key written inline (AGT-2129), and keeps env: and keychain: references", () => {
+test("readMarker refuses any provider key in pablo.json (AGT-2228, D-4), inline or a reference, without repeating it", () => {
   const dir = tempDir();
   const write = (providers: unknown) =>
     writeFileSync(join(dir, "pablo.json"), JSON.stringify({ title: "T", slug: "t", outputs: {}, providers, intents: { draft: "work" } }));
@@ -235,11 +235,21 @@ test("readMarker refuses a provider key written inline (AGT-2129), and keeps env
   if (!inline.ok) {
     expect(inline.code).toBe(2);
     expect(inline.message).toContain('provider "work"');
-    expect(inline.message).toContain("env:<NAME>");
+    expect(inline.message).toContain('may not set "key". Keys are set in the global config');
     expect(inline.message).not.toContain("sk-ant-notarealkey");
   }
 
-  write({ work: { kind: "anthropic", key: "env:WORK_KEY" }, other: { kind: "anthropic", key: "keychain:work-key/me" } });
+  for (const key of ["env:WORK_KEY", "keychain:work-key/me"]) {
+    write({ work: { endpoint: "http://127.0.0.1:8000/v1", model: "m", key } });
+    const ref = readMarker(dir);
+    expect(ref.ok).toBe(false);
+    if (!ref.ok) {
+      expect(ref.code).toBe(2);
+      expect(ref.message).toContain('provider "work": a work\'s pablo.json may not set "key"');
+    }
+  }
+
+  write({ work: { endpoint: "http://127.0.0.1:8000/v1", model: "m" } });
   expect(readMarker(dir).ok).toBe(true);
 
   rmSync(dir, { recursive: true, force: true });

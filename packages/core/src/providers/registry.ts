@@ -216,5 +216,6 @@ export function createProviders(config: PabloConfig, options: ProvidersOptions =
 }
 
 function describeMissing(source: KeySource): string {
+  if (source.from === "none") return "it has no key (a provider a work's pablo.json defines never does)";
   return source.from === "env" ? `${source.variable} is not set` : `no Keychain item for "${source.service}"`;
 }
