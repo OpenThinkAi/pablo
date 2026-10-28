@@ -587,9 +587,9 @@ runs the after-write steps for that unit, in this order:
 1. **Outline tick**: the unit's row in the beats file moves to `draft`.
 2. **Note**: a dated note under `notes/`.
 3. **README**: a bullet under "Where things stand" in the work's `README.md`.
-4. **Continuity**: facts are extracted from the new text and filed under the matching headings of the output's continuity file, citing the unit (2-minute limit). A fact the model can't anchor to a sentence goes under `## Check`. Existing bullets are never duplicated.
+4. **Continuity**: facts are extracted from the new text and filed under the matching headings of the output's continuity file, citing the unit (2-minute limit). At most 20 facts are filed per unit, anchored ones first. A fact files under `## Dates` only when its text names a year, month or weekday. A fact the model can't anchor to a sentence goes under `## Check`. A bullet that names a person or place is marked `, unconfirmed` (`[ch03, unconfirmed]`): `pablo check` still reports that name as an `unknown-name` until you delete the mark or add the name to the bible. Existing bullets are never duplicated.
 5. **Commit**: one commit of exactly the touched paths.
-6. **think sync**: runs only when the `think` CLI is on your `PATH`. Otherwise this step is reported as `skipped`. A timeout (20s) or a non-zero exit is reported as `failed`.
+6. **think sync**: runs only when the `think` CLI is on your `PATH`. Otherwise this step is reported as `skipped`. It is also `skipped` when the environment sets `PABLO_NO_THINK` (anything but empty, `0` or `false`) or the work's `pablo.json` has `"think": false`; use either for scratch and test vaults so they never write to your real cortex. A timeout (20s) or a non-zero exit is reported as `failed`.
 
 Each step is reported (`ran`, `skipped` or `failed`), and a failing step never
 undoes the merge. A conflicting merge changes nothing and runs no steps. A branch

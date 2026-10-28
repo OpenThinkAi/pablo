@@ -33,7 +33,7 @@ async function afterMerge(workDir: string, unit: number, _unitPath: string, opts
   const note = appendNote(workDir, rel, `${today} — essay`, `section ${unit}: ${opts.receiptLine} — words: ${opts.words}, model: ${opts.model}`);
   const git = note.status === "ran" ? attempt("git", () => runGit(workDir, [rel], `${opts.slug}: essay section ${unit} merged`)) : { name: "git", status: "skipped" as const, detail: "no note written" };
   const think = await attemptAsync("think", () =>
-    runThink(unit, opts.words, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, opts.env === undefined, "essay section"),
+    runThink(unit, opts.words, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, opts.env === undefined, "essay section", undefined, workDir),
   );
   return [note, git, think];
 }
@@ -48,7 +48,7 @@ async function afterRevision(workDir: string, unit: number, opts: AfterRevisionO
   const note = appendNote(workDir, rel, `${today} — essay`, `Revised on ${opts.branch}.${authorSection(notes)}`);
   const git = note.status === "ran" ? attempt("git", () => runGit(workDir, [rel], `${opts.slug}: notes on the essay (${opts.branch})`)) : { name: "git", status: "skipped" as const, detail: "no note written" };
   const think = await attemptAsync("think", () =>
-    runThink(unit, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, opts.env === undefined, "essay", "revised"),
+    runThink(unit, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, opts.env === undefined, "essay", "revised", workDir),
   );
   return [note, git, think];
 }

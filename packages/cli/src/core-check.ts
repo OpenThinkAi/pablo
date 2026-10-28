@@ -67,7 +67,11 @@ function knownWords(workDir: string, output: string): Set<string> {
     ...markdownUnder(join(workDir, "bible")),
     read(join(workDir, beatsFile(workDir))),
     read(join(workDir, FACTS_FILE)),
-    read(join(workDir, continuityFile(workDir, output))),
+    // A bullet the continuity ritual marked unconfirmed (AGT-2190) is a model's claim, not the author's: it knows no name.
+    read(join(workDir, continuityFile(workDir, output)))
+      .split("\n")
+      .filter((line) => !/, unconfirmed\]\s*$/.test(line))
+      .join("\n"),
   ];
   const known = new Set<string>();
   for (const text of texts) for (const word of text.match(/[A-Za-z][A-Za-z'-]*/g) ?? []) known.add(word.replace(/'s$/, ""));

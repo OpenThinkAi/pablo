@@ -86,6 +86,21 @@ const FALLBACK_INSTRUCTION =
   `One fact per line, in the form: <fact> ${FACT_SEPARATOR} <the exact words of the text that establish it, copied character for character>. ` +
   "No numbering, no commentary.";
 
+/** The most facts one unit adds to the ledger (AGT-2190): the durable ones, not every sentence's detail. Anchored facts go first. */
+export const MAX_FACTS_PER_UNIT = 20;
+
+/**
+ * The marker on a bullet that names someone or somewhere (AGT-2190, D-22): the model
+ * may have invented the name, so `check`'s unknown-name rule does not count the
+ * bullet as knowing it. The author confirms a name by deleting `, unconfirmed` from
+ * the bullet (or by adding the name to the bible).
+ */
+export const UNCONFIRMED_MARK = "unconfirmed";
+
+/** A month or weekday name, which makes a fact about a date. */
+const DATE_WORDS = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/g;
+const DATE_WORD = new RegExp(DATE_WORDS.source);
+
 const NAMES_AGES_HEADING = "## Names and ages";
 const DATES_HEADING = "## Dates";
 const WHO_KNOWS_HEADING = "## Who knows what";
@@ -142,12 +157,20 @@ function headingFor(fact: ExtractedFact): string {
     BORN_WORD.test(fact.fact);
   if (namesAges) return NAMES_AGES_HEADING;
 
-  const isDate = (fact.storyTime !== undefined && fact.storyTime.trim() !== "") || FOUR_DIGIT_YEAR.test(fact.fact);
+  // `storyTime` alone does not make a date: models set it on nearly every fact, which filed a whole chapter under "Dates".
+  const isDate = FOUR_DIGIT_YEAR.test(fact.fact) || DATE_WORD.test(fact.fact);
   if (isDate) return DATES_HEADING;
 
   if (WHO_KNOWS_PATTERN.test(fact.fact)) return WHO_KNOWS_HEADING;
 
   return OBJECTS_PLACES_HEADING;
+}
+
+/** Whether a fact names a person or place: a capitalised entity, or a capitalised word that does not start a sentence. */
+function namesSomeone(fact: ExtractedFact): boolean {
+  if (fact.entities.some((entity) => /^[A-Z]/.test(entity.trim()))) return true;
+  const text = fact.fact.replace(DATE_WORDS, "x");
+  return /[^.!?\s]\s+[A-Z][a-z]/.test(text.replace(/\bI\b/g, "x"));
 }
 
 /**
@@ -170,13 +193,16 @@ export function applyFacts(
   let placed = 0;
   let unanchored = 0;
 
-  for (const fact of facts) {
+  // Bounded (AGT-2190): anchored facts first, then the rest, at most MAX_FACTS_PER_UNIT in all.
+  const ordered = [...facts].sort((a, b) => Number(anchorFound(chapterBody, b.anchor)) - Number(anchorFound(chapterBody, a.anchor)));
+  for (const fact of ordered.slice(0, MAX_FACTS_PER_UNIT)) {
     const anchored = anchorFound(chapterBody, fact.anchor);
     const heading = anchored ? headingFor(fact) : CHECK_HEADING;
     // `fact.fact` is model output: a newline inside it would become a real line
     // break in continuity.md and could forge a `## ` heading, so flatten it first.
     const safeFact = fact.fact.replace(/[\r\n]+/g, " ").trim();
-    const bulletLine = anchored ? `- ${safeFact} [${tag}]` : `- ${safeFact} [${tag}, anchor not found]`;
+    const marks = `${anchored ? "" : ", anchor not found"}${namesSomeone(fact) ? `, ${UNCONFIRMED_MARK}` : ""}`;
+    const bulletLine = `- ${safeFact} [${tag}${marks}]`;
 
     if (lines.includes(bulletLine)) continue;
 

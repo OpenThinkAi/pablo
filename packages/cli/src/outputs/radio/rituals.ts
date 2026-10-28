@@ -115,7 +115,7 @@ async function afterMerge(workDir: string, episode: number, scriptPath: string, 
   const paths = [scriptRel, noteRel(today, episode), "README.md"];
   if (continuity.status === "ran") paths.push(continuityFile(workDir, RADIO_ID));
   const git = attempt("git", () => runGit(workDir, paths, `${opts.slug}: draft radio episode ${episode}`));
-  const think = await attemptAsync("think", () => runThink(episode, opts.words, opts.slug, env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "radio episode"));
+  const think = await attemptAsync("think", () => runThink(episode, opts.words, opts.slug, env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "radio episode", undefined, workDir));
   return [note, readme, continuity, cast, git, think];
 }
 
@@ -144,7 +144,7 @@ async function afterRevision(workDir: string, episode: number, opts: AfterRevisi
       : { name: "git", status: "skipped" as const, detail: "no note written" };
   const allowNvmFallback = opts.env === undefined;
   const think = await attemptAsync("think", () =>
-    runThink(episode, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "radio episode", "revised"),
+    runThink(episode, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "radio episode", "revised", workDir),
   );
   return [note, git, think];
 }

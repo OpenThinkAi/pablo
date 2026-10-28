@@ -99,7 +99,7 @@ async function afterMerge(workDir: string, scene: number, scenePath: string, opt
   const paths = [sceneRel, rel, "README.md"];
   if (continuity.status === "ran") paths.push(continuityFile(workDir, SCREENPLAY_ID));
   const git = attempt("git", () => runGit(workDir, paths, `${opts.slug}: draft screenplay scene ${scene}`));
-  const think = await attemptAsync("think", () => runThink(scene, opts.words, opts.slug, env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "screenplay scene"));
+  const think = await attemptAsync("think", () => runThink(scene, opts.words, opts.slug, env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "screenplay scene", undefined, workDir));
   return [note, readme, continuity, git, think];
 }
 
@@ -117,7 +117,7 @@ async function afterRevision(workDir: string, scene: number, opts: AfterRevision
       : { name: "git", status: "skipped" as const, detail: "no note written" };
   const allowNvmFallback = opts.env === undefined;
   const think = await attemptAsync("think", () =>
-    runThink(scene, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "screenplay scene", "revised"),
+    runThink(scene, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "screenplay scene", "revised", workDir),
   );
   return [note, git, think];
 }

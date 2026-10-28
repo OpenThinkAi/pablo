@@ -107,7 +107,7 @@ async function afterMerge(workDir: string, _unit: number, storyPath: string, opt
   const paths = [storyRel, beatsFile(workDir), noteRel, "README.md"];
   if (continuity.status === "ran") paths.push(continuityFile(workDir, STORY_ID));
   const git = attempt("git", () => runGit(workDir, paths, `${opts.slug}: draft story`));
-  const think = await attemptAsync("think", () => runThink(STORY_UNIT, opts.words, opts.slug, env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "story"));
+  const think = await attemptAsync("think", () => runThink(STORY_UNIT, opts.words, opts.slug, env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "story", undefined, workDir));
   return [outline, note, readme, continuity, git, think];
 }
 
@@ -141,7 +141,7 @@ async function afterRevision(workDir: string, _unit: number, opts: AfterRevision
       : { name: "git", status: "skipped" as const, detail: "no note written" };
   const allowNvmFallback = opts.env === undefined;
   const think = await attemptAsync("think", () =>
-    runThink(STORY_UNIT, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "story", "revised"),
+    runThink(STORY_UNIT, 0, opts.slug, opts.env ?? process.env, opts.thinkTimeoutMs ?? 20_000, allowNvmFallback, "story", "revised", workDir),
   );
   return [note, git, think];
 }

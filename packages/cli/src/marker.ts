@@ -19,6 +19,7 @@
  * | `policy`    | no       | —  (the harness's minimal default judgement policy) |
  * | `track`     | no       | `"fiction"` (`fiction`, `historical-fiction`, `nonfiction`) |
  * | `realNames` | no       | `true` (`false` keeps research names out of distilled facts) |
+ * | `think`     | no       | `true` (`false` skips the `think sync` after a merge) |
  * | `providers` | no       | —  (the global config's; merged over it by `loadConfig({ projectDir })`) |
  * | `intents`   | no       | —  (the global config's; merged over it the same way) |
  * | `format`    | deprecated | —  (`"novel"` only; read as `outputs.novel`) |
@@ -118,6 +119,8 @@ export interface Marker {
   readonly track?: TrackId;
   /** Whether distilled facts may carry real names, as written; absent reads as `true` (use `realNamesOf`). */
   readonly realNames?: boolean;
+  /** `false` skips the after-merge `think sync` (AGT-2190); absent reads as on. */
+  readonly think?: boolean;
   /** The outputs derived from the work's story core; `{}` is a core with nothing derived yet. */
   readonly outputs: Outputs;
 }
@@ -284,6 +287,10 @@ export function readMarker(workDir: string): MarkerResult {
   if (realNames !== undefined && typeof realNames !== "boolean") {
     return refuse(`pablo: ${path} has an invalid "realNames" (${JSON.stringify(realNames)}); it is true or false`, [path]);
   }
+  const think = data["think"];
+  if (think !== undefined && typeof think !== "boolean") {
+    return refuse(`pablo: ${path} has an invalid "think" (${JSON.stringify(think)}); it is true or false`, [path]);
+  }
   const inlineKey = inlineKeyRefusal(data["providers"], path);
   if (inlineKey !== undefined) return inlineKey;
 
@@ -297,6 +304,7 @@ export function readMarker(workDir: string): MarkerResult {
     ...(policy === undefined ? {} : { policy }),
     ...(track === undefined ? {} : { track }),
     ...(realNames === undefined ? {} : { realNames }),
+    ...(think === undefined ? {} : { think }),
     outputs,
   };
 

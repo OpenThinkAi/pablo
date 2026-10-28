@@ -435,3 +435,22 @@ test("AC3: the radio unit's pack still gates the timeline by its story date", ()
   expect(timeline?.text).toContain("1938: the September hurricane");
   expect(packed.pack.prompt).toMatch(/do NOT exist at this chapter's date[\s\S]*1938: the September hurricane/);
 });
+
+test("AGT-2190: a name only an unconfirmed ledger bullet carries stays an unknown-name hit until the author confirms it", () => {
+  const { vault, work } = twoOutputWork();
+  const path = join(work, "outputs", "radio", "episodes", "02-black-ice.md");
+  writeFileSync(path, `${EPISODE_TWO}ODILE: Ask Halvorsen about the hoist.\n`);
+  const ledger = join(work, "outputs", "radio", "continuity.md");
+  const original = readFileSync(ledger, "utf8");
+  const unknown = (): string[] => {
+    const outcome = checkWork(vault, work, undefined, "radio");
+    if (!outcome.ok) throw new Error(outcome.message);
+    return (outcome.core ?? []).filter((h) => h.rule === "unknown-name").map((h) => h.detail ?? "");
+  };
+
+  writeFileSync(ledger, `${original}\n- Halvorsen runs the hoist. [ep02, unconfirmed]\n`);
+  expect(unknown()).toEqual(["Halvorsen"]);
+
+  writeFileSync(ledger, `${original}\n- Halvorsen runs the hoist. [ep02]\n`);
+  expect(unknown()).toEqual([]);
+});
