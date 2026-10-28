@@ -223,6 +223,11 @@ export interface DraftingInputs {
    * every novel pack has always been.
    */
   readonly unitLabel?: string | undefined;
+  /**
+   * The unit is one scene of a script (AGT-2189): the brief drops the chapter wording and the
+   * prose point-of-view line, and asks for one scene instead of a scene count.
+   */
+  readonly scriptUnit?: boolean | undefined;
   /** `<vault>/style/*.md`. The built-in craft rules are added on top, always. */
   readonly style: readonly TextSource[];
   /**

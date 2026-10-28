@@ -41,6 +41,21 @@ export const DEFAULT_TAIL_WORDS = 500;
 export const PERIOD_FACTS_SECTION = "## Setting and period facts";
 const PERIOD_FACTS_END = "## The files";
 
+/**
+ * The period section alone (AGT-2189): from its heading to the next `## ` heading, so the rules that follow it
+ * (point of view, dialogue) are not sent a second time in the `period` slice. A file with no such section sends
+ * nothing; the old cut ran to the file map and carried every later section with it.
+ */
+function periodFactsSection(workRules: string): string {
+  const at = workRules.indexOf(PERIOD_FACTS_SECTION);
+  if (at < 0) return "";
+  const rest = workRules.slice(at + PERIOD_FACTS_SECTION.length);
+  const next = rest.search(/\n## /);
+  const end = next < 0 ? rest.length : next;
+  const fileMap = rest.indexOf(PERIOD_FACTS_END);
+  return workRules.slice(at, at + PERIOD_FACTS_SECTION.length + (fileMap >= 0 && fileMap < end ? fileMap : end)).trim();
+}
+
 /** A `## ` section heading that addresses the agent, not the writer: never part of the voice. */
 export const AGENT_SECTION_HEADING = /repl(y|ies)|agent/i;
 
@@ -89,6 +104,19 @@ export interface ReadDraftingOptions {
   readonly output?: string | undefined;
 }
 
+const FICTION_ONLY_BLOCK = /^[ \t]*<!--\s*fiction-only\s*-->[ \t]*\n?[\s\S]*?^[ \t]*<!--\s*\/fiction-only\s*-->[ \t]*\n?/gm;
+const FICTION_ONLY_MARKER = /^[ \t]*<!--\s*\/?fiction-only\s*-->[ \t]*\n?/gm;
+
+/**
+ * Style text for an output (AGT-2189): a block fenced by `<!-- fiction-only -->` ... `<!-- /fiction-only -->`
+ * (dialogue rules, scene endings) is prose-fiction craft. `keep: false`, an essay's pack, removes the block;
+ * `keep: true` removes only the two fence lines, so the marker never reaches a writer.
+ */
+export function applyFictionOnly(text: string, keep: boolean): string {
+  return (keep ? text.replace(FICTION_ONLY_MARKER, "") : text.replace(FICTION_ONLY_BLOCK, "").replace(FICTION_ONLY_MARKER, ""))
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 /**
  * Assembles the drafting inputs for one chapter. Throws only when the chapter
  * has no row in the outline, which is the one thing a pack cannot be built
@@ -132,7 +160,7 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
     periodFacts: source(
       vaultRoot,
       workRulesPath,
-      section(workRules, { from: PERIOD_FACTS_SECTION, to: PERIOD_FACTS_END }),
+      periodFactsSection(workRules),
     ),
     ...(distilledFacts === undefined ? {} : { distilledFacts }),
     cast: sourceOfFile(vaultRoot, join(workRoot, "bible", "characters", "family-tree.md"), (text) =>

@@ -72,6 +72,7 @@ export {
   planBeatsFor,
   PERIOD_FACTS_SECTION,
   readDistilledFacts,
+  applyFictionOnly,
   readDraftingInputs,
   readStyle,
   readTextSource,

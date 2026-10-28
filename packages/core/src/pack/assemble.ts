@@ -29,6 +29,7 @@ import { fitToBudget, PACK_BUDGETS, renderSlice } from "./budget";
 import { estimateTokens } from "./estimate";
 import type {
   AssembleOptions,
+  BeatRow,
   DraftingInputs,
   EssayBrief,
   EssayClaim,
@@ -280,10 +281,14 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
   const form = inputs.work.description ?? "a novel";
 
   const label = inputs.unitLabel;
+  const script = inputs.scriptUnit === true;
+  const noun = script ? "scene" : "chapter";
+  const pov = (b: BeatRow): string =>
+    script ? "" : `Point of view: ${b.pov} (close third person, one point-of-view character per scene)`;
   const brief = [
     `You are drafting ${label ?? `chapter ${inputs.unit ?? beat.chapter}`} of ${form}, working title "${inputs.work.title}".`,
-    label === undefined
-      ? "This is a first draft the author will cut and reshape. Write the chapter and nothing"
+    label === undefined || script
+      ? `This is a first draft the author will cut and reshape. Write the ${noun} and nothing`
       : "This is a first draft the author will cut and reshape. Write the whole piece and nothing",
     "else: no title, no notes, no summary, no questions.",
   ].join("\n");
@@ -295,16 +300,16 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       ? [
           `- Story date: ${beat.storyDate}`,
           `- Working title: ${beat.title}`,
-          `- Point of view: ${beat.pov} (close third person, one point-of-view character per scene)`,
+          ...(script ? [] : [`- ${pov(beat)}`]),
           `- Beat: ${beat.beat}`,
           length,
         ].join("\n")
       : [
           `- Working title: ${beat.title}`,
-          `- ${label === undefined ? "This chapter" : "This piece"} tells ${beats.length} beats, in order; tell all of them and nothing beyond them:`,
+          `- ${label === undefined ? "This chapter" : script ? "This scene" : "This piece"} tells ${beats.length} beats, in order; tell all of them and nothing beyond them:`,
           ...beats.map(
             (b, i) =>
-              `  ${i + 1}. Story date: ${b.storyDate}. Title: ${b.title}. Point of view: ${b.pov} (close third person, one point-of-view character per scene). Beat: ${b.beat}`,
+              `  ${i + 1}. Story date: ${b.storyDate}. Title: ${b.title}. ${script ? "" : `${pov(b)}. `}Beat: ${b.beat}`,
           ),
           length,
         ].join("\n");
@@ -323,7 +328,7 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
     },
     {
       name: "chapter",
-      heading: "# The chapter",
+      heading: `# The ${noun}`,
       text: chapter,
       source: beat.source,
       required: true,
@@ -334,7 +339,7 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
     },
     {
       name: "direction",
-      heading: "# Direction for this chapter (from the author; follow it)",
+      heading: `# Direction for this ${noun} (from the author; follow it)`,
       text: inputs.direction?.trim() ?? "",
       source: inputs.direction?.trim() ? "the author's direction" : undefined,
       required: true,
@@ -449,8 +454,8 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
     },
     {
       name: "timeline",
-      heading: "# What exists at this chapter's date",
-      text: renderTimeline(inputs),
+      heading: `# What exists at this ${noun}'s date`,
+      text: renderTimeline(inputs, noun),
       source: inputs.timeline.source,
       required: true,
       keep: "head",
@@ -482,7 +487,7 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
     },
     {
       name: "previousTail",
-      heading: "# The end of the previous chapter (continue from here)",
+      heading: `# The end of the previous ${noun} (continue from here)`,
       text: joinManuscript(inputs.previousTail?.text ?? ""),
       source: inputs.previousTail?.path,
       required: false,
@@ -495,8 +500,12 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       name: "task",
       heading: "",
       text: [
-        `Write the chapter now, in at least ${minScenes} scenes with a line break between`,
-        `scenes. Scenes, not summary. About ${inputs.wordTarget} words, within ten percent.`,
+        ...(script
+          ? [`Write the scene now: one scene, not a sequence of them. Scene, not summary. About ${inputs.wordTarget} words, within ten percent.`]
+          : [
+              `Write the chapter now, in at least ${minScenes} scenes with a line break between`,
+              `scenes. Scenes, not summary. About ${inputs.wordTarget} words, within ten percent.`,
+            ]),
         "Do not paraphrase the beat or the fact sheets into sentences; show traits through",
         "action and let the reader infer them. End on an image, a line, or an action, never",
         "on what it meant.",
@@ -684,17 +693,17 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
   return { specs, tail: new Set<string>(), expectedOutputTokens: Math.ceil(inputs.wordTarget * OUTPUT_TOKENS_PER_WORD) };
 }
 
-function renderTimeline(inputs: DraftingInputs): string {
+function renderTimeline(inputs: DraftingInputs, noun = "chapter"): string {
   const { exists, later } = inputs.timeline;
   if (exists.length === 0 && later.length === 0) return "";
   const blocks: string[] = [];
   if (exists.length > 0) {
-    blocks.push(["## Already true by this chapter", ...exists].join("\n"));
+    blocks.push([`## Already true by this ${noun}`, ...exists].join("\n"));
   }
   if (later.length > 0) {
     blocks.push(
       [
-        "## Not yet: these do NOT exist at this chapter's date. Do not mention or foreshadow them.",
+        `## Not yet: these do NOT exist at this ${noun}'s date. Do not mention or foreshadow them.`,
         ...later,
       ].join("\n"),
     );

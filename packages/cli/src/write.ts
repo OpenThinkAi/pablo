@@ -340,7 +340,7 @@ export async function runWrite(
 
   // The length is the request's; absent, the addressed output picks its own default.
   const words = parsePositiveInt(args.words);
-  const scenes = parsePositiveInt(args.scenes) ?? DEFAULT_MIN_SCENES;
+  const scenes = parsePositiveInt(args.scenes);
 
   const requestedTemperature = parseTemperature(args.temperature);
   if (requestedTemperature === null) {
