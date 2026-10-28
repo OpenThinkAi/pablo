@@ -1573,6 +1573,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       where?: string;
       chapters?: number;
       words?: number;
+      files?: string[];
       notes?: string[];
     };
     if (args.json) {
@@ -1580,6 +1581,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
     } else if (body.ok) {
       const def = outputDefinition(body.output ?? "") ?? OUTPUTS.novel;
       console.log(`pablo: published ${body.target}: ${body.where} (${body.chapters} ${body.chapters === 1 ? def.noun : def.plural}, ${body.words} words)`);
+      // A target that writes several files (the screenplay's Fountain and PDF) names them all (AGT-2194).
+      if ((body.files?.length ?? 0) > 1 && body.output === "screenplay") console.log(`  files: ${(body.files ?? []).join(", ")}`);
       // The radio bundle (AGT-1686) names the episodes it holds no audio for yet.
       for (const note of body.notes ?? []) console.log(`  ${note}`);
     } else {

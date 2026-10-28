@@ -173,18 +173,27 @@ export function layoutScreenplay(fountain: string): { pages: PdfLine[][]; titled
       if (page.length > 0) newPage();
       continue;
     }
-    const lead = page.length === 0 ? 0 : 1;
-    const room = LINES_PER_PAGE - page.length;
-    if (block.lines.length + lead > room && page.length > 0) {
-      // A heading or a speech moves whole when it fits a page; action splits, but never leaves one line behind.
-      if (block.kind !== "other" ? block.lines.length <= LINES_PER_PAGE : room - lead < 2) newPage();
-    }
     // A heading needs room for itself and two more lines.
     if (block.kind === "heading" && page.length > 0 && LINES_PER_PAGE - page.length - 1 < block.lines.length + 3) newPage();
-    if (page.length > 0) page.push({ x: 0, text: "" });
-    for (const line of block.lines) {
-      if (page.length >= LINES_PER_PAGE) newPage();
-      page.push(line);
+    let rest = block.lines;
+    while (rest.length > 0) {
+      const lead = page.length === 0 ? 0 : 1;
+      const room = LINES_PER_PAGE - page.length - lead;
+      if (rest.length <= room) {
+        if (lead === 1) page.push({ x: 0, text: "" });
+        page.push(...rest);
+        break;
+      }
+      // A heading or a speech moves whole when it fits a page. Action splits, but never leaves fewer than
+      // two lines on either side of the break (AGT-2194); a block taller than a page is cut wherever it must.
+      const splittable = block.kind === "other" || rest.length > LINES_PER_PAGE;
+      const take = splittable ? Math.min(room, rest.length - 2) : 0;
+      if (take >= 2) {
+        if (lead === 1) page.push({ x: 0, text: "" });
+        page.push(...rest.slice(0, take));
+        rest = rest.slice(take);
+      }
+      newPage();
     }
   }
   if (page.length > 0 || pages.length === titled) newPage();

@@ -25,7 +25,7 @@ import { runConformance } from "../src/outputs/conformance";
 import { OUTPUTS } from "../src/outputs/registry";
 import { fountainElements, lintFountain } from "../src/outputs/screenplay/fountain";
 import { buildScreenplayPack, previousSceneSummary, screenplayDefaultPlan, screenplayPreconditions } from "../src/outputs/screenplay/pack";
-import { compileScreenplay, publishScreenplay } from "../src/outputs/screenplay/publish";
+import { compileScreenplay, publishScreenplay, titleMetaOf } from "../src/outputs/screenplay/publish";
 import { buildScreenplayPdf, layoutScreenplay } from "../src/screenplay-pdf";
 import { TRACKS } from "../src/tracks/registry";
 import { runWrite } from "../src/write";
@@ -274,8 +274,8 @@ test("publish --target fountain compiles every scene in order under a title page
   if (!out.ok) throw new Error(out.message);
   expect(out.chapters).toBe(2);
   const text = readFileSync(out.where, "utf8");
-  expect(text).toBe(compileScreenplay("The Ice House", [scene(1), scene(2, "EXT. POND - DAY\n\nIce.")]));
-  expect(text.startsWith(`Title: The Ice House\n\nINT. ICE HOUSE - NIGHT\n`)).toBe(true);
+  expect(text).toBe(compileScreenplay("The Ice House", [scene(1), scene(2, "EXT. POND - DAY\n\nIce.")], titleMetaOf(work)));
+  expect(text.startsWith(`Title: The Ice House\nCredit: Written by\nAuthor: ${titleMetaOf(work).author}\n\nINT. ICE HOUSE - NIGHT\n`)).toBe(true);
   expect(text).toContain("CUT TO:\n\nEXT. POND - DAY\n\nIce.\n");
   expect(text).not.toContain("status: draft");
   expect(publishScreenplay(work, "ice-house", "T", "pdf")).toMatchObject({ ok: false, code: 2 });
@@ -291,7 +291,7 @@ test("publish --target draft|final writes the compiled .fountain and a PDF", () 
     const out = publishScreenplay(work, "ice-house", "The Ice House", target);
     if (!out.ok) throw new Error(out.message);
     expect(out.files).toEqual(["ice-house-screenplay.fountain", "ice-house-screenplay.pdf"]);
-    expect(readFileSync(out.where, "utf8")).toBe(compileScreenplay("The Ice House", [scene(1), scene(2, "EXT. POND - DAY\n\nIce.")]));
+    expect(readFileSync(out.where, "utf8")).toBe(compileScreenplay("The Ice House", [scene(1), scene(2, "EXT. POND - DAY\n\nIce.")], titleMetaOf(work)));
     const pdf = readFileSync(join(dirname(out.where), "ice-house-screenplay.pdf"), "latin1");
     expect(pdf.startsWith("%PDF-1.4\n")).toBe(true);
     expect(pdf.trimEnd().endsWith("%%EOF")).toBe(true);
@@ -335,6 +335,48 @@ test("the PDF is standard format: Courier 12, Letter, margins, dialogue indents,
   rows.forEach((row, i) => expect(pdf.slice(Number(row.slice(0, 10))).startsWith(`${i + 1} 0 obj`)).toBe(true));
   // Deterministic.
   expect(Buffer.from(buildScreenplayPdf(compileScreenplay("Long", [`INT. ROOM - DAY\n\n${long}`]), "Long")).equals(Buffer.from(bytes))).toBe(true);
+});
+
+test("AGT-2194: the title block and PDF title page carry the author, draft date and contact", () => {
+  const meta = { author: "Ada Lovelace", draftDate: "2026-10-27", contact: "ada@example.com" };
+  const text = compileScreenplay("The Ice House", [scene(1)], meta);
+  expect(text.startsWith("Title: The Ice House\nCredit: Written by\nAuthor: Ada Lovelace\nDraft date: 2026-10-27\nContact: ada@example.com\n\nINT.")).toBe(true);
+  const title = (layoutScreenplay(text).pages[0] ?? []).map((l) => l.text);
+  expect(title).toContain("Written by");
+  expect(title).toContain("Ada Lovelace");
+  expect(title).toContain("ada@example.com");
+  expect(compileScreenplay("T", [scene(1)])).toMatch(/^Title: T\n\nINT\./);
+});
+
+test("AGT-2194: action never breaks a page with fewer than two lines on either side", () => {
+  let splits = 0;
+  for (const fill of [0, 1, 2, 3, 20, 50, 51, 52, 53]) {
+    for (const size of [2, 3, 4, 5, 9]) {
+      const filler = Array.from({ length: fill }, (_, i) => `Filler ${i}.`).join("\n\n");
+      const action = Array.from({ length: size }, (_, i) => `word${i} `.repeat(11).trim()).join(" ");
+      const text = compileScreenplay("T", [`INT. ROOM - DAY\n\n${filler}\n\n${action}\n\nThe end.`]);
+      const { pages } = layoutScreenplay(text);
+      for (const page of pages.slice(1)) {
+        expect(page.length).toBeLessThanOrEqual(54);
+        // Every run of action lines (x = 108, unbroken) that touches a page edge holds at least two lines, unless the whole block does not.
+      }
+      const flat = pages.slice(1).map((p) => p.filter((l) => l.text !== "").map((l) => l.text));
+      flat.forEach((lines, i) => {
+        const tail = lines.filter((t) => t.startsWith("word"));
+        if (tail.length === 0) return;
+        // A page that ends in action holds a block fragment: it and the next page's start are each 2+ lines.
+        const next = flat[i + 1]?.filter((t) => t.startsWith("word")) ?? [];
+        const lastIsAction = lines[lines.length - 1]?.startsWith("word") === true;
+        const nextStartsAction = flat[i + 1]?.[0]?.startsWith("word") === true;
+        if (lastIsAction && nextStartsAction) {
+          splits += 1;
+          expect(tail.length).toBeGreaterThanOrEqual(2);
+          expect(next.length).toBeGreaterThanOrEqual(2);
+        }
+      });
+    }
+  }
+  expect(splits).toBeGreaterThan(0);
 });
 
 // AC4 ------------------------------------------------------------------------
