@@ -207,7 +207,7 @@ pablo write --project lighthouse --chapter 1 --words 400 --dry-run
 ```
 
 The dry run prints a table of the prompt's slices (your style guide, the work's rules,
-the beat, the timeline, places, continuity) with token counts, then the prompt itself.
+the beat, the premise, the cast from every `bible/characters/` file, the timeline, places, continuity) with token counts, then the prompt itself.
 When it looks right, write for real:
 
 ```sh

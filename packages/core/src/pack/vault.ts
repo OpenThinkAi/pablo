@@ -11,7 +11,9 @@
  *     <work>/STYLE.md                         the work's own rules (QWEN.md on an unmigrated work)
  *     <work>/bible/timeline.md                | year | real events | in the novel |
  *     <work>/bible/places.md                  places
- *     <work>/bible/characters/family-tree.md  the cast
+ *     <work>/bible/overview.md                the premise (logline, premise, themes, tone)
+ *     <work>/bible/characters/*.md            the cast: family-tree.md first, then each
+ *                                             character's own file, by name (AGT-2183)
  *     <work>/outline/beats.md                 | # | story date | title | beat | POV | status |
  *                                             (outline/chapters.md on an unmigrated work)
  *     <work>/outputs/novel/continuity.md      what the text has established
@@ -163,9 +165,8 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
       periodFactsSection(workRules),
     ),
     ...(distilledFacts === undefined ? {} : { distilledFacts }),
-    cast: sourceOfFile(vaultRoot, join(workRoot, "bible", "characters", "family-tree.md"), (text) =>
-      section(text, { to: options.castEndsAt }),
-    ),
+    premise: sourceOfFile(vaultRoot, join(workRoot, "bible", "overview.md")),
+    cast: readCast(vaultRoot, workRoot, options.castEndsAt),
     places: sourceOfFile(vaultRoot, join(workRoot, "bible", "places.md"), (text) =>
       section(text, { from: options.placesStartsAt }),
     ),
@@ -192,6 +193,32 @@ export function readDistilledFacts(
   const text = read(path);
   if (text === undefined) return undefined;
   return { path: label(vaultRoot, path), facts: periodFactsAt(parsePeriodFacts(text), storyDates) };
+}
+
+/** The family tree, which leads the cast slice when a work has one. */
+const FAMILY_TREE = "family-tree.md";
+
+/**
+ * The cast (AGT-2183): every `bible/characters/*.md`, `family-tree.md` first and
+ * then each character's own file by filename, each cut at `endsAt` (the
+ * author's open questions are not facts) and joined in one slice, its source
+ * every file sent (`, `-separated, so the `neverSend` check sees each). A file
+ * whose name starts with `_` or `.` (the vault template's `_template.md`) is
+ * not a character. `undefined` when no file has text. The slice keeps its head
+ * under budget pressure, so the family tree is the last of it to go.
+ */
+export function readCast(vaultRoot: string, workRoot: string, endsAt?: string | undefined): TextSource | undefined {
+  const dir = join(workRoot, "bible", "characters");
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return undefined;
+  const names = readdirSync(dir)
+    .filter((name) => name.endsWith(".md") && !name.startsWith("_") && !name.startsWith("."))
+    .sort((a, b) => (a === FAMILY_TREE ? -1 : b === FAMILY_TREE ? 1 : a < b ? -1 : a > b ? 1 : 0));
+  const sources = names.flatMap((name) => {
+    const found = sourceOfFile(vaultRoot, join(dir, name), (text) => section(text, { to: endsAt }));
+    return found === undefined ? [] : [found];
+  });
+  if (sources.length === 0) return undefined;
+  return { path: sources.map((s) => s.path).join(", "), text: sources.map((s) => s.text).join("\n\n") };
 }
 
 /** One row of an output's `plan.md`: `| unit | title | beats | status |`. */

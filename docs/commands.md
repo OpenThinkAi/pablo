@@ -428,7 +428,10 @@ flags a claim without one (`claim-uncited`). The section is put into
 `outputs/essay/essay.md` (any heading the writer added is dropped, the other
 sections are kept) and committed on `draft/essay-NN`; the file's frontmatter is
 the provenance of the section written last. A section that already has text is
-refused without `--force`. Default length: 600 words a section (1500 for a
+refused without `--force`. On a fiction track a section's pack also carries the cast (every character
+file, as below), and a section about one act (`Act I`, as `output add essay` names them) carries that act's
+beat rows: the beats under the act's own `## Act I` heading in `outline/beats.md` when the beats are split
+across act headings, else the beats divided over the acts in order. Default length: 600 words a section (1500 for a
 fiction essay with no `outline.md`, whose one section is the whole essay).
 
 `write --output narrated --unit N` makes reading N from the source output's unit N
@@ -467,6 +470,11 @@ Before sending anything, it:
    A `fiction` work has no gate.
 2. Runs the same checks as `status --for` and refuses (exit `2`, with `missing[]`) if any fail.
 3. Builds the pack: the voice, the work's rules, period facts, cast and places, the timeline up to the beat's date, continuity, the end of the previous unit, and the beat.
+   - The premise is `bible/overview.md` (its logline, premise, themes and tone), its own `premise` section.
+   - The cast is every `bible/characters/*.md`: `family-tree.md` first, then each character's own file by name
+     (a file whose name starts with `_`, like the template's `_template.md`, is skipped), each cut at a
+     `## Decisions for Matt` heading. Under budget pressure the cast is cut from its end, so the family tree
+     is the last of it to go. `--dry-run` lists both sections with every file they came from.
    - The period facts are the rows of `facts/period.md` (from `research distill`) whose story date is on or
      before the unit's (its latest beat's, for a unit telling several), plus every undated row, then the
      `Setting and period facts` section of the work's `STYLE.md`. Only the fact and its date are sent, never

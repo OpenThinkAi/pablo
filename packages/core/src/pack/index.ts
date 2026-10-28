@@ -71,6 +71,7 @@ export {
   parseWorkTitle,
   planBeatsFor,
   PERIOD_FACTS_SECTION,
+  readCast,
   readDistilledFacts,
   applyFictionOnly,
   readDraftingInputs,

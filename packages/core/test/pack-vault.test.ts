@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -175,6 +177,62 @@ test("the cast file can be cut at the author's own open questions", () => {
   expect(inputs.cast?.text).not.toContain("Decisions for the author");
 });
 
+test("AGT-2183: every character file reaches the cast, the family tree first, and the premise is read from the overview", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pablo-cast-"));
+  try {
+    const vault = join(dir, "vault");
+    cpSync(VAULT, vault, { recursive: true });
+    const work = join(vault, "novels", "ice-house");
+    const characters = join(work, "bible", "characters");
+    writeFileSync(join(characters, "odile-nadeau.md"), "# Odile Nadeau\n\n- Keeps the scale-house books in green ink.\n\n## Decisions for the author\n\n- Does she leave?\n");
+    writeFileSync(join(characters, "aaron-pike.md"), "# Aaron Pike\n\n- The ice-cutter's foreman, left-handed.\n");
+    writeFileSync(join(characters, "_template.md"), "# {{NAME}}\n");
+    writeFileSync(join(characters, "empty.md"), "\n");
+
+    const inputs = readDraftingInputs({ vaultRoot: vault, workRoot: work, chapter: 2, wordTarget: 1800, castEndsAt: "## Decisions for the author" });
+    expect(inputs.cast?.path).toBe(
+      "novels/ice-house/bible/characters/family-tree.md, novels/ice-house/bible/characters/aaron-pike.md, novels/ice-house/bible/characters/odile-nadeau.md",
+    );
+    const text = inputs.cast?.text ?? "";
+    expect(text.indexOf("Marcel Thibodeau")).toBeLessThan(text.indexOf("left-handed"));
+    expect(text.indexOf("left-handed")).toBeLessThan(text.indexOf("green ink"));
+    expect(text).not.toContain("Does she leave?");
+    expect(text).not.toContain("{{NAME}}");
+    expect(inputs.premise?.path).toBe("novels/ice-house/bible/overview.md");
+    expect(inputs.premise?.text).toContain("scale-house clerk");
+
+    const pack = assemblePack("drafting", inputs);
+    expect(pack.slices.find((s) => s.name === "cast")?.text).toContain("green ink");
+    expect(pack.slices.find((s) => s.name === "premise")?.text).toContain("## Logline");
+
+    // A tight budget cuts the cast like any other slice: from its tail, so the family tree is the last to go.
+    const tight = assemblePack("drafting", inputs, { budgetTokens: 2200 });
+    expect(tight.adjustments.find((a) => a.name === "cast")?.action).toBe("truncated");
+    const kept = tight.slices.find((s) => s.name === "cast")?.text ?? "";
+    expect(kept).toContain("# Family tree");
+    expect(kept).not.toContain("green ink");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AGT-2183: a work with no bible/characters directory has no cast, and none with no overview has no premise", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pablo-cast-"));
+  try {
+    const vault = join(dir, "vault");
+    cpSync(VAULT, vault, { recursive: true });
+    const work = join(vault, "novels", "ice-house");
+    rmSync(join(work, "bible", "characters"), { recursive: true });
+    rmSync(join(work, "bible", "overview.md"));
+    const inputs = readDraftingInputs({ vaultRoot: vault, workRoot: work, chapter: 2, wordTarget: 1800 });
+    expect(inputs.cast).toBeUndefined();
+    expect(inputs.premise).toBeUndefined();
+    expect(assemblePack("drafting", inputs).slices.map((s) => s.name)).not.toContain("premise");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("chapter one has no previous tail, and an unknown chapter is an error", () => {
   expect(readDraftingInputs({ vaultRoot: VAULT, workRoot: WORK, chapter: 1, wordTarget: 900 }).previousTail).toBeUndefined();
   expect(() => readDraftingInputs({ vaultRoot: VAULT, workRoot: WORK, chapter: 44, wordTarget: 900 })).toThrow(
@@ -192,6 +250,7 @@ test("the drafting pack assembles draft-chapter's slices, in draft-chapter's ord
     "style",
     "workRules",
     "craft",
+    "premise",
     "period",
     "cast",
     "places",

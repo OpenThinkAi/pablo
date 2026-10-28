@@ -200,6 +200,11 @@ export interface EssayBrief {
    * story from outside it, so nothing in it is "not yet". The cast and places come from the inputs' own slices.
    */
   readonly timeline?: TextSource | undefined;
+  /**
+   * On a fiction track (AGT-2183): the beat rows a section about one act tells — what happens in that act — so the
+   * writer works from the story's own events instead of inventing them. Absent for a section that is not an act's.
+   */
+  readonly actBeats?: readonly BeatRow[] | undefined;
   /** The section's claims, each with the note ids it cites. Empty for a section that makes none. */
   readonly claims: readonly EssayClaim[];
   /** Where the claims came from (`core/claims.md`), for the slice's source. */
@@ -261,7 +266,15 @@ export interface DraftingInputs {
    * The source note of each row is never sent; only the fact and its date.
    */
   readonly distilledFacts?: DistilledFacts | undefined;
-  /** `bible/characters/*`: who exists. */
+  /**
+   * `bible/overview.md` (AGT-2183): the premise — logline, premise, themes, tone — so the writer knows what the
+   * piece is about. Its own slice in every fiction drafting pack; an essay sends it as the story it is about.
+   */
+  readonly premise?: TextSource | undefined;
+  /**
+   * `bible/characters/*.md` (AGT-2183): who exists. The family tree first, then each character's own file; `path`
+   * names every file sent, `, `-separated.
+   */
   readonly cast?: TextSource | undefined;
   /** `bible/places.md`. */
   readonly places?: TextSource | undefined;
