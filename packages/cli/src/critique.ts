@@ -69,12 +69,16 @@ export const ASK_TIMEOUT_MS = 300_000;
 /** The model the critic asks. Real runs use the planner role (Claude); this is a test-only injection point, so no test calls a real model. */
 export const critiqueModel: { ask?: Ask } = {};
 
-/** An `Ask` over any adapter (the planner's), collecting the streamed tokens. */
-export function adapterAsk(adapter: Adapter, timeoutMs: number = ASK_TIMEOUT_MS): Ask {
+/**
+ * An `Ask` over any adapter (the planner's), collecting the streamed tokens. `maxTokens` caps the answer; without it
+ * the provider's own default applies (mlx_lm's is 512 tokens, AGT-2187).
+ */
+export function adapterAsk(adapter: Adapter, timeoutMs: number = ASK_TIMEOUT_MS, maxTokens?: number): Ask {
   return async (prompt) => {
     let text = "";
     try {
-      for await (const event of adapter.complete({ prompt, timeoutMs, signal: AbortSignal.timeout(timeoutMs) })) if (event.type === "token") text += event.text;
+      const request = { prompt, timeoutMs, signal: AbortSignal.timeout(timeoutMs), ...(maxTokens === undefined ? {} : { maxTokens }) };
+      for await (const event of adapter.complete(request)) if (event.type === "token") text += event.text;
     } catch (error) {
       const name = (error as Error).name;
       if (name === "TimeoutError" || name === "AbortError") throw new Error(`the model did not respond in ${Math.round(timeoutMs / 1000)}s; is the configured provider running?`);

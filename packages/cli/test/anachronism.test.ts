@@ -1,19 +1,36 @@
 /**
  * The `anachronism` check for historical fiction (AGT-2113, pm project `pablo-platform`, D-10): out-of-period
  * words named with why and the period they belong to, verdicts cached per (period, term) in the work's
- * `facts/lexicon.json`. Every model call goes through a fake `Ask`; no test reaches a real model, and every work is
- * a temp copy of the fixture vault.
+ * `.pablo/lexicon.json` (AGT-2187: in the main checkout, never a draft worktree). Every model call goes through a
+ * fake `Ask` or a fake adapter replaying a fixture reply (`fixtures/anachronism/`, in the shapes Gemma 4 and Claude
+ * answer); no test reaches a real model, and every work is a temp copy of the fixture vault.
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LEXICON_FILE, anachronismModel, checkAnachronisms, parseVerdicts, periodOf, readLexicon, termsByLine } from "../src/anachronism";
+import type { Adapter, CompletionEvent, CompletionRequest } from "@openthink/pablo-core";
+import {
+  ASK_MAX_TOKENS,
+  LEGACY_LEXICON_FILE,
+  LEXICON_FILE,
+  anachronismModel,
+  checkAnachronisms,
+  knownNamesOf,
+  lexiconHome,
+  parseVerdicts,
+  periodOf,
+  readLexicon,
+  termsByLine,
+} from "../src/anachronism";
+import { adapterAsk } from "../src/critique";
 import { VERBS } from "../src/verbs";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
+const REPLIES = fileURLToPath(new URL("./fixtures/anachronism", import.meta.url));
+const reply = (name: string): string => readFileSync(join(REPLIES, name), "utf8");
 const PERIOD = "The Hudson ice trade, winter 1888-89.";
 
 const roots: string[] = [];
@@ -23,28 +40,46 @@ afterEach(() => {
 });
 
 /** A temp copy of the fixture vault whose work is on `track`, with a period brief and one unit of `prose`. */
-function tempWork(prose: string, track = "historical-fiction"): { vault: string; work: string; unit: string } {
+function tempWork(prose: string, track = "historical-fiction", period = PERIOD): { vault: string; work: string; unit: string } {
   const vault = mkdtempSync(join(tmpdir(), "pablo-anachronism-"));
   roots.push(vault);
   cpSync(FIXTURE, vault, { recursive: true });
   const work = join(vault, "novels", "ice-house");
   const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as Record<string, unknown>;
   writeFileSync(join(work, "pablo.json"), JSON.stringify({ ...marker, track }, null, 2));
-  writeFileSync(join(work, "bible", "period.md"), `# Period\n\n## When and where\n\n${PERIOD}\n\n## The events\n\nThe Great Blizzard.\n`);
+  writeFileSync(join(work, "bible", "period.md"), `# Period\n\n## When and where\n\n${period}\n\n## The events\n\nThe Great Blizzard.\n`);
   const unit = join(work, "chapters", "01-the-last-full-cut.md");
   writeFileSync(unit, `---\ntitle: one\nmodel: m\nprompt_hash: h\n---\n\n${prose}\n`);
   return { vault, work, unit };
 }
 
-/** A fake model: every asked term is in period except those in `out`. Records each prompt. */
+/** The terms a prompt asks about. */
+const termsOf = (prompt: string): string[] => prompt.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
+
+/** A fake model answering in the line protocol: every asked term is in period except those in `out`. Records each prompt. */
 function fakeAsk(out: Record<string, { why: string; belongs: string }>) {
   const prompts: string[] = [];
   const ask = async (prompt: string): Promise<string> => {
     prompts.push(prompt);
-    const terms = prompt.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
-    return JSON.stringify(terms.map((term) => (out[term] ? { term, inPeriod: false, ...out[term] } : { term, inPeriod: true })));
+    const lines = termsOf(prompt).flatMap((term) => (out[term] ? [`${term} | ${out[term].why} | ${out[term].belongs}`] : []));
+    return [...lines, "END", ""].join("\n");
   };
   return { ask, prompts };
+}
+
+/** A fake adapter whose `complete()` streams `text` in small tokens, recording each request (as a local endpoint would). */
+function replayAdapter(text: string): { adapter: Adapter; requests: CompletionRequest[] } {
+  const requests: CompletionRequest[] = [];
+  const adapter = {
+    id: "fake",
+    model: "fake-model",
+    preferredOutput: "text",
+    async *complete(request: CompletionRequest): AsyncIterable<CompletionEvent> {
+      requests.push(request);
+      for (let i = 0; i < text.length; i += 7) yield { type: "token", text: text.slice(i, i + 7) } as CompletionEvent;
+    },
+  } as unknown as Adapter;
+  return { adapter, requests };
 }
 
 const TEENAGER = { teenager: { why: "the word came into use in the 1940s", belongs: "the 1940s onward" } };
@@ -120,16 +155,18 @@ test("a model that cannot be asked leaves a notice and keeps the cached hits", a
   expect(result?.notice).toBe(
     "anachronism: incomplete; 1 new word(s) not judged, cached verdicts still reported: no provider. Check the provider the `check` intent routes to (`pablo config test`; `pablo init --config` if none is set).",
   );
+  expect(result?.failed).toBe(true);
   expect(result?.hits.map((h) => h.term)).toEqual(["teenager"]);
 });
 
-test("a lexicon that does not parse is never overwritten; the check is skipped with a notice", async () => {
+test("a lexicon that does not parse is never overwritten; the check fails with a notice", async () => {
   const { work, unit } = tempWork("The teenager hauled ice.");
-  mkdirSync(join(work, "facts"), { recursive: true });
+  mkdirSync(join(work, ".pablo"), { recursive: true });
   writeFileSync(join(work, LEXICON_FILE), "{ not json");
   const fake = fakeAsk(TEENAGER);
   const result = await checkAnachronisms(work, [unit], { ask: fake.ask });
   expect(result?.hits).toEqual([]);
+  expect(result?.failed).toBe(true);
   expect(result?.notice).toContain("is not a lexicon");
   expect(fake.prompts).toEqual([]);
   expect(readFileSync(join(work, LEXICON_FILE), "utf8")).toBe("{ not json");
@@ -144,6 +181,7 @@ test("only historical-fiction works are checked, and a work without a period bri
   const result = await checkAnachronisms(work, [unit], { ask: fakeAsk(TEENAGER).ask });
   expect(result?.hits).toEqual([]);
   expect(result?.notice).toContain("bible/period.md");
+  expect(result?.failed).toBeUndefined();
 });
 
 test("`check` puts anachronism hits in hits[] through the anachronismModel seam", async () => {
@@ -158,7 +196,7 @@ test("`check` puts anachronism hits in hits[] through the anachronismModel seam"
   expect((result.body as { anachronism?: unknown }).anachronism).toEqual({ asked: 1 });
 });
 
-test("helpers: the period, the terms of a line and a lenient verdict parse", () => {
+test("helpers: the period, the terms of a line and a lenient verdict parse (JSON arrays are still read)", () => {
   expect(periodOf("# Period\n\nThe Hudson ice trade, winter 1888-89.\n")).toBe("The Hudson ice trade, winter 1888-89.");
   expect(periodOf("# Period\n\n## When and where\n\nNapa,\n1920s.\n\n## The events\n\nx\n")).toBe("Napa, 1920s.");
   expect(periodOf("# Period\n")).toBeUndefined();
@@ -169,4 +207,134 @@ test("helpers: the period, the terms of a line and a lenient verdict parse", () 
   expect([...verdicts]).toEqual([["okay", { inPeriod: false, why: "no reason given", belongs: "a later period" }]]);
   const long = parseVerdicts(JSON.stringify([{ term: "okay", inPeriod: false, why: "x".repeat(500), belongs: "the 1830s" }]), ["okay"]);
   expect(long.get("okay")?.why).toHaveLength(200);
+});
+
+// ---------------------------------------------------------------- AGT-2187: local models, loud failures, fewer words
+
+const RADIO_1918 = "Rural New York, the winter of 1918.";
+
+test("the line protocol: a Gemma 4 reply and a Claude reply both give verdicts, through an adapter's complete()", async () => {
+  for (const name of ["gemma4-reply.txt", "claude-reply.txt"]) {
+    const { work, unit } = tempWork("The radio played in the parlour while the teenager slept.", "historical-fiction", RADIO_1918);
+    const { adapter, requests } = replayAdapter(reply(name));
+    const result = await checkAnachronisms(work, [unit], { ask: adapterAsk(adapter, 5_000, ASK_MAX_TOKENS) });
+    expect(result?.failed).toBeUndefined();
+    expect(result?.notice).toBeUndefined();
+    expect(result?.hits.map((h) => h.term).sort()).toEqual(["radio", "teenager"]);
+    expect(result?.hits.find((h) => h.term === "radio")?.belongs).toBe("the 1920s onward");
+    // Every unlisted term is in period once the reply says END, and the answer budget is stated (mlx_lm's default is 512).
+    expect(readLexicon(work)?.periods[RADIO_1918]?.["parlour"]).toEqual({ inPeriod: true });
+    expect(requests[0]?.maxTokens).toBe(ASK_MAX_TOKENS);
+    expect(requests[0]?.prompt).toContain("END");
+  }
+});
+
+test("a reply cut short (no END) is a check error: check exits 1 with anachronism.failed, and nothing unjudged is cached", async () => {
+  const { vault, work } = tempWork("The radio played in the parlour while the teenager slept.", "historical-fiction", RADIO_1918);
+  anachronismModel.ask = async () => reply("gemma4-reply-cut.txt");
+  const verb = VERBS.find((v) => v.name === "check")!;
+  const ctx = { cwd: vault, env: { PABLO_VAULT: vault, PATH: "/usr/bin:/bin" }, stderr: { write: () => true } };
+  const result = await verb.run({ project: "ice-house", across: false }, ctx as never);
+  expect(result.exitCode).toBe(1);
+  const block = (result.body as { anachronism?: { failed?: boolean; notice?: string } }).anachronism;
+  expect(block?.failed).toBe(true);
+  expect(block?.notice).toContain("got no verdict");
+  // The half-written last line is not trusted, and no term is passed as in period.
+  const known = readLexicon(work)?.periods[RADIO_1918] ?? {};
+  expect(known["radio"]).toBeUndefined();
+  expect(known["parlour"]).toBeUndefined();
+});
+
+test("the line parser tolerates bullets, tables, emphasis and a thinking block, and only END passes the unlisted", () => {
+  const asked = ["radio", "okay", "parlour"];
+  const table = "<think>radio? 1918...</think>\n| Term | Why | Period |\n|---|---|---|\n| **Radio** | broadcasting began in 1920 | the 1920s |\n1. okay: first recorded in 1839\nEND";
+  expect([...parseVerdicts(table, asked)]).toEqual([
+    ["radio", { inPeriod: false, why: "broadcasting began in 1920", belongs: "the 1920s" }],
+    ["okay", { inPeriod: false, why: "first recorded in 1839", belongs: "a later period" }],
+    ["parlour", { inPeriod: true }],
+  ]);
+  // No END: only the listed term gets a verdict, so the rest are asked again rather than passed.
+  expect([...parseVerdicts("radio | too late | the 1920s\n", asked)].map(([t]) => t)).toEqual(["radio"]);
+  // A model that also lists in-period terms says so in the reason cell.
+  expect(parseVerdicts("parlour | in period | -\nEND", asked).get("parlour")).toEqual({ inPeriod: true });
+  // An echo of the asked terms is not a verdict.
+  expect(parseVerdicts("- radio\n- okay\n", asked).size).toBe(0);
+});
+
+test("stopwords and the names the bible and continuity know are never sent: the fixture chapter's term count", async () => {
+  const vault = mkdtempSync(join(tmpdir(), "pablo-anachronism-"));
+  roots.push(vault);
+  cpSync(FIXTURE, vault, { recursive: true });
+  const work = join(vault, "novels", "ice-house");
+  const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as Record<string, unknown>;
+  writeFileSync(join(work, "pablo.json"), JSON.stringify({ ...marker, track: "historical-fiction" }, null, 2));
+  writeFileSync(join(work, "bible", "period.md"), `# Period\n\n## When and where\n\n${PERIOD}\n`);
+  const chapter = join(work, "chapters", "01-the-last-full-cut.md");
+  const fake = fakeAsk({});
+  await checkAnachronisms(work, [chapter], { ask: fake.ask });
+  const sent = fake.prompts.flatMap(termsOf);
+
+  const names = knownNamesOf(work);
+  for (const name of ["Odile", "Marcel", "Wilfred", "Sprague", "Ezra"]) expect(names.has(name)).toBe(true);
+  for (const word of ["odile", "marcel", "wilfred", "sprague", "ezra", "the", "had", "would", "you'll", "something", "under", "while"]) {
+    expect(sent).not.toContain(word);
+  }
+  const everything = new Set(termsByLine(readFileSync(chapter, "utf8").replace(/^---\n[\s\S]*?\n---\n/, "")).flatMap((l) => l.terms));
+  // 319 words in, a fraction of them asked about; the count is pinned so a regression in the filter shows.
+  expect(sent.length).toBe(93);
+  expect(sent.length).toBeLessThan(everything.size);
+  expect(sent).toContain("sawdust");
+});
+
+function git(dir: string, ...args: string[]): string {
+  const r = Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "pipe", stderr: "pipe" });
+  if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.toString()}`);
+  return r.stdout.toString().trim();
+}
+
+test("a check in a draft worktree caches in the main checkout's .pablo/, leaves the worktree clean, and survives its removal", async () => {
+  const { vault, work } = tempWork("The teenager hauled ice from the river.");
+  writeFileSync(join(vault, ".gitignore"), ".pablo/\n");
+  git(vault, "init", "-q", "-b", "main");
+  git(vault, "config", "user.email", "t@example.com");
+  git(vault, "config", "user.name", "T");
+  git(vault, "add", "-A");
+  git(vault, "commit", "-q", "-m", "init");
+  const tree = join(mkdtempSync(join(tmpdir(), "pablo-anachronism-wt-")), "draft");
+  roots.push(dirname(tree));
+  git(vault, "worktree", "add", "-q", "-b", "draft/ch01", tree);
+  const draftWork = join(tree, "novels", "ice-house");
+
+  expect(realpathSync(lexiconHome(draftWork))).toBe(realpathSync(work));
+  const result = await checkAnachronisms(draftWork, [join(draftWork, "chapters", "01-the-last-full-cut.md")], { ask: fakeAsk(TEENAGER).ask });
+  expect(result?.hits.map((h) => h.term)).toEqual(["teenager"]);
+  expect(existsSync(join(draftWork, LEXICON_FILE))).toBe(false);
+  expect(existsSync(join(draftWork, LEGACY_LEXICON_FILE))).toBe(false);
+  expect(git(tree, "status", "--porcelain", "--ignored")).toBe("");
+  expect(existsSync(join(work, LEXICON_FILE))).toBe(true);
+
+  // The worktree goes (as a merge removes it); the verdicts stay, so a re-check on main asks nothing.
+  git(vault, "worktree", "remove", tree);
+  const again = await checkAnachronisms(work, [join(work, "chapters", "01-the-last-full-cut.md")], {
+    ask: async () => {
+      throw new Error("the model was called");
+    },
+  });
+  expect(again?.asked).toBe(0);
+  expect(again?.hits.map((h) => h.term)).toEqual(["teenager"]);
+});
+
+test("a legacy facts/lexicon.json seeds a missing cache and is never written", async () => {
+  const { work, unit } = tempWork("The teenager hauled ice from the river.");
+  mkdirSync(join(work, "facts"), { recursive: true });
+  const legacy = { periods: { [PERIOD]: { teenager: { inPeriod: false, why: "1940s word", belongs: "the 1940s" }, hauled: { inPeriod: true }, ice: { inPeriod: true }, river: { inPeriod: true } } } };
+  writeFileSync(join(work, LEGACY_LEXICON_FILE), JSON.stringify(legacy));
+  const result = await checkAnachronisms(work, [unit], {
+    ask: async () => {
+      throw new Error("the model was called");
+    },
+  });
+  expect(result?.asked).toBe(0);
+  expect(result?.hits.map((h) => h.term)).toEqual(["teenager"]);
+  expect(JSON.parse(readFileSync(join(work, LEGACY_LEXICON_FILE), "utf8"))).toEqual(legacy);
 });

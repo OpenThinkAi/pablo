@@ -81,8 +81,11 @@ On top of the [fiction checks](fiction.md#checks) (`continuity`, `story-time`,
 - **anachronism**: a word, object or idiom out of the work's period (`rule: "anachronism"`).
   The period is the `## When and where` section of `bible/period.md`; with no brief the
   check is skipped and says so. The unit's distinct words go to the `check` intent's
-  model, verdicts are cached per (period, term) in `facts/lexicon.json`, and you can edit
-  a verdict there to overrule the model. A fully cached unit makes no model call.
+  model (function words and names the bible or continuity already knows are not sent),
+  verdicts are cached per (period, term) in the work's `.pablo/lexicon.json` in the main
+  checkout, and you can edit a verdict there to overrule the model. A fully cached unit
+  makes no model call. Words the model leaves unjudged make the check fail (exit `1`),
+  never a silent pass.
 - **fact-accuracy**: the unit against `facts/period.md`. One model call per unit; the
   model names each sentence a fact contradicts, and each hit quotes the sentence, the
   fact and its source note.

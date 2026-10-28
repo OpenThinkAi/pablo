@@ -610,7 +610,7 @@ export async function withFactAccuracy(
 /** What the model-backed checks added to a scan: every hit (the scan's first), their JSON blocks, and the notices to print. */
 export interface ModelChecked {
   readonly hits: readonly Hit[];
-  readonly anachronism?: { asked: number; notice?: string };
+  readonly anachronism?: { asked: number; notice?: string; failed?: true };
   readonly factAccuracy?: FactAccuracySummary;
   /** Each check's notice when it stopped short, for the prose form's stderr. */
   readonly notices: readonly string[];
@@ -630,7 +630,9 @@ export async function runModelChecks(
   const progress = options.progress;
   const anachronism = await checkAnachronisms(workDir, outcome.scanned, { env: options.env, ...(progress ? { progress } : {}) });
   const fact = await withFactAccuracy(outcome, workDir, output, options.factAsk ?? (() => factAccuracyAsk(options.env, workDir)), progress);
-  const notices = [anachronism?.notice, fact.factAccuracy?.notice].filter((n): n is string => n !== undefined);
+  // An anachronism run that left terms unjudged is a check error, never a silent pass (AGT-2187).
+  const anachronismNotice = anachronism?.notice === undefined ? undefined : anachronism.failed ? `pablo: check error: ${anachronism.notice}` : anachronism.notice;
+  const notices = [anachronismNotice, fact.factAccuracy?.notice].filter((n): n is string => n !== undefined);
   return {
     hits: [...fact.outcome.hits, ...(anachronism?.hits ?? [])],
     notices,
@@ -698,7 +700,8 @@ export function radioScriptsChecked(file: string | undefined, output: string | u
  * hit (`path:line rule — excerpt`, with `(<detail>)` appended when set) then
  * one `unprovenanced: <path>` line per unprovenanced file, or `no hits` when
  * both are empty. JSON is `{ok: true, hits[], unprovenanced[], radio?}`. Exit
- * 0 always, except a resolution refusal before any scanning (exit 2).
+ * 0, except a resolution refusal before any scanning (exit 2) and an anachronism
+ * run that left terms unjudged (exit 1, `anachronism.failed`, AGT-2187).
  *
  * A work with radio scripts (a `CAST:` line, AGT-1680) also gets them read by
  * the Python side: `radio` holds each episode's counts, the directions outside
@@ -769,6 +772,8 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
     for (const line of radioLines) console.log(line);
   }
 
+  // Terms the anachronism check could not judge fail the check (exit 1, AGT-2187); the hits it did find are reported above.
+  if (model.anachronism?.failed) return 1;
   return args.strict === true && strictFails(hits, outcome.core) ? 1 : outcome.code;
 }
 
