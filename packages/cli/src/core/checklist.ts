@@ -199,12 +199,14 @@ export function placeholderItem(category: string): string {
  * dropped), then each new proposed item appended with the next number. A proposal is rejected when its category is
  * not one of `categories`, it is empty or too long, or it repeats an item already listed. Each category in
  * `categories` that ends up with no item gets a placeholder, so nothing in the brief's scope is skipped silently.
- * Pure.
+ * With `max` (AGT-2186) the list never grows past that many rows in all: further proposals are rejected naming the
+ * cap, and placeholders stop at it. Pure.
  */
 export function mergeChecklist(
   existing: readonly ChecklistRow[],
   proposed: readonly ProposedItem[],
   categories: readonly string[],
+  max?: number,
 ): { rows: ChecklistRow[]; added: number; rejected: RejectedItem[] } {
   const rows: ChecklistRow[] = [...existing];
   const seen = new Set(existing.map((r) => key(r.item)));
@@ -236,10 +238,61 @@ export function mergeChecklist(
       reject("already on the checklist");
       continue;
     }
+    if (max !== undefined && rows.length >= max) {
+      reject(`the checklist is at its cap of ${max} items (raise it with --max)`);
+      continue;
+    }
     push(category, item);
   }
   for (const category of categories) {
+    if (max !== undefined && rows.length >= max) break;
     if (!rows.some((r) => r.category === category)) push(category, placeholderItem(category));
   }
   return { rows, added, rejected };
+}
+
+/**
+ * The default size of a checklist (AGT-2186): the work's length and how many outputs it has, not whatever the
+ * research agent offers. A short work with one output gets about a dozen items, a long brief or several outputs more,
+ * never fewer than 8 or more than 24; `research plan --max N` overrides it. Pure.
+ */
+export function defaultChecklistMax(sourceWords: number, outputCount: number): number {
+  const size = 6 + 3 * Math.max(1, outputCount) + Math.floor(sourceWords / 100);
+  return Math.min(24, Math.max(8, size));
+}
+
+/** The most items a `--max` may ask for. */
+export const MAX_CHECKLIST_ITEMS = 200;
+
+/**
+ * An item selection: `3`, `#3`, `1,3,5-8` or an array of those -> the distinct item numbers in order, or a message
+ * when a part is not a number or a range. Used by `research waive|link` to close several items on one branch. Pure.
+ */
+export function parseItemSpec(raw: string | number | readonly (string | number)[] | undefined): { ok: true; numbers: number[] } | { ok: false; message: string } {
+  const parts = (Array.isArray(raw) ? raw : [raw]).flatMap((r) => String(r ?? "").split(","));
+  const numbers: number[] = [];
+  for (const part of parts) {
+    const text = part.trim();
+    if (text === "") continue;
+    const m = /^#?(\d+)(?:\s*-\s*#?(\d+))?$/.exec(text);
+    if (!m) return { ok: false, message: `"${text}" is not an item number or range (e.g. 3, 1,3,5-8)` };
+    const from = Number(m[1]);
+    const to = m[2] === undefined ? from : Number(m[2]);
+    if (from < 1 || to < from || to - from > MAX_CHECKLIST_ITEMS) return { ok: false, message: `"${text}" is not a valid item range` };
+    for (let n = from; n <= to; n++) if (!numbers.includes(n)) numbers.push(n);
+  }
+  return numbers.length === 0 ? { ok: false, message: "no item named" } : { ok: true, numbers };
+}
+
+/** True if `text` has a `## Sources` heading with at least one `- `/`* ` entry under it (`renderResearchNote`'s shape). */
+export function noteHasSources(text: string): boolean {
+  let inSources = false;
+  for (const line of text.split("\n")) {
+    if (/^##\s/.test(line)) {
+      inSources = /^##\s+Sources\b/i.test(line);
+      continue;
+    }
+    if (inSources && /^\s*[-*]\s+\S/.test(line)) return true;
+  }
+  return false;
 }

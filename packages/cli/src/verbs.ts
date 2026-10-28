@@ -780,15 +780,16 @@ const RESEARCH_ARGS = z.object({
     .enum(["save", "distill", "plan", "waive", "link"])
     .describe(
       "`save`: keep a research finding with its sources as research/<slug>.md. `distill`: turn research/ into short, sourced period facts in facts/period.md. " +
-        "`plan`: derive research/checklist.md from the period brief or thesis. `waive <#> \"<reason>\"`: close a checklist item with a reason. " +
-        "`link <#> <note>`: close a checklist item with an existing research note.",
+        "`plan`: derive research/checklist.md from the period brief or thesis. `waive <#,#,a-b> \"<reason>\"`: close checklist items with a reason, on one branch. " +
+        "`link <#,#,a-b> <note>`: close checklist items with an existing research note, on one branch.",
     ),
   project: projectField,
   title: z.string().optional().describe("What the note is about, e.g. 'Grape prices, 1919'. Becomes the file name."),
   note: z.string().optional().describe("The finding, in your own words: the checkable facts and what they mean for the story."),
   source: z.array(z.string()).optional().default([]).describe("Where a fact came from: a URL or full citation. Repeatable; at least one."),
   item: z.array(z.string()).optional().default([]).describe("`save`: the research checklist item(s) this note sources, by number. Repeatable."),
-  entry: z.string().optional().describe("`waive`/`link`: the checklist item's number."),
+  entry: z.string().optional().describe("`waive`/`link`: the checklist item numbers: `3`, `1,3` or a range `5-8` (or a mix: `1,3,5-8`)."),
+  max: z.number().int().positive().optional().describe("`plan`: the most items the checklist may hold in all (default: sized to the work's length and outputs)."),
   // One positional slot, read per action: the CLI's `waive <#> "<reason>"` and `link <#> <note>`. The MCP tools name it `reason` and `note`.
   text: z.string().optional().describe("The action's second positional, overloaded: `waive`'s reason (why the item needs no research), or `link`'s research note id (its path under research/ without .md)."),
 });
@@ -798,7 +799,7 @@ async function runResearchVerb(args: z.infer<typeof RESEARCH_ARGS>, ctx: VerbCon
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
   if (args.sub === "distill") return distillFactsInProject(resolved.projectPath, ctx.env, { researcher: ctx.researcher, stderr: ctx.stderr });
-  if (args.sub === "plan") return planChecklist(resolved.projectPath, ctx.env, { researcher: ctx.researcher, stderr: ctx.stderr });
+  if (args.sub === "plan") return planChecklist(resolved.projectPath, ctx.env, { researcher: ctx.researcher, stderr: ctx.stderr, max: args.max });
   if (args.sub === "waive") return waiveChecklistItem(resolved.projectPath, args.entry, args.text, ctx.env);
   if (args.sub === "link") return linkChecklistItem(resolved.projectPath, args.entry, args.text, ctx.env);
   return saveResearchInProject(resolved.projectPath, { title: args.title ?? "", note: args.note ?? "", sources: args.source ?? [] }, ctx.env, args.item ?? []);
@@ -884,7 +885,10 @@ const SAVE_RESEARCH_MCP: McpToolSpec = {
 };
 
 // AGT-2111 (D-9): the research checklist as MCP tools, so any agent knows what still needs researching.
-const PLAN_RESEARCH_MCP_ARGS = z.object({ project: projectField });
+const PLAN_RESEARCH_MCP_ARGS = z.object({
+  project: projectField,
+  max: z.number().int().positive().optional().describe("The most items the checklist may hold in all. Default: sized to the work's length and outputs."),
+});
 
 const PLAN_RESEARCH_MCP: McpToolSpec = {
   name: "plan_research",
@@ -895,44 +899,46 @@ const PLAN_RESEARCH_MCP: McpToolSpec = {
     const args = PLAN_RESEARCH_MCP_ARGS.parse(raw);
     const resolved = resolveVerbProject(ctx, args.project);
     if (!resolved.ok) return resolved.result;
-    return planChecklist(resolved.projectPath, ctx.env, { researcher: ctx.researcher, stderr: ctx.stderr });
+    return planChecklist(resolved.projectPath, ctx.env, { researcher: ctx.researcher, stderr: ctx.stderr, max: args.max });
   },
 };
 
 const WAIVE_RESEARCH_ITEM_MCP_ARGS = z.object({
   project: projectField,
-  item: z.number().int().positive().describe("The checklist item's number."),
-  reason: z.string().min(1).describe("Why the item needs no research."),
+  items: z.array(z.number().int().positive()).optional().describe("The checklist item numbers to waive, all on one branch."),
+  item: z.number().int().positive().optional().describe("One item number (the same as items: [n])."),
+  reason: z.string().min(1).describe("Why the items need no research."),
 });
 
 const WAIVE_RESEARCH_ITEM_MCP: McpToolSpec = {
   name: "waive_research_item",
-  description: "Waive one research checklist item with a reason (research/checklist.md), on a new plan/ branch the author reviews. A waived item no longer holds the research gate shut.",
+  description: "Waive research checklist items (research/checklist.md) with one reason, all on a single new plan/ branch the author reviews. A waived item no longer holds the research gate shut.",
   args: WAIVE_RESEARCH_ITEM_MCP_ARGS,
   run: async (raw, ctx) => {
     const args = WAIVE_RESEARCH_ITEM_MCP_ARGS.parse(raw);
     const resolved = resolveVerbProject(ctx, args.project);
     if (!resolved.ok) return resolved.result;
-    return waiveChecklistItem(resolved.projectPath, String(args.item), args.reason, ctx.env);
+    return waiveChecklistItem(resolved.projectPath, [...(args.items ?? []), ...(args.item === undefined ? [] : [args.item])], args.reason, ctx.env);
   },
 };
 
 const LINK_RESEARCH_ITEM_MCP_ARGS = z.object({
   project: projectField,
-  item: z.number().int().positive().describe("The checklist item's number."),
-  note: z.string().min(1).describe("The research note's id: its path under research/ without .md."),
+  items: z.array(z.number().int().positive()).optional().describe("The checklist item numbers the note sources, all on one branch."),
+  item: z.number().int().positive().optional().describe("One item number (the same as items: [n])."),
+  note: z.string().min(1).describe("The research note's id: its path under research/ without .md. A note still on an unmerged plan/ branch works; the result names the branch to accept."),
 });
 
 const LINK_RESEARCH_ITEM_MCP: McpToolSpec = {
   name: "link_research_item",
   description:
-    "Mark one research checklist item sourced by an existing research note that has a ## Sources entry (the note's id joins the item's Sources), on a new plan/ branch the author reviews. To save a new finding for an item, use save_research with items instead.",
+    "Mark research checklist items sourced by an existing research note that has a ## Sources entry (the note's id joins each item's Sources), on one new plan/ branch the author reviews. To save a new finding for an item, use save_research with items instead.",
   args: LINK_RESEARCH_ITEM_MCP_ARGS,
   run: async (raw, ctx) => {
     const args = LINK_RESEARCH_ITEM_MCP_ARGS.parse(raw);
     const resolved = resolveVerbProject(ctx, args.project);
     if (!resolved.ok) return resolved.result;
-    return linkChecklistItem(resolved.projectPath, String(args.item), args.note, ctx.env);
+    return linkChecklistItem(resolved.projectPath, [...(args.items ?? []), ...(args.item === undefined ? [] : [args.item])], args.note, ctx.env);
   },
 };
 
@@ -2105,7 +2111,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "research",
     description:
-      "`research save`: keep a research finding with its sources and retrieval date as research/<slug>.md, on a new plan/ branch for the author to review. At least one source is required (--source, repeatable). Over MCP this is the `save_research` tool. `research distill`: turn research/ into short, sourced period facts in facts/period.md on a plan/ branch (real names swapped for the bible's when the work sets realNames: false); over MCP the `distill_facts` tool. `research plan`: derive research/checklist.md from the period brief or thesis (`plan_research`); `research waive <#> \"<reason>\"` (`waive_research_item`) and `research link <#> <note>` (`link_research_item`) close an item, as does `research save --item <#>`; the research gate passes once every item is sourced or waived.",
+      "`research save`: keep a research finding with its sources and retrieval date as research/<slug>.md, on a new plan/ branch for the author to review. At least one source is required (--source, repeatable). Over MCP this is the `save_research` tool. `research distill`: turn research/ into short, sourced period facts in facts/period.md on a plan/ branch (real names swapped for the bible's when the work sets realNames: false); over MCP the `distill_facts` tool. `research plan`: derive research/checklist.md from the period brief or thesis (`plan_research`); `research waive <#,#,a-b> \"<reason>\"` (`waive_research_item`) and `research link <#,#,a-b> <note>` (`link_research_item`) close items, several on one branch, as does `research save --item <#>`; the research gate passes once every item is sourced or waived.",
     args: RESEARCH_ARGS,
     run: runResearchVerb,
     positionalArgs: ["sub", "entry", "text"],

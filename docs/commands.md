@@ -744,7 +744,7 @@ the checklist, or a work with no checklist, is refused before anything is writte
 ```
 
 ```
-pablo research plan --project <slug>
+pablo research plan --project <slug> [--max <N>]
 ```
 
 Derives the work's research checklist, `research/checklist.md`, so an agent knows
@@ -767,31 +767,39 @@ Every item is `open`, `sourced` (Sources names at least one research note, by
 id, that has a `## Sources` entry) or `waived` (Waived gives a reason). pablo
 works the status out from those two cells, never from the Status cell it writes.
 Running `plan` again keeps every existing row as it is and appends only new
-items. A proposed item in an unknown category, empty, over 200 characters or
-already listed is rejected and listed under `rejected`; a category left with no
-item gets a placeholder to source or waive. With no brief (or thesis) it is
+items. The list is sized to the work: by default no more than about a dozen
+items for a short work with one output, more for a longer brief or thesis or
+several outputs (never fewer than 8 or more than 24 in all); `--max <N>` sets
+the cap yourself (`max` over MCP), counting items already on the checklist.
+A proposed item in an unknown category, empty, over 200 characters, already
+listed or past the cap is rejected and listed under `rejected`; a category left
+with no item gets a placeholder to source or waive while there is room. With no brief (or thesis) it is
 refused (exit 2); nothing new to add is refused too. Over MCP this is the
 `plan_research` tool.
 
 ```
-{ok: true, path, branch, sha?, added, items: [{number, category, item, status}], rejected: [{category, item, reason}], from, provider, model}
+{ok: true, path, branch, sha?, added, max, items: [{number, category, item, status}], rejected: [{category, item, reason}], from, provider, model}
 ```
 
 ```
-pablo research waive <#> "<reason>" --project <slug>
-pablo research link <#> <note> --project <slug>
+pablo research waive <#,#,a-b> "<reason>" --project <slug>
+pablo research link <#,#,a-b> <note> --project <slug>
 ```
 
-`waive` closes an item with a reason; `link` closes one with a research note
+`waive` closes items with a reason; `link` closes them with a research note
 already in the work (its id, the path under `research/` without `.md`; a note
-with no `## Sources` entry is refused). Each rewrites the checklist on a new
-`plan/` branch for you to review. Both read the checklist from the work as merged,
-so merge `plan`'s branch first, and merge each `waive`/`link` branch before the
-next: every one rewrites the whole table from main, so two unmerged ones conflict. Over MCP: `waive_research_item` (`item`, `reason`)
-and `link_research_item` (`item`, `note`).
+with no `## Sources` entry is refused). Name the items as a list and ranges,
+`1,3,5-8`: all of them close on one new `plan/` branch for you to review. A note
+still on an unmerged `plan/` branch (a `research save` without `--item`) links
+too, and the result's `pending` names the branch to accept with it. Both read the
+checklist from the work as merged, so merge `plan`'s branch first (if it is not
+merged, the refusal names its branch); merge each `waive`/`link` branch before the
+next: every one rewrites the whole table from main, so two unmerged ones conflict.
+Over MCP: `waive_research_item` (`items`, `reason`) and `link_research_item`
+(`items`, `note`), each taking an array (a single `item` still works).
 
 ```
-{ok: true, path, branch, sha?, item: {number, category, item, sources, waived?, status}, open}
+{ok: true, path, branch, sha?, items: [{number, category, item, sources, waived?, status}], item? (one item only), open, pending?: [{note, branch}]}
 ```
 
 The research gate on `historical-fiction` and `nonfiction` works passes only when

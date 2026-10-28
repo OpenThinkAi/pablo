@@ -23,6 +23,7 @@ import {
   placeholderItem,
   renderChecklist,
 } from "../src/core/checklist";
+import { defaultChecklistMax, parseItemSpec } from "../src/core/checklist";
 import { coreNext, coreStages, readCoreState, trackGate } from "../src/core/machine";
 import { readResearchNotes } from "../src/distill";
 import { mcpTools } from "../src/mcp";
@@ -371,4 +372,104 @@ test("the CLI takes waive's item and reason as positionals", async () => {
     Object.assign(process.env, saved);
   }
   expect(logs.join("\n")).toContain("#2 language: Ice-trade slang -> waived");
+});
+
+// --- AGT-2186: sizing, batch waive/link, pending notes, MCP arrays ---------------
+
+test("parseItemSpec reads lists, ranges and arrays; defaultChecklistMax scales with the work, bounded", () => {
+  expect(parseItemSpec("1,3,5-7")).toEqual({ ok: true, numbers: [1, 3, 5, 6, 7] });
+  expect(parseItemSpec("#2, #2")).toEqual({ ok: true, numbers: [2] });
+  expect(parseItemSpec([4, "6-7"])).toEqual({ ok: true, numbers: [4, 6, 7] });
+  expect(parseItemSpec("x").ok).toBe(false);
+  expect(parseItemSpec("7-3").ok).toBe(false);
+  expect(parseItemSpec(undefined).ok).toBe(false);
+  expect(defaultChecklistMax(20, 1)).toBe(9);
+  expect(defaultChecklistMax(20, 3)).toBe(15);
+  expect(defaultChecklistMax(100000, 4)).toBe(24);
+  expect(defaultChecklistMax(0, 0)).toBeGreaterThanOrEqual(8);
+});
+
+test("mergeChecklist stops at max: extra proposals are rejected naming the cap, placeholders stop too", () => {
+  const merged = mergeChecklist([], parsePlanAnswer(JSON.stringify(PLAN_ANSWER)) ?? [], PERIOD_CATEGORIES, 2);
+  expect(merged.rows.length).toBe(2);
+  expect(merged.rejected.some((r) => r.reason.includes("cap of 2"))).toBe(true);
+});
+
+test("research plan sizes the list: --max caps it, the prompt says so, a full checklist is refused", async () => {
+  const { vault, env } = setup("historical-fiction", { "bible/period.md": BRIEF });
+  const researcher = fakeResearcher(PLAN_ANSWER);
+  const r = await research(vault, env, { sub: "plan", max: 3 }, researcher);
+  expect(r.exitCode).toBe(0);
+  const body = r.body as { added: number; max: number };
+  expect(body).toMatchObject({ added: 3, max: 3 });
+  expect(researcher.prompts[0]).toContain("at most 3 items");
+
+  const { vault: v2, env: e2 } = setup("historical-fiction", { "bible/period.md": BRIEF });
+  const sized = await research(v2, e2, { sub: "plan" }, fakeResearcher(PLAN_ANSWER));
+  expect((sized.body as { max: number }).max).toBe(9);
+
+  const { vault: v3, env: e3 } = setup("historical-fiction", { "bible/period.md": BRIEF, [CHECKLIST_FILE]: CHECKLIST });
+  const full = await research(v3, e3, { sub: "plan", max: 3 }, fakeResearcher(PLAN_ANSWER));
+  expect(full.exitCode).toBe(2);
+  expect((full.body as { message: string }).message).toContain("at its cap of 3");
+});
+
+test("research waive and link close several items on one branch", async () => {
+  const { vault, work, env } = setup("historical-fiction", { "bible/period.md": BRIEF, [CHECKLIST_FILE]: CHECKLIST, "research/owners.md": NOTE("owners") });
+  const before = sh(vault, "branch", "--list", "plan/*").split("\n").filter(Boolean).length;
+  const waived = await research(vault, env, { sub: "waive", entry: "2-3", text: "never on the page" });
+  expect(waived.exitCode).toBe(0);
+  const wb = waived.body as { branch: string; items: { number: number; status: string }[]; open: number };
+  expect(wb.items.map((i) => [i.number, i.status])).toEqual([[2, "waived"], [3, "waived"]]);
+  expect(wb.open).toBe(1);
+  expect(sh(vault, "branch", "--list", "plan/*").split("\n").filter(Boolean).length).toBe(before + 1);
+  merge(vault, wb.branch);
+
+  const linked = await research(vault, env, { sub: "link", entry: "1,2", text: "owners" });
+  expect(linked.exitCode).toBe(0);
+  const lb = linked.body as { items: { number: number; sources: string[] }[] };
+  expect(lb.items.map((i) => i.number)).toEqual([1, 2]);
+  expect(lb.items.every((i) => i.sources.includes("owners"))).toBe(true);
+  expect(existsSync(work)).toBe(true);
+
+  const bad = await research(vault, env, { sub: "waive", entry: "1,9", text: "why" });
+  expect((bad.body as { message: string }).message).toContain("has no item #9");
+});
+
+test("research link finds a note still pending on an unmerged plan branch and names the branch", async () => {
+  const { vault, env } = setup("historical-fiction", { "bible/period.md": BRIEF, [CHECKLIST_FILE]: CHECKLIST });
+  const saved = await research(vault, env, { sub: "save", title: "Ice thickness", note: "A foot.", source: ["https://example.org/ice"] });
+  expect(saved.exitCode).toBe(0);
+  const noteBranch = (saved.body as { branch: string }).branch;
+  const r = await research(vault, env, { sub: "link", entry: "1,3", text: "ice-thickness" });
+  expect(r.exitCode).toBe(0);
+  const body = r.body as { pending: { note: string; branch: string }[]; items: { status: string }[]; branch: string };
+  expect(body.pending).toEqual([{ note: "ice-thickness", branch: noteBranch }]);
+  expect(body.items.every((i) => i.status === "sourced")).toBe(true);
+  const missing = await research(vault, env, { sub: "link", entry: "1", text: "nowhere" });
+  expect(missing.exitCode).toBe(2);
+});
+
+test("research waive on a checklist still on a plan branch says which branch to accept first", async () => {
+  const { vault, env } = setup("historical-fiction", { "bible/period.md": BRIEF });
+  const planned = await research(vault, env, { sub: "plan" }, fakeResearcher(PLAN_ANSWER));
+  const branch = (planned.body as { branch: string }).branch;
+  const r = await research(vault, env, { sub: "waive", entry: "1", text: "why" });
+  expect(r.exitCode).toBe(2);
+  expect((r.body as { message: string }).message).toContain(`accept ${branch} first`);
+});
+
+test("waive_research_item and link_research_item take arrays; save_research takes items", async () => {
+  const { vault, env } = setup("historical-fiction", { "bible/period.md": BRIEF, [CHECKLIST_FILE]: CHECKLIST, "research/owners.md": NOTE("owners") });
+  const tools = mcpTools();
+  const waive = tools.find((t) => t.name === "waive_research_item")!;
+  const w = await waive.run({ project: "ice-house", items: [1, 2], reason: "minor" }, ctx(env, vault));
+  expect(w.exitCode).toBe(0);
+  expect((w.body as { items: unknown[] }).items.length).toBe(2);
+  const link = tools.find((t) => t.name === "link_research_item")!;
+  const l = await link.run({ project: "ice-house", items: [2, 3], note: "owners" }, ctx(env, vault));
+  expect((l.body as { items: unknown[] }).items.length).toBe(2);
+  const save = tools.find((t) => t.name === "save_research")!;
+  const s = await save.run({ project: "ice-house", title: "Ice", note: "n", sources: ["s"], items: [1, 3] }, ctx(env, vault));
+  expect((s.body as { items: unknown[] }).items.length).toBe(2);
 });

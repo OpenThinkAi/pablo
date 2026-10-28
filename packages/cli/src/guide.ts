@@ -159,9 +159,9 @@ function researchSteps(track: TrackId): GuideStep[] {
       phase: "research",
       stage: "research",
       gate: true,
-      title: "or waive an item, with a reason",
-      command: `pablo research waive <#> "<reason>" ${P}`,
-      detail: "accept each waive branch in the screen before the next (two unaccepted ones conflict); the gate opens when every item is sourced or waived",
+      title: "or waive items, with a reason",
+      command: `pablo research waive <#,#,a-b> "<reason>" ${P}`,
+      detail: "several items go on one branch; accept a waive or link branch in the screen before starting the next (two unaccepted ones conflict); the gate opens when every item is sourced or waived",
     },
   ];
 }

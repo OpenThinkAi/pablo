@@ -415,9 +415,11 @@ export function researchFactText(raw: unknown): string {
     const items = (Array.isArray(body["items"]) ? body["items"] : [body["item"]]) as { number: number; category: string; item: string; status: string }[];
     const saved = body["note"] !== undefined;
     const head = saved ? `saved ${String(body["path"])} and research/checklist.md` : `updated ${String(body["path"])}`;
+    const pending = (body["pending"] ?? []) as { note: string; branch: string }[];
     return [
       `pablo: ${head} on ${String(body["branch"])}`,
       ...items.map((i) => `  #${i.number} ${i.category}: ${i.item} -> ${i.status}`),
+      ...pending.map((p) => `  research/${p.note}.md is still on ${p.branch}: accept that branch too, or the link stays open`),
       `  ${String(body["open"])} checklist item${body["open"] === 1 ? "" : "s"} still open once merged`,
       review,
     ].join("\n");
