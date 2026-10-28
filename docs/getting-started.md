@@ -16,13 +16,25 @@ browser windows are macOS-only.
 ```sh
 curl -fsSL https://bun.sh/install | bash     # if you don't have Bun
 bun add -g @openthink/pablo
-bun pm -g trust @openthink/ui-leaf           # lets the window helper finish installing
 pablo --version
 ```
 
-The trust step is only needed for the commands that open a window (`read`, `review`,
-`mixer`), but it costs nothing to run now. `npm install -g @openthink/pablo` also
-works; pablo still runs on Bun.
+`npm install -g @openthink/pablo` also works; pablo still runs on Bun.
+
+The commands that open a window (`read`, `review`, `mixer`) need one more step,
+which you can skip if you will not use them:
+
+```sh
+bun pm -g trust @openthink/ui-leaf           # lets the window helper finish installing
+```
+
+Bun does not run a dependency's install script until you trust it. ui-leaf's
+(`@openthink/ui-leaf`, from the same maintainer as pablo) downloads the `ui-leaf-bin`
+binary for your platform from the ui-leaf GitHub releases
+(`github.com/OpenThinkAi/ui-leaf/releases`) and checks it against the sha256 shipped
+in the package. Trust is by package name and lasts, so it also covers the ui-leaf
+versions later pablo releases install; pablo pins ui-leaf to one exact version, so
+that only changes when pablo does.
 
 ## 2. Choose a model
 

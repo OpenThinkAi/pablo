@@ -2,7 +2,8 @@ github:
   repo: OpenThinkAi/pablo
   branches:
     - main
-  # Mirror tags to GitHub too — uncomment if you publish on tag push
-  # (npm/Cargo/PyPI release workflows). Glob patterns or 'true' for all.
+  # Mirror tags to GitHub too: uncomment to keep release tags on the mirror.
+  # Tags do not publish: release.yml runs only by hand on main (no tag
+  # trigger), so mirroring them cannot ship anything. Glob patterns or 'true'.
   # tags:
   #   - "v*"

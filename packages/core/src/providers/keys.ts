@@ -7,7 +7,8 @@
  *   `"key": "keychain:<service>[/<account>]"`.
  *
  * A provider a work's `pablo.json` defines (one the global config does not
- * name) has no key at all (`{ from: "none" }`, AGT-2228 D-4): a work file may
+ * name), or one whose endpoint, kind or local flag it changes (AGT-2230), has
+ * no key at all (`{ from: "none" }`, AGT-2228 D-4): a work file may
  * not name a key reference, and the `<PROVIDER>_API_KEY` convention is not
  * applied to it either, so a committed file cannot pick which secret a local
  * port receives by choosing a provider id.

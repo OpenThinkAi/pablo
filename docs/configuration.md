@@ -158,12 +158,16 @@ branch, so it is trusted less than this file:
 - `pablo.json` may not set `key` on any provider, not even an `env:<NAME>` or
   `keychain:...` reference. Every command refuses a work whose `pablo.json` has a
   `key` until it is removed, naming the provider. Keys are set in this file only. A
-  provider the work overrides keeps the key of the global provider of the same name;
-  a provider the work adds has no key at all (the `<NAME>_API_KEY` convention does not
-  apply to it). Otherwise a committed file could choose which secret, any environment
-  variable or Keychain item, is sent to a port on this machine. If a local server a
-  work uses needs a key, declare that provider here with its `key`, and override only
-  its `model` from `pablo.json`.
+  provider the work overrides keeps the key of the global provider of the same name,
+  as long as the work changes only what the request asks for (`model`, `timeoutMs`,
+  `temperature`, `thinking`, `tools`). A provider the work adds has no key at all (the
+  `<NAME>_API_KEY` convention does not apply to it), and neither does one whose
+  `endpoint`, `kind` or `local` the work changes, even to another port on this machine:
+  the key was set for the endpoint named here. Otherwise a committed file could choose
+  which secret, any environment variable or Keychain item, is sent to a port on this
+  machine. If a local server a work uses needs a key, declare that provider here with
+  its `endpoint` and `key`, and override only its `model` from `pablo.json`. A
+  non-local provider left without a key is skipped, and the stderr notice says this.
 - A work may add a provider, or change any field of one, only on this machine
   (`127.0.0.1`, `localhost` or `::1`). On a remote provider (Anthropic, a hosted
   endpoint) it may change only `model`, `timeoutMs`, `temperature`, `thinking` and `tools`.
@@ -208,6 +212,31 @@ through an `anthropic` provider, or any OpenAI-compatible model with tool calls
 (Gemma 4 behind `mlx_lm` included). It needs that provider's key, the same as any
 other request; your Claude Code login is not used. With no non-local provider
 configured, the agent runs on the local model.
+
+## What leaves your machine
+
+pablo has no telemetry, analytics or error reporting. Your vault is plain markdown in
+git on your disk. Text leaves it only in these ways, all set by you:
+
+| Where it goes | What is sent | When |
+|---|---|---|
+| The provider an intent routes to (table above) | `draft`, `revise`, `prose`: the assembled pack (voice, rules, the unit's slices; `write --dry-run` prints it). `continuity`: the merged unit's prose, to extract its facts. `plan`, `check`: plans, bible, beats and the branch being judged. `agent`: the conversation, the work's `STYLE.md` and every tool result (plans, bible, notes it reads, fetched pages). `research`: raw `research/` notes, the period brief or the thesis | Every model call. By default the writing intents go to the first local provider and `plan`, `check`, `agent` and `research` to the first non-local one: map them to a local provider to keep that text on this machine |
+| The `web.search` backend, then its upstream engines | Search queries the agent model writes itself; they can paraphrase your plot or name your characters | Only when the agent calls `web_search`, and only with a `web.search` block. A SearXNG instance you run yourself keeps the queries off public instances |
+| The sites `web_fetch` opens | A plain GET of a URL the agent model chose | Only when the agent calls `web_fetch` |
+| The `think` CLI (`think -C writing`) | After a merge: one line naming the work's slug, the unit and its word count (`<slug>: drafted chapter N (<words> words)`, or `<slug>: revised radio episode N`), tagged `repo:<slug>`; never prose. `resume` asks it for a brief and sends nothing but the slug | Only when `think` is installed; `"think": false` or `PABLO_NO_THINK` turns it off. Where think keeps it (and whether it leaves the machine) is think's own configuration |
+
+`neverSend` (default `research/` and `notes/`) keeps those paths out of drafting packs
+only. `research distill` and `research plan` send `research/` to the `research`
+intent's provider on purpose; see `docs/vault.md`.
+
+Local copies pablo keeps, all gitignored under the work's `.pablo/` and never pruned:
+receipts (`receipts.jsonl`, `casting/receipts.jsonl`), agent transcripts
+(`.pablo/transcripts/`, each stage's full JSONL including tool results) and saved
+sessions (`.pablo/sessions/`; `--new` starts another and leaves the old file).
+Deleting a note or a research file from the work does not remove its copies there.
+Delete those directories, or the files in them, to purge them. pablo never reads a
+transcript back; a deleted session file only means `pablo agent` cannot resume that
+conversation.
 
 ## The screen: `keys` and `editor`
 

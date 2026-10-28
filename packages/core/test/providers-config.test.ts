@@ -221,7 +221,7 @@ test("pablo.json may not set key on any provider, new or overridden, loopback or
   ).toThrow(/provider "x": a work's pablo\.json may not set "key"/);
 });
 
-test("a work's override without key inherits the global key; a provider it adds has none", () => {
+test("a work's override without key inherits the global key unless it repoints the provider; one it adds has none", () => {
   const global = JSON.stringify({
     providers: {
       local: { ...TEST_LOCAL_PROVIDER, key: "keychain:local-server/me" },
@@ -239,13 +239,44 @@ test("a work's override without key inherits the global key; a provider it adds 
     },
     global,
   );
-  expect(config.providers.get("local")?.key).toEqual({ from: "keychain", service: "local-server", account: "me" });
+  // Moved to another local port: the global key stays with the global endpoint (AGT-2230).
+  expect(config.providers.get("local")?.key).toEqual({ from: "none" });
   expect(config.providers.get("anthropic")?.key).toEqual({ from: "keychain", service: "anthropic-api-key", account: undefined });
   expect(config.providers.get("openai")?.key).toEqual({ from: "none" });
   // A global provider that relies on the convention keeps it when the work overrides it.
   const conventional = JSON.stringify({ providers: { local: TEST_LOCAL_PROVIDER } });
   const { config: c2 } = projectConfig({ providers: { local: { model: "other" } } }, conventional);
   expect(c2.providers.get("local")?.key).toEqual({ from: "env", variable: "LOCAL_API_KEY" });
+});
+
+// AGT-2230: a work moving a global loopback provider to another local port (or changing its kind or local flag)
+// must not take the global key with it: that would send the secret to a port the committed file chose.
+test("a work that changes a global loopback provider's endpoint, kind or local flag drops its global key", () => {
+  const keyed = (key: string) => JSON.stringify({ providers: { local: { ...TEST_LOCAL_PROVIDER, key } } });
+  for (const key of ["keychain:local-server/me", "env:LOCAL_SERVER_KEY"]) {
+    for (const change of [
+      { endpoint: "http://127.0.0.1:9999/v1" },
+      { endpoint: "http://localhost:8000/v1" },
+      { kind: "anthropic" },
+      { local: false },
+    ]) {
+      const { config } = projectConfig({ providers: { local: change } }, keyed(key));
+      expect(config.providers.get("local")?.key).toEqual({ from: "none" });
+    }
+    // Changing only what a request asks for keeps the key.
+    for (const change of [{ model: "other" }, { timeoutMs: 5000 }, { temperature: 0.4 }, { thinking: false }, { tools: false }]) {
+      const { config } = projectConfig({ providers: { local: change } }, keyed(key));
+      expect(config.providers.get("local")?.key).not.toEqual({ from: "none" });
+    }
+    // Naming the same endpoint, kind and local flag again is not a change.
+    const same = { endpoint: TEST_LOCAL_PROVIDER.endpoint, local: TEST_LOCAL_PROVIDER.local, kind: "openai-compatible" };
+    expect(projectConfig({ providers: { local: same } }, keyed(key)).config.providers.get("local")?.key).not.toEqual({ from: "none" });
+  }
+  // The convention key (LOCAL_API_KEY) is dropped the same way.
+  const conventional = JSON.stringify({ providers: { local: TEST_LOCAL_PROVIDER } });
+  expect(projectConfig({ providers: { local: { endpoint: "http://127.0.0.1:9999/v1" } } }, conventional).config.providers.get("local")?.key).toEqual({
+    from: "none",
+  });
 });
 
 test("a work's intent must name a provider of the merged set", () => {

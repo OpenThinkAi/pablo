@@ -31,8 +31,9 @@
  * providers on this machine, but on a remote provider only `model`,
  * `timeoutMs`, `temperature`, `thinking` and `tools` (`checkWorkProvider`).
  * It may not set `key` at all (AGT-2228, decision D-4): keys are bound only in
- * the global file. A provider it overrides keeps the global entry's key; one
- * it adds has none (`{ from: "none" }`), not even the `<ID>_API_KEY`
+ * the global file. A provider it overrides keeps the global entry's key unless
+ * it changes the provider's `endpoint`, `kind` or `local` (AGT-2230): then, like
+ * one it adds, it has none (`{ from: "none" }`), not even the `<ID>_API_KEY`
  * convention.
  */
 
@@ -214,8 +215,10 @@ export function mergeProjectConfig(base: PabloConfig, text: string, source = "pa
       const existing = providers.get(id);
       refuseWorkKey(id, entry, source);
       const read = readProvider(id, entry, source, existing, options.allowIncomplete === true);
-      // Overriding a global provider keeps its key (readProvider inherits it); a provider the work adds has none.
-      const merged: ProviderConfig = existing === undefined ? { ...read, key: { from: "none" } } : read;
+      // Overriding a global provider keeps its key (readProvider inherits it); a provider the work adds has none,
+      // and so does one whose endpoint, kind or local flag the work changes (`repoints`): the global key was bound
+      // to the global endpoint, and a work must not send it to another port of its choosing (AGT-2230).
+      const merged: ProviderConfig = existing === undefined || repoints(read, existing) ? { ...read, key: { from: "none" } } : read;
       checkWorkProvider(merged, existing, source);
       providers.set(id, merged);
     }
@@ -332,6 +335,12 @@ export function refuseWorkKey(id: string, entry: unknown, source: string): void 
       `(\`pablo config set providers.${id}.key env:<NAME>\` or \`keychain:<service>\`, without --project); ` +
       `a work's provider uses the key of the global provider of the same name, or none. Remove "key" from ${source}.`,
   );
+}
+
+/** Whether a work's entry changes where (or how) the global provider's requests go, rather than only what they ask. */
+function repoints(read: ProviderConfig, existing: ProviderConfig): boolean {
+  if (read.endpoint === "") return false; // incomplete (a `config set` in progress): nothing to judge yet
+  return read.endpoint !== existing.endpoint || read.kind !== existing.kind || read.local !== existing.local;
 }
 
 function sameKey(a: KeySource, b: KeySource): boolean {

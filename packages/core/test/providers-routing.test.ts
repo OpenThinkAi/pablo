@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { NoModelConfiguredError, ProviderConfigError, defaultConfig, createProviders,  resolveRoute, route } from "../src/index";
+import { NoModelConfiguredError, ProviderConfigError, defaultConfig, createProviders, mergeProjectConfig, resolveRoute, route } from "../src/index";
 import type { Intent, IntentKind } from "../src/index";
 import { localConfig, parseWithTestDefaults } from "./local-config";
 
@@ -105,4 +105,19 @@ test("with no provider configured at all, resolveRoute refuses with NoModelConfi
     expect(() => resolveRoute(defaultConfig(), intent(kind))).toThrow(NoModelConfiguredError);
   }
   expect(() => createProviders(defaultConfig()).adapterFor(intent("drafting"))).toThrow(/pablo init --config/);
+});
+
+// AGT-2230: a provider with no key because a work's pablo.json added or repointed it says what to do about it.
+test("a keyless work provider's skip reason names the global config fix", () => {
+  const config = mergeProjectConfig(
+    twoClouds(),
+    JSON.stringify({ providers: { mine: { endpoint: "http://127.0.0.1:8100/v1", model: "m", local: false } }, intents: { research: "mine" } }),
+  );
+  const routed = createProviders(config, { keys: { env: { ANTHROPIC_API_KEY: "k" } }, onSkip: () => {} }).routed(intent("planning", "research"));
+  expect(routed.provider).toBe("anthropic");
+  expect(routed.skipped).toHaveLength(1);
+  const reason = routed.skipped[0]?.reason ?? "";
+  expect(reason).toMatch(/^it has no key: a provider a work's pablo\.json adds, or whose endpoint, kind or local flag it changes, never does/);
+  expect(reason).toContain('declare "mine" with its endpoint and "key" in the global config');
+  expect(reason).toContain("`pablo config set providers.mine.key env:<NAME>`, without --project");
 });
