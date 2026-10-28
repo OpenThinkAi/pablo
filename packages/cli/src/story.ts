@@ -387,7 +387,7 @@ function freeSlug(vault: string, title: string): string {
 
 const STAGE_TEXT: Readonly<Record<StoryCoreStage, string>> = {
   research:
-    "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice). You have no web access: work from the work's saved notes and what you know with confidence, and keep each finding with save_research, citing only sources you can name exactly (author and title); never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
+    "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice). You have no web access: work from the work's saved notes and what you know with confidence, and keep each finding with save_research, citing only sources you can name exactly (author, title and year); never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.",
   premise:
     'Stage 2 of 5, premise. Read the research notes (read, search) and propose the premise with propose (stage "premise"): bible/overview.md with ## Title (the work\'s own short title, two to six words, about the story and not the request), ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure.',
   bible:
@@ -397,12 +397,19 @@ const STAGE_TEXT: Readonly<Record<StoryCoreStage, string>> = {
     'Stage 5 of 5, beats. Propose the beats with propose (stage "beats"): one row per story unit, | # | Story date | Title (working) | Beat | POV | Status |, status "outline".',
 };
 
+/**
+ * The research stage's text when a web search backend is configured (AGT-2185, D-9/D-11): the stage is offered
+ * `web_search` and `web_fetch` and must use them, so every note cites at least one page it fetched.
+ */
+const RESEARCH_WEB =
+  "Stage 1 of 5, research. Find what this story needs to be true to (its period, place, work and practice). Search the web with web_search, read the promising pages with web_fetch (a search snippet is not a source), and keep each finding with save_research. Every note cites at least one page you fetched, by the url web_fetch returned, with its retrievedAt date (e.g. \"https://... (retrieved 2026-10-27)\"); when no page exists for a finding, cite a book by author, title and year and say in the note why no page was found. Never cite general knowledge or memory, never invent a source or a retrieval date, and leave out a finding you cannot source. If the request needs no research (pure invention), save nothing and say so. Propose nothing yet.";
+
 const ON_DEMAND =
   "This is an on-demand run: nobody reviews the stages as they land. When a call is the author's, ask_author answers with an instruction to assume: make the most plausible choice, state it as an assumption (record_fact, kind invented), and continue.";
 const REVIEW_MODE = "This is a review run: the author reviews this stage's plan branch before the next stage starts. Use ask_author only for what you cannot reasonably assume.";
 
-/** The harness message for one core stage. */
-export function stageMessage(stage: StoryCoreStage, state: Pick<StoryState, "prompt" | "outputs" | "review">, title: string, slug: string): string {
+/** The harness message for one core stage. `web` is whether the run has a web search backend (`webConfigured`). */
+export function stageMessage(stage: StoryCoreStage, state: Pick<StoryState, "prompt" | "outputs" | "review">, title: string, slug: string, web = false): string {
   const length =
     stage === "beats"
       ? state.outputs.includes("novel")
@@ -414,7 +421,7 @@ export function stageMessage(stage: StoryCoreStage, state: Pick<StoryState, "pro
     "",
     `> ${state.prompt.replace(/\n/g, "\n> ")}`,
     "",
-    `${STAGE_TEXT[stage]}${length}`,
+    `${stage === "research" && web ? RESEARCH_WEB : STAGE_TEXT[stage]}${length}`,
     "",
     state.review ? REVIEW_MODE : ON_DEMAND,
   ].join("\n");
@@ -532,6 +539,25 @@ export function stageIntent(stage: StoryCoreStage): Intent {
   return stage === "research" ? RESEARCH_INTENT : PLAN_INTENT;
 }
 
+/** The web tools the story stages are offered only when a search backend is configured (AGT-2185). */
+const WEB_TOOLS: ReadonlySet<string> = new Set(["web_search", "web_fetch"]);
+
+/**
+ * Whether the run can search the web (AGT-2185): a `web.search` backend in the config file, as `web_search` itself
+ * reads it, or (tests) an injected search backend. Without one the stages are not offered the web tools and the
+ * research stage is told so, rather than told to use tools that can only fail.
+ */
+export function webConfigured(ctx: Pick<VerbContext, "env" | "web">, readConfig?: LoadConfigOptions["readFile"]): boolean {
+  const seam = ctx.web?.search;
+  if (seam?.backend !== undefined) return true;
+  if (seam?.config !== undefined) return seam.config.search !== undefined;
+  try {
+    return loadConfig({ env: ctx.env, ...(readConfig === undefined ? {} : { readFile: readConfig }) }).web?.search !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 function agentProviderFor(run: Run, stage: StoryCoreStage): HarnessProvider | VerbResult {
   if (run.deps.agent !== undefined) return run.deps.agent;
   const intent = stageIntent(stage);
@@ -559,11 +585,12 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
 
   const session = startPlanSession(run.vault, run.slug, { env: run.ctx.env });
   const ask = run.state.review && run.deps.ask !== undefined ? run.deps.ask : assumingAsk(stage, run.state.assumptions);
+  const web = webConfigured(run.ctx, run.deps.readConfig);
   const spec = {
     work: prompt.work,
     provider,
     ctx: { ...run.ctx, caller: "mcp" as const },
-    tools: harnessTools(ask),
+    tools: web ? harnessTools(ask) : harnessTools(ask).filter((tool) => !WEB_TOOLS.has(tool.name)),
     sessionTools: planTools(session, run.work),
     // Every agent-loop turn keeps a receipt in the work's log, under the stage's intent (AGT-2191).
     receipts: { sink: fileReceiptSink(run.work), intent: stageIntent(stage).name },
@@ -571,7 +598,7 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
   const entries: TranscriptEntry[] = [];
   let finished: { ok: boolean; text: string; errors: readonly string[] } | undefined;
   try {
-    for await (const entry of runHarness(stageMessage(stage, run.state, run.title, run.slug), spec, run.deps.query ?? loopQuery)) {
+    for await (const entry of runHarness(stageMessage(stage, run.state, run.title, run.slug, web), spec, run.deps.query ?? loopQuery)) {
       entries.push(entry);
       if (entry.kind === "result") finished = entry;
     }

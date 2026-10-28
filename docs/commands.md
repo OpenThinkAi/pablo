@@ -782,8 +782,12 @@ pablo research save --project <slug> --title <text> --note <text> --source <url>
 ```
 
 Keeps a research finding as `research/<slug>.md` in the work: the title, the
-retrieval date, the note, then a Sources list. At least one `--source` (a URL or
-a full citation) is required, and a note never replaces an earlier one (the slug
+retrieval date, the note, then a Sources list. At least one `--source` is
+required, and every one must be a source a reader can follow: an http(s) URL, a
+DOI or ISBN, or a bibliographic citation naming the work and its year
+(`"Hobsbawm, The Age of Empire, 1987"`). Anything else ("General knowledge of
+...", "memory", "Wikipedia") is refused, naming the entry, and nothing is
+written. A note never replaces an earlier one (the slug
 gets a `-2` suffix). The write lands on a new `plan/` branch for you to review.
 The same writer is the harness's `save_research` tool, and over MCP this verb is
 the `save_research` tool (sources go in `sources`).
