@@ -1195,12 +1195,28 @@ Rendering uses the GPU.
 
 What that install fetches, and how it is pinned: the Python packages come from the
 committed `packages/casting/uv.lock` (`uv sync --frozen`, every package checked
-against its sha256 there). The speech engines' weights and the UTMOS scorer are
-fetched at a fixed commit revision, and each load's receipt records the weights'
-sha256. The other scorers' weights (Whisper, the aligner, ECAPA, Audiobox,
-emotion2vec), the Stable Audio Open model behind generated sound cues, and any
-`weights` you list in `casting.json` are fetched at the Hugging Face repo's current
-revision when first used and then read from the Hugging Face cache.
+against its sha256 there). Every model pablo downloads by default is fetched at a
+fixed commit revision, never the repo's current one: the speech engines, the voice
+designers (Qwen3-TTS VoiceDesign, VoxCPM2), every gate scorer (Whisper, the aligner,
+ECAPA, UTMOS, Audiobox, emotion2vec; DNSMOS ships inside its pinned Python package)
+and the Stable Audio Open model behind generated sound cues. Each engine load's
+receipt also records the weights' sha256. A model you name yourself in
+`casting.json`, under `weights` or as `engines.designers.<name>.model`, takes an
+optional `revision` (`{"id": "org/name", "revision": "<commit sha>"}` in `weights`);
+without one it is fetched at the Hugging Face repo's current revision, and pablo
+prints a warning on stderr saying so (also for a `revision` that is a branch or tag
+rather than a 40-character commit). Weights are read from the Hugging Face cache
+after the first fetch.
+
+**Pinned model revisions.** The pins live in one place,
+`packages/casting/src/pablo_casting/pins.py` (`PINS`: repo id to commit SHA). To bump
+one, read the repo's current commit from the Hub's metadata API (no weights are
+downloaded): `curl -s https://huggingface.co/api/models/<org>/<name> | jq -r .sha`
+(for UTMOS, a GitHub repo, `git ls-remote https://github.com/tarepan/SpeechMOS`),
+replace that one SHA in `PINS`, run the hand-run model tests on Apple Silicon
+(`cd packages/casting && uv sync --extra scorers --extra emotion --extra mix && uv run pytest -m models -s`), and note the bump
+in `CHANGELOG.md`. The default tests check that every pin is a full commit SHA and
+that each loader passes its pin through, without loading a model.
 
 | Verb | What it does |
 |---|---|

@@ -5,12 +5,14 @@ import {
   ProviderConfigError,
   configPath,
   defaultConfig,
+  keyDropNotice,
   isLoopbackEndpoint,
   loadConfig,
   mergeProjectConfig,
   parseConfig,
   route,
 } from "../src/index";
+import type { DroppedKey, LoadConfigOptions } from "../src/index";
 import { TEST_LOCAL_ENDPOINT, TEST_LOCAL_MODEL, TEST_LOCAL_PROVIDER } from "./local-config";
 
 test("with no config file at all, pablo has no provider, no endpoint and no model", () => {
@@ -137,9 +139,12 @@ const GLOBAL = JSON.stringify({
   intents: { plan: "anthropic" },
 });
 
-function projectConfig(marker: Record<string, unknown>, global: string | undefined = GLOBAL) {
+function projectConfig(marker: Record<string, unknown>, global: string | undefined = GLOBAL, options: Partial<LoadConfigOptions> = {}) {
   const asked: string[] = [];
   const config = loadConfig({
+    // Quiet by default; the AGT-2274 tests below record the notices.
+    onKeyDropped: () => {},
+    ...options,
     path: "/conf/pablo/config.json",
     readFile: () => global,
     projectDir: "/vault/novels/ice-house",
@@ -277,6 +282,61 @@ test("a work that changes a global loopback provider's endpoint, kind or local f
   expect(projectConfig({ providers: { local: { endpoint: "http://127.0.0.1:9999/v1" } } }, conventional).config.providers.get("local")?.key).toEqual({
     from: "none",
   });
+});
+
+// AGT-2274: a dropped key is said, once, on stderr, so a local server that needs auth does not just fail opaquely.
+test("a work that repoints a keyed global provider is told the key was dropped, naming the provider and the fix", () => {
+  const keyed = (key: string) => JSON.stringify({ providers: { local: { ...TEST_LOCAL_PROVIDER, key } } });
+  const told: DroppedKey[] = [];
+  const onKeyDropped = (d: DroppedKey) => void told.push(d);
+  projectConfig({ providers: { local: { endpoint: "http://127.0.0.1:9999/v1" } } }, keyed("keychain:local-server/me"), { onKeyDropped });
+  expect(told).toEqual([
+    { provider: "local", source: "/vault/novels/ice-house/pablo.json", changed: ["endpoint"], key: "keychain:local-server/me" },
+  ]);
+  const line = keyDropNotice(told[0]!);
+  expect(line).not.toContain("\n");
+  expect(line).toContain('provider "local"');
+  expect(line).toContain("keychain:local-server/me");
+  expect(line).toContain("pablo config set providers.local.endpoint <value>`, without --project");
+
+  // An env key is told only when the variable is set: an unset one sent nothing before either.
+  told.length = 0;
+  const env = { LOCAL_SERVER_KEY: "secret" };
+  projectConfig({ providers: { local: { kind: "anthropic", local: false } } }, keyed("env:LOCAL_SERVER_KEY"), { onKeyDropped, env });
+  expect(told.map((d) => [d.key, d.changed])).toEqual([["env:LOCAL_SERVER_KEY", ["kind", "local"]]]);
+  expect(keyDropNotice(told[0]!)).toContain("`pablo config set providers.local.kind <value>`, `pablo config set providers.local.local <value>`");
+  expect(told[0]?.key).not.toContain("secret");
+  told.length = 0;
+  projectConfig({ providers: { local: { endpoint: "http://127.0.0.1:9999/v1" } } }, keyed("env:LOCAL_SERVER_KEY"), { onKeyDropped, env: {} });
+  projectConfig({ providers: { local: { endpoint: "http://127.0.0.1:9999/v1" } } }, JSON.stringify({ providers: { local: TEST_LOCAL_PROVIDER } }), {
+    onKeyDropped,
+    env: {},
+  });
+  // Nothing dropped: a model-only override keeps the key, and a provider the work adds never had one.
+  projectConfig({ providers: { local: { model: "other" } } }, keyed("keychain:local-server/me"), { onKeyDropped });
+  projectConfig({ providers: { mine: { endpoint: "http://127.0.0.1:8000/v1", model: "m" } } }, keyed("keychain:local-server/me"), { onKeyDropped });
+  expect(told).toEqual([]);
+});
+
+test("the default key-drop notice is one stderr line, once per provider and pablo.json", () => {
+  const writes: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    writes.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const global = JSON.stringify({ providers: { notice: { ...TEST_LOCAL_PROVIDER, key: "keychain:notice-test" } } });
+    const marker = JSON.stringify({ providers: { notice: { endpoint: "http://127.0.0.1:9123/v1" } } });
+    const base = parseConfig(global);
+    mergeProjectConfig(base, marker, "/tmp/agt-2274/pablo.json");
+    mergeProjectConfig(base, marker, "/tmp/agt-2274/pablo.json");
+  } finally {
+    process.stderr.write = original;
+  }
+  const notices = writes.filter((w) => w.includes('provider "notice"'));
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toMatch(/^pablo: \/tmp\/agt-2274\/pablo\.json changes provider "notice"'s endpoint, so its global key \(keychain:notice-test\) is not sent[^\n]*\n$/);
 });
 
 test("a work's intent must name a provider of the merged set", () => {

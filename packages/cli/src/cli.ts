@@ -1031,7 +1031,8 @@ export function composeSpec(dir: string, cwd: string, env: Record<string, string
   if (!work.ok) throw new Error(work.message);
   return {
     work: work.work,
-    provider: harnessProvider(loadConfig({ env, projectDir: dir }), { keys: { env } }),
+    // No key-drop notice here: stderr would draw over the screen, and a provider left keyless says so when used.
+    provider: harnessProvider(loadConfig({ env, projectDir: dir, onKeyDropped: () => {} }), { keys: { env } }),
     ctx: { cwd, env, stderr: { write: () => {} }, caller: "mcp" },
   };
 }

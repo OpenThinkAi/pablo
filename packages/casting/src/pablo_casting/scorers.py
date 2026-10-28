@@ -27,6 +27,7 @@ from importlib.metadata import PackageNotFoundError, version as dist_version
 from pathlib import Path
 from typing import Protocol
 
+from pablo_casting.pins import pinned
 from pablo_casting.words import Heard, words_check
 
 
@@ -107,6 +108,7 @@ WHISPER = ScorerInfo(
     gate="words, tail",
     measures=("wer", "inserted_span", "tail_ok", "word_end"),
     weights="mlx-community/whisper-large-v3-turbo",
+    revision=pinned("mlx-community/whisper-large-v3-turbo"),
     license_code="MIT",
     license_weights="Apache-2.0",
     package="mlx-whisper",
@@ -119,6 +121,7 @@ ALIGNER = ScorerInfo(
     gate="pace, duration",
     measures=("timings",),
     weights="mlx-community/Qwen3-ForcedAligner-0.6B-bf16",
+    revision=pinned("mlx-community/Qwen3-ForcedAligner-0.6B-bf16"),
     license_code="MIT",
     license_weights="Apache-2.0",
     package="mlx-audio",
@@ -131,6 +134,7 @@ ECAPA = ScorerInfo(
     gate="identity, consistency",
     measures=("sim_card", "sim_role_centroid"),
     weights="speechbrain/spkrec-ecapa-voxceleb",
+    revision=pinned("speechbrain/spkrec-ecapa-voxceleb"),
     license_code="Apache-2.0",
     license_weights="Apache-2.0",
     package="speechbrain",
@@ -144,7 +148,7 @@ UTMOS = ScorerInfo(
     measures=("utmos",),
     weights="tarepan/SpeechMOS utmos22_strong",
     # The commit tag v1.2.0 points at (git ls-remote, 2026-10-10); an immutable pin.
-    revision="ed25eacbfa42b99156c36ebec67a733b5dbb9b79",
+    revision=pinned("tarepan/SpeechMOS"),
     license_code="MIT",
     license_weights="MIT",
     package="torch",
@@ -157,6 +161,7 @@ AUDIOBOX = ScorerInfo(
     gate="naturalness (second opinion)",
     measures=("pq",),
     weights="facebook/audiobox-aesthetics",
+    revision=pinned("facebook/audiobox-aesthetics"),
     license_code="CC BY 4.0",
     license_weights="CC BY 4.0",
     package="audiobox_aesthetics",
@@ -181,6 +186,7 @@ EMOTION = ScorerInfo(
     gate="emotion (soft)",
     measures=("emotion_top2",),
     weights="emotion2vec/emotion2vec_plus_large",
+    revision=pinned("emotion2vec/emotion2vec_plus_large"),
     license_code="MIT",
     license_weights="unverified",
     package="funasr",
@@ -231,11 +237,29 @@ def _cosine(a, b) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
 
 
+def _snapshot(repo: str, revision: str) -> str:
+    """The local directory of `repo` at `revision`, downloading it into the HF cache if absent.
+
+    For the loaders that take a repo id but no revision (mlx-whisper, funasr's `hub="hf"`
+    path): pin here, then hand them the local path. Tests replace this function.
+    """
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(repo_id=repo, revision=revision)
+
+
+def _revision(info: ScorerInfo) -> str:
+    if info.revision is None:  # a bug: test_pins.py holds every Hub scorer to a pin
+        raise RuntimeError(f"the {info.name} scorer has no pinned revision (pins.py)")
+    return info.revision
+
+
 class _Lazy:
     info: ScorerInfo
 
     def __init__(self) -> None:
         self._model: object | None = None
+        self._path: str | None = None
 
     def _load(self) -> object:
         raise NotImplementedError
@@ -255,6 +279,9 @@ class WhisperScorer(_Lazy):
     def _load(self) -> object:
         import mlx_whisper
 
+        # mlx_whisper.transcribe takes a repo id or a path but no revision (it calls
+        # snapshot_download(repo_id) itself), so pin at the snapshot and pass the path.
+        self._path = _snapshot(self.info.weights, _revision(self.info))
         return mlx_whisper
 
     def score(self, take: Take) -> Mapping[str, object]:
@@ -262,7 +289,7 @@ class WhisperScorer(_Lazy):
         audio, sr = _load_mono(take.audio)
         result = whisper.transcribe(  # type: ignore[attr-defined]
             _resample(audio, sr, SR_16K),
-            path_or_hf_repo=self.info.weights,
+            path_or_hf_repo=self._path,
             language="en",
             verbose=None,
             word_timestamps=True,
@@ -279,7 +306,7 @@ class AlignerScorer(_Lazy):
     def _load(self) -> object:
         from mlx_audio.stt.utils import load
 
-        return load(self.info.weights)
+        return load(self.info.weights, revision=_revision(self.info))
 
     def score(self, take: Take) -> Mapping[str, object]:
         model = self.model()
@@ -293,8 +320,13 @@ class EcapaScorer(_Lazy):
 
     def _load(self) -> object:
         from speechbrain.inference.speaker import EncoderClassifier
+        from speechbrain.utils.fetching import FetchConfig
 
-        return EncoderClassifier.from_hparams(source=self.info.weights, run_opts={"device": "cpu"})
+        return EncoderClassifier.from_hparams(
+            source=self.info.weights,
+            run_opts={"device": "cpu"},
+            fetch_config=FetchConfig(revision=_revision(self.info)),
+        )
 
     def _embed(self, path: Path):
         import torch
@@ -349,13 +381,46 @@ class UtmosScorer(_Lazy):
         return {"utmos": round(float(mos.item()), 3)}
 
 
+AUDIOBOX_COPIED_FROM = "0.0.4"
+"""The audiobox-aesthetics release `AudioboxScorer`'s `setup_model` copy was taken from (AGT-2274)."""
+
+
 class AudioboxScorer(_Lazy):
     info = AUDIOBOX
 
     def _load(self) -> object:
-        from audiobox_aesthetics.infer import initialize_predictor
+        installed = self.info.version()
+        if installed is not None and installed != AUDIOBOX_COPIED_FROM:
+            # The pinned loader below is a copy of that release's AesPredictor.setup_model; a different
+            # release may set the predictor up differently, so refuse rather than run a stale copy.
+            raise RuntimeError(
+                f"the audiobox scorer's pinned loader is copied from audiobox-aesthetics {AUDIOBOX_COPIED_FROM}, but "
+                f"{installed} is installed: re-check AesPredictor.setup_model against PinnedPredictor in scorers.py, "
+                f"then update AUDIOBOX_COPIED_FROM (and the audiobox pin in pins.py if the weights moved)"
+            )
+        from audiobox_aesthetics.infer import AesPredictor
+        from audiobox_aesthetics.model.aes import AesMultiOutput
 
-        return initialize_predictor()
+        repo, revision = self.info.weights, _revision(self.info)
+
+        class PinnedPredictor(AesPredictor):
+            # `initialize_predictor()` loads `AesMultiOutput.from_pretrained("facebook/audiobox-aesthetics")`
+            # with no revision and no way to pass one; this is its `setup_model` (0.0.4) with the pin added.
+            def setup_model(self) -> None:
+                import torch
+
+                if torch.cuda.is_available():
+                    self.device = torch.device("cuda")
+                elif torch.backends.mps.is_available():
+                    self.device = torch.device("mps")
+                else:
+                    self.device = torch.device("cpu")
+                model = AesMultiOutput.from_pretrained(repo, revision=revision)
+                model.to(self.device)
+                model.eval()
+                self.model = model
+
+        return PinnedPredictor(checkpoint_pth=None, data_col="path")
 
     def score(self, take: Take) -> Mapping[str, object]:
         import torch
@@ -388,7 +453,10 @@ class EmotionScorer(_Lazy):
     def _load(self) -> object:
         from funasr import AutoModel
 
-        return AutoModel(model=self.info.weights, hub="hf", device="cpu", disable_update=True)
+        # funasr's `hub="hf"` download ignores `model_revision` (it calls snapshot_download(model)),
+        # so pin at the snapshot; a local path is loaded as is.
+        path = _snapshot(self.info.weights, _revision(self.info))
+        return AutoModel(model=path, hub="hf", device="cpu", disable_update=True)
 
     def score(self, take: Take) -> Mapping[str, object]:
         result = self.model().generate(str(take.audio), granularity="utterance", extract_embedding=False)  # type: ignore[attr-defined]

@@ -211,13 +211,14 @@ export type ScreenFinisher = (branch: string, rejected: Rejected) => Promise<Scr
 const CONTINUITY_INTENT: Intent = { name: "continuity", kind: "extraction" };
 
 export function screenFinisher(projectPath: string, deps: { env?: Record<string, string | undefined>; extractor?: Adapter; now?: () => Date } = {}): ScreenFinisher {
+  // loadConfig below is told onKeyDropped: () => {}: this runs under the screen, where a stderr line draws over it.
   return async (branch, rejected) => {
     const marker = readMarker(projectPath);
     if (!marker.ok) return { ok: false, message: marker.message };
     let extractor = deps.extractor;
     if (extractor === undefined) {
       try {
-        const providers = createProviders(loadConfig({ projectDir: projectPath }));
+        const providers = createProviders(loadConfig({ projectDir: projectPath, onKeyDropped: () => {} }));
         extractor = providers.adapter(providers.route(CONTINUITY_INTENT));
       } catch {
         extractor = undefined; // continuity is then skipped ("no extraction adapter"); the merge still lands
@@ -282,7 +283,7 @@ export async function acceptBranchInProject(
     extractorOverride ??
     (() => {
       try {
-        const providers = createProviders(loadConfig({ projectDir: projectPath }));
+        const providers = createProviders(loadConfig({ projectDir: projectPath, onKeyDropped: () => {} }));
         return providers.adapter(providers.route(CONTINUITY_INTENT));
       } catch (error) {
         // No model configured: the merge still lands, with continuity skipped (AGT-2131).

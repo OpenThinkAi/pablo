@@ -166,8 +166,10 @@ branch, so it is trusted less than this file:
   the key was set for the endpoint named here. Otherwise a committed file could choose
   which secret, any environment variable or Keychain item, is sent to a port on this
   machine. If a local server a work uses needs a key, declare that provider here with
-  its `endpoint` and `key`, and override only its `model` from `pablo.json`. A
-  non-local provider left without a key is skipped, and the stderr notice says this.
+  its `endpoint` and `key`, and override only its `model` from `pablo.json`. When a
+  work's change drops a key that would have been sent (a Keychain item, or an `env:`
+  variable that is set), pablo prints one line on stderr naming the provider and this
+  fix. A non-local provider left without a key is skipped, and the stderr notice says this.
 - A work may add a provider, or change any field of one, only on this machine
   (`127.0.0.1`, `localhost` or `::1`). On a remote provider (Anthropic, a hosted
   endpoint) it may change only `model`, `timeoutMs`, `temperature`, `thinking` and `tools`.

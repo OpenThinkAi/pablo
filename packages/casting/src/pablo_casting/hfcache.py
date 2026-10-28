@@ -17,15 +17,21 @@ def hub_cache(env: Mapping[str, str]) -> Path:
     return root / "huggingface" / "hub"
 
 
-def is_cached(model_id: str, env: Mapping[str, str]) -> bool:
-    """True when a snapshot of `model_id` is in the cache (the hub's `models--org--name/snapshots/<rev>` layout)."""
+def is_cached(model_id: str, env: Mapping[str, str], revision: str | None = None) -> bool:
+    """True when a snapshot of `model_id` is in the cache (the hub's `models--org--name/snapshots/<rev>` layout);
+    with a commit `revision`, that snapshot exactly."""
     snapshots = hub_cache(env) / ("models--" + model_id.replace("/", "--")) / "snapshots"
+    if revision is not None:
+        return (snapshots / revision).is_dir()
     return snapshots.is_dir() and any(snapshots.iterdir())
 
 
-def snapshot_dir(model_id: str, env: Mapping[str, str]) -> Path | None:
-    """The newest cached snapshot of `model_id`, or `None` when it is not in the cache."""
+def snapshot_dir(model_id: str, env: Mapping[str, str], revision: str | None = None) -> Path | None:
+    """The cached snapshot of `model_id` at a commit `revision` (else the newest), or `None` when it is not in the cache."""
     snapshots = hub_cache(env) / ("models--" + model_id.replace("/", "--")) / "snapshots"
+    if revision is not None:
+        pinned = snapshots / revision
+        return pinned if pinned.is_dir() else None
     if not snapshots.is_dir():
         return None
     candidates = [entry for entry in snapshots.iterdir() if entry.is_dir()]
@@ -37,12 +43,12 @@ def snapshot_dir(model_id: str, env: Mapping[str, str]) -> Path | None:
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".npz", ".gguf")
 
 
-def weights_sha256(model_id: str, env: Mapping[str, str]) -> str | None:
+def weights_sha256(model_id: str, env: Mapping[str, str], revision: str | None = None) -> str | None:
     """One sha256 over a cached snapshot's weight files: each file's relative path and
     content hash, in path order. `None` when the model is not cached. This is what a
     card's `designed.weights_sha256` records, so a re-uploaded checkpoint under the
     same id shows up as different weights."""
-    root = snapshot_dir(model_id, env)
+    root = snapshot_dir(model_id, env, revision)
     return None if root is None else weights_sha256_at(root)
 
 
