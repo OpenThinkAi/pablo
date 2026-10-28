@@ -21,9 +21,10 @@ import { buildContent, resolveStageTarget } from "./save";
 /**
  * The stages `propose` accepts, in the order the novel machine needs them. `timeline` (AGT-1690) is
  * `bible/timeline.md` whole, so a core built from a prompt (`pablo story`) can date its beats: a unit's
- * story-time gate needs a timeline row at or before its year.
+ * story-time gate needs a timeline row at or before its year. `period` (AGT-2184) is the historical-fiction period
+ * brief, `bible/period.md` whole: the research checklist is derived from it.
  */
-export const PROPOSE_STAGES = ["premise", "acts", "beats", "cast", "places", "timeline"] as const;
+export const PROPOSE_STAGES = ["premise", "acts", "beats", "cast", "places", "timeline", "period"] as const;
 export type ProposeStage = (typeof PROPOSE_STAGES)[number];
 
 export interface ProposeArgs {
@@ -80,6 +81,8 @@ export function propose(session: PlanSession, workPath: string, args: ProposeArg
     saveStage = "bible/places.md";
   } else if (stage === "timeline") {
     saveStage = "bible/timeline.md";
+  } else if (stage === "period") {
+    saveStage = "bible/period.md";
   } else {
     saveStage = stage;
   }

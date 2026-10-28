@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { PlanSession } from "../plan";
 import { propose } from "../propose";
 import { recordFact } from "../record-fact";
-import { saveResearchTool } from "./save-research";
+import { linkResearchItemTool, saveResearchTool, waiveResearchItemTool } from "./save-research";
 import type { McpToolSpec, VerbResult } from "../verbs";
 
 const REFUSED = 2;
@@ -21,7 +21,7 @@ export function proposeTool(session: PlanSession, workPath: string): McpToolSpec
   const tool: McpToolSpec<typeof ProposeArgs.shape> = {
     name: "propose",
     description:
-      "Propose planning output for the author to accept in review mode: stage is premise, acts, beats, cast, places or timeline (bible/timeline.md whole: | Year | Real events | In the story | rows, which date the beats). acts and beats take table rows; cast also takes a name (lowercase-hyphen). Staged on this session's plan branch, not applied: the proposal changes nothing in the book until the author accepts the branch in review mode (the branch is merged then).",
+      "Propose planning output for the author to accept in review mode: stage is premise, acts, beats, cast, places, timeline (bible/timeline.md whole: | Year | Real events | In the story | rows, which date the beats) or period (bible/period.md whole: a historical work's period brief, which its research checklist is derived from). acts and beats take table rows; cast also takes a name (lowercase-hyphen). Staged on this session's plan branch, not applied: the proposal changes nothing in the book until the author accepts the branch in review mode (the branch is merged then).",
     // stage is a plain string, not an enum, so an unknown stage is refused with pablo's own list of valid stages.
     args: ProposeArgs,
     async run(args): Promise<VerbResult> {
@@ -77,7 +77,13 @@ export function recordFactTool(session: PlanSession, workPath: string): McpToolS
   return tool as unknown as McpToolSpec;
 }
 
-/** The plan-branch tools for one session. */
+/** The plan-branch tools for one session: the research checklist's waive and link land on it too (AGT-2184). */
 export function planTools(session: PlanSession, workPath: string): readonly McpToolSpec[] {
-  return [proposeTool(session, workPath), recordFactTool(session, workPath), saveResearchTool(session, workPath)];
+  return [
+    proposeTool(session, workPath),
+    recordFactTool(session, workPath),
+    saveResearchTool(session, workPath),
+    waiveResearchItemTool(session, workPath),
+    linkResearchItemTool(session, workPath),
+  ];
 }
