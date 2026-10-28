@@ -20,7 +20,7 @@ import { runConformance } from "../src/outputs/conformance";
 import { ESSAY } from "../src/outputs/essay";
 import { buildEssayPack, essayDefaultPlan, essayPreconditions } from "../src/outputs/essay/pack";
 import { compileEssay, noteSource, publishEssay } from "../src/outputs/essay/publish";
-import { assumedThesis } from "../src/outputs/essay/scaffold";
+import { assumedThesis, fictionEssaySections } from "../src/outputs/essay/scaffold";
 import { claimRefs, cleanSectionBody, parseEssayFile, putSection, sectionBody, withoutCitations } from "../src/outputs/essay/sections";
 import { NARRATED } from "../src/outputs/narrated";
 import { OUTPUTS, outputsOnTrack, resolveOutput } from "../src/outputs/registry";
@@ -324,11 +324,11 @@ test("AC3: publish draft|final compile markdown with numbered references and a s
   expect(publishEssay(work, "the-press", "The Press", "review")).toMatchObject({ ok: false, code: 2 });
 });
 
-test("AC3: an essay that cites nothing still ends with its sources list", () => {
+test("AGT-2195 AC2: an essay that cites nothing has no sources section", () => {
   const compiled = compileEssay("T", "## One\n\nPlain.\n\n## Two\n\nMore.\n", new Map(), new Map(), "final");
-  expect(compiled.text).toBe("# T\n\n## One\n\nPlain.\n\n## Two\n\nMore.\n\n## Sources\n\nNo sources cited.\n");
+  expect(compiled.text).toBe("# T\n\n## One\n\nPlain.\n\n## Two\n\nMore.\n");
   // One section (a fiction track's essay) is the essay itself: no heading over it.
-  expect(compileEssay("T", "## The essay\n\nPlain.\n", new Map(), new Map(), "final").text).toBe("# T\n\nPlain.\n\n## Sources\n\nNo sources cited.\n");
+  expect(compileEssay("T", "## The essay\n\nPlain.\n", new Map(), new Map(), "final").text).toBe("# T\n\nPlain.\n");
   expect(noteSource("x", "no title")).toEqual({ id: "x", title: "x", links: [] });
 });
 
@@ -429,10 +429,18 @@ test("AGT-2135 AC1: output add essay on a fiction work needs a thesis, then writ
   expect(added.committed).toBe(true);
   expect(readFileSync(join(work, "outputs", "essay", "thesis.md"), "utf8")).toBe(`# Thesis\n\n${FICTION_THESIS}\n`);
   const outline = readFileSync(join(work, "outputs", "essay", "outline.md"), "utf8");
-  expect(outline).toContain("| 3 | Act I | The light is to be automated; Ines keeps it anyway. (1930) |");
-  expect(essayDefaultPlan(work).map((r) => r.title)).toEqual(["The story", "The world it is drawn from", "Act I", "What the story argues"]);
+  expect(outline).toContain("| 2 | The light is to be automated | The light is to be automated; Ines keeps it anyway. (1930) |");
+  expect(essayDefaultPlan(work).map((r) => r.title)).toEqual(["The story", "The light is to be automated", "What the story argues"]);
+  // AGT-2195 AC1: plain fiction has no period section; historical fiction does; an act with its own title keeps it.
+  const acts = [
+    { act: "Act I: The Crossing", years: "", summary: "They leave." },
+    { act: "II", years: "", summary: "" },
+    { act: "Civil War", years: "", summary: "Fighting." },
+  ];
+  expect(fictionEssaySections(acts, "fiction").map((r) => r.title)).toEqual(["The story", "The Crossing", "Act II", "Civil War", "What the story argues"]);
+  expect(fictionEssaySections(acts, "historical-fiction").map((r) => r.title)).toContain("The world it is drawn from");
   expect(essayDefaultPlan(work)[0]!.beats).toEqual([1, 2, 3, 4]);
-  expect(readFileSync(join(work, "outputs", "essay", "plan.md"), "utf8")).toContain("| 4 | What the story argues | 1, 2, 3, 4 | beat |");
+  expect(readFileSync(join(work, "outputs", "essay", "plan.md"), "utf8")).toContain("| 3 | What the story argues | 1, 2, 3, 4 | beat |");
   expect(git(vault, "status", "--porcelain")).toBe("");
 });
 
@@ -457,14 +465,14 @@ test("AGT-2135 AC2: a fiction essay section's pack carries the thesis, period fa
   const added = addOutput(vault, work, "essay", { now: NOW, thesis: FICTION_THESIS });
   if (!added.ok) throw new Error(added.message);
   expect(essayPreconditions(work, 1)).toEqual({ ready: true, missing: [] });
-  const packed = buildEssayPack(vault, work, 3, { marker: markerOf(work), output: "essay" });
+  const packed = buildEssayPack(vault, work, 2, { marker: markerOf(work), output: "essay" });
   if (!packed.ok) throw new Error(packed.message);
   const prompt = packed.pack.prompt;
   expect(prompt).toContain("# The thesis (the essay argues this)");
   expect(prompt).toContain(FICTION_THESIS);
   expect(prompt).toContain("# The story this essay is about");
   expect(prompt).toContain("A lighthouse keeper's daughter keeps the lamp lit");
-  expect(prompt).toContain("Section 3: Act I");
+  expect(prompt).toContain("Section 2: The light is to be automated");
   expect(prompt).toContain("Lajos Halmi ran the lighthouse board in 1930");
   expect(prompt).toContain("The lamp is red.");
   expect(prompt).toContain("Ines Varga");

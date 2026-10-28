@@ -52,6 +52,18 @@ test("write --chapter 3 refuses (exit 2) naming chapter 2 as unwritten (AC1)", (
   rmSync(vault, { recursive: true, force: true });
 });
 
+test("AGT-2195 AC3: write --chapter 3 --dry-run shows the pack with the unmet precondition as a warning", () => {
+  const vault = tempVault();
+  const { exitCode, stdout } = runCli(["write", "--project", "ice-house", "--chapter", "3", "--dry-run", "--json"], { PABLO_VAULT: vault });
+  expect(exitCode).toBe(0);
+  const body = JSON.parse(stdout);
+  expect(body.ok).toBe(true);
+  expect(body.dryRun).toBe(true);
+  expect(body.slices.length).toBeGreaterThan(0);
+  expect(body.warnings[0].missing).toContain("chapter 2 is not written");
+  rmSync(vault, { recursive: true, force: true });
+});
+
 test("write --chapter x (not a positive integer) refuses with exit 2", () => {
   const vault = tempVault();
 

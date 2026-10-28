@@ -171,8 +171,9 @@ story**. `pablo output add essay` asks for it (on a terminal it prompts; otherwi
 it is refused with `missing: ["--thesis: ..."]` until you pass `--thesis "<text>"`)
 and writes two files beside `plan.md` and `RULES.md`: `outputs/essay/thesis.md`,
 and `outputs/essay/outline.md`, the sections (`| # | Section | What it covers |`)
-drawn from the story core: the story, the world it is drawn from, one section per
-act, and what the story argues. Edit the outline freely; `pablo output plan essay`
+drawn from the story core: the story, the world it is drawn from (historical
+fiction only), one section per act (titled with the act's own title), and what the
+story argues. Edit the outline freely; `pablo output plan essay`
 re-reads it. A thesis already in `thesis.md` is kept (passing `--thesis` then is
 refused), and `--thesis` is refused on nonfiction, whose essay argues
 `core/thesis.md`. Each section's pack carries the thesis, the story it is about
@@ -378,7 +379,7 @@ Reads stdin, or `--file`, and writes:
 | `premise` | replaces `bible/overview.md` |
 | `acts` | replaces the acts table in the beats file; the rest of the file is kept byte for byte |
 | `beats` | replaces the beat table in the beats file |
-| `bible/<file>` | replaces that `.md` file, which must stay under `bible/` |
+| `bible/<file>` | replaces that `.md` file, which must stay under `bible/`; input of table rows only (no header row) replaces the data rows of the file's first table and keeps its heading and header |
 
 Table input may be a full table or rows only; it is rewritten under the standard
 header. Input is checked before anything is written. A beat row needs six columns
@@ -470,7 +471,7 @@ shows the script as the pack's one `source` section. `--words`, `--scenes`,
 | `--voices narrator\|characters` | the narrated output only: one narrator (default), or speaker lines for attributed dialogue; refused on any other output |
 | `--force` | overwrite an existing unit file (an essay section: replace its text) |
 | `--no-check` | skip the track's checks after the draft (see below) |
-| `--dry-run` | build and show the prompt pack, send nothing |
+| `--dry-run` | build and show the prompt pack, send nothing; a unit whose preconditions are unmet is shown with them as a warning (`warnings` in `--json`) instead of being refused |
 
 Before sending anything, it:
 
@@ -979,7 +980,7 @@ pablo publish --project <slug> [--output <type>] --target <target>
 |---|---|---|
 | `novel` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-<target>.md`. `draft`: every chapter in order, frontmatter stripped, sentence lines joined into paragraphs, quotes curled. `review`: chapter headings with each source sentence line numbered `[n]` (restarting in every chapter) so a reader can cite a line. `final`: the clean manuscript, same as the draft, plus `<slug>-final.epub` (one XHTML file per chapter; no pandoc needed); `files` lists both |
 | `story` | `draft`, `review`, `final` | `<work>/.pablo/out/<slug>-story-<target>.md`: `draft` and `final` are the clean compiled story; `review` adds a "Review copy, N words" line under the title |
-| `essay` | `draft`, `final` | `<work>/.pablo/out/<slug>-essay-<target>.md`: `# <title>`, every section under its `## ` heading (a one-section essay has none) with sentences joined into paragraphs and quotes curled, then `## Sources`. Each citation becomes a numbered reference (`[1]`, `[2, 3]`; a `#n` cites the notes claims row n names), and the sources list gives each cited research note's title, its sources and its retrieval date, in order of first citation. `draft` adds a "Draft, N words" line under the title naming any citation that resolves to nothing; `final` is the clean copy and is refused while such a citation remains. |
+| `essay` | `draft`, `final` | `<work>/.pablo/out/<slug>-essay-<target>.md`: `# <title>`, every section under its `## ` heading (a one-section essay has none) with sentences joined into paragraphs and quotes curled, then `## Sources` (left out when nothing is cited). Each citation becomes a numbered reference (`[1]`, `[2, 3]`; a `#n` cites the notes claims row n names), and the sources list gives each cited research note's title, its sources and its retrieval date, in order of first citation. `draft` adds a "Draft, N words" line under the title naming any citation that resolves to nothing; `final` is the clean copy and is refused while such a citation remains. |
 | `narrated` | `script` | `<work>/.pablo/out/<slug>-narrated-script.md`: every reading's script in unit order, frontmatter stripped, under a `## Reading N: <title>` heading each. The audio targets come with the mixer. |
 | `screenplay` | `draft`, `final`, `fountain` | `<work>/.pablo/out/<slug>-screenplay.fountain`: a title block (`Title:`, then `Credit: Written by` and `Author:` from `pablo.json` `author`, plus `Draft date:` and `Contact:` from the optional `pablo.json` keys `draftDate` and `contact`), then every written scene in order, frontmatter stripped, the Fountain copied line for line. `draft` and `final` also write `<slug>-screenplay.pdf` beside it in standard screenplay format (US Letter, Courier 12, 1.5in left and 1in other margins, indented dialogue, page numbers from page 2); `fountain` writes the Fountain file alone. The PDF is typeset by pablo itself (`packages/cli/src/screenplay-pdf.ts`, no dependency, no pandoc, Courier is a built-in PDF font); `files` lists both, and the text output names them (`files: <slug>-screenplay.fountain, <slug>-screenplay.pdf`). Action never breaks across a page with fewer than two lines on either side. |
 | `radio` | `bundle`, `stream` | `bundle`: `.pablo/out/<slug>-radio-bundle/` with every script, each mixed episode's newest audio and manifest, and `bundle.json`; unmixed episodes are listed in `notes`. `stream`: each mixed episode to `.pablo/out/stream/`. `player` is refused; use `pablo review`. |

@@ -107,13 +107,10 @@ export function compileEssay(
     .replace(/\[\d+(?:, \d+)*\]/g, "")
     .split(/\s+/)
     .filter((w) => w !== "").length;
-  const list =
-    sources.length === 0
-      ? ["No sources cited."]
-      : sources.map((s, i) => `${i + 1}. ${s.title}${s.links.length === 0 ? "" : `. ${s.links.join("; ")}`}${s.retrieved === undefined ? "" : ` (retrieved ${s.retrieved})`}`);
+  const list = sources.map((s, i) => `${i + 1}. ${s.title}${s.links.length === 0 ? "" : `. ${s.links.join("; ")}`}${s.retrieved === undefined ? "" : ` (retrieved ${s.retrieved})`}`);
   const distinct = [...new Set(unresolved)];
   const draftLine = `*Draft, ${words} words.${distinct.length === 0 ? "" : ` Unresolved citations: ${distinct.join(", ")}.`}*`;
-  const parts = [`# ${curlQuotes(title)}`, ...(target === "draft" ? [draftLine] : []), ...body, "## Sources", list.join("\n")];
+  const parts = [`# ${curlQuotes(title)}`, ...(target === "draft" ? [draftLine] : []), ...body, ...(list.length === 0 ? [] : ["## Sources", list.join("\n")])];
   return { text: `${parts.join("\n\n")}\n`, words, sources, unresolved: distinct };
 }
 

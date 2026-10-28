@@ -399,21 +399,36 @@ export async function runWrite(
     return 2;
   }
   const preconditions = output.preconditions(projectPath, chapter);
-  if (!preconditions.ready) {
+  // A dry run only previews the pack (AGT-2195): an unmet precondition is a warning beside it, not a refusal.
+  // If the pack cannot be built without it, the refusal below names what is missing.
+  const notReady = !preconditions.ready;
+  if (notReady && !args.dryRun) {
     emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
     return 2;
   }
 
-  const packResult = output.pack(vaultRoot, projectPath, chapter, {
-    words,
-    scenes,
-    marker: markerResult.marker,
-    direction,
-    output: output.id,
-    ...(deps.env === undefined ? {} : { env: deps.env }),
-    ...(args.voices === undefined ? {} : { voices: args.voices }),
-  });
+  // A dry run with unmet preconditions may find the pack cannot be built at all (a unit with no row throws): that is the refusal.
+  let packResult: ReturnType<typeof output.pack>;
+  try {
+    packResult = output.pack(vaultRoot, projectPath, chapter, {
+      words,
+      scenes,
+      marker: markerResult.marker,
+      direction,
+      output: output.id,
+      ...(deps.env === undefined ? {} : { env: deps.env }),
+      ...(args.voices === undefined ? {} : { voices: args.voices }),
+    });
+  } catch (error) {
+    if (!notReady) throw error;
+    emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
+    return 2;
+  }
   if (!packResult.ok) {
+    if (notReady) {
+      emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
+      return 2;
+    }
     emitError(packResult.message, undefined, packResult.code, args.json);
     return packResult.code;
   }
@@ -421,6 +436,8 @@ export async function runWrite(
   const { pack } = packResult;
 
   if (args.dryRun) {
+    const notReadyMessage = `${output.noun} ${chapter} is not ready to draft`;
+    if (notReady && !args.json) console.error(`warning: ${notReadyMessage}: ${preconditions.missing.join("; ")}`);
     if (args.json) {
       const actionByName = new Map(pack.adjustments.map((a) => [a.name, a.action]));
       const body = {
@@ -443,6 +460,7 @@ export async function runWrite(
         expectedOutputTokens: pack.expectedOutputTokens,
         prompt_hash: pack.hash,
         adjustments: pack.adjustments,
+        ...(notReady ? { warnings: [{ kind: "preconditions", message: notReadyMessage, missing: preconditions.missing }] } : {}),
         // The layered voice (AGT-2139): every layer used, lowest first, and any voice pablo.json names that was not found.
         ...(pack.voiceLayers === undefined ? {} : { voiceLayers: pack.voiceLayers }),
         // AGT-2110: how many facts/period.md rows the prompt carries, when the work has the file.

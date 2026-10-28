@@ -21,22 +21,47 @@ import { join } from "node:path";
 import { readCoreState } from "../../core/machine";
 import type { ActRow } from "../../core/machine";
 import { hasProse, THESIS_FILE } from "../../core/nonfiction";
+import type { TrackId } from "../../tracks/registry";
 import type { ScaffoldOptions, ScaffoldOutcome } from "../types";
 import { essayTrack, ESSAY_OUTLINE_FILE, ESSAY_THESIS_FILE } from "./sections";
 
 const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 
-/** An act's section title: `Act I` for an act named `I`, the act's own name when it already says so. */
-export function actTitle(act: ActRow): string {
+/** An act's plain label, as the beats file's headings name it: `Act I` for an act named `I`, the name when it already says `Act`. */
+export function actLabel(act: ActRow): string {
   const name = act.act.trim();
   return /^act\b/i.test(name) ? name : `Act ${name}`;
 }
 
-/** The default outline's rows over the core's acts: the story, its world, each act, the argument. Titles are unique. */
-export function fictionEssaySections(acts: readonly ActRow[]): { readonly title: string; readonly covers: string }[] {
+/**
+ * An act's section title: the act's own title when its name carries one (`Act I: The Crossing`, `I - The Crossing`),
+ * else the opening clause of what it accomplishes; a bare `Act I` only when the row says nothing else.
+ */
+export function actTitle(act: ActRow): string {
+  const name = act.act.trim();
+  const own = name
+    .replace(/^act\s+/i, "")
+    .replace(/^(?:[ivxlcdm]+|\d+)(?:\s*[:.\u2014\u2013-]\s*|\s*$)/i, "")
+    .trim();
+  if (own !== "") return own;
+  const first = act.summary.trim().split(/(?<=[.!?;:])\s|\s[\u2014\u2013]\s/)[0]?.replace(/[.!?;:]+$/, "").trim() ?? "";
+  if (first !== "") return first.length <= 60 ? first : `${first.slice(0, 57).replace(/\s+\S*$/, "")}...`;
+  return /^act\b/i.test(name) ? name : `Act ${name}`;
+}
+
+/**
+ * The default outline's rows over the core's acts: the story, its world (historical fiction only: plain fiction has
+ * no period), each act, the argument. Titles are unique.
+ */
+export function fictionEssaySections(
+  acts: readonly ActRow[],
+  track: TrackId,
+): { readonly title: string; readonly covers: string }[] {
   const rows = [
     { title: "The story", covers: "what the story is and what happens in it (the overview and the cast), set against the thesis" },
-    { title: "The world it is drawn from", covers: "the period and place the story keeps to: the timeline and the period facts" },
+    ...(track === "historical-fiction"
+      ? [{ title: "The world it is drawn from", covers: "the period and place the story keeps to: the timeline and the period facts" }]
+      : []),
     ...acts.map((a) => ({ title: actTitle(a), covers: [a.summary.trim(), a.years.trim() === "" ? "" : `(${a.years.trim()})`].filter((p) => p !== "").join(" ") })),
     { title: "What the story argues", covers: "what the story shows about the thesis, and why it is told" },
   ];
@@ -50,7 +75,7 @@ export function fictionEssaySections(acts: readonly ActRow[]): { readonly title:
 }
 
 /** `outputs/essay/outline.md`'s text for `acts`. */
-export function renderFictionEssayOutline(acts: readonly ActRow[]): string {
+export function renderFictionEssayOutline(acts: readonly ActRow[], track: TrackId): string {
   return [
     "# Essay outline",
     "",
@@ -59,7 +84,7 @@ export function renderFictionEssayOutline(acts: readonly ActRow[]): string {
     "",
     "| # | Section | What it covers |",
     "|---|---|---|",
-    ...fictionEssaySections(acts).map((r, i) => `| ${i + 1} | ${cell(r.title)} | ${cell(r.covers)} |`),
+    ...fictionEssaySections(acts, track).map((r, i) => `| ${i + 1} | ${cell(r.title)} | ${cell(r.covers)} |`),
     "",
   ].join("\n");
 }
@@ -110,6 +135,6 @@ export function essayScaffold(workDir: string, options: ScaffoldOptions): Scaffo
   }
   const files: { rel: string; content: string }[] = [];
   if (thesis !== undefined) files.push({ rel: ESSAY_THESIS_FILE, content: renderThesis(thesis) });
-  files.push({ rel: ESSAY_OUTLINE_FILE, content: renderFictionEssayOutline(readCoreState(workDir, track).acts) });
+  files.push({ rel: ESSAY_OUTLINE_FILE, content: renderFictionEssayOutline(readCoreState(workDir, track).acts, track) });
   return { ok: true, files };
 }
