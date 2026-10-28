@@ -94,6 +94,10 @@ export interface Receipt {
   readonly voice_missing?: readonly PackVoiceMissing[];
   /** How many of `facts/period.md`'s rows the prompt carried (AGT-2110); present when the work has the file. */
   readonly period_facts?: number;
+  /** An agent-loop turn's cost in US dollars (0 on a local provider); present when the wrapper was given a `cost` function (AGT-2191). */
+  readonly cost_usd?: number;
+  /** The names of the tools the turn called, in order; present (and non-empty) only on an agent-loop turn that called some (AGT-2191). */
+  readonly tool_calls?: readonly string[];
 }
 
 export type ReceiptSink = (receipt: Receipt) => void | Promise<void>;
@@ -106,6 +110,8 @@ export interface WithReceiptsOptions {
   /** The output and unit the calls draft for: written into every receipt as `output` and `unit` (AGT-1669). */
   readonly address?: { readonly output: string; readonly unit: number } | undefined;
   readonly estimate?: TokenEstimator | undefined;
+  /** Prices a `chat()` turn's reported usage in US dollars; written into the turn's receipt as `cost_usd` (AGT-2191). */
+  readonly cost?: ((usage: ChatUsage, model: string) => number) | undefined;
   readonly now?: (() => number) | undefined;
   readonly clock?: (() => Date) | undefined;
   /**
@@ -171,9 +177,11 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
       const promptHash = pack?.hash ?? hashPrompt([request.system, JSON.stringify(request.messages)].join("\n\n"));
       let firstAt: number | undefined;
       let usage: ChatUsage | undefined;
+      const toolNames: string[] = [];
       try {
         for await (const event of inner(request)) {
           if (event.type === "done") usage = event.usage;
+          else if (event.type === "tool_call") toolNames.push(event.call.name);
           else if (firstAt === undefined) firstAt = now();
           yield event;
         }
@@ -196,6 +204,8 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
         tokens_read: usage?.inputTokens ?? null,
         tokens_written: usage?.outputTokens ?? null,
         ttft_ms: firstAt === undefined ? null : Math.round(firstAt - started),
+        ...(options.cost === undefined || usage === undefined ? {} : { cost_usd: options.cost(usage, request.model ?? adapter.model) }),
+        ...(toolNames.length === 0 ? {} : { tool_calls: toolNames }),
       });
     };
   }

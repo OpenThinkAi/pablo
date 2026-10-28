@@ -204,6 +204,37 @@ test("story is one VERBS entry, MCP-only beside the CLI: never the harness's, pr
   expect(story?.args.safeParse({}).success).toBe(true);
 });
 
+// AGT-2191: the harness's own turns leave receipts and transcripts.
+test("AGT-2191: every agent-loop turn keeps a receipt naming the stage intent and its tool calls, and --json points at the stage transcripts", async () => {
+  const { ctx } = tempVault();
+  const harness = fakeHarness();
+  const result = await runStory({ prompt: SPEC }, ctx, depsFor(harness.agent, fakeWriter()));
+  const body = result.body as Record<string, any>;
+  expect(result.exitCode).toBe(0);
+
+  const loop = receipts(body.path).filter((r) => r["output"] === undefined);
+  expect(loop.length).toBeGreaterThanOrEqual(10);
+  // research runs under `research`, premise through beats under `plan`; local provider costs nothing.
+  expect(new Set(loop.map((r) => r["intent"]))).toEqual(new Set(["research", "plan"]));
+  expect(loop[0]).toMatchObject({ intent: "research", provider: "scripted-agent", model: "scripted-agent-model", cost_usd: 0, tool_calls: ["save_research"] });
+  for (const r of loop) expect(typeof r["cost_usd"]).toBe("number");
+  expect(loop.flatMap((r) => (r["tool_calls"] as string[] | undefined) ?? [])).toEqual(
+    expect.arrayContaining(["save_research", "ask_author", "propose"]),
+  );
+
+  // One saved transcript per stage, listed in the result and holding the tool calls by name.
+  expect(body.transcripts).toHaveLength(5);
+  const research = body.transcripts.find((t: string) => t.includes("research-"));
+  expect(research.startsWith(join(body.path, ".pablo", "transcripts"))).toBe(true);
+  const entries = readFileSync(research, "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l) as { kind: string; tool?: string });
+  expect(entries[0]?.kind).toBe("session");
+  expect(entries.filter((e) => e.kind === "tool_call").map((e) => e.tool)).toEqual(["save_research"]);
+  expect(entries.at(-1)?.kind).toBe("result");
+});
+
 // ---------------------------------------------------------------------------
 // AC1: on demand, a story from one prompt
 // ---------------------------------------------------------------------------
@@ -250,7 +281,7 @@ test("AC1: the spec example leaves research, a bible, an outline, a drafted and 
   ]);
 
   // The receipt chain: one per model call, each naming its output.
-  const chain = receipts(work);
+  const chain = receipts(work).filter((r) => r["output"] !== undefined);
   expect(chain.map((r) => r["intent"])).toEqual(["draft", "continuity"]);
   for (const r of chain) expect(r).toMatchObject({ output: "story", unit: 1 });
   expect(writer.drafts).toBe(1);
@@ -310,7 +341,7 @@ test("AC2: --output novel --output story builds one core and both outputs", asyn
   expect(existsSync(body.published.story.where)).toBe(true);
   expect(body.published.novel.where).not.toBe(body.published.story.where);
 
-  const chain = receipts(work);
+  const chain = receipts(work).filter((r) => r["output"] !== undefined);
   const drafts = chain.filter((r) => r["intent"] === "draft").map((r) => `${r["output"]}/${r["unit"]}`);
   expect(drafts).toEqual(["novel/1", "novel/2", "novel/3", "novel/4", "story/1"]);
   for (const r of chain) expect(typeof r["output"]).toBe("string");

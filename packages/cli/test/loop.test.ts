@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { createScriptedChatAdapter } from "@openthink/pablo-core";
-import type { Adapter, ChatEvent, ChatMessage, ScriptedTurn } from "@openthink/pablo-core";
+import type { Adapter, ChatEvent, ChatMessage, Receipt, ScriptedTurn } from "@openthink/pablo-core";
 import { askAuthorTool } from "../src/harness/ask-author";
 import { DEFAULT_MAX_TURNS, parseTextToolCalls, runLoop, textProtocolPrompt } from "../src/harness/loop";
 import type { LoopSpec } from "../src/harness/loop";
@@ -233,6 +233,24 @@ describe("runLoop", () => {
     await collect("m", { adapter: required, system: "s", tools: [status.spec], ctx, toolChoice: "required", forcedToolChoice: false });
     expect(required.requests[0]!.toolChoice).toBe("auto");
     expect(required.requests[0]!.system).toContain("answer by calling one of your tools");
+  });
+
+  test("AGT-2191: with a receipts sink, each turn writes a receipt: intent, provider, model, tokens, cost and the tool names", async () => {
+    const turns: ScriptedTurn[] = [[call("c1", "status", { title: "x" }), call("c2", "status", { title: "y" }), done(1000, 500)], [text("ok"), done(2000, 100)]];
+    const tools = [recordingTool("status").spec];
+    const logged: Receipt[] = [];
+    const sink = (receipt: Receipt) => void logged.push(receipt);
+    await collect("m", { adapter: scripted(turns, "claude-opus-5-5"), system: "s", tools, ctx, receipts: { sink, intent: "research" } });
+    expect(logged).toHaveLength(2);
+    expect(logged[0]).toMatchObject({ intent: "research", provider: "scripted", model: "claude-opus-5-5", tokens_read: 1000, tokens_written: 500, tool_calls: ["status", "status"] });
+    expect(logged[0]!.cost_usd).toBeCloseTo(0.004 + 0.01, 10);
+    expect(logged[1]).toMatchObject({ tokens_read: 2000, tokens_written: 100 });
+    expect(logged[1]!.tool_calls).toBeUndefined();
+
+    // A local provider costs nothing, and a run without a sink writes nothing.
+    const local: Receipt[] = [];
+    await collect("m", { adapter: scripted(turns, "claude-opus-5-5"), system: "s", tools, ctx, local: true, receipts: { sink: (r) => void local.push(r), intent: "agent" } });
+    expect(local.map((r) => r.cost_usd)).toEqual([0, 0]);
   });
 
   test("with tool choice auto, a text-only first turn is the final answer", async () => {

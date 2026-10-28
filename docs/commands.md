@@ -992,6 +992,11 @@ stops on each branch for you to accept; `pablo story --project <slug>` then pick
 run up again. Progress is kept in `<work>/.pablo/story.json`, so a stopped or failed
 run resumes where it was. Runs on the same provider as `agent`.
 
+Every turn of the agent loop in a core stage appends a receipt to `<work>/.pablo/receipts.jsonl`
+(`intent` `research` or `plan`, `provider`, `model`, tokens, `cost_usd`, and `tool_calls`, the
+names of the tools the turn called), and each stage's full transcript is saved as JSONL under
+`<work>/.pablo/transcripts/`. The result (`--json`) lists them as `transcripts`.
+
 After each drafted unit the run does what `write` does: it runs the work's track checks on
 that unit and keeps the hits (and any check that could not run) on the draft's record in
 the result, `drafts.<output>[].check[]` and `.checkNotices[]`; the prose form prints one
@@ -1057,6 +1062,9 @@ by an older pablo (the old Agent SDK's format) is reported as legacy, not resuma
 untouched; a new session starts instead. Only `pablo agent` saves and resumes; the
 screen's compose view starts fresh each time. When the agent asks you a question, it
 prints the choices and reads your answer from stdin (type a number to pick one).
+
+Each turn also appends a receipt to the work's `.pablo/receipts.jsonl`: `intent` `agent`, `provider`,
+`model`, tokens, `cost_usd` and `tool_calls` (the names of the tools the turn called).
 
 `--tag-facts` tags every untagged bible and continuity fact as researched, invented
 or author on a `plan/` branch. Chapters are never touched. The classifier runs on the

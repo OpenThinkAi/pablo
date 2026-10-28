@@ -49,7 +49,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { PLAN_INTENT, WORK_RULES_FILE, createPlanner, createProviders, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
+import { PLAN_INTENT, WORK_RULES_FILE, createPlanner, createProviders, fileReceiptSink, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
 import type { Adapter, Intent, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
 import { coreStages, readCoreState } from "./core/machine";
@@ -73,6 +73,7 @@ import { harnessProvider, LOCAL_FALLBACK_NOTICE, shouldWarnLocal } from "./harne
 import type { HarnessProvider } from "./harness/provider";
 import { planTools } from "./harness/plan-tools";
 import { loadPromptWork } from "./harness/prompt";
+import type { TranscriptEntry } from "./harness/transcript";
 import { loopQuery, runHarness } from "./harness/session";
 import type { HarnessQuery } from "./harness/session";
 import { harnessTools } from "./harness/tools";
@@ -249,6 +250,8 @@ interface StoryState {
   published: Record<string, PublishedRecord>;
   assumptions: StoryAssumption[];
   finished?: boolean;
+  /** Each core stage's saved transcript, as paths relative to the work (AGT-2191). */
+  transcripts?: string[];
 }
 
 /** What an output's publish left: the radio output lists its published episodes (AGT-1700). */
@@ -453,9 +456,29 @@ function waiting(run: Run, step: string, branch: string): VerbResult {
       ...(run.state.track === undefined ? {} : { track: run.state.track }),
       done: run.state.done,
       assumptions: run.state.assumptions,
+      ...transcriptsOf(run),
     },
     exitCode: 0,
   };
+}
+
+/** `transcripts` for a result body: the saved stage transcripts, absolute, when any exist. */
+function transcriptsOf(run: Run): { transcripts?: string[] } {
+  const saved = run.state.transcripts ?? [];
+  return saved.length === 0 ? {} : { transcripts: saved.map((rel) => join(run.work, rel)) };
+}
+
+/** Saves one stage's transcript as JSONL under `<work>/.pablo/transcripts/` and records it in the run's state. */
+function saveTranscript(run: Run, stage: StoryCoreStage, entries: readonly TranscriptEntry[]): void {
+  const stamp = (run.deps.now?.() ?? new Date()).toISOString().replace(/[:.]/g, "-");
+  const rel = join(".pablo", "transcripts", `${stage}-${stamp}.jsonl`);
+  try {
+    mkdirSync(join(run.work, ".pablo", "transcripts"), { recursive: true });
+    writeFileSync(join(run.work, rel), entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+    (run.state.transcripts ??= []).push(rel);
+  } catch {
+    // A transcript that cannot be saved must not lose the stage's work.
+  }
 }
 
 function markDone(run: Run, step: string): void {
@@ -542,18 +565,25 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
     ctx: { ...run.ctx, caller: "mcp" as const },
     tools: harnessTools(ask),
     sessionTools: planTools(session, run.work),
+    // Every agent-loop turn keeps a receipt in the work's log, under the stage's intent (AGT-2191).
+    receipts: { sink: fileReceiptSink(run.work), intent: stageIntent(stage).name },
   };
+  const entries: TranscriptEntry[] = [];
   let finished: { ok: boolean; text: string; errors: readonly string[] } | undefined;
   try {
     for await (const entry of runHarness(stageMessage(stage, run.state, run.title, run.slug), spec, run.deps.query ?? loopQuery)) {
+      entries.push(entry);
       if (entry.kind === "result") finished = entry;
     }
   } catch (error) {
-    return { ok: false, result: fail(`pablo: story: the harness failed in the ${stage} stage (${(error as Error).message})`, { stage }) };
+    saveTranscript(run, stage, entries);
+    saveState(run.work, run.state);
+    return { ok: false, result: fail(`pablo: story: the harness failed in the ${stage} stage (${(error as Error).message})`, { stage, ...transcriptsOf(run) }) };
   }
+  saveTranscript(run, stage, entries);
   saveState(run.work, run.state);
   if (finished?.ok !== true) {
-    return { ok: false, result: fail(`pablo: story: the harness did not finish the ${stage} stage${finished === undefined ? "" : `: ${finished.errors.join("; ") || finished.text}`}`, { stage }) };
+    return { ok: false, result: fail(`pablo: story: the harness did not finish the ${stage} stage${finished === undefined ? "" : `: ${finished.errors.join("; ") || finished.text}`}`, { stage, ...transcriptsOf(run) }) };
   }
   if (session.worktree === undefined) return { ok: true };
   return { ok: true, branch: session.branch, sha: git(run.repo, ["rev-parse", session.branch]) };
@@ -915,6 +945,7 @@ async function advance(run: Run): Promise<VerbResult> {
       published: state.published,
       assumptions: state.assumptions,
       receipts: receiptsPath(run.work),
+      ...transcriptsOf(run),
     },
     exitCode: 0,
   };

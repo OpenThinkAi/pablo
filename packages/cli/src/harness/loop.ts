@@ -48,8 +48,8 @@
  * throw, so a caller sees them in the transcript with the turns and cost so far.
  */
 
-import { costUsd, priceFor } from "@openthink/pablo-core";
-import type { Adapter, ChatEvent, ChatMessage, ChatRequest, ChatUsage, JsonSchemaTool, PriceTable, ToolCall, ToolChoice } from "@openthink/pablo-core";
+import { costUsd, priceFor, withReceipts } from "@openthink/pablo-core";
+import type { Adapter, ReceiptSink, ChatEvent, ChatMessage, ChatRequest, ChatUsage, JsonSchemaTool, PriceTable, ToolCall, ToolChoice } from "@openthink/pablo-core";
 import type { McpToolSpec, VerbContext } from "../verbs";
 import { parseToolArguments, toJsonSchemaTools } from "./tool-schema";
 import type { TranscriptEntry } from "./transcript";
@@ -92,6 +92,11 @@ export interface LoopSpec {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly now?: () => number;
+  /**
+   * Where each turn's receipt goes (AGT-2191): intent, provider, model, tokens,
+   * cost and the names of the tools the turn called. Absent, the loop keeps none.
+   */
+  readonly receipts?: { readonly sink: ReceiptSink; readonly intent: string };
 }
 
 type ResultEntry = Extract<TranscriptEntry, { kind: "result" }>;
@@ -226,7 +231,14 @@ export async function* runLoop(
   const started = now();
   const maxTurns = spec.maxTurns ?? DEFAULT_MAX_TURNS;
   const model = spec.model ?? spec.adapter.model;
-  const chat = spec.adapter.chat?.bind(spec.adapter);
+  const adapter =
+    spec.receipts === undefined
+      ? spec.adapter
+      : withReceipts(spec.adapter, spec.receipts.sink, {
+          intent: spec.receipts.intent,
+          cost: (usage, modelId) => costUsd(usage, modelId, { local: spec.local, prices: spec.prices }),
+        });
+  const chat = adapter.chat?.bind(adapter);
   const needsCall = spec.toolChoice !== undefined && spec.toolChoice !== "auto" && spec.toolChoice !== "none";
   // A provider that refuses a forced choice gets `auto` on the wire and the requirement in the prompt.
   const steer = needsCall && spec.forcedToolChoice === false;
