@@ -318,3 +318,27 @@ export async function revisePassage(vaultRoot: string, projectPath: string, requ
   if (!taken.ok) return fail(1, taken.message);
   return { ok: true, branch: taken.branch, path: request.file, receipt: { ...r } };
 }
+
+/**
+ * `pablo revise --branch` (AGT-2192): the CLI half of what the MCP `revise` tool does with `branch`. Needs `--passage`,
+ * refuses `--dry-run`, lands the candidate on a `revise/<id>` branch and prints the branch, file and receipt (never the prose).
+ * Returns the exit code.
+ */
+export async function runReviseBranch(
+  args: { readonly file: string | undefined; readonly passage: string | undefined; readonly instruction: string | undefined; readonly dryRun: boolean; readonly json: boolean },
+  ctx: { readonly vaultRoot: string; readonly projectPath: string; readonly env: NodeJS.ProcessEnv },
+  deps: ScreenReviserDeps = {},
+): Promise<number> {
+  const say = (code: number, message: string): number => {
+    if (args.json) console.log(JSON.stringify({ ok: false, code, message }));
+    else console.error(message);
+    return code;
+  };
+  if (args.file === undefined) return say(2, "pablo: revise requires --file <path>");
+  if (args.passage === undefined || args.dryRun) return say(2, "pablo: revise with `branch` needs `passage` and cannot be a dry run");
+  const result = await revisePassage(ctx.vaultRoot, ctx.projectPath, { file: args.file, passage: args.passage, instruction: args.instruction ?? "" }, { ...deps, env: ctx.env });
+  if (!result.ok) return say(result.code, result.message);
+  if (args.json) console.log(JSON.stringify(result));
+  else console.log(`pablo: revised ${result.path} on ${result.branch}\n  review the branch in the screen (pablo), then merge it`);
+  return 0;
+}

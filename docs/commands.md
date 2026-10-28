@@ -549,14 +549,15 @@ dry run (`voiceLayers` in `--json`) and the receipt (`voice_layers`) list both.
 ```
 pablo revise --project <slug> --file F
              (--passage "<quoted text>" | --start N --end N)
-             --instruction "<text>" [--dry-run]
+             --instruction "<text>" [--dry-run | --branch]
 ```
 
 Sends one passage of a file to the configured writer model with your instruction and returns a
 candidate. It never changes the file. Find the passage by quoting it, or with
 `--start`/`--end` character offsets into the body (frontmatter excluded). Returns
 `{ok, candidate, span, receipt}`. To keep a candidate, use the screen's revise
-action, or `--branch` (with `--passage`), which commit it on a `revise/<id>` branch.
+action, or `--branch` (with `--passage`, not with `--dry-run`), which commits it on a
+`revise/<id>` branch and prints the branch, file and receipt instead of the prose.
 
 ---
 

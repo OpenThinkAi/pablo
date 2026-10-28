@@ -5,6 +5,8 @@
 // dependency-free, so the HTML reduction is a small hand-rolled pass, and the
 // network is an injected `fetch` seam (tests never touch a real one).
 
+import { pdfToText } from "./pdf";
+
 export type WebFetchFn = (url: string, init?: { signal?: AbortSignal; headers?: Record<string, string>; redirect?: "follow" | "manual" | "error" }) => Promise<Response>;
 
 export interface WebFetchOptions {
@@ -87,7 +89,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
         await assertPublicHost(current, options.resolveHost);
         res = await doFetch(current.href, {
           signal: controller.signal,
-          headers: { accept: "text/html,text/plain,text/markdown;q=0.9,*/*;q=0.1", "user-agent": "pablo-web-fetch" },
+          headers: { accept: "text/html,text/plain,text/markdown,application/pdf;q=0.9,*/*;q=0.1", "user-agent": "pablo-web-fetch" },
           redirect: "manual",
         });
       } catch (err) {
@@ -115,7 +117,8 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 
     const type = (res.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
     const isHtml = type === "text/html" || type === "application/xhtml+xml";
-    if (type !== "" && !isHtml && !type.startsWith("text/")) {
+    const isPdf = type === "application/pdf";
+    if (type !== "" && !isHtml && !isPdf && !type.startsWith("text/")) {
       throw new WebFetchError("unsupported-type", `unsupported content type ${type} for ${parsed.href}`);
     }
     const declared = Number(res.headers.get("content-length"));
@@ -123,16 +126,20 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
       throw new WebFetchError("too-large", `${parsed.href} is ${declared} bytes, over the ${maxBytes}-byte cap`);
     }
 
-    let body: string;
+    let bytes: Uint8Array;
     try {
-      body = await readCapped(res, maxBytes, parsed.href);
+      bytes = await readCapped(res, maxBytes, parsed.href);
     } catch (err) {
       throw wrapNetwork(err, timedOut, timeoutMs, parsed.href);
     }
 
     let title: string | null = null;
     let markdown: string;
-    if (isHtml || (type === "" && /<\s*(html|body|p|div)\b/i.test(body))) {
+    const body = isPdf ? "" : new TextDecoder("utf-8").decode(bytes);
+    if (isPdf) {
+      markdown = pdfToText(bytes);
+      if (markdown === "") throw new WebFetchError("unsupported-type", `${parsed.href} is a PDF with no extractable text (scanned, encrypted or custom-encoded)`);
+    } else if (isHtml || (type === "" && /<\s*(html|body|p|div)\b/i.test(body))) {
       const extracted = htmlToMarkdown(body);
       title = extracted.title;
       markdown = extracted.markdown;
@@ -203,12 +210,12 @@ function wrapNetwork(err: unknown, timedOut: boolean, timeoutMs: number, url: st
   return new WebFetchError("network", `could not fetch ${url}: ${err instanceof Error ? err.message : String(err)}`);
 }
 
-async function readCapped(res: Response, maxBytes: number, url: string): Promise<string> {
+async function readCapped(res: Response, maxBytes: number, url: string): Promise<Uint8Array> {
   const tooLarge = () => new WebFetchError("too-large", `${url} is over the ${maxBytes}-byte cap`);
   if (!res.body) {
-    const text = await res.text();
-    if (new TextEncoder().encode(text).length > maxBytes) throw tooLarge();
-    return text;
+    const all = new Uint8Array(await res.arrayBuffer());
+    if (all.length > maxBytes) throw tooLarge();
+    return all;
   }
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -229,7 +236,7 @@ async function readCapped(res: Response, maxBytes: number, url: string): Promise
     all.set(c, at);
     at += c.length;
   }
-  return new TextDecoder("utf-8").decode(all);
+  return all;
 }
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“" };
