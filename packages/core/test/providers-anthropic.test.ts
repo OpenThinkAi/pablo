@@ -476,3 +476,20 @@ test("an edit on a span the document does not have never reaches the endpoint", 
   ).rejects.toThrow(RangeError);
   expect(fake.requests).toHaveLength(0);
 });
+
+test('"thinking": false sends a disabled thinking param on complete(); unset sends none', async () => {
+  const fake = endpoint({ text: ["ok"] });
+
+  await drain(adapterAt(fake.url).complete({ prompt: "default" }));
+  await drain(adapterAt(fake.url, { thinking: false }).complete({ prompt: "off" }));
+
+  expect(fake.requests[0]?.body).not.toHaveProperty("thinking");
+  expect(fake.requests[1]?.body["thinking"]).toEqual({ type: "disabled" });
+});
+
+test("a reply that is only thinking is a named error that names the fix", async () => {
+  const fake = endpoint({ thinking: "hmm", stopReason: "max_tokens" });
+  const error = await drain(adapterAt(fake.url).complete({ prompt: "x" })).catch((caught: unknown) => caught);
+  expect((error as Error).message).toContain("only thinking");
+  expect((error as Error).message).toContain('"thinking": false');
+});

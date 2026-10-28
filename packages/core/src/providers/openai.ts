@@ -548,7 +548,13 @@ function body(provider: ProviderConfig, request: CompletionRequest): Record<stri
  */
 function thinkingField(provider: ProviderConfig): Record<string, unknown> {
   const off = provider.thinking === false || (provider.thinking === undefined && provider.local);
-  return off ? { chat_template_kwargs: { enable_thinking: false } } : {};
+  if (!off) return {};
+  // `chat_template_kwargs` is the local servers' switch; a hosted reasoning API
+  // (DeepSeek) ignores it and takes `thinking` instead. Only an explicit
+  // `"thinking": false` sends the second one: a local default stays as it was.
+  return provider.thinking === false
+    ? { chat_template_kwargs: { enable_thinking: false }, thinking: { type: "disabled" } }
+    : { chat_template_kwargs: { enable_thinking: false } };
 }
 
 /**

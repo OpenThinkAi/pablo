@@ -255,3 +255,14 @@ test('a provider configured with "tools": false refuses a turn that offers tools
   const events = await collect(chat({ system: "s", messages: [{ role: "user", content: "hi" }], tools: [] }));
   expect(textOf(events)).toBe("Ned keeps the lighthouse.");
 });
+
+test('"thinking": false sends a disabled thinking param on chat(); unset sends none', async () => {
+  const request: ChatRequest = { system: "s", messages: [{ role: "user", content: "hi" }], tools: [READ_FILE] };
+  const on = fakeFetch([fixture("turn-2.sse")]);
+  await collect(adapterWith(on.fetch).chat(request));
+  const off = fakeFetch([fixture("turn-2.sse")]);
+  await collect(adapterWith(off.fetch, { thinking: false }).chat(request));
+
+  expect(on.sent[0]?.body).not.toHaveProperty("thinking");
+  expect(off.sent[0]?.body["thinking"]).toEqual({ type: "disabled" });
+});
