@@ -61,8 +61,9 @@ The three npm packages release together at one version.
    typechecks and tests, then publishes core, tui and cli in that order with npm
    Trusted Publishing (OIDC, with provenance, no token), skipping any package whose
    version is already published. A pre-release version such as `0.3.0-rc.1` is
-   published under the `rc` tag instead of `latest`. A `v<version>` tag also triggers
-   it if tags are mirrored, and the tag must equal the version.
+   published under the `rc` tag instead of `latest`. Pushing a `v<version>` git tag
+   does not publish: a tag can point at an unreviewed commit, so the workflow has no
+   tag trigger.
 
 Each package needs this repository's `release.yml` set as its Trusted Publisher on
 npmjs.com before its first automated publish.
