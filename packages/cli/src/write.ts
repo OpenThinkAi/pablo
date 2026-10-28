@@ -399,7 +399,10 @@ export async function runWrite(
     return 2;
   }
   const preconditions = output.preconditions(projectPath, chapter);
-  if (!preconditions.ready) {
+  // A dry run only previews the pack (AGT-2195): an unmet precondition is a warning beside it, not a refusal.
+  // If the pack cannot be built without it, the refusal below names what is missing.
+  const notReady = !preconditions.ready;
+  if (notReady && !args.dryRun) {
     emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
     return 2;
   }
@@ -414,6 +417,10 @@ export async function runWrite(
     ...(args.voices === undefined ? {} : { voices: args.voices }),
   });
   if (!packResult.ok) {
+    if (notReady) {
+      emitError(`pablo: ${output.noun} ${chapter} is not ready to draft`, preconditions.missing, 2, args.json);
+      return 2;
+    }
     emitError(packResult.message, undefined, packResult.code, args.json);
     return packResult.code;
   }
@@ -421,6 +428,8 @@ export async function runWrite(
   const { pack } = packResult;
 
   if (args.dryRun) {
+    const warning = notReady ? `warning: ${output.noun} ${chapter} is not ready to draft: ${preconditions.missing.join("; ")}` : undefined;
+    if (warning !== undefined && !args.json) console.error(warning);
     if (args.json) {
       const actionByName = new Map(pack.adjustments.map((a) => [a.name, a.action]));
       const body = {
@@ -443,6 +452,7 @@ export async function runWrite(
         expectedOutputTokens: pack.expectedOutputTokens,
         prompt_hash: pack.hash,
         adjustments: pack.adjustments,
+        ...(notReady ? { warnings: [{ kind: "preconditions", message: `${output.noun} ${chapter} is not ready to draft`, missing: preconditions.missing }] } : {}),
         // The layered voice (AGT-2139): every layer used, lowest first, and any voice pablo.json names that was not found.
         ...(pack.voiceLayers === undefined ? {} : { voiceLayers: pack.voiceLayers }),
         // AGT-2110: how many facts/period.md rows the prompt carries, when the work has the file.

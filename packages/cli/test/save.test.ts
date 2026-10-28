@@ -362,6 +362,17 @@ test("buildContent for premise/bible ensures exactly one trailing newline", () =
   expect(withoutNewline.ok && withoutNewline.content).toBe("text\n");
 });
 
+test("AGT-2195 AC4: a rows-only bible table keeps the file's heading and header; a full file still replaces whole", () => {
+  const target = { kind: "bible" as const, absPath: "/x/bible/timeline.md", relPath: "bible/timeline.md" };
+  const existing = "# Timeline\n\nNotes.\n\n| Year | Event |\n|---|---|\n| 1900 | old |\n\nAfter.\n";
+  const rows = buildContent(target, "| 1920 | a |\n| 1930 | b |\n", existing);
+  expect(rows.ok && rows.content).toBe("# Timeline\n\nNotes.\n\n| Year | Event |\n|---|---|\n| 1920 | a |\n| 1930 | b |\n\nAfter.\n");
+  const full = buildContent(target, "# New\n\n| Year | Event |\n|---|---|\n| 1 | x |\n", existing);
+  expect(full.ok && full.content).toBe("# New\n\n| Year | Event |\n|---|---|\n| 1 | x |\n");
+  const withHeader = buildContent(target, "| Year | Event |\n|---|---|\n| 1 | x |\n", existing);
+  expect(withHeader.ok && withHeader.content).toBe("| Year | Event |\n|---|---|\n| 1 | x |\n");
+});
+
 // ── through the spawned CLI ─────────────────────────────────────────────
 
 test("save --stage beats --file <tmp> through the spawned CLI exits 0 and the commit shows only that path", () => {

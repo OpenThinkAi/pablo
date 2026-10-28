@@ -13,6 +13,7 @@
  *    (The beats file is `outline/beats.md`; an unmigrated work's is still
  *    `outline/chapters.md`, see core's `beatsFile`.)
  *  - `bible/<file>` replaces `bible/<file>` whole (must stay under `bible/`,
+ *    except that table rows alone, with no header, keep the file's heading and header;
  *    `.md` only).
  *
  * A nonfiction work (AGT-2101, `pablo.json` `track: "nonfiction"`) has its
@@ -400,13 +401,39 @@ function wholeFileContent(rawInput: string): string {
 }
 
 /**
+ * A `bible/<file>` save whose input is table rows only (no header row, no separator) replaces the data rows of the
+ * file's first table and keeps its heading and header, as `acts`/`beats` do (AGT-2195). Undefined when the input is
+ * anything else, or the file has no table to keep: those save whole.
+ */
+function spliceRowsOnlyTable(existingText: string, rawInput: string): string | undefined {
+  const inputLines = rawInput.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== "");
+  if (inputLines.length === 0 || !inputLines.every((l) => l.startsWith("|")) || inputLines.some(isSeparatorLine)) return undefined;
+  const lines = existingText.split("\n");
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (!lines[i]!.trim().startsWith("|") || !isSeparatorLine(lines[i + 1]!)) continue;
+    let end = i + 2;
+    while (end < lines.length && lines[end]!.trim().startsWith("|")) end++;
+    // The input is rows only when its first line is not itself a header: the file's header names the first column.
+    const header = (cellsOf(lines[i]!)[0] ?? "").toLowerCase();
+    if (header !== "" && (cellsOf(inputLines[0]!)[0] ?? "").toLowerCase() === header) return undefined;
+    const out = [...lines.slice(0, i + 2), ...inputLines, ...lines.slice(end)].join("\n");
+    return out.endsWith("\n") ? out : `${out}\n`;
+  }
+  return undefined;
+}
+
+/**
  * Builds the new file content for `target` from `rawInput`, validating table
  * input first — a validation failure is returned, never written.
  * `existingText` is the file's current content (`""` when it doesn't exist
  * yet, e.g. a fresh template) for the `acts`/`beats` table-replace path.
  */
 export function buildContent(target: StageTarget, rawInput: string, existingText: string): BuildContentResult {
-  if (target.kind === "premise" || target.kind === "bible") {
+  if (target.kind === "bible") {
+    const rowsOnly = spliceRowsOnlyTable(existingText, rawInput);
+    return { ok: true, content: rowsOnly ?? wholeFileContent(rawInput) };
+  }
+  if (target.kind === "premise") {
     return { ok: true, content: wholeFileContent(rawInput) };
   }
 
