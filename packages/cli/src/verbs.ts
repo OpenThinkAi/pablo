@@ -83,7 +83,7 @@ import {
   saveResearchInProject,
   waiveChecklistItem,
 } from "./research-verbs";
-import { guide } from "./guide";
+import { guide, writerModel } from "./guide";
 import { readTool, searchTool } from "./harness-tools";
 import { runWebVerb, WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "./web-tools";
 import type { WebSeams } from "./web-tools";
@@ -1993,6 +1993,7 @@ async function runStoryVerb(args: z.infer<typeof STORY_ARGS>, ctx: VerbContext):
 // ---------------------------------------------------------------------------
 
 const GUIDE_ARGS = z.object({
+  project: z.string().optional().describe("A work's slug: the draft step names the writer model that work's pablo.json routes to, not only the global config's."),
   track: z.string().optional().describe("The work's track (fiction, historical-fiction or nonfiction). With no `output`: the outputs that track allows."),
   output: z
     .string()
@@ -2000,8 +2001,14 @@ const GUIDE_ARGS = z.object({
     .describe('The output to finish, e.g. "novel", "story", "screenplay", "radio", "narrated" or "essay". Without `track`: fiction when it allows the output. Omit both to list the tracks and outputs.'),
 });
 
-async function runGuideVerb(args: z.infer<typeof GUIDE_ARGS>): Promise<VerbResult> {
-  const body = guide(args);
+async function runGuideVerb(args: z.infer<typeof GUIDE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
+  let projectDir: string | undefined;
+  if (args.project !== undefined) {
+    const resolved = resolveVerbProject(ctx, args.project);
+    if (!resolved.ok) return resolved.result;
+    projectDir = resolved.projectPath;
+  }
+  const body = guide(args, writerModel(ctx.env, projectDir));
   return { body, exitCode: body.ok ? 0 : body.code };
 }
 
@@ -2013,7 +2020,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "guide",
     description:
-      "Call this first. The step-by-step path from nothing to a finished piece for a track and an output: create the work, each core stage with the verb that meets it, research where the track gates it, add the output, write, check, publish. With no arguments: the tracks and the outputs each allows. Reads nothing; needs no project.",
+      "Call this first. The step-by-step path from nothing to a finished piece for a track and an output: create the work, each core stage with the verb that meets it, research where the track gates it, add the output, write, check, publish. With no arguments: the tracks and the outputs each allows. Reads only the model config (to name the writer model); needs no project.",
     args: GUIDE_ARGS,
     run: runGuideVerb,
   },

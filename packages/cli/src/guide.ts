@@ -9,14 +9,14 @@
  * file has no verb for fails `test/guide.test.ts`, which builds a guide for
  * every registered track × allowed output.
  *
- * Pure: no vault, no project, no model. `<slug>`, `<Title>`, `N` and the like
+ * Pure over its arguments (the caller passes the writer model's name via `writerModel`). `<slug>`, `<Title>`, `N` and the like
  * are placeholders for the caller to fill.
  */
 
 // The registry first: it must initialise before the output modules it imports (narrated, the core machine) are read.
 import { outputDefinition, outputIds, outputsOnTrack } from "./outputs/registry";
 import type { CoreStageId } from "./core/machine";
-import { PERIOD_FACTS_FILE } from "@openthink/pablo-core";
+import { PERIOD_FACTS_FILE, loadConfig, resolveRoute } from "@openthink/pablo-core";
 import { PERIOD_BRIEF_FILE } from "./core/machine";
 import { CHECKLIST_FILE } from "./core/checklist";
 import { CLAIMS_FILE, OUTLINE_FILE, THESIS_FILE } from "./core/nonfiction";
@@ -24,6 +24,21 @@ import { isNarratableSource } from "./outputs/narrated";
 import type { OutputDefinition } from "./outputs/types";
 import { DEFAULT_TRACK, isTrackId, trackDefinition, trackIds } from "./tracks/registry";
 import type { TrackId } from "./tracks/registry";
+
+/**
+ * The model `write` drafts on: the provider the `draft` intent routes to under the configured providers (and, with
+ * `projectDir`, the work's own `pablo.json`), as `anthropic (the-model-id)`. Undefined when no model is configured or the
+ * config cannot be read: the guide then says so rather than naming a model.
+ */
+export function writerModel(env: Record<string, string | undefined>, projectDir?: string): string | undefined {
+  try {
+    const config = loadConfig({ env, ...(projectDir === undefined ? {} : { projectDir }) });
+    const provider = config.providers.get(resolveRoute(config, { name: "draft", kind: "drafting" }).provider);
+    return provider === undefined ? undefined : `${provider.id} (${provider.model})`;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Where a step sits on the path, in the order the path runs. */
 export type GuidePhase = "create" | "core" | "research" | "output" | "write" | "check" | "publish";
@@ -129,7 +144,16 @@ function coreStep(stage: CoreStageId, track: TrackId): GuideStep[] {
         },
       ];
     case "outline":
-      return [{ phase: "core", stage, gate: true, title: `save the outline sections (${OUTLINE_FILE})`, command: `pablo save ${P} --stage outline` }];
+      return [
+        {
+          phase: "core",
+          stage,
+          gate: true,
+          title: `save the outline sections (${OUTLINE_FILE})`,
+          command: `pablo save ${P} --stage outline`,
+          detail: 'name the claims a section makes in its "What it covers" cell as #2, #3 (none named: the section gets every claim); a number the claims table lacks refuses the draft',
+        },
+      ];
   }
 }
 
@@ -185,7 +209,7 @@ function audioUnit(def: OutputDefinition): string {
 }
 
 /** One output stage's steps (every stage but `publish`, which `buildGuide` adds after `check`). */
-function outputStageSteps(def: OutputDefinition, stage: string): GuideStep[] | undefined {
+function outputStageSteps(def: OutputDefinition, stage: string, writer?: string): GuideStep[] | undefined {
   const each = def.soleUnit !== undefined ? `the ${def.noun}` : `each ${def.noun}`;
   switch (stage) {
     case "chapter":
@@ -195,7 +219,7 @@ function outputStageSteps(def: OutputDefinition, stage: string): GuideStep[] | u
         {
           phase: "write",
           stage,
-          title: `draft ${each} on the local model`,
+          title: `draft ${each} on ${writer === undefined ? "the configured writer model (none is configured: pablo init --config)" : writer}`,
           command: writeCommand(def),
           detail: `the draft lands on a draft/ branch; the author reads and accepts it (pablo merge ${P} <branch>, or the screen)`,
         },
@@ -298,7 +322,7 @@ function refuse(message: string, missing: readonly string[]): GuideOutcome {
  * check, publish. A refusal for an unknown track or output, an output the
  * track does not allow, or an allowed type pablo does not ship yet.
  */
-export function buildGuide(track: string, output: string): GuideOutcome {
+export function buildGuide(track: string, output: string, writer?: string): GuideOutcome {
   if (!isTrackId(track)) return refuse(`unknown track "${track}" (known: ${trackIds().join(", ")})`, [`--track: ${trackIds().join(" | ")}`]);
   const allowed = outputsOnTrack(track);
   const def = outputDefinition(output);
@@ -331,7 +355,7 @@ export function buildGuide(track: string, output: string): GuideOutcome {
   steps.push(...addSteps(def, track));
   for (const stage of def.stages) {
     if (stage === "publish") continue;
-    const found = outputStageSteps(def, stage);
+    const found = outputStageSteps(def, stage, writer);
     if (found === undefined) throw new Error(`pablo: guide: the ${def.id} output's stage "${stage}" has no guide step`);
     steps.push(...found);
   }
@@ -379,16 +403,16 @@ export function guideIndex(track?: TrackId): GuideIndex {
  * path for a pair. `output` without `track` reads the default track
  * (fiction) when it allows the output, else the first track that does.
  */
-export function guide(args: { readonly track?: string | undefined; readonly output?: string | undefined }): GuideIndex | GuideOutcome {
+export function guide(args: { readonly track?: string | undefined; readonly output?: string | undefined }, writer?: string): GuideIndex | GuideOutcome {
   if (args.output === undefined) {
     if (args.track === undefined) return guideIndex();
     if (!isTrackId(args.track)) return refuse(`unknown track "${args.track}" (known: ${trackIds().join(", ")})`, [`--track: ${trackIds().join(" | ")}`]);
     return guideIndex(args.track);
   }
-  if (args.track !== undefined) return buildGuide(args.track, args.output);
+  if (args.track !== undefined) return buildGuide(args.track, args.output, writer);
   const def = outputDefinition(args.output);
   const track = def === undefined || def.tracks.includes(DEFAULT_TRACK) ? DEFAULT_TRACK : (def.tracks[0] ?? DEFAULT_TRACK);
-  return buildGuide(track, args.output);
+  return buildGuide(track, args.output, writer);
 }
 
 /** The prose form of `guide`'s body. */

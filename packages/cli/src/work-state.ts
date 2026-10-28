@@ -5,7 +5,8 @@
  * report this; `next` names the layer that is short:
  *
  *     core: <action>        the core is not at beats yet (premise, bible, acts, beats)
- *     add an output         the core is ready but the work derives nothing from it yet
+ *     add an output (pablo output add <type> --project <slug>)
+ *                           the core is ready but the work derives nothing from it yet
  *     <type>: <action>      the first output with a unit still to draft
  *     all outputs drafted   nothing is short
  *
@@ -25,7 +26,7 @@ import type { Outputs } from "./marker";
 import { readMarker, trackOf } from "./marker";
 import { DEFAULT_TRACK } from "./tracks/registry";
 import type { TrackId } from "./tracks/registry";
-import { outputDefinition } from "./outputs/registry";
+import { outputDefinition, outputsOnTrack } from "./outputs/registry";
 import type { OutputReport } from "./outputs/types";
 
 export type { OutputReport };
@@ -46,7 +47,10 @@ export function workNext(core: CoreState, outputs: Readonly<Record<string, Outpu
   const short = coreNext(core);
   if (short !== undefined) return `core: ${short}`;
   const types = Object.keys(outputs);
-  if (types.length === 0) return "add an output";
+  if (types.length === 0) {
+    const allowed = outputsOnTrack(core.track).filter((id) => outputDefinition(id)?.derive === undefined);
+    return `add an output (pablo output add ${allowed.length === 0 ? "<type>" : allowed.join("|")} --project <slug>)`;
+  }
   for (const type of types) {
     const next = outputs[type]?.next;
     if (next !== undefined) return `${type}: ${next}`;
