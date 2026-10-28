@@ -207,7 +207,7 @@ const FAMILY_TREE = "family-tree.md";
  * not a character. `undefined` when no file has text. The slice keeps its head
  * under budget pressure, so the family tree is the last of it to go.
  */
-export function readCast(vaultRoot: string, workRoot: string, endsAt?: string | undefined): TextSource | undefined {
+function readCast(vaultRoot: string, workRoot: string, endsAt?: string | undefined): TextSource | undefined {
   const dir = join(workRoot, "bible", "characters");
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return undefined;
   const names = readdirSync(dir)
@@ -371,21 +371,26 @@ function isSeparatorRow(line: string): boolean {
 }
 
 /**
- * The outline's lines that may be beat rows: every `|` line except those in a
- * table whose header row's first cell is `Act` or `Acts` (AGT-2182). The acts
- * table `save --stage acts` writes sits in the same file as the beats, and an
- * act numbered `1` rather than `I` would otherwise read as beat 1. A table is
- * a contiguous run of `|` lines; its header is the first line when a separator
- * row follows it. A run with no header (rows only) is read as beats.
+ * The outline's lines that may be beat rows, each with the `## ` heading above
+ * it (AGT-2183: a fiction essay's act section reads the beats under that act's
+ * heading): every `|` line except those in a table whose header row's first
+ * cell is `Act` or `Acts` (AGT-2182). The acts table `save --stage acts`
+ * writes sits in the same file as the beats, and an act numbered `1` rather
+ * than `I` would otherwise read as beat 1. A table is a contiguous run of `|`
+ * lines; its header is the first line when a separator row follows it. A run
+ * with no header (rows only) is read as beats.
  */
-function beatRowCandidates(outline: string): string[] {
+function beatRowCandidates(outline: string): { readonly line: string; readonly heading: string }[] {
   const lines = outline.split("\n");
-  const out: string[] = [];
+  const out: { line: string; heading: string }[] = [];
+  let heading = "";
   let inTable = false;
   let skip = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     if (!line.trim().startsWith("|")) {
+      const h = /^##\s+(.+?)\s*$/.exec(line);
+      if (h !== null) heading = h[1] as string;
       inTable = false;
       skip = false;
       continue;
@@ -396,9 +401,42 @@ function beatRowCandidates(outline: string): string[] {
       const first = (line.trim().replace(/^\|/, "").split("|")[0] ?? "").trim().toLowerCase();
       skip = next !== undefined && isSeparatorRow(next) && (first === "act" || first === "acts");
     }
-    if (!skip) out.push(line);
+    if (!skip) out.push({ line, heading });
   }
   return out;
+}
+
+/** A beat row and the `## ` heading it sits under in the outline (`""` before any heading). */
+export interface HeadedBeatRow {
+  readonly row: BeatRow;
+  readonly heading: string;
+}
+
+/**
+ * `parseBeatRows` with each row's `## ` heading (AGT-2183): the same rows, in
+ * the same order, so a caller grouping beats by act heading reads exactly the
+ * beats every pack reads.
+ */
+export function parseHeadedBeatRows(outline: string, source: string): readonly HeadedBeatRow[] {
+  const rows: HeadedBeatRow[] = [];
+  for (const { line, heading } of beatRowCandidates(outline)) {
+    const match = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
+    if (match === null) continue;
+    const cells = (match[2] ?? "").split("|").map((cell) => cell.trim());
+    rows.push({
+      heading,
+      row: {
+        chapter: Number(match[1]),
+        storyDate: cells[0] ?? "",
+        title: cells[1] ?? "",
+        beat: cells[2] ?? "",
+        pov: cells[3] ?? "",
+        status: cells[4] ?? "",
+        source,
+      },
+    });
+  }
+  return rows;
 }
 
 /**
@@ -410,22 +448,7 @@ function beatRowCandidates(outline: string): string[] {
  * open-question bullets) is skipped.
  */
 export function parseBeatRows(outline: string, source: string): readonly BeatRow[] {
-  const rows: BeatRow[] = [];
-  for (const line of beatRowCandidates(outline)) {
-    const match = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
-    if (match === null) continue;
-    const cells = (match[2] ?? "").split("|").map((cell) => cell.trim());
-    rows.push({
-      chapter: Number(match[1]),
-      storyDate: cells[0] ?? "",
-      title: cells[1] ?? "",
-      beat: cells[2] ?? "",
-      pov: cells[3] ?? "",
-      status: cells[4] ?? "",
-      source,
-    });
-  }
-  return rows;
+  return parseHeadedBeatRows(outline, source).map((r) => r.row);
 }
 
 /**

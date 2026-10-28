@@ -57,6 +57,7 @@ export type {
 export { withReceipts } from "./receipts";
 export { fileReceiptSink, RECEIPTS_RELATIVE_PATH, receiptsPath } from "./receipt-log";
 export type { PlanFileRow, ReadDraftingOptions, TimelineAt } from "./vault";
+export type { HeadedBeatRow } from "./vault";
 export {
   AGENT_SECTION_HEADING,
   chapterTail,
@@ -67,11 +68,11 @@ export {
   parseBeatList,
   parseBeatRow,
   parseBeatRows,
+  parseHeadedBeatRows,
   parsePlanRows,
   parseWorkTitle,
   planBeatsFor,
   PERIOD_FACTS_SECTION,
-  readCast,
   readDistilledFacts,
   applyFictionOnly,
   readDraftingInputs,

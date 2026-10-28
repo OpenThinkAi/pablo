@@ -215,7 +215,7 @@ test("AGT-2183: a fiction essay's act section carries that act's beat rows, from
 
   // The essay carries the premise (as the story it is about) and every character file too.
   expect(act1.slices.find((s) => s.name === "cast")?.text).toContain("ninety steps under her breath");
-  expect(act1.slices.find((s) => s.name === "subject")?.source ?? act1.slices.find((s) => s.name === "thesis")?.source).toBeDefined();
+  expect(act1.slices.find((s) => s.name === "subject")?.source).toBe("novels/four-beats/bible/overview.md");
   expect(act1.prompt).toContain("A lighthouse keeper's daughter keeps the lamp lit");
 });
 

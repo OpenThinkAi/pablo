@@ -11,6 +11,7 @@ import {
   PACK_BUDGETS,
   parseBeatRow,
   parseBeatRows,
+  parseHeadedBeatRows,
   readDraftingInputs,
   readStyle,
   readWorkRules,
@@ -214,6 +215,34 @@ test("AGT-2183: every character file reaches the cast, the family tree first, an
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("AGT-2183: parseHeadedBeatRows reads parseBeatRows's rows, each with its ## heading, never the acts table", () => {
+  const outline = `# Outline
+
+## The acts
+
+| Act | Years | What it accomplishes |
+|---|---|---|
+| 1 | 1930 | The letter. |
+| 2 | 1931 | The dark. |
+
+## Act 1
+
+| Beat | Story date | Title | Beat | POV | Status |
+|---|---|---|---|---|---|
+| 1 | 1930 | The Letter | It arrives. | Ines | outline |
+
+## Act 2
+
+| 2 | 1931 | The Dark | The light goes out. | Ines | outline |
+`;
+  const headed = parseHeadedBeatRows(outline, "outline/beats.md");
+  expect(headed.map((r) => [r.row.chapter, r.row.title, r.heading])).toEqual([
+    [1, "The Letter", "Act 1"],
+    [2, "The Dark", "Act 2"],
+  ]);
+  expect(headed.map((r) => r.row)).toEqual([...parseBeatRows(outline, "outline/beats.md")]);
 });
 
 test("AGT-2183: a work with no bible/characters directory has no cast, and none with no overview has no premise", () => {

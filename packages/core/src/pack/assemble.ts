@@ -670,7 +670,7 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
       name: "actBeats",
       heading: "# What happens in this act (the story's own beats; draw on these and invent no events)",
       text: renderActBeats(essay.actBeats ?? []),
-      source: essay.actBeats?.[0]?.source,
+      source: (essay.actBeats ?? []).length === 0 ? undefined : essay.actBeatsSource,
       cutOrder: 3,
     }),
     spec({

@@ -18,7 +18,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { beatsFile, outputRulesFile, readDraftingInputs, readTextSource, readWorkRules, DEFAULT_MIN_SCENES } from "@openthink/pablo-core";
+import { beatsFile, outputRulesFile, parseHeadedBeatRows, readDraftingInputs, readTextSource, readWorkRules, DEFAULT_MIN_SCENES } from "@openthink/pablo-core";
 import type { BeatRow, DraftingInputs, EssayBrief, EssaySection, TextSource } from "@openthink/pablo-core";
 import { readCoreState } from "../../core/machine";
 import { CLAIMS_FILE, hasProse, THESIS_FILE } from "../../core/nonfiction";
@@ -123,43 +123,6 @@ function fold(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-/** A beats-table row and the `## ` heading it sits under. */
-interface PlacedBeat {
-  readonly row: BeatRow;
-  readonly heading: string;
-}
-
-/** Rows of every `| # | ... |` table in the beats file (never the acts table), each with the heading above it. */
-function placedBeats(outline: string, source: string): PlacedBeat[] {
-  const out: PlacedBeat[] = [];
-  let heading = "";
-  let inBeats = false;
-  for (const line of outline.split("\n")) {
-    const h = /^##\s+(.+?)\s*$/.exec(line);
-    if (h !== null) {
-      heading = h[1] as string;
-      inBeats = false;
-      continue;
-    }
-    if (!line.trimStart().startsWith("|")) {
-      inBeats = false;
-      continue;
-    }
-    if (/^\s*\|\s*#\s*\|/.test(line)) {
-      inBeats = true;
-      continue;
-    }
-    const m = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
-    if (!inBeats || m === null) continue;
-    const cells = (m[2] ?? "").split("|").map((c) => c.trim());
-    out.push({
-      heading,
-      row: { chapter: Number(m[1]), storyDate: cells[0] ?? "", title: cells[1] ?? "", beat: cells[2] ?? "", pov: cells[3] ?? "", status: cells[4] ?? "", source },
-    });
-  }
-  return out;
-}
-
 /**
  * The beat rows a fiction essay's act section tells (AGT-2183): the section whose title is an act's (`Act I`, as
  * the scaffold writes it) gets the beats under that act's `## Act I` heading in the beats file, when the file
@@ -171,11 +134,8 @@ export function actBeatsFor(workDir: string, track: TrackId, section: EssaySecti
   const { acts } = readCoreState(workDir, track);
   const index = acts.findIndex((a) => fold(actTitle(a)) === fold(section.title));
   if (index === -1) return undefined;
-  const beats = placedBeats(read(join(workDir, beatsFile(workDir))) ?? "", source);
-  const actOf = (heading: string): number => {
-    const named = /^act\s+(.+)$/i.exec(heading.trim())?.[1];
-    return named === undefined ? -1 : acts.findIndex((a) => fold(a.act) === fold(named) || fold(actTitle(a)) === fold(heading));
-  };
+  const beats = parseHeadedBeatRows(read(join(workDir, beatsFile(workDir))) ?? "", source);
+  const actOf = (heading: string): number => acts.findIndex((a) => fold(actTitle(a)) === fold(heading));
   const headed = new Set(beats.map((b) => actOf(b.heading)).filter((i) => i !== -1));
   if (headed.size >= 2) return beats.filter((b) => actOf(b.heading) === index).map((b) => b.row);
   const from = Math.floor((index * beats.length) / acts.length);
@@ -238,7 +198,7 @@ export function buildEssayPack(vaultRoot: string, workDir: string, unit: number,
       ...(thesis === undefined ? {} : { thesis }),
       subject,
       ...(timeline === undefined ? {} : { timeline }),
-      ...(actBeats === undefined ? {} : { actBeats }),
+      ...(actBeats === undefined ? {} : { actBeats, actBeatsSource: story.beat.source }),
       claims: [],
     };
     inputs = { ...story, beat: sectionBeat(section, story.beat.source), moreBeats: [], unit, previousTail: undefined };

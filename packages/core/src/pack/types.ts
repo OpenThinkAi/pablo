@@ -205,6 +205,8 @@ export interface EssayBrief {
    * writer works from the story's own events instead of inventing them. Absent for a section that is not an act's.
    */
   readonly actBeats?: readonly BeatRow[] | undefined;
+  /** Where the act's beat rows came from (the vault-relative beats file), for the slice's source. */
+  readonly actBeatsSource?: string | undefined;
   /** The section's claims, each with the note ids it cites. Empty for a section that makes none. */
   readonly claims: readonly EssayClaim[];
   /** Where the claims came from (`core/claims.md`), for the slice's source. */
