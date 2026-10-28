@@ -1193,6 +1193,15 @@ run on MLX) and [uv](https://docs.astral.sh/uv/) (`brew install uv`). The Python
 side installs itself on first use, and only verbs that need it ever install it.
 Rendering uses the GPU.
 
+What that install fetches, and how it is pinned: the Python packages come from the
+committed `packages/casting/uv.lock` (`uv sync --frozen`, every package checked
+against its sha256 there). The speech engines' weights and the UTMOS scorer are
+fetched at a fixed commit revision, and each load's receipt records the weights'
+sha256. The other scorers' weights (Whisper, the aligner, ECAPA, Audiobox,
+emotion2vec), the Stable Audio Open model behind generated sound cues, and any
+`weights` you list in `casting.json` are fetched at the Hugging Face repo's current
+revision when first used and then read from the Hugging Face cache.
+
 | Verb | What it does |
 |---|---|
 | `pablo doctor [--json]` | reports the casting side's state, uv and config, and checks the writing side: the config file is found and valid, each provider the config routes to answers, the vault is a git repo, the search backend answers. Each failing line says how to fix it; exits 1 when a required check fails (a missing config file or search backend is a warning, not a failure). Never installs anything |

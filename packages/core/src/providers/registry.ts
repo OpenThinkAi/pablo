@@ -149,7 +149,7 @@ export function createProviders(config: PabloConfig, options: ProvidersOptions =
     let found: Lookup;
     try {
       const value = resolveKey(provider.key, options.keys);
-      found = { value, problem: value === undefined ? describeMissing(provider.key) : undefined };
+      found = { value, problem: value === undefined ? describeMissing(provider) : undefined };
     } catch (error) {
       found = { value: undefined, problem: (error as Error).message.replace(/^pablo: /, ""), error: error as Error };
     }
@@ -215,7 +215,14 @@ export function createProviders(config: PabloConfig, options: ProvidersOptions =
   };
 }
 
-function describeMissing(source: KeySource): string {
-  if (source.from === "none") return "it has no key (a provider a work's pablo.json defines never does)";
+function describeMissing(provider: ProviderConfig): string {
+  const source: KeySource = provider.key;
+  if (source.from === "none") {
+    return (
+      `it has no key: a provider a work's pablo.json adds, or whose endpoint, kind or local flag it changes, never does. ` +
+      `To use one, declare "${provider.id}" with its endpoint and "key" in the global config ` +
+      `(\`pablo config set providers.${provider.id}.key env:<NAME>\`, without --project), or route the intent to a provider that has a key`
+    );
+  }
   return source.from === "env" ? `${source.variable} is not set` : `no Keychain item for "${source.service}"`;
 }

@@ -35,8 +35,8 @@ novels/<slug>/
     places.md
     characters/          one file per character (a family-tree.md is read too)
   outline/chapters.md    the acts table and the beats table (`outline/beats.md` after `migrate outputs`)
-  research/              your sources; never sent to the writer
-  notes/                 session notes; never sent to the writer
+  research/              your sources; never in a drafting pack (research distill/plan send them to the research intent)
+  notes/                 session notes; never in a drafting pack
   continuity.md          facts the text has established, kept by `merge`
   chapters/NN-slug.md    the novel, one sentence per line, with frontmatter
   .pablo/                pablo's own state (receipts, comments, rounds, output); gitignored
@@ -101,7 +101,7 @@ before writing, and commits only that file.
 | `outputs` | no | `{}` | The work's outputs: `novel`, `story`, `screenplay`, `radio`, `narrated` or `essay`. Each entry has `added` (YYYY-MM-DD); the novel's `dir` is always `"chapters"` |
 | `author` | no | `"author"` | Free text. `init` writes your git `user.name` |
 | `voice` | no | `["../../style", "STYLE.md"]` | Which voice the screen's voice tools edit. The writer always gets `style/` then the work's `STYLE.md` |
-| `neverSend` | no | `["research/", "notes/"]` | Paths that must never reach a model. A prompt that would include one is refused, not silently trimmed |
+| `neverSend` | no | `["research/", "notes/"]` | Paths that must never reach a drafting pack (the one `write` assembles). A pack that would include one is refused, not silently trimmed. It does not cover every model call: `research distill` and `research plan` send `research/` notes, raw, to the `research` intent's provider, and the agent sends what its tools read to the `agent` intent's. Both go to the first non-local provider unless you map them to a local one (see [configuration.md](configuration.md#what-leaves-your-machine)) |
 | `publish` | no | `{}` | Per-target publish settings |
 | `track` | no | `"fiction"` | The kind of work: `fiction`, `historical-fiction` or `nonfiction`. Any other value is refused, naming the allowed ones. `status` and `resume` report it |
 | `policy` | no | the track's policy | The judgement policy for `pablo agent` (see below) |

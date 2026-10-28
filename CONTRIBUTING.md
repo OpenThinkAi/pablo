@@ -65,8 +65,14 @@ The three npm packages release together at one version.
    does not publish: a tag can point at an unreviewed commit, so the workflow has no
    tag trigger.
 
+Before the bump, move `CHANGELOG.md`'s `Unreleased` section under the new version,
+and call out anything that breaks an existing config or work.
+
 Each package needs this repository's `release.yml` set as its Trusted Publisher on
-npmjs.com before its first automated publish.
+npmjs.com before its first automated publish, with `npm-release` as its environment.
+The publish job runs in that GitHub environment: give it required reviewers and limit
+its deployment branches to `main` (repo Settings -> Environments), so a publish waits
+for a second approval and no other job's token is accepted.
 
 Every release also gets a documentation pass: check README.md and `docs/` against
 what the release actually does.
