@@ -304,6 +304,7 @@ test("a work that repoints a keyed global provider is told the key was dropped, 
   const env = { LOCAL_SERVER_KEY: "secret" };
   projectConfig({ providers: { local: { kind: "anthropic", local: false } } }, keyed("env:LOCAL_SERVER_KEY"), { onKeyDropped, env });
   expect(told.map((d) => [d.key, d.changed])).toEqual([["env:LOCAL_SERVER_KEY", ["kind", "local"]]]);
+  expect(keyDropNotice(told[0]!)).toContain("`pablo config set providers.local.kind <value>`, `pablo config set providers.local.local <value>`");
   expect(told[0]?.key).not.toContain("secret");
   told.length = 0;
   projectConfig({ providers: { local: { endpoint: "http://127.0.0.1:9999/v1" } } }, keyed("env:LOCAL_SERVER_KEY"), { onKeyDropped, env: {} });

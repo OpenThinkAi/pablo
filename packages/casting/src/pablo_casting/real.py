@@ -24,6 +24,7 @@ import numpy as np
 
 from pablo_casting.audio import resample, write_wav
 from pablo_casting.hfcache import weights_sha256
+from pablo_casting.pins import is_commit
 from pablo_casting.scorers import ALIGNER, ECAPA, UTMOS, AlignerScorer, EcapaScorer, ScorerUnavailable, Take, UtmosScorer
 from pablo_casting.toolkit import DESIGNER_NAMES, Toolkit, ToolkitUnavailable, Word, designer_model, designer_revision
 
@@ -126,19 +127,28 @@ class ForcedAligner:
         return [Word(str(t["word"]), float(t["start"]), float(t["end"])) for t in result["timings"]]  # type: ignore[union-attr]
 
 
+_WARNED: set[str] = set()
+
+
+def _unpinned_designer(name: str, engine: str, revision: str | None) -> str | None:
+    pin = f'pin one with engines.designers.{name}.revision: "<commit sha>"'
+    if revision is None:
+        return f"pablo casting: warning: designer {name} model {engine} has no `revision` in casting.json, so it fetches the Hub's current revision; {pin}"
+    if not is_commit(revision):
+        return f'pablo casting: warning: designer {name} model {engine} is at "{revision}", a branch or tag that can move; {pin}'
+    return None
+
+
 def real_toolkit(env: Mapping[str, str], engines: Mapping[str, Mapping[str, object]]) -> Toolkit:
     def designer(name: str) -> _MlxDesigner:
         if name not in DESIGNER_NAMES:
             raise ToolkitUnavailable(f'unknown designer "{name}": one of {", ".join(DESIGNER_NAMES)}')
         engine = designer_model(name, engines)
         revision = designer_revision(name, engines)
-        if revision is None:
-            print(
-                f"pablo casting: designer {name} model {engine} has no `revision` in casting.json, so it fetches the Hub's "
-                f'current revision; pin one with engines.designers.{name}.revision: "<commit sha>"',
-                file=sys.stderr,
-                flush=True,
-            )
+        warning = _unpinned_designer(name, engine, revision)
+        if warning is not None and warning not in _WARNED:
+            _WARNED.add(warning)  # once per process: `cast --auto --design` builds designers repeatedly
+            print(warning, file=sys.stderr, flush=True)
         return (QwenDesigner if name == "qwen3" else VoxcpmDesigner)(name, engine, env, revision)
 
     return Toolkit(designer=designer, embedder=EcapaEmbedder, mos=UtmosMos, aligner=ForcedAligner, kind="real")

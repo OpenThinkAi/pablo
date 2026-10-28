@@ -138,6 +138,11 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
     )
 
 
+def _is_revision(value: object) -> bool:
+    """A Hub revision name: non-empty, and never something that could leave the cache's snapshots directory."""
+    return isinstance(value, str) and bool(value) and "/" not in value and "\\" not in value and value not in (".", "..")
+
+
 def _read_weights(raw: object, path: Path) -> list[WeightSpec]:
     shape = f'{path}: `weights` must be a list of Hugging Face model ids, each "org/name" or {{"id": "org/name", "revision": "<commit sha>"}}'
     if not isinstance(raw, list):
@@ -151,7 +156,7 @@ def _read_weights(raw: object, path: Path) -> list[WeightSpec]:
             and not set(entry) - {"id", "revision"}
             and isinstance(entry.get("id"), str)
             and entry["id"]
-            and (entry.get("revision") is None or (isinstance(entry["revision"], str) and entry["revision"]))
+            and (entry.get("revision") is None or _is_revision(entry["revision"]))
         ):
             out.append(WeightSpec(entry["id"], entry.get("revision")))
         else:

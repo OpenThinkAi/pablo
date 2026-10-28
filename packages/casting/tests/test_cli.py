@@ -78,6 +78,7 @@ def test_doctor_reports_whether_each_configured_weight_is_cached(env: dict[str, 
         {"weights": [{"revision": PIN}]},
         {"weights": [{"id": "org/one", "revision": 3}]},
         {"weights": [{"id": "org/one", "rev": PIN}]},
+        {"weights": [{"id": "org/one", "revision": "../../escape"}]},
         {"engines": {"dia": 3}}, {"pace": {"default": -1}}, {"library": 4}],
 )
 def test_an_unusable_config_is_a_refusal_naming_the_file(env: dict[str, str], config: object) -> None:

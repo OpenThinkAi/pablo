@@ -29,7 +29,11 @@ Notable changes per release of `@openthink/pablo`, `@openthink/pablo-core` and
   `{"id": "org/name", "revision": "<commit sha>"}`, and an `engines.designers.<name>`
   override may carry a `revision`; without one, pablo warns on stderr that it fetches
   the repo's current revision. `pablo doctor` reports a pinned model as cached only at
-  its pinned revision.
+  its pinned revision, so a model cached at another revision is fetched once more (a
+  one-time download of up to several GB on the next `gate`, `perform` or `mix`).
+  `python -m pablo_casting doctor --json`'s `config.weights` is now a list of
+  `{"id", "revision"}` objects (was strings), and `pull`'s and `doctor`'s `weights`
+  entries gain `revision`.
 - When a work's `pablo.json` repoints a global provider (its `endpoint`, `kind` or
   `local`) and so drops a key that would have been sent, pablo prints a one-line stderr
   notice naming the provider and the fix, instead of the local server failing on auth.

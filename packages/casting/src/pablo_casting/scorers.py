@@ -249,7 +249,8 @@ def _snapshot(repo: str, revision: str) -> str:
 
 
 def _revision(info: ScorerInfo) -> str:
-    assert info.revision is not None, f"{info.name} has no pinned revision (pins.py)"
+    if info.revision is None:  # a bug: test_pins.py holds every Hub scorer to a pin
+        raise RuntimeError(f"the {info.name} scorer has no pinned revision (pins.py)")
     return info.revision
 
 

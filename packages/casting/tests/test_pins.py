@@ -234,3 +234,16 @@ def test_real_designer_passes_the_revision_and_warns_when_an_override_has_none(
         ("org/loose", {}),
     ]
     assert "designer voxcpm2 model org/loose has no `revision`" in capsys.readouterr().err
+    toolkit.designer("voxcpm2")
+    assert capsys.readouterr().err == ""  # once per process
+
+
+def test_a_designer_override_on_a_branch_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from pablo_casting.real import real_toolkit
+
+    loads: list[tuple[str, dict[str, object]]] = []
+    fake_module(monkeypatch, "mlx_audio.tts.utils", load_model=lambda path, **kwargs: loads.append((path, kwargs)) or object())
+    fake_module(monkeypatch, "mlx.core")
+    real_toolkit({}, {"designers": {"qwen3": {"model": "org/branchy", "revision": "main"}}}).designer("qwen3")
+    assert loads == [("org/branchy", {"revision": "main"})]
+    assert 'designer qwen3 model org/branchy is at "main", a branch or tag that can move' in capsys.readouterr().err

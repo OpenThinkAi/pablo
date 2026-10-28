@@ -20,6 +20,8 @@ from typing import Protocol
 
 import numpy as np
 
+from pablo_casting.pins import pinned
+
 DESIGNER_NAMES = ("qwen3", "voxcpm2")
 DEFAULT_DESIGNER = "qwen3"
 
@@ -107,8 +109,6 @@ def designer_revision(name: str, engines: Mapping[str, Mapping[str, object]]) ->
     author names carries its own optional `revision`, and `None` (the Hub's current
     revision, which `real_toolkit` warns about) when it has none.
     """
-    from pablo_casting.pins import pinned
-
     designers = engines.get("designers")
     entry = designers.get(name) if isinstance(designers, Mapping) else None
     if isinstance(entry, Mapping) and isinstance(entry.get("model"), str):

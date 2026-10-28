@@ -153,10 +153,11 @@ export interface DroppedKey {
 /** The default one-line notice for a dropped key: which provider, why, and the fix. */
 export function keyDropNotice(dropped: DroppedKey): string {
   const fields = dropped.changed.join(", ");
+  const commands = dropped.changed.map((field) => `\`pablo config set providers.${dropped.provider}.${field} <value>\``).join(", ");
   return (
     `pablo: ${dropped.source} changes provider "${dropped.provider}"'s ${fields}, so its global key (${dropped.key}) is not sent ` +
-    `and it has none. If that server needs a key, make the change in the global config, where keys are bound ` +
-    `(\`pablo config set providers.${dropped.provider}.${dropped.changed[0] ?? "endpoint"} <value>\`, without --project), and drop it from ${dropped.source}.`
+    `and it has none. If that server needs a key, move the change to the global config, where keys are bound ` +
+    `(${commands}, without --project), and drop it from ${dropped.source}.`
   );
 }
 
