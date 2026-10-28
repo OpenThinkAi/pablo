@@ -23,6 +23,7 @@ import { repoRoot } from "./branch";
 import {
   checkFacts,
   completeText,
+  crosscheckCore,
   distillPrompt,
   NAMES_FILE,
   parseDistillAnswer,
@@ -176,6 +177,15 @@ export async function distillFactsInProject(projectPath: string, env: NodeJS.Pro
 
   const planned = planSessionFor(projectPath, env);
   if (!planned.ok) return planned.result;
+  // AGT-2196: the period brief and premise held to the facts just distilled; contradictions are reported, never fixed.
+  const crosscheck = await crosscheckCore(
+    adapter,
+    [
+      { name: "period brief", text: brief },
+      { name: "premise", text: readIfPresent(join(projectPath, "bible", "overview.md")) },
+    ],
+    checked.facts,
+  );
   const path = `${planned.dir ? `${planned.dir}/` : ""}${PERIOD_FACTS_FILE}`;
   const written = planWrite(planned.session, {
     path,
@@ -192,6 +202,7 @@ export async function distillFactsInProject(projectPath: string, env: NodeJS.Pro
       facts: checked.facts.length,
       rejected: checked.rejected,
       ...(realNames ? {} : { swapped: checked.swapped }),
+      ...(crosscheck !== undefined ? { contradictions: crosscheck.contradictions, ...(crosscheck.notice !== undefined ? { crosscheckNotice: crosscheck.notice } : {}) } : {}),
       provider: adapter.id,
       model: adapter.model,
     },

@@ -100,15 +100,18 @@ export function draftSentences(text: string): Sentence[] {
 }
 
 /** The prompt for one unit: numbered facts and numbered sentences, each fenced as data. */
-export function factAccuracyPrompt(label: string, sentences: readonly Sentence[], facts: readonly PeriodFact[]): string {
+export function factAccuracyPrompt(label: string, sentences: readonly Sentence[], facts: readonly PeriodFact[], storyDate?: string): string {
   const factList = facts.map((f, i) => `F${i + 1}. ${f.fact}${f.date === undefined ? "" : ` (from ${f.date})`}`).join("\n");
   const sentenceList = sentences.map((s, i) => `S${i + 1}. ${s.text}`).join("\n");
   return [
     "You check a historical novel's draft against sourced period facts. Report each draft sentence that a fact shows to be wrong: it states or plainly implies something the fact contradicts (a date, a number, a name, a place, how a thing worked).",
     "A sentence the facts agree with, or that no fact speaks to, is not reported. Invented characters and their private doings are not contradictions. Report only clear contradictions, never a matter of taste.",
+    storyDate === undefined
+      ? "Each fact shows the story date it holds from, as (from DATE), when it has one."
+      : `The draft is set on ${storyDate}. Each fact shows the story date it holds from, as (from DATE), when it has one. Compare dates: a sentence that puts something on a date (or in a year) that a fact dates differently contradicts that fact, so cite the fact about that very thing.`,
     DATA_RULE,
     fence("period facts", factList),
-    fence(`draft ${label}`, sentenceList),
+    fence(`draft ${label}${storyDate === undefined ? "" : ` story date ${storyDate}`}`, sentenceList),
     'Reply with JSON only: {"contradictions": [{"sentence": <S number>, "fact": <F number>, "why": "<one short line>"}]}. An empty list when nothing contradicts.',
   ].join("\n\n");
 }
@@ -148,11 +151,11 @@ const sourcePath = (fact: PeriodFact): string => (fact.source.startsWith("resear
  * One unit's fact-accuracy hits (`text` its contents, `path` its report label) against `facts`, the facts it is
  * held to. No facts or no sentences: no model call, no hits. Throws when the model fails or its reply is unreadable.
  */
-export async function checkFactAccuracy(text: string, path: string, facts: readonly PeriodFact[], ask: Ask): Promise<FactHit[]> {
+export async function checkFactAccuracy(text: string, path: string, facts: readonly PeriodFact[], ask: Ask, storyDate?: string): Promise<FactHit[]> {
   if (facts.length === 0) return [];
   const sentences = draftSentences(text);
   if (sentences.length === 0) return [];
-  const reply = await ask(factAccuracyPrompt(path, sentences, facts));
+  const reply = await ask(factAccuracyPrompt(path, sentences, facts, storyDate));
   return parseContradictions(reply, sentences.length, facts.length)
     .map(({ sentence, fact, why }) => {
       const s = sentences[sentence - 1] as Sentence;
@@ -209,7 +212,7 @@ export async function runFactAccuracy(opts: FactAccuracyOptions): Promise<FactAc
       const text = readFileSync(file, "utf8");
       const label = relative(opts.workDir, file).split("\\").join("/");
       const date = storyDateOf(opts.workDir, opts.def, opts.def.unitOfPath(label), text);
-      return { label, text, facts: periodFactsAt(facts, date === undefined ? [] : [date]) };
+      return { label, text, date, facts: periodFactsAt(facts, date === undefined ? [] : [date]) };
     });
 
   const hits: FactHit[] = [];
@@ -230,7 +233,7 @@ export async function runFactAccuracy(opts: FactAccuracyOptions): Promise<FactAc
     }
     opts.progress?.(`fact-accuracy: ${unit.label} (${checked + 1}/${sent}), ${unit.facts.length} period fact${unit.facts.length === 1 ? "" : "s"}, asking the check model…`);
     try {
-      const found = await checkFactAccuracy(unit.text, unit.label, unit.facts, ask);
+      const found = await checkFactAccuracy(unit.text, unit.label, unit.facts, ask, unit.date);
       checked++;
       hits.push(...found);
       saved[unit.label] = found;

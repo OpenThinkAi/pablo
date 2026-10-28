@@ -838,8 +838,16 @@ list is caught only when you review the `plan/` branch. The work's period brief
 maps to a local provider, the notes go to the first non-local provider. Over MCP
 this is the `distill_facts` tool.
 
+After writing the facts, the same agent holds the period brief (`bible/period.md`)
+and the premise (`bible/overview.md`) against them and reports every claim a fact
+contradicts (a brief saying the saloons closed while a fact says they stayed open):
+`contradiction:` lines in the output, `contradictions` in the JSON. It only reports;
+nothing is rewritten. If the cross-check model fails, `crosscheckNotice` says so and
+the distillation stands. The `fact-accuracy` check also tells the model the unit's
+story date and each fact's date, so a date contradiction is caught.
+
 ```
-{ok: true, path, branch, sha?, facts, rejected: [{fact, source, reason}], swapped?: [{from, to}], provider, model}
+{ok: true, path, branch, sha?, facts, rejected: [{fact, source, reason}], swapped?: [{from, to}], contradictions?: [{document, claim, fact, source, why}], crosscheckNotice?, provider, model}
 {ok: false, code: 2, message, names?}       realNames: false and unmapped research names
 ```
 

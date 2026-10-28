@@ -234,3 +234,17 @@ test("the MCP check verb runs fact-accuracy too, on the injected model seam", as
   expect(body.hits.filter((h) => h["rule"] === "fact-accuracy")).toHaveLength(1);
   expect(body.factAccuracy).toEqual({ checked: 1 });
 });
+
+test("the prompt carries the unit's story date and each fact's date; a date contradiction is caught", async () => {
+  const { vault, dir } = work(["| The river ice houses closed in 1934 | refrigeration | 1934 |"]);
+  const unit = join(dir, UNIT);
+  writeFileSync(unit, "---\ntitle: One\n---\n\nIn January 1929 the river ice houses were already shuttered.\n");
+  const ask = fakeAsk([["already shuttered", "ice houses closed", "closed in 1934, not 1929"]]);
+  const hits = await checkFactAccuracy(readFileSync(unit, "utf8"), UNIT, [{ fact: "The river ice houses closed in 1934", source: "refrigeration", date: "1934" }], ask, "1929-01");
+  expect(hits).toHaveLength(1);
+  expect(hits[0]?.source).toBe("research/refrigeration.md");
+  expect(ask.prompts[0]).toContain("The draft is set on 1929-01.");
+  expect(ask.prompts[0]).toContain("story date 1929-01");
+  expect(ask.prompts[0]).toContain("F1. The river ice houses closed in 1934 (from 1934)");
+  void vault;
+});

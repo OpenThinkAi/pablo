@@ -23,6 +23,7 @@ import { join, relative } from "node:path";
 import type { Adapter, Intent, PeriodFact } from "@openthink/pablo-core";
 import { splitTableRow } from "@openthink/pablo-core";
 import { CHECKLIST_FILE } from "./core/checklist";
+import { DATA_RULE, fence, jsonIn } from "./critique";
 
 /** The intent distillation routes under: a planning-kind call, so an unmapped config sends it to the cloud planner when one exists. */
 export const RESEARCH_INTENT: Intent = { name: "research", kind: "planning" };
@@ -290,4 +291,82 @@ export async function completeText(adapter: Adapter, prompt: string): Promise<st
     if (ev.type === "token") text += ev.text;
   }
   return text;
+}
+
+// ---------------------------------------------------------------- core vs. period facts (AGT-2196)
+
+/** A core claim (the period brief or the premise) that a distilled period fact contradicts. */
+export interface CoreContradiction {
+  /** Which core document the claim is in. */
+  readonly document: "period brief" | "premise";
+  /** The claim, as the model quoted it. */
+  readonly claim: string;
+  /** The contradicting period fact, as written to `facts/period.md`. */
+  readonly fact: string;
+  /** The fact's source note, `research/<id>.md`. */
+  readonly source: string;
+  readonly why: string;
+}
+
+/** The prompt that holds the period brief and premise against the facts just distilled. Pure. */
+export function crosscheckPrompt(docs: ReadonlyArray<{ name: "period brief" | "premise"; text: string }>, facts: readonly PeriodFact[]): string {
+  const factList = facts.map((f, i) => `F${i + 1}. ${f.fact}${f.date === undefined ? "" : ` (from ${f.date})`}`).join("\n");
+  return [
+    "You check a novel's core documents against sourced period facts. Report each claim in the period brief or the premise that a fact shows to be wrong: the document states or plainly implies something a fact contradicts (a date, a number, whether something closed or stayed open, how a thing worked).",
+    "A claim the facts agree with, or that no fact speaks to, is not reported. Invented characters and their private doings are not contradictions. Report only clear contradictions, never a matter of taste.",
+    DATA_RULE,
+    fence("period facts", factList),
+    ...docs.map((d) => fence(d.name, d.text.trim())),
+    'Reply with JSON only: {"contradictions": [{"document": "period brief" or "premise", "claim": "<the claim, quoted>", "fact": <F number>, "why": "<one short line>"}]}. An empty list when nothing contradicts.',
+  ].join("\n\n");
+}
+
+/** The contradictions a reply names, keeping only ones that point at a shown document and a shown fact. Throws on a reply that is not the JSON asked for. */
+export function parseCrosscheck(reply: string, facts: readonly PeriodFact[], docs: readonly string[]): CoreContradiction[] {
+  let value: { contradictions?: unknown } | undefined;
+  try {
+    value = jsonIn(reply) as { contradictions?: unknown } | undefined;
+  } catch {
+    value = undefined;
+  }
+  const list = typeof value === "object" && value !== null && Array.isArray(value.contradictions) ? value.contradictions : undefined;
+  if (list === undefined) throw new Error("the model's reply was not the contradictions JSON");
+  const out: CoreContradiction[] = [];
+  const clean = (v: unknown): string => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim() : "");
+  for (const item of list as unknown[]) {
+    if (item === null || typeof item !== "object") continue;
+    const raw = item as Record<string, unknown>;
+    const document = clean(raw["document"]).toLowerCase();
+    const f = Number(String(raw["fact"] ?? "").replace(/^F/i, ""));
+    if (!docs.includes(document) || !Number.isInteger(f) || f < 1 || f > facts.length) continue;
+    const fact = facts[f - 1] as PeriodFact;
+    out.push({
+      document: document as CoreContradiction["document"],
+      claim: clean(raw["claim"]),
+      fact: fact.fact,
+      source: `research/${fact.source}.md`,
+      why: clean(raw["why"]),
+    });
+  }
+  return out;
+}
+
+/**
+ * The period brief (`bible/period.md`) and premise (`bible/overview.md`) held to the facts just distilled. `undefined`
+ * when the work has neither document; otherwise the contradictions found, or a `notice` when the model failed (the
+ * distillation itself is never failed by it).
+ */
+export async function crosscheckCore(
+  adapter: Adapter,
+  docs: ReadonlyArray<{ name: "period brief" | "premise"; text: string | undefined }>,
+  facts: readonly PeriodFact[],
+): Promise<{ contradictions: CoreContradiction[]; notice?: string } | undefined> {
+  const present = docs.filter((d): d is { name: "period brief" | "premise"; text: string } => d.text !== undefined && d.text.trim() !== "");
+  if (present.length === 0 || facts.length === 0) return undefined;
+  try {
+    const reply = await completeText(adapter, crosscheckPrompt(present, facts));
+    return { contradictions: parseCrosscheck(reply, facts, present.map((d) => d.name)) };
+  } catch (error) {
+    return { contradictions: [], notice: `core cross-check not run: ${(error as Error).message}` };
+  }
 }
