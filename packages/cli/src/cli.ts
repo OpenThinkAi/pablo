@@ -426,10 +426,14 @@ export function researchFactText(raw: unknown): string {
     // `research distill` (AGT-2109).
     const rejected = (body["rejected"] ?? []) as { fact: string; reason: string }[];
     const swapped = (body["swapped"] ?? []) as { from: string; to: string }[];
+    const contradictions = (body["contradictions"] ?? []) as { document: string; claim: string; fact: string; source: string; why: string }[];
+    const crosscheckNotice = typeof body["crosscheckNotice"] === "string" ? body["crosscheckNotice"] : undefined;
     return [
       `pablo: distilled ${String(body["facts"])} period fact${body["facts"] === 1 ? "" : "s"} -> ${String(body["path"])} on ${String(body["branch"])}`,
       ...swapped.map((s) => `  swapped ${s.from} -> ${s.to}`),
       ...rejected.map((r) => `  rejected: ${r.fact || "(empty)"} (${r.reason})`),
+      ...contradictions.map((c) => `  contradiction: the ${c.document} says "${c.claim}" but "${c.fact}" (${c.source})${c.why === "" ? "" : `: ${c.why}`}`),
+      ...(crosscheckNotice !== undefined ? [`  ${crosscheckNotice}`] : []),
       "  review the branch in the screen (pablo), then merge it",
     ].join("\n");
   }

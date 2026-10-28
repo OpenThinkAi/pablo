@@ -252,3 +252,43 @@ test("name maps, answers and swaps parse as documented", () => {
     "the fact is longer than 280 characters",
   ]);
 });
+
+/** AGT-2196: a researcher that answers the distill prompt with facts and the cross-check prompt with `contradictions`. */
+function crosscheckResearcher(contradictions: unknown): Adapter & { prompts: string[] } {
+  const inner = fakeResearcher(ANSWER);
+  const prompts = inner.prompts;
+  return {
+    ...inner,
+    async *complete(request: CompletionRequest): AsyncIterable<CompletionEvent> {
+      const reply = request.prompt.includes("core documents against sourced period facts") ? { contradictions } : ANSWER;
+      prompts.push(request.prompt);
+      yield { type: "token", text: JSON.stringify(reply) };
+      yield { type: "done", stats: { timeToFirstTokenMs: 1, elapsedMs: 1, tokensRead: 1, tokensWritten: 1, tokensPerSecond: 1 } };
+    },
+    prompts,
+  };
+}
+
+test("research distill reports period brief / premise claims the new facts contradict", async () => {
+  const { vault, work, env } = setup();
+  writeFileSync(join(work, "bible", "period.md"), "# Period\n\nBy 1929 every ice house on the river had closed.\n");
+  const r = await distill(vault, env, crosscheckResearcher([
+    { document: "period brief", claim: "every ice house on the river had closed", fact: 1, why: "ice was still selling" },
+    { document: "premise", claim: "x", fact: 99, why: "not a shown fact" },
+    { document: "elsewhere", claim: "x", fact: 1, why: "not a shown document" },
+  ]));
+  expect(r.exitCode).toBe(0);
+  const body = r.body as { contradictions: { document: string; claim: string; fact: string; source: string; why: string }[] };
+  expect(body.contradictions).toEqual([
+    { document: "period brief", claim: "every ice house on the river had closed", fact: "Ice sold for four dollars a ton.", source: "research/ice-prices-1929.md", why: "ice was still selling" },
+  ]);
+});
+
+test("research distill's cross-check failing is a notice, not a failed distill", async () => {
+  const { vault, env } = setup();
+  const r = await distill(vault, env, fakeResearcher(ANSWER));
+  expect(r.exitCode).toBe(0);
+  const body = r.body as { contradictions: unknown[]; crosscheckNotice?: string };
+  expect(body.contradictions).toEqual([]);
+  expect(body.crosscheckNotice).toContain("core cross-check not run");
+});
