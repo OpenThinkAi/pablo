@@ -82,7 +82,7 @@ export function planPrompt(origin: ChecklistOrigin, source: string, opts: { clai
   return [
     ...ask,
     `Keep each item under 200 characters. ${existing.length > 0 ? "The checklist already has the items listed below; do not repeat them." : ""}`.trim(),
-    ...(opts.limit !== undefined ? [`Size the list to the work: give at most ${opts.limit} items in all, the ones a scene would most likely get wrong first; do not pad a short work.`] : []),
+    ...(opts.limit !== undefined ? [`Size the list to the work: give at most ${opts.limit} items in all, the ones the work would most likely get wrong first; do not pad a short work.`] : []),
     'Answer with JSON only, no prose and no code fence: {"items": [{"category": "...", "item": "..."}]}',
     "",
     origin === "thesis" ? "## Thesis" : "## Period brief",
@@ -161,7 +161,7 @@ export async function planChecklistInProject(
   const words = sourceText.split(/\s+/).filter(Boolean).length;
   const max = deps.max ?? defaultChecklistMax(words, Object.keys(marker.marker.outputs).length);
   if (existing.length >= max) {
-    return refuse(`pablo: research plan: the checklist already has ${existing.length} items, at its cap of ${max}; nothing written (raise it with --max N)`, { max });
+    return refuse(`pablo: research plan: the checklist already has ${existing.length} items, at its cap of ${max}; nothing written (raise it with --max N, or max over MCP)`, { max });
   }
   const claims = origin === "thesis" ? readIfPresent(join(projectPath, CLAIMS_FILE)) : undefined;
 

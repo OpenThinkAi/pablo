@@ -473,3 +473,28 @@ test("waive_research_item and link_research_item take arrays; save_research take
   const s = await save.run({ project: "ice-house", title: "Ice", note: "n", sources: ["s"], items: [1, 3] }, ctx(env, vault));
   expect((s.body as { items: unknown[] }).items.length).toBe(2);
 });
+
+test("the CLI takes a batch of items and --max as argv", async () => {
+  const { vault, env } = setup("historical-fiction", { "bible/period.md": BRIEF, [CHECKLIST_FILE]: CHECKLIST });
+  const saved = { ...process.env };
+  Object.assign(process.env, env);
+  const logs: string[] = [];
+  const log = console.log;
+  const err = console.error;
+  console.log = (...a: unknown[]) => void logs.push(a.join(" "));
+  console.error = (...a: unknown[]) => void logs.push(a.join(" "));
+  try {
+    expect(await main(["research", "waive", "1,3", "never spoken", "--project", "ice-house"], vault)).toBe(0);
+    // A full checklist refuses with the cap, proving --max reaches the verb as a number (no model is asked).
+    expect(await main(["research", "plan", "--max", "3", "--project", "ice-house"], vault)).toBe(2);
+  } finally {
+    console.log = log;
+    console.error = err;
+    for (const k of Object.keys(env)) if (saved[k] === undefined) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+  const out = logs.join("\n");
+  expect(out).toContain("#1 people: Who ran the ice houses -> waived");
+  expect(out).toContain("#3 technology: How thick ice had to be -> waived");
+  expect(out).toContain("at its cap of 3");
+});
