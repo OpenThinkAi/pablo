@@ -248,8 +248,10 @@ const PING_TIMEOUT_MS = 20_000;
 const BILLING_ERROR = /credit balance|insufficient[_ ](?:quota|funds|credit)|billing|payment required|quota exceeded|\b402\b/i;
 
 /** A provider's error, with billing/credit trouble named plainly (AGT-2198) so it is not read as a bad key or a down server. */
+export const BILLING_LABEL = "billing/credit problem";
+
 export function describeProviderError(message: string): string {
-  return BILLING_ERROR.test(message) ? `billing/credit problem: ${message} (add credit or change plan with the provider; the key itself is fine)` : message;
+  return BILLING_ERROR.test(message) ? `${BILLING_LABEL}: ${message} (add credit or change plan with the provider)` : message;
 }
 
 export async function configTest(scope: ConfigScope, deps: ConfigTestDeps): Promise<ConfigResult> {

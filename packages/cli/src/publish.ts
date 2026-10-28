@@ -87,6 +87,13 @@ export function straightenQuotes(text: string): string {
 }
 
 const STRAIGHT_RULE = /straight (?:quotes?|apostrophes?)|never curly|no curly|not curly/i;
+/** A line that points the other way: "always curly quotes, never straight quotes", "curly, not straight". */
+const CURLY_RULE = /(?:never|no|not|avoid|without|instead of|don'?t use)\s+(?:the\s+)?straight|(?:always|use|prefer)\s+(?:curly|typographic|smart)/i;
+
+/** Whether any line of `text` asks for straight quotes and none of those lines asks for curly ones. */
+export function asksForStraightQuotes(text: string): boolean {
+  return text.split(/\r?\n/).some((line) => STRAIGHT_RULE.test(line) && !CURLY_RULE.test(line));
+}
 
 /**
  * Whether the work's own style says quotes stay straight (AGT-2198): its `STYLE.md`
@@ -97,7 +104,7 @@ export function workKeepsStraightQuotes(workDir: string): boolean {
   const files = [join(workDir, "STYLE.md")];
   const vault = findVault(workDir);
   if (vault.ok) files.push(join(vault.path, "style", "prose.md"));
-  return files.some((file) => existsSync(file) && STRAIGHT_RULE.test(readFileSync(file, "utf8")));
+  return files.some((file) => existsSync(file) && asksForStraightQuotes(readFileSync(file, "utf8")));
 }
 
 /** Sentence lines to paragraphs: a blank line separates paragraphs, each paragraph's lines are joined into one. */

@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bodyParagraphs, compileDraft, compileReview, curlQuotes, publishWork, stripFrontmatter } from "../src/publish";
+import { asksForStraightQuotes, bodyParagraphs, compileDraft, compileReview, curlQuotes, publishWork, stripFrontmatter } from "../src/publish";
 import { VERBS } from "../src/verbs";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
@@ -189,3 +189,10 @@ function publishDraftPath(work: string): string {
   if (!draft.ok) throw new Error("draft failed");
   return draft.where;
 }
+
+test("a rule that asks for curly quotes is not read as a straight-quote rule", () => {
+  expect(asksForStraightQuotes("Straight quotes (\"like this\"), never curly.")).toBe(true);
+  expect(asksForStraightQuotes("Always curly quotes, never straight quotes.")).toBe(false);
+  expect(asksForStraightQuotes("Curly, not straight quotes.")).toBe(false);
+  expect(asksForStraightQuotes("No rule about quotes here.")).toBe(false);
+});

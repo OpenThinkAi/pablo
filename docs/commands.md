@@ -408,7 +408,7 @@ pablo write --project <slug> --chapter N [flags]
 ```
 
 Drafts one unit of an output on your configured writer model. A draft more than
-10% off its word target gets a warning on the receipt (stderr; `lengthWarning` in JSON); the
+10% off its word target gets a warning (stderr; `lengthWarning` in JSON); the
 draft is still written. While it streams, stderr shows `~N tokens`, estimated from
 the text so far, not the number of stream chunks. `--chapter N` is
 short for `--output novel --unit N`. A work with several outputs needs `--output`.
