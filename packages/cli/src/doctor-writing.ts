@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { configPath, createSearchBackend, loadConfig, ProviderConfigError } from "@openthink/pablo-core";
 import type { PabloConfig, SearchBackend } from "@openthink/pablo-core";
-import { configTest, realConfigTestDeps } from "./config-verb";
+import { BILLING_LABEL, configTest, realConfigTestDeps } from "./config-verb";
 import type { ConfigTestDeps } from "./config-verb";
 import { findVault } from "./project";
 
@@ -100,7 +100,9 @@ export async function runWritingDoctor(deps: WritingDoctorDeps): Promise<Writing
               name: `provider ${id}`,
               status: "fail",
               detail: state.error ?? "no answer",
-              fix: `start the server or set its key, then run \`pablo config test\`; \`pablo config show\` lists where "${id}" points`,
+              fix: (state.error ?? "").startsWith(BILLING_LABEL)
+                ? `add credit for provider "${id}" (see \`pablo config show\`), then run \`pablo config test\``
+                : `start the server or set its key, then run \`pablo config test\`; \`pablo config show\` lists where "${id}" points`,
             },
       );
     }

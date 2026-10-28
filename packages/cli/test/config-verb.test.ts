@@ -183,3 +183,10 @@ test("CLI end to end against a temp XDG_CONFIG_HOME", () => {
   expect(JSON.parse(show.stdout.toString()).providers.map((p: { id: string }) => p.id)).toEqual(["cloud"]);
   expect(run("bogus").exitCode).toBe(2);
 });
+
+test("test: a billing/credit error is named plainly", async () => {
+  const s = scope({ providers: GLOBAL.providers });
+  const r = await configTest({ env: s.env }, { adapterFor: (_c: unknown, id: string) => fakeAdapter(id, "Your credit balance is too low to access the Anthropic API") } as never);
+  expect(r.exitCode).toBe(1);
+  expect(r.text).toContain("billing/credit problem");
+});

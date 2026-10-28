@@ -31,6 +31,7 @@ import {
   assemblePack,
   createProviders,
   EndpointHung,
+  estimateTokens,
   fileReceiptSink,
   NoModelConfiguredError,
   loadConfig,
@@ -629,8 +630,10 @@ async function sendProse(
           lastProgressAt = nowMs;
           stderr.write(`first token after ${seconds(nowMs - startedAt)}s\n`);
         } else if (nowMs - lastProgressAt >= PROGRESS_INTERVAL_MS) {
-          const rate = tokenEvents / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
-          stderr.write(`${tokenEvents} tokens, ${rate.toFixed(1)} tok/s\n`);
+          // Stream chunks are not tokens: count what the text weighs, the way the final count does (AGT-2198).
+          const streamed = Math.max(tokenEvents, estimateTokens(text));
+          const rate = streamed / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
+          stderr.write(`~${streamed} tokens, ${rate.toFixed(1)} tok/s\n`);
           lastProgressAt = nowMs;
         }
       } else {

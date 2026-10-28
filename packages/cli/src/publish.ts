@@ -24,6 +24,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { joinSentences } from "@openthink/pablo-core";
+import { findVault } from "./project";
 import { buildEpub } from "./epub";
 import { parseFrontmatter } from "./novel/machine";
 import { NOVEL_PUBLISH_TARGETS, NOVEL_UNIT_FILE, novelUnitDir, NOVEL_DIR } from "./outputs/novel/units";
@@ -78,6 +79,32 @@ export function curlQuotes(text: string): string {
     else out += opening ? "‘" : "’";
   }
   return out;
+}
+
+/** Straight quotes and apostrophes in place of curly ones. */
+export function straightenQuotes(text: string): string {
+  return text.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+}
+
+const STRAIGHT_RULE = /straight (?:quotes?|apostrophes?)|never curly|no curly|not curly/i;
+/** A line that points the other way: "always curly quotes, never straight quotes", "curly, not straight". */
+const CURLY_RULE = /(?:never|no|not|avoid|without|instead of|don'?t use)\s+(?:the\s+)?straight|(?:always|use|prefer)\s+(?:curly|typographic|smart)/i;
+
+/** Whether any line of `text` asks for straight quotes and none of those lines asks for curly ones. */
+export function asksForStraightQuotes(text: string): boolean {
+  return text.split(/\r?\n/).some((line) => STRAIGHT_RULE.test(line) && !CURLY_RULE.test(line));
+}
+
+/**
+ * Whether the work's own style says quotes stay straight (AGT-2198): its `STYLE.md`
+ * or the enclosing vault's `style/prose.md` names "straight quotes" or "never curly".
+ * Without such a rule publish curls quotes, as it always has.
+ */
+export function workKeepsStraightQuotes(workDir: string): boolean {
+  const files = [join(workDir, "STYLE.md")];
+  const vault = findVault(workDir);
+  if (vault.ok) files.push(join(vault.path, "style", "prose.md"));
+  return files.some((file) => existsSync(file) && asksForStraightQuotes(readFileSync(file, "utf8")));
 }
 
 /** Sentence lines to paragraphs: a blank line separates paragraphs, each paragraph's lines are joined into one. */
@@ -149,13 +176,14 @@ export function compileReview(title: string, chapters: readonly CompileChapter[]
 }
 
 /** The final target's clean manuscript as an EPUB. Pure. */
-export function compileEpub(slug: string, title: string, chapters: readonly CompileChapter[]): Uint8Array {
+export function compileEpub(slug: string, title: string, chapters: readonly CompileChapter[], straight = false): Uint8Array {
+  const fix = straight ? straightenQuotes : (text: string): string => text;
   return buildEpub({
     id: slug,
-    title: curlQuotes(title),
+    title: fix(curlQuotes(title)),
     chapters: [...chapters]
       .sort((a, b) => a.number - b.number)
-      .map((chapter) => ({ heading: chapterHeading(chapter), paragraphs: bodyParagraphs(stripFrontmatter(chapter.text)).map(curlQuotes) })),
+      .map((chapter) => ({ heading: fix(chapterHeading(chapter)), paragraphs: bodyParagraphs(stripFrontmatter(chapter.text)).map(curlQuotes).map(fix) })),
   });
 }
 
@@ -215,12 +243,14 @@ export function publishWork(workDir: string, slug: string, title: string, target
   if (!where.startsWith(outDir + sep)) {
     return refuse(`pablo: publish: marker slug "${slug}" would write outside ${outDir}`);
   }
-  const compiled = target === "review" ? compileReview(title, chapters) : compileDraft(title, chapters);
+  const straight = workKeepsStraightQuotes(workDir);
+  const built = target === "review" ? compileReview(title, chapters) : compileDraft(title, chapters);
+  const compiled = straight ? straightenQuotes(built) : built;
   mkdirSync(outDir, { recursive: true });
   writeFileSync(where, compiled, "utf8");
   const files = [`${slug}-${target}.md`];
   if (target === "final") {
-    writeFileSync(join(outDir, `${slug}-final.epub`), compileEpub(slug, title, chapters));
+    writeFileSync(join(outDir, `${slug}-final.epub`), compileEpub(slug, title, chapters, straight));
     files.push(`${slug}-final.epub`);
   }
   const words = compiled.split(/\s+/).filter((word) => word !== "").length;

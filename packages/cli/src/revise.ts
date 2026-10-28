@@ -18,6 +18,7 @@ import {
   assemblePack,
   createProviders,
   EndpointHung,
+  estimateTokens,
   fileReceiptSink,
   isWithin,
   joinManuscript,
@@ -460,8 +461,10 @@ async function sendRevise(pack: Pack, span: Span, ctx: ReviseCoreContext, deps: 
           stderr.write(`first token after ${seconds(nowMs - startedAt)}s\n`);
           deps.onCandidate?.(text);
         } else if (nowMs - lastProgressAt >= PROGRESS_INTERVAL_MS) {
-          const rate = tokenEvents / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
-          stderr.write(`${tokenEvents} tokens, ${rate.toFixed(1)} tok/s\n`);
+          // Stream chunks are not tokens: count what the text weighs, the way the final count does (AGT-2198).
+          const streamed = Math.max(tokenEvents, estimateTokens(text));
+          const rate = streamed / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
+          stderr.write(`~${streamed} tokens, ${rate.toFixed(1)} tok/s\n`);
           lastProgressAt = nowMs;
           deps.onCandidate?.(text);
         }

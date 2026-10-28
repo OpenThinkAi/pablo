@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bodyParagraphs, compileDraft, compileReview, curlQuotes, publishWork, stripFrontmatter } from "../src/publish";
+import { asksForStraightQuotes, bodyParagraphs, compileDraft, compileReview, curlQuotes, publishWork, stripFrontmatter } from "../src/publish";
 import { VERBS } from "../src/verbs";
 
 const FIXTURE_VAULT = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
@@ -59,6 +59,18 @@ test("compileDraft orders chapters by number, titles them, and keeps no frontmat
   expect(out).not.toContain("model:");
 });
 
+test("publishWork curls quotes when no style rule asks for straight ones", () => {
+  const vault = tempVault();
+  writeFileSync(join(vault, "style", "prose.md"), "# Prose\n\nPlain sentences.\n");
+  const work = join(vault, "novels", "ice-house");
+  mkdirSync(join(work, "chapters"), { recursive: true });
+  writeFileSync(join(work, "chapters", "02-second.md"), "---\ntitle: Second\n---\nHe said \"go\".\nShe didn't.\n");
+  const outcome = publishWork(work, "ice-house", "The Ice House", "draft");
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(readFileSync(outcome.where, "utf8")).toContain("He said “go”. She didn’t.");
+});
+
 test("publishWork writes one file under .pablo/out and refuses other targets", () => {
   const vault = tempVault();
   const work = join(vault, "novels", "ice-house");
@@ -72,9 +84,10 @@ test("publishWork writes one file under .pablo/out and refuses other targets", (
   expect(outcome.chapters).toBe(2);
   const text = readFileSync(outcome.where, "utf8");
   expect(text.indexOf("## Chapter 1: The Last Full Cut")).toBeLessThan(text.indexOf("## Chapter 2: Second"));
-  expect(text).toContain("He said “go”. She didn’t.");
+  // The fixture vault's style/prose.md says "Straight quotes, never curly": publish follows it (AGT-2198).
+  expect(text).toContain('He said "go". She didn\'t.');
   expect(text).not.toMatch(/^---$/m);
-  expect(text).not.toMatch(/["']/);
+  expect(text).not.toMatch(/[“”‘’]/);
 
   for (const target of ["pdf", undefined]) {
     const refused = publishWork(work, "ice-house", "The Ice House", target);
@@ -147,7 +160,7 @@ test("review and final targets on the novel fixture", () => {
   const reviewText = readFileSync(review.where, "utf8");
   expect(reviewText).toContain("## Chapter 1: The Last Full Cut");
   expect(reviewText).toContain("## Chapter 2: Second & Third");
-  expect(reviewText).toContain("[1] He said “go”.  \n[2] She didn’t.");
+  expect(reviewText).toContain('[1] He said "go".  \n[2] She didn\'t.');
   expect(existsSync(join(work, ".pablo", "out", "ice-house-final.epub"))).toBe(false);
 
   const final = publishWork(work, "ice-house", "The Ice House", "final");
@@ -167,7 +180,7 @@ test("review and final targets on the novel fixture", () => {
   expect(readFileSync(join(probe, "mimetype"), "utf8")).toBe("application/epub+zip");
   const chapter2 = readFileSync(join(probe, "OEBPS", "chapter-02.xhtml"), "utf8");
   expect(chapter2).toContain("<h1>Chapter 2: Second &amp; Third</h1>");
-  expect(chapter2).toContain("<p>He said “go”. She didn’t.</p>");
+  expect(chapter2).toContain("<p>He said &quot;go&quot;. She didn't.</p>");
   expect(readFileSync(join(probe, "OEBPS", "content.opf"), "utf8")).toContain("<dc:title>The Ice House</dc:title>");
 });
 
@@ -176,3 +189,10 @@ function publishDraftPath(work: string): string {
   if (!draft.ok) throw new Error("draft failed");
   return draft.where;
 }
+
+test("a rule that asks for curly quotes is not read as a straight-quote rule", () => {
+  expect(asksForStraightQuotes("Straight quotes (\"like this\"), never curly.")).toBe(true);
+  expect(asksForStraightQuotes("Always curly quotes, never straight quotes.")).toBe(false);
+  expect(asksForStraightQuotes("Curly, not straight quotes.")).toBe(false);
+  expect(asksForStraightQuotes("No rule about quotes here.")).toBe(false);
+});

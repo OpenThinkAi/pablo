@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { wordTargetNotice } from "../src/write";
 import { useLocalConfigHome } from "./local-config";
 
 useLocalConfigHome();
@@ -146,4 +147,11 @@ test("write --dry-run --direction shows the direction slice in the pack (AGT-156
   const names = (JSON.parse(stdout).slices as { name: string }[]).map((s) => s.name);
   expect(names).toContain("direction");
   rmSync(vault, { recursive: true, force: true });
+});
+
+test("wordTargetNotice warns only outside 10% of the target", () => {
+  expect(wordTargetNotice(1800, 1800)).toBeUndefined();
+  expect(wordTargetNotice(1650, 1800)).toBeUndefined();
+  expect(wordTargetNotice(1280, 1800)).toContain("29% under");
+  expect(wordTargetNotice(2200, 1800)).toContain("over the 1800-word target");
 });
