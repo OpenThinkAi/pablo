@@ -704,8 +704,12 @@ stderr, and the JSON has `branch`. A section of the essay is found in its shared
 drafted units, `check` prints `nothing to check: no drafted <units> in <dir>/ (<output>
 output)` (JSON: `notice`) instead of `no hits`.
 
-`--strict` makes the run exit `1` when any hit is reported (`hits[]` or `core[]`); without
-it a hit never changes the exit code. A refusal is still `2`.
+`--strict` makes the run exit `1` when any hit is reported (`hits[]` or `core[]`; provenance
+gaps and radio findings are not counted); without it a hit never changes the exit code. A
+refusal is still `2`. Exit `1` with `ok: true` in the JSON means hits.
+
+Checking a pending draft adds the branch's git worktree under `$PABLO_HOME/worktrees/` when
+it has none (never in the vault tree); the model checks' caches land there too.
 
 The summary is `factAccuracy: {checked, notice?}`: how many units were sent, and why
 the run stopped short (no model configured, or the model failed). A notice never fails

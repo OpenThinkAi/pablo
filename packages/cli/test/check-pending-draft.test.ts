@@ -5,25 +5,15 @@
  */
 
 import { afterAll, afterEach, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { checkWork, checkWorkOrPending, runCheck } from "../src/check";
 import { initTrack } from "../src/init";
-import { readMarker } from "../src/marker";
 import { mergeDraft } from "../src/novel/merge";
-import { runConformance } from "../src/outputs/conformance";
-import { ESSAY } from "../src/outputs/essay";
-import { buildEssayPack, essayDefaultPlan, essayPreconditions } from "../src/outputs/essay/pack";
-import { compileEssay, noteSource, publishEssay } from "../src/outputs/essay/publish";
-import { assumedThesis } from "../src/outputs/essay/scaffold";
-import { claimRefs, cleanSectionBody, parseEssayFile, putSection, sectionBody, withoutCitations } from "../src/outputs/essay/sections";
-import { NARRATED } from "../src/outputs/narrated";
-import { OUTPUTS, outputsOnTrack, resolveOutput } from "../src/outputs/registry";
 import { addOutput } from "../src/output-verbs";
-import { TRACKS, trackIds } from "../src/tracks/registry";
 import { runWrite } from "../src/write";
 import type { WriteArgs } from "../src/write";
 import { useLocalConfigHome } from "./local-config";
@@ -87,12 +77,6 @@ function nonfiction(opts: { essay?: boolean } = {}): { vault: string; work: stri
   return { vault, work, home: join(root, "pablo-home") };
 }
 
-function markerOf(work: string) {
-  const marker = readMarker(work);
-  if (!marker.ok) throw new Error(marker.message);
-  return marker.marker;
-}
-
 /** A writer that answers one paragraph with a citation, plus a stray heading it should not keep. */
 function fakeEssayWriter(text = "## A heading the writer added\n\nMainz had a working press by 1455 [#1]. It changed what a town could read."): Adapter {
   return {
@@ -112,10 +96,15 @@ function fakeEssayWriter(text = "## A heading the writer added\n\nMainz had a wo
   };
 }
 
-async function write(vault: string, work: string, home: string, unit: string, extra: Partial<WriteArgs> = {}, adapter = fakeEssayWriter()): Promise<{ code: number; body: Record<string, unknown> }> {
+function capture(): { lines: string[]; restore: () => void } {
   const lines: string[] = [];
   const log = console.log;
   console.log = (text: unknown) => void lines.push(String(text));
+  return { lines, restore: () => void (console.log = log) };
+}
+
+async function write(vault: string, work: string, home: string, unit: string, extra: Partial<WriteArgs> = {}, adapter = fakeEssayWriter()): Promise<{ code: number; body: Record<string, unknown> }> {
+  const out = capture();
   let code: number;
   try {
     code = await runWrite(
@@ -125,20 +114,12 @@ async function write(vault: string, work: string, home: string, unit: string, ex
       { adapter, env: { PATH: NO_THINK_PATH, XDG_STATE_HOME: STATE_HOME, PABLO_HOME: home }, stderr: { write: () => {} }, now: NOW },
     );
   } finally {
-    console.log = log;
+    out.restore();
   }
-  return { code, body: JSON.parse(lines.join("\n") || "{}") as Record<string, unknown> };
+  return { code, body: JSON.parse(out.lines.join("\n") || "{}") as Record<string, unknown> };
 }
-
 
 const DASHED = "Mainz had a working press by 1455 [#1]. Little did he know how it would change what a town could read.";
-
-function capture(): { lines: string[]; restore: () => void } {
-  const lines: string[] = [];
-  const log = console.log;
-  console.log = (text: unknown) => void lines.push(String(text));
-  return { lines, restore: () => void (console.log = log) };
-}
 
 test("check --unit N checks section N's pending draft, and main alone still refuses it", async () => {
   const { vault, work, home } = nonfiction({ essay: true });

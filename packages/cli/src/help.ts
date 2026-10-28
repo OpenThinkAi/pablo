@@ -70,7 +70,7 @@ export const USAGE_LINES: readonly string[] = [
     "                                            historical fiction adds fact-accuracy",
     "                                            against facts/period.md: one call per",
     "                                            unit to the check intent's model",
-    "                                            a unit still on its draft branch is checked there;",
+    "                                            a unit not yet accepted is checked on its draft branch;",
     "                                            --strict exits 1 on any hit",
     "  pablo check --project <slug> --across     contradictions between the outputs' ledgers,",
     "                                            each with a promote action",

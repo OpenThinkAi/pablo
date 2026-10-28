@@ -458,7 +458,7 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     // `--unit N` (AGT-2112): just that unit of the output.
     if (unit !== undefined && scanned !== undefined) {
       const def = scanned;
-      // A section of a shared file (the essay, AGT-2188) is in the file when the file has its text, whatever number the file reads as.
+      // Only a shared-file output (the essay) reads each file for the unit: a section of it (AGT-2188) is in the file when the file has its text, whatever number the file reads as.
       const shared = def.shared;
       filePaths =
         shared !== undefined
@@ -500,7 +500,7 @@ function draftVersion(branch: string): number {
 }
 
 /** The scan a pending draft's branch gets (AGT-2188): where it is checked out, and which branch it is. */
-export interface PendingDraft {
+interface PendingDraft {
   readonly ok: true;
   readonly branch: string;
   /** The work as the branch has it: the branch's worktree plus the work's path inside the repo. */
@@ -513,7 +513,7 @@ export interface PendingDraft {
  * draft is linted and fact-checked before it is accepted. The branch's worktree is added when it has none. A failure
  * is a message, never a throw.
  */
-export function pendingDraft(workDir: string, def: OutputDefinition | undefined, unit: number | undefined, branch: string | undefined, env: NodeJS.ProcessEnv = process.env): PendingDraft | { ok: false; message: string } {
+function pendingDraft(workDir: string, def: OutputDefinition | undefined, unit: number | undefined, branch: string | undefined, env: NodeJS.ProcessEnv = process.env): PendingDraft | { ok: false; message: string } {
   const repo = repoRoot(workDir);
   const marker = readMarker(workDir);
   if (repo === undefined || !marker.ok) return { ok: false, message: `pablo: check: ${workDir} is not a work in a git repository, so it has no pending drafts` };
@@ -530,7 +530,8 @@ export function pendingDraft(workDir: string, def: OutputDefinition | undefined,
   }
   const tree = ensureWorktree(repo, marker.marker.slug, name, env);
   if (!tree.ok) return { ok: false, message: tree.notice };
-  return { ok: true, branch: name, workDir: join(tree.path as string, relative(realpathSync(repo), realpathSync(workDir))) };
+  if (tree.path === undefined) return { ok: false, message: `pablo: check: ${name} has no worktree` };
+  return { ok: true, branch: name, workDir: join(tree.path, relative(realpathSync(repo), realpathSync(workDir))) };
 }
 
 /**
