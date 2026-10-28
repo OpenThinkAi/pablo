@@ -852,7 +852,7 @@ const SAVE_RESEARCH_MCP_ARGS = z.object({
   project: projectField,
   title: z.string().describe("What the note is about, e.g. 'Grape prices, 1919'. Becomes the file name."),
   note: z.string().describe("The finding, in your own words: the checkable facts and what they mean for the story."),
-  sources: z.array(z.string()).describe("Where each fact came from: URLs or full citations. At least one."),
+  sources: z.array(z.string()).describe("Where each fact came from: http(s) URLs, DOIs or ISBNs, or citations naming the work and its year. At least one; general knowledge or memory is refused."),
   items: z.array(z.number().int().positive()).optional().describe("The research checklist item numbers this note sources (research/checklist.md)."),
 });
 
@@ -880,7 +880,7 @@ const RECORD_FACT_MCP_ARGS = z.object({
 const SAVE_RESEARCH_MCP: McpToolSpec = {
   name: "save_research",
   description:
-    "Save a research finding with its sources to the work's research/ notes (research/<slug>.md, with the retrieval date), on a new plan/ branch the author reviews. At least one source is required. The writer model never sees these notes; distilled facts are what reach a draft.",
+    "Save a research finding with its sources to the work's research/ notes (research/<slug>.md, with the retrieval date), on a new plan/ branch the author reviews. At least one source is required, and each must be an http(s) URL, a DOI or ISBN, or a citation naming the work and its year; general knowledge or memory is refused. The writer model never sees these notes; distilled facts are what reach a draft.",
   args: SAVE_RESEARCH_MCP_ARGS,
   run: async (raw, ctx) => {
     const args = SAVE_RESEARCH_MCP_ARGS.parse(raw);
@@ -2117,7 +2117,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "research",
     description:
-      "`research save`: keep a research finding with its sources and retrieval date as research/<slug>.md, on a new plan/ branch for the author to review. At least one source is required (--source, repeatable). Over MCP this is the `save_research` tool. `research distill`: turn research/ into short, sourced period facts in facts/period.md on a plan/ branch (real names swapped for the bible's when the work sets realNames: false); over MCP the `distill_facts` tool. `research plan`: derive research/checklist.md from the period brief or thesis (`plan_research`); `research waive <#,#,a-b> \"<reason>\"` (`waive_research_item`) and `research link <#,#,a-b> <note>` (`link_research_item`) close items, several on one branch, as does `research save --item <#>`; the research gate passes once every item is sourced or waived.",
+      "`research save`: keep a research finding with its sources and retrieval date as research/<slug>.md, on a new plan/ branch for the author to review. At least one source is required (--source, repeatable): an http(s) URL, a DOI or ISBN, or a citation naming the work and its year; general knowledge and the like are refused. Over MCP this is the `save_research` tool. `research distill`: turn research/ into short, sourced period facts in facts/period.md on a plan/ branch (real names swapped for the bible's when the work sets realNames: false); over MCP the `distill_facts` tool. `research plan`: derive research/checklist.md from the period brief or thesis (`plan_research`); `research waive <#,#,a-b> \"<reason>\"` (`waive_research_item`) and `research link <#,#,a-b> <note>` (`link_research_item`) close items, several on one branch, as does `research save --item <#>`; the research gate passes once every item is sourced or waived.",
     args: RESEARCH_ARGS,
     run: runResearchVerb,
     positionalArgs: ["sub", "entry", "text"],

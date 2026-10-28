@@ -18,7 +18,9 @@ import type { McpToolSpec } from "../verbs";
 const ARGS = z.object({
   title: z.string().describe("What the note is about, e.g. 'Grape prices, 1919'. Becomes the file name."),
   note: z.string().describe("The finding, in your own words: the checkable facts and what they mean for the story."),
-  sources: z.array(z.string()).describe("Where each fact came from: URLs or full citations. At least one."),
+  sources: z
+    .array(z.string())
+    .describe("Where each fact came from: the URL web_fetch returned (with its retrievedAt date), a DOI or ISBN, or a citation naming the work and its year. At least one; general knowledge or memory is refused."),
 });
 
 export const SAVE_RESEARCH_TOOL = "save_research";

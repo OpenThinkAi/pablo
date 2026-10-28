@@ -470,7 +470,7 @@ test("waive_research_item and link_research_item take arrays; save_research take
   const l = await link.run({ project: "ice-house", items: [2, 3], note: "owners" }, ctx(env, vault));
   expect((l.body as { items: unknown[] }).items.length).toBe(2);
   const save = tools.find((t) => t.name === "save_research")!;
-  const s = await save.run({ project: "ice-house", title: "Ice", note: "n", sources: ["s"], items: [1, 3] }, ctx(env, vault));
+  const s = await save.run({ project: "ice-house", title: "Ice", note: "n", sources: ["https://example.test/ice"], items: [1, 3] }, ctx(env, vault));
   expect((s.body as { items: unknown[] }).items.length).toBe(2);
 });
 
