@@ -17,6 +17,7 @@ import {
   createProviders,
   DEFAULT_MIN_SCENES,
   EndpointHung,
+  estimateTokens,
   fileReceiptSink,
   NoModelConfiguredError,
   loadConfig,
@@ -272,6 +273,13 @@ export interface UnitReceiptSummary extends WriteReceiptSummary {
   readonly unit: number;
 }
 
+/** A draft more than 10% off its word target (AGT-2198): a warning on the receipt, never a failure. */
+export function wordTargetNotice(words: number, target: number): string | undefined {
+  if (target <= 0 || Math.abs(words - target) <= target * 0.1) return undefined;
+  const pct = Math.round((Math.abs(words - target) / target) * 100);
+  return `pablo: warning: ${words} words is ${pct}% ${words < target ? "under" : "over"} the ${target}-word target (allowed: within 10%)`;
+}
+
 function emitWriteSuccess(
   json: boolean,
   path: string,
@@ -282,9 +290,11 @@ function emitWriteSuccess(
   from?: string,
   /** A check that could not run (AGT-2115): reported, never fatal. */
   notices: readonly string[] = [],
+  /** The draft is more than 10% off its word target (AGT-2198): a warning, never a failure. */
+  lengthWarning?: string,
 ): void {
   if (json) {
-    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, ...(notices.length === 0 ? {} : { checkNotices: notices }), ...(from === undefined ? {} : { from }) }));
+    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, ...(notices.length === 0 ? {} : { checkNotices: notices }), ...(lengthWarning === undefined ? {} : { lengthWarning }), ...(from === undefined ? {} : { from }) }));
     return;
   }
   console.log(`wrote ${path} (${receipt.words} words) on branch ${branch.name}`);
@@ -302,6 +312,7 @@ function emitWriteSuccess(
   }
   for (const hit of hits) console.log(formatHitLine(hit));
   for (const notice of notices) console.error(notice);
+  if (lengthWarning !== undefined) console.error(lengthWarning);
 }
 
 /**
@@ -595,8 +606,10 @@ export async function runWrite(
           lastProgressAt = nowMs;
           stderr.write(`first token after ${seconds(nowMs - startedAt)}s\n`);
         } else if (nowMs - lastProgressAt >= PROGRESS_INTERVAL_MS) {
-          const rate = tokenEvents / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
-          stderr.write(`${tokenEvents} tokens, ${rate.toFixed(1)} tok/s\n`);
+          // Stream chunks are not tokens: count what the text weighs, the way the final count does (AGT-2198).
+          const streamed = Math.max(tokenEvents, estimateTokens(text));
+          const rate = streamed / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
+          stderr.write(`~${streamed} tokens, ${rate.toFixed(1)} tok/s\n`);
           lastProgressAt = nowMs;
         }
       } else {
@@ -697,6 +710,6 @@ export async function runWrite(
     notices = checked.notices;
   }
 
-  emitWriteSuccess(args.json, workRelativePath, receipt, reported, branch, undefined, notices);
+  emitWriteSuccess(args.json, workRelativePath, receipt, reported, branch, undefined, notices, wordTargetNotice(wordCount, packResult.inputs.wordTarget));
   return 0;
 }

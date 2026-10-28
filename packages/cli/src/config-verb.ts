@@ -245,6 +245,13 @@ export function realConfigTestDeps(options: ProvidersOptions = {}): ConfigTestDe
 const PING_PROMPT = "Reply with the single word: ok";
 const PING_TIMEOUT_MS = 20_000;
 
+const BILLING_ERROR = /credit balance|insufficient[_ ](?:quota|funds|credit)|billing|payment required|quota exceeded|\b402\b/i;
+
+/** A provider's error, with billing/credit trouble named plainly (AGT-2198) so it is not read as a bad key or a down server. */
+export function describeProviderError(message: string): string {
+  return BILLING_ERROR.test(message) ? `billing/credit problem: ${message} (add credit or change plan with the provider; the key itself is fine)` : message;
+}
+
 export async function configTest(scope: ConfigScope, deps: ConfigTestDeps): Promise<ConfigResult> {
   let config: PabloConfig;
   try {
@@ -266,7 +273,7 @@ export async function configTest(scope: ConfigScope, deps: ConfigTestDeps): Prom
       }
       results.push({ ...target, ok: true });
     } catch (error) {
-      results.push({ ...target, ok: false, error: (error as Error).message });
+      results.push({ ...target, ok: false, error: describeProviderError((error as Error).message) });
     }
   }
 

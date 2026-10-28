@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { CLAIMS_FILE, parseClaims, researchNoteId } from "../../core/nonfiction";
 import { readResearchNotes } from "../../distill";
-import { bodyParagraphs, curlQuotes } from "../../publish";
+import { bodyParagraphs, curlQuotes, straightenQuotes, workKeepsStraightQuotes } from "../../publish";
 import type { PublishOutcome } from "../types";
 import { CITATION, ESSAY_PATH, parseEssayFile } from "./sections";
 import { ESSAY_PUBLISH_TARGETS } from "./units";
@@ -139,6 +139,6 @@ export function publishEssay(workDir: string, slug: string, title: string, targe
   const where = join(outDir, `${slug}-essay-${target}.md`);
   if (!where.startsWith(outDir + sep)) return refuse(`pablo: publish: marker slug "${slug}" would write outside ${outDir}`);
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(where, compiled.text, "utf8");
+  writeFileSync(where, workKeepsStraightQuotes(workDir) ? straightenQuotes(compiled.text) : compiled.text, "utf8");
   return { ok: true, code: 0, target, where, chapters: parseEssayFile(readFileSync(source, "utf8")).sections.length, words: compiled.words };
 }

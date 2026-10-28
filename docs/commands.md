@@ -256,7 +256,9 @@ is given, and `--json` prints one JSON object.
   no provider, or a work repointing a remote provider is a refusal and nothing is
   written. Other keys in the file are kept.
 - `config test` sends one tiny request per mapped intent (the default route when none
-  is mapped) and prints ok or the error per provider. Exit `1` if any failed.
+  is mapped) and prints ok or the error per provider. Exit `1` if any failed. A
+  billing or credit error (an exhausted balance, a quota, `402`) is labelled
+  `billing/credit problem`, and `doctor` says to add credit rather than check the key.
 
 ---
 
@@ -405,7 +407,10 @@ pablo write --project <slug> [--output <type>] --unit N [flags]
 pablo write --project <slug> --chapter N [flags]
 ```
 
-Drafts one unit of an output on your configured writer model. `--chapter N` is
+Drafts one unit of an output on your configured writer model. A draft more than
+10% off its word target gets a warning on the receipt (stderr; `lengthWarning` in JSON); the
+draft is still written. While it streams, stderr shows `~N tokens`, estimated from
+the text so far, not the number of stream chunks. `--chapter N` is
 short for `--output novel --unit N`. A work with several outputs needs `--output`.
 The `story` output has a single unit, so `write --output story` needs no `--unit`.
 
@@ -881,6 +886,10 @@ pablo publish --project <slug> [--output <type>] --target <target>
 | `narrated` | `script` | `<work>/.pablo/out/<slug>-narrated-script.md`: every reading's script in unit order, frontmatter stripped, under a `## Reading N: <title>` heading each. The audio targets come with the mixer. |
 | `screenplay` | `draft`, `final`, `fountain` | `<work>/.pablo/out/<slug>-screenplay.fountain`: a `Title:` page, then every written scene in order, frontmatter stripped, the Fountain copied line for line. `draft` and `final` also write `<slug>-screenplay.pdf` beside it in standard screenplay format (US Letter, Courier 12, 1.5in left and 1in other margins, indented dialogue, page numbers from page 2); `fountain` writes the Fountain file alone. The PDF is typeset by pablo itself (`packages/cli/src/screenplay-pdf.ts`, no dependency, no pandoc, Courier is a built-in PDF font); `files` lists both. |
 | `radio` | `bundle`, `stream` | `bundle`: `.pablo/out/<slug>-radio-bundle/` with every script, each mixed episode's newest audio and manifest, and `bundle.json`; unmixed episodes are listed in `notes`. `stream`: each mixed episode to `.pablo/out/stream/`. `player` is refused; use `pablo review`. |
+
+Quotes follow the work's rule: when its `STYLE.md` or the vault's `style/prose.md`
+says "straight quotes" or "never curly", `publish` writes straight quotes (even
+over curly ones in the source); with no such rule it curls them, as the table says.
 
 Returns `{ok, output, target, where, chapters, words, files?, notes?}`. Here
 `chapters` counts units, whatever the output calls them.

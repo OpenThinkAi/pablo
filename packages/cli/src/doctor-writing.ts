@@ -100,7 +100,9 @@ export async function runWritingDoctor(deps: WritingDoctorDeps): Promise<Writing
               name: `provider ${id}`,
               status: "fail",
               detail: state.error ?? "no answer",
-              fix: `start the server or set its key, then run \`pablo config test\`; \`pablo config show\` lists where "${id}" points`,
+              fix: (state.error ?? "").startsWith("billing/credit problem")
+                ? `add credit with the provider "${id}" points at, then run \`pablo config test\``
+                : `start the server or set its key, then run \`pablo config test\`; \`pablo config show\` lists where "${id}" points`,
             },
       );
     }

@@ -12,7 +12,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { bodyParagraphs, curlQuotes, stripFrontmatter } from "../../publish";
+import { bodyParagraphs, curlQuotes, straightenQuotes, stripFrontmatter, workKeepsStraightQuotes } from "../../publish";
 import type { PublishOutcome } from "../types";
 import { STORY_DIR, STORY_FILE, STORY_PUBLISH_TARGETS } from "./units";
 
@@ -42,7 +42,8 @@ export function publishStory(workDir: string, slug: string, title: string, targe
   if (!existsSync(source)) return refuse(`pablo: publish: no story to compile (${STORY_DIR}/${STORY_FILE})`, [source]);
 
   const text = readFileSync(source, "utf8");
-  const compiled = target === "review" ? compileStoryReview(title, text) : compileStory(title, text);
+  const built = target === "review" ? compileStoryReview(title, text) : compileStory(title, text);
+  const compiled = workKeepsStraightQuotes(workDir) ? straightenQuotes(built) : built;
   const outDir = join(workDir, ".pablo", "out");
   const where = join(outDir, `${slug}-story-${target}.md`);
   if (!where.startsWith(outDir + sep)) return refuse(`pablo: publish: marker slug "${slug}" would write outside ${outDir}`);
