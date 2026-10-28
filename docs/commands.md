@@ -686,9 +686,11 @@ refusal) for two things:
     labels, the `CAST:` line and double quotation marks aside) differ from its source
     unit's prose, or the words the reading lost
 
-With `--output`, it also runs the core check (`core[]`). That flags mentions dated
-after the unit's year, and names the bible, `facts.md` and the output's continuity
-don't know. On a work with radio scripts it adds a `radio` block: directions outside
+With `--output` (or when the work has one output), it also runs the core check
+(`core[]`), the same one `write` runs after a draft. That flags mentions dated
+after the unit's year, and names the bible, `facts.md`, `facts/period.md`, the work's
+title and the output's continuity (on a nonfiction work, also `research/`) don't know.
+Headings and a word right after an opening quote are not names. On a work with radio scripts it adds a `radio` block: directions outside
 the vocabulary, and roles with no voice. A screenplay's scenes (`*.fountain`) also
 get the Fountain lint in `hits[]`: `fountain-no-heading` (the scene does not open
 with a scene heading), `fountain-heading-spacing` (a heading without a blank line
