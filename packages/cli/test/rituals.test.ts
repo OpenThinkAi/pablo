@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Ritual, RitualOptions } from "../src/novel/rituals";
-import { runAfterMerge } from "../src/novel/rituals";
+import { runAfterMerge, thinkOptOut } from "../src/novel/rituals";
 
 /**
  * `runAfterMerge` (AGT-1231; the merge-path steps since AGT-1536) exercised directly against a throwaway copy of the
@@ -282,4 +282,56 @@ test("calling runAfterMerge twice on the same day appends to the note file inste
   expect(text).toContain("read 1300 tokens in 0.5s, wrote 50 in 1.5s");
 
   rmSync(project, { recursive: true, force: true });
+});
+
+/** A fake `think` that leaves a file behind when it runs, so a test can tell it ran. */
+function recordingThink(): { dir: string; ran: string } {
+  const dir = mkdtempSync(join(tmpdir(), "pablo-rituals-fake-think-"));
+  const ran = join(dir, "ran");
+  const bin = join(dir, "think");
+  writeFileSync(bin, `#!/bin/sh\ntouch "${ran}"\nexit 0\n`, "utf8");
+  chmodSync(bin, 0o755);
+  return { dir, ran };
+}
+
+test("AGT-2190: PABLO_NO_THINK=1 skips the think ritual and never runs think", async () => {
+  const project = tempProject();
+  gitInitBase(project);
+  const chapterPath = writeChapterFile(project, 2, "black-ice");
+  const fake = recordingThink();
+
+  const rituals = await runAfterMerge(project, 2, chapterPath, baseOpts({ env: { PATH: fake.dir, PABLO_NO_THINK: "1" } }));
+  const think = rituals.find((r) => r.name === "think");
+
+  expect(think?.status).toBe("skipped");
+  expect(think?.detail).toBe("PABLO_NO_THINK is set");
+  expect(existsSync(fake.ran)).toBe(false);
+
+  rmSync(fake.dir, { recursive: true, force: true });
+  rmSync(project, { recursive: true, force: true });
+}, 20_000);
+
+test("AGT-2190: pablo.json \"think\": false skips the think ritual and never runs think", async () => {
+  const project = tempProject();
+  gitInitBase(project);
+  const marker = JSON.parse(readFileSync(join(project, "pablo.json"), "utf8")) as Record<string, unknown>;
+  writeFileSync(join(project, "pablo.json"), JSON.stringify({ ...marker, think: false }, null, 2));
+  const chapterPath = writeChapterFile(project, 2, "black-ice");
+  const fake = recordingThink();
+
+  const rituals = await runAfterMerge(project, 2, chapterPath, baseOpts({ env: { PATH: fake.dir } }));
+  const think = rituals.find((r) => r.name === "think");
+
+  expect(think?.status).toBe("skipped");
+  expect(think?.detail).toBe('pablo.json sets "think": false');
+  expect(existsSync(fake.ran)).toBe(false);
+
+  rmSync(fake.dir, { recursive: true, force: true });
+  rmSync(project, { recursive: true, force: true });
+}, 20_000);
+
+test("AGT-2190: thinkOptOut is off by default, and PABLO_NO_THINK=0 does not opt out", () => {
+  expect(thinkOptOut({}, undefined)).toBeNull();
+  expect(thinkOptOut({ PABLO_NO_THINK: "0" }, undefined)).toBeNull();
+  expect(thinkOptOut({ PABLO_NO_THINK: "true" }, undefined)).not.toBeNull();
 });

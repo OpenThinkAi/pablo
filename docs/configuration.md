@@ -165,6 +165,13 @@ branch, so it is trusted less than this file:
 
 Routing `draft` to a hosted model from a work costs per chapter, as it does here.
 
+### Per-work `think`
+
+`pablo merge` ends with a `think sync` when the `think` CLI is installed. A scratch or
+test work sets `"think": false` in its `pablo.json` to skip it (the step is reported
+as `skipped`); `PABLO_NO_THINK=1` in the environment does the same for every work.
+`think` is `true` when absent, and anything but `true` or `false` is refused.
+
 ### Per-work `realNames`
 
 Distilled period facts are what the drafting model sees of a work's research. By

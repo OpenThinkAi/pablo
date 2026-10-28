@@ -330,6 +330,26 @@ export function runGit(workDir: string, candidatePaths: readonly string[], messa
 }
 
 /**
+ * Why the think ritual is switched off, or `null` when it is on (AGT-2190, D-22):
+ * `PABLO_NO_THINK` set to anything but `""`/`0`/`false`, or `"think": false` in the
+ * work's `pablo.json`. Scratch and test vaults use this so they never write to the
+ * author's real cortex.
+ */
+export function thinkOptOut(env: Record<string, string | undefined>, workDir: string | undefined): string | null {
+  const flag = env["PABLO_NO_THINK"];
+  if (flag !== undefined && !["", "0", "false"].includes(flag.trim().toLowerCase())) return "PABLO_NO_THINK is set";
+  if (workDir !== undefined) {
+    try {
+      const data: unknown = JSON.parse(readFileSync(join(workDir, "pablo.json"), "utf8"));
+      if (typeof data === "object" && data !== null && (data as Record<string, unknown>)["think"] === false) return 'pablo.json sets "think": false';
+    } catch {
+      // No readable marker: the setting is off.
+    }
+  }
+  return null;
+}
+
+/**
  * `think -C writing sync "<slug>: drafted chapter N (<words> words)" --topic repo:<slug>`,
  * resolved off `env.PATH` and raced against `timeoutMs` — mirrors
  * `resume.ts`'s `runBrief`. A missing `think` is `"skipped"`; a timeout
@@ -355,7 +375,11 @@ export async function runThink(
   noun = "chapter",
   /** What happened to it, in the sync message (`drafted`; a revision's is `revised`). */
   verb = "drafted",
+  /** The work's directory: its `pablo.json` `think: false` skips the sync (AGT-2190). */
+  workDir?: string,
 ): Promise<Ritual> {
+  const optOut = thinkOptOut(env, workDir);
+  if (optOut !== null) return { name: "think", status: "skipped", detail: optOut };
   let thinkPath = Bun.which("think", { PATH: env["PATH"] });
   if (thinkPath === null && allowNvmFallback && existsSync(NVM_THINK_FALLBACK)) {
     thinkPath = NVM_THINK_FALLBACK;
@@ -463,7 +487,7 @@ export async function runAfterMerge(workDir: string, chapter: number, chapterPat
   if (continuity.status === "ran") gitPaths.push(continuityFile(workDir, opts.output ?? "novel"));
   const git = attempt("git", () => runGit(workDir, gitPaths, `${opts.slug}: draft chapter ${chapter}`));
 
-  const think = await attemptAsync("think", () => runThink(chapter, opts.words, opts.slug, env, thinkTimeoutMs, allowNvmFallback));
+  const think = await attemptAsync("think", () => runThink(chapter, opts.words, opts.slug, env, thinkTimeoutMs, allowNvmFallback, undefined, undefined, workDir));
 
   return [outline, note, readme, continuity, git, think];
 }

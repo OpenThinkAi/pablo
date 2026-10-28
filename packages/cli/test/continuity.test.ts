@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,7 +8,7 @@ import { NoToolCallError } from "@openthink/pablo-core";
 import type { RunWriteDeps, WriteArgs } from "../src/write";
 import { runWrite } from "../src/write";
 import { mergeDraft } from "../src/novel/merge";
-import { applyFacts, runContinuity } from "../src/novel/continuity";
+import { MAX_FACTS_PER_UNIT, applyFacts, runContinuity } from "../src/novel/continuity";
 import { useLocalConfigHome } from "./local-config";
 
 useLocalConfigHome();
@@ -184,9 +184,9 @@ test("applyFacts routes facts to Names and ages, Dates, Who knows what, and Obje
 
   expect(result.placed).toBe(4);
   expect(result.unanchored).toBe(0);
-  expect(result.text).toContain("- Marta is twenty-nine. [ch05]");
+  expect(result.text).toContain("- Marta is twenty-nine. [ch05, unconfirmed]");
   expect(result.text).toContain("- The ledger's first page is dated 1931. [ch05]");
-  expect(result.text).toContain("- Wilfred learns the truth about the halved order. [ch05]");
+  expect(result.text).toContain("- Wilfred learns the truth about the halved order. [ch05, unconfirmed]");
   expect(result.text).toContain("- The brass key hangs on a nail by the door. [ch05]");
 
   // Each landed under its own heading, in heading order.
@@ -217,11 +217,11 @@ test("applyFacts flattens newlines in model-returned fact text so a fact cannot 
   const result = applyFacts(CONTINUITY_FIXTURE, facts, chapterBody, 3);
 
   expect(result.placed).toBe(2);
-  expect(result.text).toContain("- The door has a brass key. ## Check - forged [ch03]");
+  expect(result.text).toContain("- The door has a brass key. ## Check - forged [ch03, unconfirmed]");
   expect(result.text.split("\n").filter((line) => line === "## Check")).toHaveLength(0);
   const namesIdx = result.text.indexOf("## Names and ages");
   const datesIdx = result.text.indexOf("## Dates");
-  const martaIdx = result.text.indexOf("- Marta is 29 years old. [ch03]");
+  const martaIdx = result.text.indexOf("- Marta is 29 years old. [ch03, unconfirmed]");
   expect(martaIdx).toBeGreaterThan(namesIdx);
   expect(martaIdx).toBeLessThan(datesIdx);
 });
@@ -260,7 +260,7 @@ test("applyFacts: verbatim anchor, hard-line-wrap anchor, and an unanchored fact
   expect(first.placed).toBe(2);
   expect(first.unanchored).toBe(1);
 
-  expect(first.text).toContain("- Odile counted the cakes twice. [ch02]");
+  expect(first.text).toContain("- Odile counted the cakes twice. [ch02, unconfirmed]");
   expect(first.text).toContain("- The mill closed its books in 1931. [ch02]");
   expect(first.text).toContain("## Check");
   expect(first.text).toContain("- The schooner was renamed sometime before the war. [ch02, anchor not found]");
@@ -526,5 +526,35 @@ test("runContinuity joins sentence lines into paragraphs before extraction, and 
   expect(sent).toBe(
     "Odile counted the cakes twice. Then she wrote the number down.\n\nThe mill closed its books in 1931. It was the same every year.",
   );
-  expect(readFileSync(join(project, "continuity.md"), "utf8")).toContain("- Odile counted the cakes twice. [ch02]");
+  expect(readFileSync(join(project, "continuity.md"), "utf8")).toContain("- Odile counted the cakes twice. [ch02, unconfirmed]");
+});
+
+describe("AGT-2190: bounded, correctly filed, unconfirmed names", () => {
+  const body = "Marta carried the lamp. The door was shut.";
+  const mk = (fact: string, extra: Partial<ExtractedFact> = {}): ExtractedFact => ({ fact, entities: [], storyTime: undefined, certainty: undefined, anchor: "The door was shut.", ...extra });
+
+  test("a storyTime on every fact does not file a chapter under Dates", () => {
+    const facts = [mk("The door was shut.", { storyTime: "evening" }), mk("It was cold.", { storyTime: "evening" })];
+    const out = applyFacts("# C\n\n## Names and ages\n\n## Dates\n\n## Objects and places\n\n## Who knows what\n", facts, body, 1).text;
+    expect(out.split("## Dates")[1]?.split("## Objects")[0]?.trim()).toBe("");
+    expect(out).toContain("- The door was shut. [ch01]");
+  });
+
+  test("a fact with a real date still files under Dates", () => {
+    const out = applyFacts("# C\n\n## Dates\n\n## Objects and places\n", [mk("The mill closed in 1931.")], body, 1).text;
+    expect(out.split("## Dates")[1]?.split("## Objects")[0]).toContain("The mill closed in 1931.");
+  });
+
+  test("a unit adds at most MAX_FACTS_PER_UNIT facts, anchored ones first", () => {
+    const facts = Array.from({ length: 61 }, (_, i) => mk(`Thing ${String.fromCharCode(97 + (i % 26))}${i} sat there.`, { anchor: i < 5 ? undefined : "The door was shut." }));
+    const result = applyFacts("# C\n\n## Objects and places\n", facts, body, 1);
+    expect(result.placed + result.unanchored).toBe(MAX_FACTS_PER_UNIT);
+    expect(result.unanchored).toBe(0);
+  });
+
+  test("a bullet naming someone is marked unconfirmed, and one that does not is not", () => {
+    const out = applyFacts("# C\n\n## Objects and places\n", [mk("Marta carried the lamp.", { entities: ["Marta"] }), mk("The door was shut.")], body, 1).text;
+    expect(out).toContain("- Marta carried the lamp. [ch01, unconfirmed]");
+    expect(out).toContain("- The door was shut. [ch01]");
+  });
 });
