@@ -619,7 +619,7 @@ Outside a work, or without a terminal, bare `pablo` prints the help.
 ### check
 
 ```
-pablo check --project <slug> [--file F] [--output <type> [--unit N]]
+pablo check --project <slug> [--file F] [--output <type> [--unit N]] [--branch <b>] [--strict]
 pablo check --project <slug> --across
 ```
 
@@ -693,6 +693,19 @@ contradicts. Each `fact-accuracy` hit in `hits[]` quotes the draft sentence
 all three in `detail`. A unit with no relevant facts is not sent. `--unit N` checks only
 unit N of the output, on any track (every check above narrows to it); a unit it does not
 have, or `--unit` with `--file`, is a refusal, exit `2`.
+
+A unit still on its draft branch is checked there: when `main` lacks unit N, `--unit N`
+reads the newest draft branch of that unit that has commits `main` does not (a re-draft
+`-v2` over `-v1`), so lint, core and fact checks run before the draft is accepted.
+`--branch <b>` names the branch (any change branch; with `--unit` it narrows to that unit)
+and is refused with `--file`. The prose form notes `checked the pending draft on <b>` on
+stderr, and the JSON has `branch`. A section of the essay is found in its shared
+`essay.md` by its text, so every section's draft is checked, not only the first. With no
+drafted units, `check` prints `nothing to check: no drafted <units> in <dir>/ (<output>
+output)` (JSON: `notice`) instead of `no hits`.
+
+`--strict` makes the run exit `1` when any hit is reported (`hits[]` or `core[]`); without
+it a hit never changes the exit code. A refusal is still `2`.
 
 The summary is `factAccuracy: {checked, notice?}`: how many units were sent, and why
 the run stopped short (no model configured, or the model failed). A notice never fails

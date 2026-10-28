@@ -27,8 +27,9 @@
  * AGT-1237's `write` to call directly and put the hits in its receipt.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { branchExists, ensureWorktree, repoRoot, waitingBranches } from "./branch";
 import type { TextSource } from "@openthink/pablo-core";
 import { joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
@@ -74,6 +75,10 @@ export interface CheckSuccess {
   readonly core?: readonly Hit[];
   /** The absolute paths scanned, for the model-backed checks that run after (`anachronism`, AGT-2113; `fact-accuracy`, AGT-2112). */
   readonly scanned: readonly string[];
+  /** The output whose units a whole-work scan read (AGT-2188: "nothing to check" names it); absent for a `--file` scan. */
+  readonly scannedOutput?: OutputDefinition;
+  /** The pending draft branch these units were read from (AGT-2188), when the scan ran on a branch rather than on main. */
+  readonly branch?: string;
 }
 
 /** A resolution refusal before any scanning happens — the one case `checkWork`/`runCheck` exit non-zero (a `--file` outside the work). */
@@ -84,6 +89,8 @@ export interface CheckRefusal {
   readonly tried: readonly string[];
   /** `--output` was needed (a work with several outputs) or names one the work lacks (AGT-1669). */
   readonly missing?: readonly string[];
+  /** `--unit N` named a unit this output's files on the scanned tree do not have (AGT-2188: it may be a pending draft). */
+  readonly unitMissing?: { readonly output: OutputDefinition; readonly unit: number };
 }
 
 export type CheckOutcome = CheckSuccess | CheckRefusal;
@@ -451,9 +458,14 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     // `--unit N` (AGT-2112): just that unit of the output.
     if (unit !== undefined && scanned !== undefined) {
       const def = scanned;
-      filePaths = filePaths.filter((path) => def.unitOfPath(relative(workDir, path).split("\\").join("/")) === unit);
+      // A section of a shared file (the essay, AGT-2188) is in the file when the file has its text, whatever number the file reads as.
+      const shared = def.shared;
+      filePaths =
+        shared !== undefined
+          ? filePaths.filter((path) => def.unitOfPath(relative(workDir, path).split("\\").join("/")) !== undefined && shared.has(workDir, read(path), unit))
+          : filePaths.filter((path) => def.unitOfPath(relative(workDir, path).split("\\").join("/")) === unit);
       if (filePaths.length === 0) {
-        return { ok: false, code: 2, message: `pablo: check --unit ${unit}: ${def.id} has no unit ${unit} under ${def.artifactDir}/`, tried: [chaptersDir] };
+        return { ok: false, code: 2, message: `pablo: check --unit ${unit}: ${def.id} has no unit ${unit} under ${def.artifactDir}/`, tried: [chaptersDir], unitMissing: { output: def, unit } };
       }
     }
   }
@@ -478,7 +490,78 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
   }
 
   // `--output <type>` adds the core check (AGT-1671): the units against the bible, the timeline and facts.md.
-  return { ok: true, code: 0, hits, unprovenanced, scanned: filePaths, ...(named !== undefined ? { core: coreCheck(workDir, named, filePaths) } : {}) };
+  return { ok: true, code: 0, hits, unprovenanced, scanned: filePaths, ...(file === undefined && scanned !== undefined ? { scannedOutput: scanned } : {}), ...(named !== undefined ? { core: coreCheck(workDir, named, filePaths) } : {}) };
+}
+
+/** `draft/essay-03-v2` -> 2, `draft/essay-03` -> 1: a re-draft's version, so the newest draft of a unit sorts last. */
+function draftVersion(branch: string): number {
+  const m = /-v(\d+)$/.exec(branch);
+  return m ? Number(m[1]) : 1;
+}
+
+/** The scan a pending draft's branch gets (AGT-2188): where it is checked out, and which branch it is. */
+export interface PendingDraft {
+  readonly ok: true;
+  readonly branch: string;
+  /** The work as the branch has it: the branch's worktree plus the work's path inside the repo. */
+  readonly workDir: string;
+}
+
+/**
+ * The checkout a unit's pending draft can be checked in (AGT-2188): `branch`, else the newest draft branch of
+ * `unit` that has commits `main` lacks. `check --unit N` falls back to it when the unit is not on `main` yet, so a
+ * draft is linted and fact-checked before it is accepted. The branch's worktree is added when it has none. A failure
+ * is a message, never a throw.
+ */
+export function pendingDraft(workDir: string, def: OutputDefinition | undefined, unit: number | undefined, branch: string | undefined, env: NodeJS.ProcessEnv = process.env): PendingDraft | { ok: false; message: string } {
+  const repo = repoRoot(workDir);
+  const marker = readMarker(workDir);
+  if (repo === undefined || !marker.ok) return { ok: false, message: `pablo: check: ${workDir} is not a work in a git repository, so it has no pending drafts` };
+  let name = branch;
+  if (name !== undefined) {
+    if (!branchExists(repo, name)) return { ok: false, message: `pablo: check --branch ${name}: no such branch` };
+  } else {
+    if (def === undefined || unit === undefined) return { ok: false, message: "pablo: check: a pending draft needs a unit" };
+    const waiting = waitingBranches(repo);
+    if (!waiting.ok) return { ok: false, message: waiting.notice };
+    const drafts = waiting.branches.filter((b) => def.unitOfBranch(b) === unit).sort((a, b) => draftVersion(a) - draftVersion(b));
+    name = drafts[drafts.length - 1];
+    if (name === undefined) return { ok: false, message: `pablo: check --unit ${unit}: ${def.id} has no unit ${unit} under ${def.artifactDir}/ and no pending draft of it` };
+  }
+  const tree = ensureWorktree(repo, marker.marker.slug, name, env);
+  if (!tree.ok) return { ok: false, message: tree.notice };
+  return { ok: true, branch: name, workDir: join(tree.path as string, relative(realpathSync(repo), realpathSync(workDir))) };
+}
+
+/**
+ * `checkWork`, then, for `--unit N` that `main` lacks (or any `--branch <b>`), the same scan on that pending draft's
+ * branch (AGT-2188). `workDir` in the result is the tree the scan read, which the model-backed checks must use too.
+ */
+export function checkWorkOrPending(
+  vaultRoot: string,
+  workDir: string,
+  file: string | undefined,
+  output: string | undefined,
+  unit: number | undefined,
+  branch?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { outcome: CheckOutcome; workDir: string } {
+  if (branch !== undefined && file !== undefined) {
+    return { outcome: { ok: false, code: 2, message: "pablo: check --branch checks a draft branch's units; it cannot be combined with --file", tried: [] }, workDir };
+  }
+  if (branch !== undefined) {
+    const pending = pendingDraft(workDir, undefined, undefined, branch, env);
+    if (!pending.ok) return { outcome: { ok: false, code: 2, message: pending.message, tried: [] }, workDir };
+    const outcome = checkWork(vaultRoot, pending.workDir, undefined, output, unit);
+    return { outcome: outcome.ok ? { ...outcome, branch: pending.branch } : outcome, workDir: pending.workDir };
+  }
+  const outcome = checkWork(vaultRoot, workDir, file, output, unit);
+  if (outcome.ok || outcome.unitMissing === undefined) return { outcome, workDir };
+  const pending = pendingDraft(workDir, outcome.unitMissing.output, outcome.unitMissing.unit, undefined, env);
+  if (!pending.ok) return { outcome, workDir };
+  const onBranch = checkWork(vaultRoot, pending.workDir, undefined, output, unit);
+  if (!onBranch.ok) return { outcome, workDir };
+  return { outcome: { ...onBranch, branch: pending.branch }, workDir: pending.workDir };
 }
 
 /**
@@ -593,6 +676,15 @@ export interface CheckArgs {
   readonly output?: string | undefined;
   /** `check --unit N` (AGT-2112): only unit N of the output; validated here. */
   readonly unit?: string | undefined;
+  /** `check --branch <b>` (AGT-2188): check the units on that pending draft branch instead of `main`. */
+  readonly branch?: string | undefined;
+  /** `check --strict` (AGT-2188): exit 1 when any hit is reported. */
+  readonly strict?: boolean | undefined;
+}
+
+/** The line `check` prints when there is nothing drafted to scan (AGT-2188). */
+export function nothingToCheck(def: OutputDefinition): string {
+  return `nothing to check: no drafted ${def.plural} in ${def.artifactDir}/ (${def.id} output)`;
 }
 
 /** Whether a check also reads radio scripts: not for a single `--file`, nor when `--output` names another output. */
@@ -624,7 +716,10 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
     else console.error(badUnit);
     return 2;
   }
-  const outcome = checkWork(vaultRoot, workDir, args.file, args.output, args.unit === undefined ? undefined : Number(args.unit));
+  const picked = checkWorkOrPending(vaultRoot, workDir, args.file, args.output, args.unit === undefined ? undefined : Number(args.unit), args.branch);
+  const outcome = picked.outcome;
+  // A pending draft is read from its branch's worktree (AGT-2188); the model-backed checks read it there too.
+  const scanDir = picked.workDir;
 
   if (!outcome.ok) {
     if (args.json) {
@@ -637,12 +732,14 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   }
 
   // A historical-fiction work also gets the model-backed checks: anachronism (AGT-2113) and fact accuracy (AGT-2112).
-  const model = await runModelChecks(outcome, workDir, args.output, { env: process.env, progress: (line) => process.stderr.write(`${line}\n`), ...(factAsk ? { factAsk } : {}) });
+  const model = await runModelChecks(outcome, scanDir, args.output, { env: process.env, progress: (line) => process.stderr.write(`${line}\n`), ...(factAsk ? { factAsk } : {}) });
   const hits = model.hits;
   if (!args.json) for (const notice of model.notices) console.error(notice);
+  if (!args.json && outcome.branch !== undefined) console.error(`pablo: checked the pending draft on ${outcome.branch}`);
+  const nothing = outcome.scanned.length === 0 && outcome.scannedOutput !== undefined ? nothingToCheck(outcome.scannedOutput) : undefined;
 
   const radio =
-    radioScriptsChecked(args.file, args.output) ? radioCheck({ env: process.env, stderr: process.stderr }, casting ?? realCastingDeps(process.env), workDir) : undefined;
+    radioScriptsChecked(args.file, args.output) ? radioCheck({ env: process.env, stderr: process.stderr }, casting ?? realCastingDeps(process.env), scanDir) : undefined;
   if (radio !== undefined && radio.exitCode !== 0) {
     const failure = radio.body as { message?: string };
     if (args.json) console.log(JSON.stringify(radio.body));
@@ -654,9 +751,9 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   const radioLines = hasRadio ? radioCheckLines(radioBody) : [];
 
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(model.anachronism !== undefined ? { anachronism: model.anachronism } : {}), ...(model.factAccuracy !== undefined ? { factAccuracy: model.factAccuracy } : {}) }));
+    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(model.anachronism !== undefined ? { anachronism: model.anachronism } : {}), ...(model.factAccuracy !== undefined ? { factAccuracy: model.factAccuracy } : {}), ...(outcome.branch !== undefined ? { branch: outcome.branch } : {}), ...(nothing !== undefined && !hasRadio ? { notice: nothing } : {}) }));
   } else if (hits.length === 0 && outcome.unprovenanced.length === 0 && (outcome.core ?? []).length === 0 && radioLines.length === 0) {
-    console.log("no hits");
+    console.log(nothing ?? "no hits");
   } else {
     for (const hit of hits) {
       const detail = hit.detail !== undefined ? ` (${hit.detail})` : "";
@@ -671,5 +768,10 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
     for (const line of radioLines) console.log(line);
   }
 
-  return outcome.code;
+  return args.strict === true && strictFails(hits, outcome.core) ? 1 : outcome.code;
+}
+
+/** `check --strict` (AGT-2188): any reported hit (the scan's, the model checks' or the core check's) fails the run. */
+export function strictFails(hits: readonly Hit[], core: readonly Hit[] | undefined): boolean {
+  return hits.length > 0 || (core ?? []).length > 0;
 }

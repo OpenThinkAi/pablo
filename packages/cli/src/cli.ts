@@ -1447,7 +1447,8 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit(refusalResult(vaultResult), args.json);
       return vaultResult.code;
     }
-    return await runCheck(args, vaultResult.path, projectPath);
+    const branch = typeof args.values["branch"] === "string" ? args.values["branch"] : undefined;
+    return await runCheck({ ...args, branch, strict: args.values["strict"] === true }, vaultResult.path, projectPath);
   }
 
   if (args.verb === "migrate") {

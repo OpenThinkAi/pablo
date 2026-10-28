@@ -64,7 +64,7 @@ import { readFileSync } from "node:fs";
 import { CHECK_INTENT, createPlanner, loadConfig, timelineAt } from "@openthink/pablo-core";
 import type { Adapter } from "@openthink/pablo-core";
 import { join, resolve, sep } from "node:path";
-import { checkWork, radioScriptsChecked, runModelChecks } from "./check";
+import { checkWorkOrPending, nothingToCheck, radioScriptsChecked, runModelChecks, strictFails } from "./check";
 import { checkAcross, promoteFinding } from "./across";
 import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import type { Ask } from "./critique";
@@ -690,7 +690,9 @@ const CHECK_ARGS = z.object({
     .optional()
     .describe(`Work-relative or absolute path to scan; omit to scan every unit of the output (the novel's ${OUTPUTS.novel.artifactDir}/*.md).`),
   output: outputField.optional(),
-  unit: z.number().int().positive().optional().describe("With `output`: only this unit of the output."),
+  unit: z.number().int().positive().optional().describe("With `output`: only this unit of the output. A unit not on main yet is checked on its pending draft branch."),
+  branch: z.string().optional().describe('Check the units on this draft branch (e.g. "draft/ch03") instead of main.'),
+  strict: z.boolean().optional().default(false).describe("Exit 1 when any hit is reported."),
   across: z
     .boolean()
     .optional()
@@ -726,7 +728,10 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
     if (!bound.ok) return { body: refusalBody(bound), exitCode: bound.code };
   }
 
-  const outcome = checkWork(resolved.vaultRoot, resolved.projectPath, args.file, args.output, args.unit);
+  const picked = checkWorkOrPending(resolved.vaultRoot, resolved.projectPath, args.file, args.output, args.unit, args.branch, ctx.env);
+  const outcome = picked.outcome;
+  // A pending draft is read from its branch's worktree (AGT-2188).
+  const scanDir = picked.workDir;
   if (!outcome.ok) {
     return {
       body: { ok: false, code: outcome.code, message: outcome.message, tried: outcome.tried, ...(outcome.missing ? { missing: outcome.missing } : {}) },
@@ -735,17 +740,18 @@ async function runCheckVerb(args: z.infer<typeof CHECK_ARGS>, ctx: VerbContext):
   }
   // A historical-fiction work also gets the model-backed checks, on the `check` intent: anachronism (AGT-2113, cached
   // verdicts first) and, with `output`, fact accuracy against facts/period.md (AGT-2112).
-  const model = await runModelChecks(outcome, resolved.projectPath, args.output, { env: ctx.env, progress: (line) => ctx.stderr.write(`${line}\n`) });
-  const body: Record<string, unknown> = { ok: true, hits: model.hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(model.factAccuracy ? { factAccuracy: model.factAccuracy } : {}) };
+  const model = await runModelChecks(outcome, scanDir, args.output, { env: ctx.env, progress: (line) => ctx.stderr.write(`${line}\n`) });
+  const body: Record<string, unknown> = { ok: true, hits: model.hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(model.factAccuracy ? { factAccuracy: model.factAccuracy } : {}), ...(outcome.branch !== undefined ? { branch: outcome.branch } : {}) };
+  if (outcome.scanned.length === 0 && outcome.scannedOutput !== undefined) body["notice"] = nothingToCheck(outcome.scannedOutput);
   // A radio work also gets its scripts read: unknown directions and unbound roles (AGT-1680).
-  const radio = radioScriptsChecked(args.file, args.output) ? radioCheck({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.projectPath) : undefined;
+  const radio = radioScriptsChecked(args.file, args.output) ? radioCheck({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), scanDir) : undefined;
   if (radio !== undefined) {
     if (radio.exitCode !== 0) return radio;
     const { ok: _ok, ...rest } = radio.body as Record<string, unknown>;
     body["radio"] = rest;
   }
   if (model.anachronism !== undefined) body["anachronism"] = model.anachronism;
-  return { body, exitCode: 0 };
+  return { body, exitCode: args.strict && strictFails(model.hits, outcome.core) ? 1 : 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -2091,7 +2097,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "check",
     description:
-      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. With `output` it adds the core check under `core`: story-time (a mention dated after the unit's year) and names the bible, facts.md and the output's own ledger do not know. With `across` it instead compares every output's continuity ledger and reports contradictions between tellings, each with a promote action. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`. On a historical-fiction work it also reports `anachronism` hits (a word out of the period in bible/period.md, with why and the period it belongs to), verdicts cached in facts/lexicon.json. With `output` on a historical-fiction work it also runs fact-accuracy: each draft sentence a distilled period fact in facts/period.md contradicts is a `fact-accuracy` hit quoting the sentence, the fact and its source note (summary under `factAccuracy`). `unit` narrows it to one unit of the output.",
+      "Scan a work's chapters for mechanical tells (em-dashes, curly quotes, flagged phrases) and provenance gaps. With `output` it adds the core check under `core`: story-time (a mention dated after the unit's year) and names the bible, facts.md and the output's own ledger do not know. With `across` it instead compares every output's continuity ledger and reports contradictions between tellings, each with a promote action. On a work with radio scripts it also reports directions outside the vocabulary (with line numbers) and roles with no voice, under `radio`. On a historical-fiction work it also reports `anachronism` hits (a word out of the period in bible/period.md, with why and the period it belongs to), verdicts cached in facts/lexicon.json. With `output` on a historical-fiction work it also runs fact-accuracy: each draft sentence a distilled period fact in facts/period.md contradicts is a `fact-accuracy` hit quoting the sentence, the fact and its source note (summary under `factAccuracy`). `unit` narrows it to one unit of the output; a unit not on main yet is checked on its pending draft branch (or name one with `branch`). With nothing drafted it says so (`notice`). `strict` exits 1 when any hit is reported.",
     args: CHECK_ARGS,
     run: runCheckVerb,
   },
