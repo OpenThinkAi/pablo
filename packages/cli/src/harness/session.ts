@@ -58,6 +58,8 @@ export interface HarnessSpec {
   readonly ask?: AskAuthor;
   /** Tools built for this session (plan-branch tools), offered after `tools`. */
   readonly sessionTools?: readonly McpToolSpec[];
+  /** Where each turn's receipt is appended, and the intent it names (AGT-2191). */
+  readonly receipts?: LoopSpec["receipts"];
 }
 
 /** The tools a session offers: `tools` (or every `pablo mcp` tool), then the session's own. */
@@ -78,6 +80,7 @@ export function loopSpec(spec: HarnessSpec): LoopSpec {
     local: spec.provider.local,
     credential: spec.provider.credential,
     forcedToolChoice: spec.provider.forcedToolChoice,
+    ...(spec.receipts === undefined ? {} : { receipts: spec.receipts }),
   };
 }
 

@@ -6,7 +6,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -189,6 +189,17 @@ test("pablo agent runs one session on the loop and prints the transcript", async
   expect(io.out()).toContain('  ← {"core":{"premise":true');
   expect(io.out()).toContain("pablo: The bible is in; acts come next.");
   expect(io.out()).toContain("— done: 2 turn(s)");
+});
+
+test("AGT-2191: pablo agent keeps a receipt per turn in the work's log, naming the agent intent and the tool it called", async () => {
+  const io = capture();
+  const code = await runAgent({ project: "ice-house", message: "Where are we?", json: true }, io.ctx, { provider: adapterProvider(statusModel()), readConfig: noConfig });
+  expect(code).toBe(0);
+  const lines = readFileSync(join(vault, "novels", "ice-house", ".pablo", "receipts.jsonl"), "utf8").trim().split("\n");
+  // Earlier sessions in this file share the work's log; this run's two turns are its last two lines.
+  const receipts = lines.slice(-2).map((l) => JSON.parse(l) as Record<string, unknown>);
+  expect(receipts[0]).toMatchObject({ intent: "agent", provider: "scripted", model: "claude-test-1", cost_usd: 0, tool_calls: ["status"] });
+  expect(receipts[1]!["tool_calls"]).toBeUndefined();
 });
 
 test("--json prints one object with the provider, entries and result", async () => {

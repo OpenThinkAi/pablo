@@ -22,7 +22,7 @@
  * the provider failing outside the loop).
  */
 
-import { loadConfig } from "@openthink/pablo-core";
+import { fileReceiptSink, loadConfig } from "@openthink/pablo-core";
 import type { KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { readMarker } from "../marker";
 import { findVault, resolveProject } from "../project";
@@ -32,7 +32,7 @@ import { lineReader, stdinAskAuthor } from "./ask-author";
 import { planTools } from "./plan-tools";
 import { appendMessages, chooseSession } from "./sessions";
 import { loadPromptWork } from "./prompt";
-import { harnessProvider, LOCAL_FALLBACK_NOTICE, providerHint, shouldWarnLocal } from "./provider";
+import { AGENT_INTENT, harnessProvider, LOCAL_FALLBACK_NOTICE, providerHint, shouldWarnLocal } from "./provider";
 import type { HarnessProvider } from "./provider";
 import { loopQuery, runHarness } from "./session";
 import { runTagFacts } from "./tag-facts";
@@ -128,6 +128,8 @@ export async function runAgent(args: AgentArgs, ctx: AgentContext, deps: AgentDe
     ...(ctx.stdin === undefined ? {} : { ask: stdinAskAuthor(lineReader(ctx.stdin), args.json ? ctx.stderr : ctx.stdout) }),
     // One plan branch per session; it exists only once a planning tool writes.
     sessionTools: planTools(startPlanSession(vault.path, args.project, { env: ctx.env }), project.path),
+    // Every turn keeps a receipt in the work's log (AGT-2191).
+    receipts: { sink: fileReceiptSink(project.path), intent: AGENT_INTENT.name },
   };
 
   const entries: TranscriptEntry[] = [];
