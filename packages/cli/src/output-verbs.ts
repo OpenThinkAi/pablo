@@ -353,10 +353,13 @@ export function removeOutput(vaultRoot: string, workDir: string, type: string | 
  * The plan to write: the existing `plan.md`'s rows kept (the author edits the
  * mapping, so a unit's number, title and beats are never rewritten), their
  * status refreshed from the unit's file; a row whose unit has no file and
- * whose beats no longer all exist is dropped as stale; and a row appended for
- * every beat no kept row covers, from the type's default plan, numbered after
- * the last kept unit. With no existing plan this is the default
- * plan itself.
+ * whose beats no longer all exist is dropped as stale; a row that shares its
+ * unit number with another row and whose title matches no beat is dropped as
+ * a stale duplicate (AGT-2182: the rows an acts table once added when its act
+ * ids read as beats), the unit keeping the row that does match; and a row
+ * appended for every beat no kept row covers, from the type's default plan,
+ * numbered after the last kept unit. With no existing plan this is the
+ * default plan itself.
  */
 export function mergePlan(def: OutputDefinition, workDir: string, existing: readonly PlanFileRow[]): PlanRow[] {
   const defaults = def.plan(workDir);
@@ -364,8 +367,12 @@ export function mergePlan(def: OutputDefinition, workDir: string, existing: read
   const units = new Map(def.report(workDir, readCoreState(workDir)).units.map((u) => [u.unit, u]));
   const beats = new Set(defaults.flatMap((r) => r.beats));
   const byUnit = new Map(defaults.map((r) => [r.unit, r]));
+  const titles = new Set(defaults.map((r) => titleKey(r.title)));
+  const matches = (row: PlanFileRow): boolean => titles.has(titleKey(row.title));
   const kept: PlanRow[] = [];
   for (const row of existing) {
+    const twins = existing.filter((r) => r.unit === row.unit);
+    if (twins.length > 1 && !matches(row) && twins.some(matches)) continue;
     const unit = units.get(row.unit);
     // The type's own account of the unit wins (the default plan's status, the same one a first run wrote), else its file's.
     const status = byUnit.get(row.unit)?.status ?? (unit !== undefined && unit.file !== undefined ? unit.status : "beat");
@@ -384,6 +391,11 @@ export function mergePlan(def: OutputDefinition, workDir: string, existing: read
     kept.push({ ...d, unit });
   }
   return kept.sort((a, b) => a.unit - b.unit);
+}
+
+/** A plan title compared with a beat's: trimmed, case and inner spacing ignored. */
+function titleKey(title: string): string {
+  return title.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 /**

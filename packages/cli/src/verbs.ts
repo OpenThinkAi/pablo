@@ -640,7 +640,9 @@ export function draftChapterBody(body: unknown): unknown {
 
 const SAVE_ARGS = z.object({
   project: projectField,
-  stage: z.string().optional().describe("acts|beats|premise|bible/<file> — which planning target to replace (a nonfiction work: thesis|claims|outline)."),
+  stage: z.string().optional().describe(
+      "acts|beats|premise|bible/<file> — which planning target to replace (a nonfiction work: thesis|claims|outline). An acts row is `| Act | Years | What it accomplishes |`: the act's id (I, II or 1, 2), the story time it spans (years for a long work, dates or days for a short one) and what it does; a beats row is `| # | Story date | Title | Beat | POV | Status |`.",
+    ),
   file: z
     .string()
     .optional()

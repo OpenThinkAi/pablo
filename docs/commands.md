@@ -192,7 +192,7 @@ narrated output reads an output, `output remove` refuses that output.
 | `list` | each output, its units drafted and its next step |
 | `add <type>` | declares the output in `pablo.json` and scaffolds `outputs/<type>/` (`plan.md`, `RULES.md`); refused until the core has beats (on `nonfiction`, until the core is complete) |
 | `remove <type>` | undeclares it and moves `outputs/<type>/` under `outputs/_removed/`; nothing is deleted |
-| `plan <type>` | rewrites `outputs/<type>/plan.md` (which units tell which beats) from the beats; `--dry-run` shows the rows and writes nothing |
+| `plan <type>` | rewrites `outputs/<type>/plan.md` (which units tell which beats) from the beats: existing rows keep their mapping; an undrafted row whose beats are gone, or a second row for a unit whose title matches no beat, is dropped as stale; new beats get rows. `--dry-run` shows the rows and writes nothing |
 
 Each change is one commit.
 
@@ -380,7 +380,10 @@ Reads stdin, or `--file`, and writes:
 Table input may be a full table or rows only; it is rewritten under the standard
 header. Input is checked before anything is written. A beat row needs six columns
 (`# | Story date | Title | Beat | POV | Status`) with a four-digit year in the date.
-An act row needs three. A bad row is refused, naming the row and column. The file is
+An act row needs three (`Act | Years | What it accomplishes`): the act's id (`I`, `II`
+or `1`, `2`), the story time it spans (a year or range of years for a long work, the
+dates or days for a short one; the column keeps its name either way) and what the act
+does. The acts table never counts as beats, whatever its ids. A bad row is refused, naming the row and column. The file is
 committed by path. Returns `{ok, path, stage, committed, notice?}`.
 
 A nonfiction work (`track: "nonfiction"`) has its own core, and its own stages:

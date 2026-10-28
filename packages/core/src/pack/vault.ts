@@ -334,33 +334,57 @@ export function section(text: string, bounds: { from?: string | undefined; to?: 
  * column is ignored; a short row leaves the missing fields empty.
  */
 export function parseBeatRow(outline: string, chapter: number, source: string): BeatRow | undefined {
-  for (const line of outline.split("\n")) {
-    const match = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
-    if (match === null || Number(match[1]) !== chapter) continue;
-    const cells = (match[2] ?? "").split("|").map((cell) => cell.trim());
-    return {
-      chapter,
-      storyDate: cells[0] ?? "",
-      title: cells[1] ?? "",
-      beat: cells[2] ?? "",
-      pov: cells[3] ?? "",
-      status: cells[4] ?? "",
-      source,
-    };
+  return parseBeatRows(outline, source).find((row) => row.chapter === chapter);
+}
+
+/** True for a markdown table separator row (`|---|:--:|`). */
+function isSeparatorRow(line: string): boolean {
+  const cells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+}
+
+/**
+ * The outline's lines that may be beat rows: every `|` line except those in a
+ * table whose header row's first cell is `Act` or `Acts` (AGT-2182). The acts
+ * table `save --stage acts` writes sits in the same file as the beats, and an
+ * act numbered `1` rather than `I` would otherwise read as beat 1. A table is
+ * a contiguous run of `|` lines; its header is the first line when a separator
+ * row follows it. A run with no header (rows only) is read as beats.
+ */
+function beatRowCandidates(outline: string): string[] {
+  const lines = outline.split("\n");
+  const out: string[] = [];
+  let inTable = false;
+  let skip = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.trim().startsWith("|")) {
+      inTable = false;
+      skip = false;
+      continue;
+    }
+    if (!inTable) {
+      inTable = true;
+      const next = lines[i + 1];
+      const first = (line.trim().replace(/^\|/, "").split("|")[0] ?? "").trim().toLowerCase();
+      skip = next !== undefined && isSeparatorRow(next) && (first === "act" || first === "acts");
+    }
+    if (!skip) out.push(line);
   }
-  return undefined;
+  return out;
 }
 
 /**
  * Every row of the outline's chapter table, in file order — the same table
  * `parseBeatRow` reads one row from, for callers (the novel stage machine,
  * in particular) that need the whole beat list rather than one chapter.
- * A row counts if its first cell parses as an integer; anything else
- * (the acts table, prose, open-question bullets) is skipped.
+ * A row counts if its first cell parses as an integer and it is not in the
+ * acts table (whose ids may be integers too); anything else (prose,
+ * open-question bullets) is skipped.
  */
 export function parseBeatRows(outline: string, source: string): readonly BeatRow[] {
   const rows: BeatRow[] = [];
-  for (const line of outline.split("\n")) {
+  for (const line of beatRowCandidates(outline)) {
     const match = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
     if (match === null) continue;
     const cells = (match[2] ?? "").split("|").map((cell) => cell.trim());

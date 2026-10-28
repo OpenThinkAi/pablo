@@ -95,7 +95,15 @@ function coreStep(stage: CoreStageId, track: TrackId): GuideStep[] {
         },
       ];
     case "acts":
-      return [{ phase: "core", stage, title: "save the acts table", command: `pablo save ${P} --stage acts` }];
+      return [
+        {
+          phase: "core",
+          stage,
+          title: "save the acts table",
+          command: `pablo save ${P} --stage acts`,
+          detail: "| Act | Years | What it accomplishes |: the act's id (I, II or 1, 2), the story time it spans (years, or dates for a short work), what it does",
+        },
+      ];
     case "beats":
       return [{ phase: "core", stage, title: "save the beats (one row per beat, with a story date)", command: `pablo save ${P} --stage beats` }];
     case "facts":
