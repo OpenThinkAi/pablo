@@ -62,8 +62,11 @@ export interface ProviderConfig {
   /** Sampling temperature `write` sends when `--temperature` is not given; absent means write's own default. */
   readonly temperature?: number;
   /**
-   * Whether an OpenAI-compatible endpoint may think before it answers. Absent
-   * means off for a local endpoint and the server's own default otherwise.
+   * Whether the endpoint may think before it answers. `false` on an
+   * OpenAI-compatible provider sends `chat_template_kwargs.enable_thinking` and
+   * DeepSeek's `thinking: {type: "disabled"}`; on an `anthropic` provider it
+   * sends `thinking: {type: "disabled"}` (unset sends nothing). Absent means off
+   * for a local OpenAI-compatible endpoint and the server's own default otherwise.
    * Gemma 4 on mlx_lm thinks by default, and the thinking spends the same
    * `max_tokens` the answer needs: a one-sentence revise ran out mid-thought
    * and came back empty (2026-10-08). Off is also what the 2026-09-02

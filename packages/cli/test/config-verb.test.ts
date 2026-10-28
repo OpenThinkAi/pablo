@@ -190,3 +190,16 @@ test("test: a billing/credit error is named plainly", async () => {
   expect(r.exitCode).toBe(1);
   expect(r.text).toContain("billing/credit problem");
 });
+
+test("test: the probe leaves a reasoning model room to think before it answers", async () => {
+  const s = scope({ providers: GLOBAL.providers });
+  const budgets: (number | undefined)[] = [];
+  const adapter = fakeAdapter("local");
+  const probe: Adapter = {
+    ...adapter,
+    complete: (request) => (budgets.push(request.maxTokens), adapter.complete(request)),
+  };
+  const r = await configTest({ env: s.env }, { adapterFor: () => probe });
+  expect(r.exitCode).toBe(0);
+  expect(budgets[0]).toBeGreaterThanOrEqual(512);
+});

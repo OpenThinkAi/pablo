@@ -55,7 +55,7 @@ A map from a name you choose to one model endpoint. The names are yours: `local`
 | `local` | `true` for a model on your own machine. Local providers get one request at a time and are preferred for drafting | `false` |
 | `timeoutMs` | How long to wait with no tokens arriving before giving up | `60000` |
 | `temperature` | Sampling temperature, 0 to 2, used by `write` when you don't pass `--temperature` | `0.8` |
-| `thinking` | OpenAI-compatible only: `false` sends the switch that stops a reasoning model (Qwen3 and similar) from thinking before it answers. Set it to `false` if a local model times out with "only thinking" | off for local providers |
+| `thinking` | `false` tells a reasoning model not to think before it answers. On an OpenAI-compatible provider it sends `chat_template_kwargs.enable_thinking: false` (local servers: Qwen3, Gemma) and `thinking: {"type": "disabled"}` (hosted DeepSeek). On an `anthropic` provider it sends `thinking: {"type": "disabled"}`; left unset, no thinking parameter is sent and Claude behaves as before. Set it to `false` if a model fails with "only thinking" or `config test` reports it. A DeepSeek v4-pro route needs it, or `research distill` spends its whole budget reasoning | off for local OpenAI-compatible providers; unset otherwise |
 | `tools` | OpenAI-compatible only: `false` for a server that cannot take native tool calls. A chat turn that offers tools is then refused with an error naming the provider, instead of being sent to a server that would ignore them | `true` |
 | `key` | Where the API key is. See below | the environment |
 

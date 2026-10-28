@@ -260,7 +260,9 @@ is given, and `--json` prints one JSON object.
   no provider, or a work repointing a remote provider is a refusal and nothing is
   written. Other keys in the file are kept.
 - `config test` sends one tiny request per mapped intent (the default route when none
-  is mapped) and prints ok or the error per provider. Exit `1` if any failed. A
+  is mapped) and prints ok or the error per provider. Exit `1` if any failed. The
+  request allows 1024 output tokens so a reasoning model can think and still answer;
+  a reply that is only thinking names the `"thinking": false` fix. A
   billing or credit error (an exhausted balance, a quota, `402`) is labelled
   `billing/credit problem`, and `doctor` says to add credit rather than check the key.
 

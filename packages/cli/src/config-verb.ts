@@ -244,6 +244,12 @@ export function realConfigTestDeps(options: ProvidersOptions = {}): ConfigTestDe
 
 const PING_PROMPT = "Reply with the single word: ok";
 const PING_TIMEOUT_MS = 20_000;
+/**
+ * A reasoning model spends part of this on thinking before it writes "ok"; 8
+ * tokens made a working DeepSeek v4-pro read as broken. Generous enough to
+ * think a little, small enough that the probe stays cheap.
+ */
+const PING_MAX_TOKENS = 1024;
 
 const BILLING_ERROR = /credit balance|insufficient[_ ](?:quota|funds|credit)|billing|payment required|quota exceeded|\b402\b/i;
 
@@ -270,7 +276,7 @@ export async function configTest(scope: ConfigScope, deps: ConfigTestDeps): Prom
   for (const target of targets) {
     try {
       const adapter = deps.adapterFor(config, target.provider);
-      for await (const event of adapter.complete({ prompt: PING_PROMPT, maxTokens: 8, timeoutMs: PING_TIMEOUT_MS })) {
+      for await (const event of adapter.complete({ prompt: PING_PROMPT, maxTokens: PING_MAX_TOKENS, timeoutMs: PING_TIMEOUT_MS })) {
         if (event.type === "done") break;
       }
       results.push({ ...target, ok: true });

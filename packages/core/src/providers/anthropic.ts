@@ -251,6 +251,8 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
     let outputReported = false;
     let stopReason: string | undefined;
     let refusal: string | undefined;
+    let thought = false;
+    let answered = false;
 
     try {
       const idleMs = request.timeoutMs ?? provider.timeoutMs;
@@ -319,6 +321,8 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
                 break;
 
               case "block_start":
+                if (event.kind === "thinking" || event.kind === "redacted_thinking") thought = true;
+                else if (event.kind === "text" || event.kind === "tool_use") answered = true;
                 blocks.set(event.index, {
                   kind: event.kind,
                   name: event.name,
@@ -401,6 +405,17 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): Adapte
         throw new ProviderResponseError(
           provider.endpoint,
           `a refusal${refusal === undefined ? "" : ` (${refusal})`} rather than an answer — rephrase the instruction, or send this passage to another provider`,
+        );
+      }
+
+      // A thinking model can spend the whole budget before it answers; that is
+      // not an empty answer, and saying so names the fix.
+      if (!answered && thought) {
+        throw new ProviderResponseError(
+          provider.endpoint,
+          stopReason === "max_tokens"
+            ? `only thinking: it spent all ${tokensWritten} tokens of its budget thinking and never answered (set "thinking": false for this provider)`
+            : `only thinking and no answer (set "thinking": false for this provider)`,
         );
       }
 
@@ -787,6 +802,10 @@ function body(provider: ProviderConfig, request: WireRequest): Record<string, un
     model: request.model ?? provider.model,
     max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
     stream: true,
+    // Sent only when the config says `"thinking": false`: omitting it keeps
+    // adaptive thinking on Claude. A hosted reasoning model behind this wire
+    // (DeepSeek v4-pro) otherwise spends the whole budget thinking.
+    ...(provider.thinking === false ? { thinking: { type: "disabled" } } : {}),
     messages: request.messages ?? [{ role: "user", content: request.prompt ?? "" }],
     ...(request.system === undefined ? {} : { system: request.system }),
     ...(request.tools === undefined ? {} : { tools: request.tools }),

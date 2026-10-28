@@ -398,6 +398,17 @@ test("thinking stays the server's call for a hosted endpoint, and a config may t
   expect(fake.requests[2]?.body["chat_template_kwargs"]).toEqual({ enable_thinking: false });
 });
 
+test('"thinking": false also sends the hosted switch, and a local default does not', async () => {
+  const fake = endpoint({ tokens: ["a"] });
+
+  await drain(providersAt(fake.url, { local: false, thinking: false }).adapter("local").complete({ prompt: "hosted off" }));
+  await drain(providersAt(fake.url, { local: true }).adapter("local").complete({ prompt: "local default" }));
+
+  expect(fake.requests[0]?.body["thinking"]).toEqual({ type: "disabled" });
+  expect(fake.requests[0]?.body["chat_template_kwargs"]).toEqual({ enable_thinking: false });
+  expect(fake.requests[1]?.body).not.toHaveProperty("thinking");
+});
+
 test('a "thinking" that is not true or false is a config error', () => {
   expect(() => parseWithTestDefaults(JSON.stringify({ providers: { local: { thinking: "no" } } }))).toThrow(/"thinking" must be true or false/);
 });
