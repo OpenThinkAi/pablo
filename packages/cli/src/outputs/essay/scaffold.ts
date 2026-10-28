@@ -27,7 +27,7 @@ import { essayTrack, ESSAY_OUTLINE_FILE, ESSAY_THESIS_FILE } from "./sections";
 const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 
 /** An act's section title: `Act I` for an act named `I`, the act's own name when it already says so. */
-function actTitle(act: ActRow): string {
+export function actTitle(act: ActRow): string {
   const name = act.act.trim();
   return /^act\b/i.test(name) ? name : `Act ${name}`;
 }

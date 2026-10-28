@@ -76,7 +76,7 @@ test("a neverSend prefix that covers a slice's source is a refusal naming the sl
   if (result.ok) throw new Error("unreachable");
   expect(result.code).toBe(2);
   expect(result.message).toContain("bible/");
-  expect(result.message).toMatch(/slice "(cast|places|timeline)"/);
+  expect(result.message).toMatch(/slice "(premise|cast|places|timeline)"/);
 
   rmSync(vault, { recursive: true, force: true });
 });

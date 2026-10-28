@@ -10,21 +10,24 @@
  * of the previous section. On a fiction track it also carries the story
  * core's distilled period facts and `facts.md`, read as the story pack reads
  * them, and (AGT-2135) the essay's own thesis (`outputs/essay/thesis.md`) and
- * the bible: the cast, the places and the whole timeline. Research notes
+ * the bible: the cast (every character file, AGT-2183), the places and the whole timeline, and a section about one
+ * act carries that act's beat rows (`actBeatsFor`). Research notes
  * themselves are never in it (D-10): a claim's sources go to the writer as
  * ids only, and a fiction essay's facts come distilled.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { outputRulesFile, readDraftingInputs, readTextSource, readWorkRules, DEFAULT_MIN_SCENES } from "@openthink/pablo-core";
+import { beatsFile, outputRulesFile, parseHeadedBeatRows, readDraftingInputs, readTextSource, readWorkRules, DEFAULT_MIN_SCENES } from "@openthink/pablo-core";
 import type { BeatRow, DraftingInputs, EssayBrief, EssaySection, TextSource } from "@openthink/pablo-core";
 import { readCoreState } from "../../core/machine";
 import { CLAIMS_FILE, hasProse, THESIS_FILE } from "../../core/nonfiction";
 import { trackOf } from "../../marker";
 import { CAST_ENDS_AT, packFromInputs } from "../../novel/pack";
 import { frontmatterField } from "../novel/plan";
+import type { TrackId } from "../../tracks/registry";
 import type { PlanRow, UnitPackOptions, UnitPackOutcome, UnitPreconditions } from "../types";
+import { actTitle } from "./scaffold";
 import { ESSAY_OUTLINE_FILE, ESSAY_PATH, ESSAY_THESIS_FILE, essayOutline, essayTrack, readEssayFile, sectionBody, sectionClaims } from "./sections";
 import { ESSAY_ID } from "./units";
 
@@ -115,6 +118,31 @@ function sectionBeat(section: EssaySection, source: string): BeatRow {
   return { chapter: section.number, storyDate: "", title: section.title, beat: section.covers, pov: "", status: "", source };
 }
 
+/** Case and spacing folded, for matching a section or heading to an act. */
+function fold(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * The beat rows a fiction essay's act section tells (AGT-2183): the section whose title is an act's (`Act I`, as
+ * the scaffold writes it) gets the beats under that act's `## Act I` heading in the beats file, when the file
+ * splits its beats across two or more act headings; otherwise the beats split over the acts in order, as evenly as
+ * they go (a beats file that lists every beat under one heading says nothing finer). `undefined` for a section that
+ * is not an act's. `source` labels the rows (the vault-relative beats file).
+ */
+export function actBeatsFor(workDir: string, track: TrackId, section: EssaySection, source: string): readonly BeatRow[] | undefined {
+  const { acts } = readCoreState(workDir, track);
+  const index = acts.findIndex((a) => fold(actTitle(a)) === fold(section.title));
+  if (index === -1) return undefined;
+  const beats = parseHeadedBeatRows(read(join(workDir, beatsFile(workDir))) ?? "", source);
+  const actOf = (heading: string): number => acts.findIndex((a) => fold(actTitle(a)) === fold(heading));
+  const headed = new Set(beats.map((b) => actOf(b.heading)).filter((i) => i !== -1));
+  if (headed.size >= 2) return beats.filter((b) => actOf(b.heading) === index).map((b) => b.row);
+  const from = Math.floor((index * beats.length) / acts.length);
+  const to = Math.floor(((index + 1) * beats.length) / acts.length);
+  return beats.slice(from, to).map((b) => b.row);
+}
+
 /** `OUTPUTS.essay.pack`: the section's writer pack, or a refusal (a `neverSend` violation, an unknown section). */
 export function buildEssayPack(vaultRoot: string, workDir: string, unit: number, options: UnitPackOptions): UnitPackOutcome {
   const track = trackOf(options.marker);
@@ -161,6 +189,8 @@ export function buildEssayPack(vaultRoot: string, workDir: string, unit: number,
     const thesisPath = join(workDir, ESSAY_THESIS_FILE);
     const thesis = hasProse(read(thesisPath) ?? "") ? readTextSource(vaultRoot, thesisPath) : undefined;
     const timeline = readTextSource(vaultRoot, join(workDir, "bible", "timeline.md"));
+    // AGT-2183: a section about one act carries that act's beat rows.
+    const actBeats = actBeatsFor(workDir, track, section, story.beat.source);
     essay = {
       section,
       outline: sections,
@@ -168,6 +198,7 @@ export function buildEssayPack(vaultRoot: string, workDir: string, unit: number,
       ...(thesis === undefined ? {} : { thesis }),
       subject,
       ...(timeline === undefined ? {} : { timeline }),
+      ...(actBeats === undefined ? {} : { actBeats, actBeatsSource: story.beat.source }),
       claims: [],
     };
     inputs = { ...story, beat: sectionBeat(section, story.beat.source), moreBeats: [], unit, previousTail: undefined };

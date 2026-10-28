@@ -264,7 +264,8 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
  * Drafting: `bin/draft-chapter`'s pack, in its order — the chapter, the prose
  * rules (the layered voice, AGT-2139: global and vault in `style`, the work's
  * in `workRules`, the output's in `outputRules`, then every voice's `never`),
- * the craft rules, the voices' exemplars, period facts, cast, places, the timeline gated by the
+ * the craft rules, the voices' exemplars, the premise (`bible/overview.md`), period facts, the cast (every
+ * `bible/characters/*.md`, AGT-2183), places, the timeline gated by the
  * chapter's story date, the promoted facts (`facts.md`), the unit's own
  * output's continuity ledger, the tail of the previous
  * chapter, and the task.
@@ -418,6 +419,18 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       cutOrder: 9,
     },
     {
+      // What the piece is about (AGT-2183): without it a writer told only the beat invents the story around it.
+      name: "premise",
+      heading: "# The story (its premise; every unit serves it)",
+      text: inputs.premise?.text.trim() ?? "",
+      source: inputs.premise?.path,
+      required: false,
+      keep: "head",
+      minTokens: 0,
+      reducible: true,
+      cutOrder: 5,
+    },
+    {
       // The distilled rows first (AGT-2110), then the work's own STYLE.md section: a head-keeping cut drops the
       // hand-written section before a sourced fact.
       name: "period",
@@ -567,6 +580,16 @@ function renderOutline(essay: EssayBrief): string {
     .join("\n");
 }
 
+/** `- Beat 3 (1911-11-20, POV Ansel), "The schooner": what happens` per beat row. */
+function renderActBeats(rows: readonly BeatRow[]): string {
+  return rows
+    .map((b) => {
+      const when = [b.storyDate, b.pov === "" ? "" : `POV ${b.pov}`].filter((p) => p !== "").join(", ");
+      return `- Beat ${b.chapter}${when === "" ? "" : ` (${when})`}${b.title === "" ? "" : `, "${b.title}"`}: ${b.beat}`;
+    })
+    .join("\n");
+}
+
 /** `- [#n] The claim (sources: [@a], [@b])` per claim. */
 function renderClaims(claims: readonly EssayClaim[]): string {
   return claims
@@ -642,6 +665,13 @@ function essaySpecs(inputs: DraftingInputs, essay: EssayBrief): BuiltSpecs {
       required: true,
       reducible: false,
       cutOrder: 0,
+    }),
+    spec({
+      name: "actBeats",
+      heading: "# What happens in this act (the story's own beats; draw on these and invent no events)",
+      text: renderActBeats(essay.actBeats ?? []),
+      source: (essay.actBeats ?? []).length === 0 ? undefined : essay.actBeatsSource,
+      cutOrder: 3,
     }),
     spec({
       name: "claims",

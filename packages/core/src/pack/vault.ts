@@ -11,7 +11,9 @@
  *     <work>/STYLE.md                         the work's own rules (QWEN.md on an unmigrated work)
  *     <work>/bible/timeline.md                | year | real events | in the novel |
  *     <work>/bible/places.md                  places
- *     <work>/bible/characters/family-tree.md  the cast
+ *     <work>/bible/overview.md                the premise (logline, premise, themes, tone)
+ *     <work>/bible/characters/*.md            the cast: family-tree.md first, then each
+ *                                             character's own file, by name (AGT-2183)
  *     <work>/outline/beats.md                 | # | story date | title | beat | POV | status |
  *                                             (outline/chapters.md on an unmigrated work)
  *     <work>/outputs/novel/continuity.md      what the text has established
@@ -163,9 +165,8 @@ export function readDraftingInputs(options: ReadDraftingOptions): DraftingInputs
       periodFactsSection(workRules),
     ),
     ...(distilledFacts === undefined ? {} : { distilledFacts }),
-    cast: sourceOfFile(vaultRoot, join(workRoot, "bible", "characters", "family-tree.md"), (text) =>
-      section(text, { to: options.castEndsAt }),
-    ),
+    premise: sourceOfFile(vaultRoot, join(workRoot, "bible", "overview.md")),
+    cast: readCast(vaultRoot, workRoot, options.castEndsAt),
     places: sourceOfFile(vaultRoot, join(workRoot, "bible", "places.md"), (text) =>
       section(text, { from: options.placesStartsAt }),
     ),
@@ -192,6 +193,32 @@ export function readDistilledFacts(
   const text = read(path);
   if (text === undefined) return undefined;
   return { path: label(vaultRoot, path), facts: periodFactsAt(parsePeriodFacts(text), storyDates) };
+}
+
+/** The family tree, which leads the cast slice when a work has one. */
+const FAMILY_TREE = "family-tree.md";
+
+/**
+ * The cast (AGT-2183): every `bible/characters/*.md`, `family-tree.md` first and
+ * then each character's own file by filename, each cut at `endsAt` (the
+ * author's open questions are not facts) and joined in one slice, its source
+ * every file sent (`, `-separated, so the `neverSend` check sees each). A file
+ * whose name starts with `_` or `.` (the vault template's `_template.md`) is
+ * not a character. `undefined` when no file has text. The slice keeps its head
+ * under budget pressure, so the family tree is the last of it to go.
+ */
+function readCast(vaultRoot: string, workRoot: string, endsAt?: string | undefined): TextSource | undefined {
+  const dir = join(workRoot, "bible", "characters");
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return undefined;
+  const names = readdirSync(dir)
+    .filter((name) => name.endsWith(".md") && !name.startsWith("_") && !name.startsWith("."))
+    .sort((a, b) => (a === FAMILY_TREE ? -1 : b === FAMILY_TREE ? 1 : a < b ? -1 : a > b ? 1 : 0));
+  const sources = names.flatMap((name) => {
+    const found = sourceOfFile(vaultRoot, join(dir, name), (text) => section(text, { to: endsAt }));
+    return found === undefined ? [] : [found];
+  });
+  if (sources.length === 0) return undefined;
+  return { path: sources.map((s) => s.path).join(", "), text: sources.map((s) => s.text).join("\n\n") };
 }
 
 /** One row of an output's `plan.md`: `| unit | title | beats | status |`. */
@@ -344,21 +371,26 @@ function isSeparatorRow(line: string): boolean {
 }
 
 /**
- * The outline's lines that may be beat rows: every `|` line except those in a
- * table whose header row's first cell is `Act` or `Acts` (AGT-2182). The acts
- * table `save --stage acts` writes sits in the same file as the beats, and an
- * act numbered `1` rather than `I` would otherwise read as beat 1. A table is
- * a contiguous run of `|` lines; its header is the first line when a separator
- * row follows it. A run with no header (rows only) is read as beats.
+ * The outline's lines that may be beat rows, each with the `## ` heading above
+ * it (AGT-2183: a fiction essay's act section reads the beats under that act's
+ * heading): every `|` line except those in a table whose header row's first
+ * cell is `Act` or `Acts` (AGT-2182). The acts table `save --stage acts`
+ * writes sits in the same file as the beats, and an act numbered `1` rather
+ * than `I` would otherwise read as beat 1. A table is a contiguous run of `|`
+ * lines; its header is the first line when a separator row follows it. A run
+ * with no header (rows only) is read as beats.
  */
-function beatRowCandidates(outline: string): string[] {
+function beatRowCandidates(outline: string): { readonly line: string; readonly heading: string }[] {
   const lines = outline.split("\n");
-  const out: string[] = [];
+  const out: { line: string; heading: string }[] = [];
+  let heading = "";
   let inTable = false;
   let skip = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     if (!line.trim().startsWith("|")) {
+      const h = /^##\s+(.+?)\s*$/.exec(line);
+      if (h !== null) heading = h[1] as string;
       inTable = false;
       skip = false;
       continue;
@@ -369,9 +401,42 @@ function beatRowCandidates(outline: string): string[] {
       const first = (line.trim().replace(/^\|/, "").split("|")[0] ?? "").trim().toLowerCase();
       skip = next !== undefined && isSeparatorRow(next) && (first === "act" || first === "acts");
     }
-    if (!skip) out.push(line);
+    if (!skip) out.push({ line, heading });
   }
   return out;
+}
+
+/** A beat row and the `## ` heading it sits under in the outline (`""` before any heading). */
+export interface HeadedBeatRow {
+  readonly row: BeatRow;
+  readonly heading: string;
+}
+
+/**
+ * `parseBeatRows` with each row's `## ` heading (AGT-2183): the same rows, in
+ * the same order, so a caller grouping beats by act heading reads exactly the
+ * beats every pack reads.
+ */
+export function parseHeadedBeatRows(outline: string, source: string): readonly HeadedBeatRow[] {
+  const rows: HeadedBeatRow[] = [];
+  for (const { line, heading } of beatRowCandidates(outline)) {
+    const match = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
+    if (match === null) continue;
+    const cells = (match[2] ?? "").split("|").map((cell) => cell.trim());
+    rows.push({
+      heading,
+      row: {
+        chapter: Number(match[1]),
+        storyDate: cells[0] ?? "",
+        title: cells[1] ?? "",
+        beat: cells[2] ?? "",
+        pov: cells[3] ?? "",
+        status: cells[4] ?? "",
+        source,
+      },
+    });
+  }
+  return rows;
 }
 
 /**
@@ -383,22 +448,7 @@ function beatRowCandidates(outline: string): string[] {
  * open-question bullets) is skipped.
  */
 export function parseBeatRows(outline: string, source: string): readonly BeatRow[] {
-  const rows: BeatRow[] = [];
-  for (const line of beatRowCandidates(outline)) {
-    const match = /^\s*\|\s*(\d+)\s*\|(.*)$/.exec(line);
-    if (match === null) continue;
-    const cells = (match[2] ?? "").split("|").map((cell) => cell.trim());
-    rows.push({
-      chapter: Number(match[1]),
-      storyDate: cells[0] ?? "",
-      title: cells[1] ?? "",
-      beat: cells[2] ?? "",
-      pov: cells[3] ?? "",
-      status: cells[4] ?? "",
-      source,
-    });
-  }
-  return rows;
+  return parseHeadedBeatRows(outline, source).map((r) => r.row);
 }
 
 /**
