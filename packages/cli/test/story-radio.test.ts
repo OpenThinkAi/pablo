@@ -17,7 +17,8 @@ import { venvPython } from "../src/casting";
 import type { CastingDeps, CastingLayout } from "../src/casting";
 import type { HarnessProvider } from "../src/harness/provider";
 import { scriptedAgent } from "./scripted-agent";
-import { mergeChanges, mergeDraftInProject } from "../src/novel/merge";
+import { mergeChanges } from "../src/novel/merge";
+import { acceptBranchInProject } from "../src/review-finish";
 import { radioMachine } from "../src/outputs/radio/casting-side";
 import { scriptRoles } from "../src/outputs/radio/script";
 import { streamRoot } from "../src/radio-stream";
@@ -594,7 +595,7 @@ test("AC4: --review stops on each episode's script, bindings and render (open fl
       if (branch !== undefined && branch.startsWith("plan/")) {
         expect((await mergeChanges(work, branch, { slug, env })).ok).toBe(true);
       } else if (branch !== undefined) {
-        expect((await mergeDraftInProject(work, branch, env, writer)).exitCode).toBe(0);
+        expect((await acceptBranchInProject(work, branch, env, writer)).exitCode).toBe(0);
       } else if (review === "binding") {
         // The bindings to approve: every role of the episode, with how it was bound.
         expect(body.waiting.bindings.map((b: { role: string }) => b.role)).toEqual(["NARRATOR", "ROSA"]);

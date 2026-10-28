@@ -69,10 +69,10 @@ import { checkAcross, promoteFinding } from "./across";
 import { adapterAsk, critiqueBranch, critiqueModel } from "./critique";
 import type { Ask } from "./critique";
 import { KNOWN_FORMATS } from "./formats";
+import { acceptBranchInProject, rejectBranchInProject } from "./review-finish";
 import { migrateLines } from "./migrate";
 import { migrateOutputs } from "./migrate-outputs";
 import { migrateTrack } from "./migrate-track";
-import { mergeDraftInProject } from "./novel/merge";
 import { readMarker, trackOf } from "./marker";
 import { FACT_KINDS } from "./record-fact";
 import {
@@ -1044,18 +1044,23 @@ async function runMigrateVerb(args: z.infer<typeof MIGRATE_ARGS>, ctx: VerbConte
 }
 
 // ---------------------------------------------------------------------------
-// merge (AGT-1536)
+// merge (AGT-1536; any change branch, and --reject, AGT-2181)
 // ---------------------------------------------------------------------------
 
 const MERGE_ARGS = z.object({
   project: projectField,
-  branch: z.string().describe("The draft branch to merge to main, e.g. draft/ch02 (the receipt of `write` names it)."),
+  branch: z
+    .string()
+    .describe("The change branch to accept onto main (or with `reject`, to delete): draft/chNN, revise/..., edit/..., plan/... (the receipt of the verb that made it names it)."),
+  reject: z.boolean().default(false).describe("Delete the branch and its worktree instead of merging it; main is not touched."),
 });
 
 async function runMergeVerb(args: z.infer<typeof MERGE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
-  const outcome = await mergeDraftInProject(resolved.projectPath, args.branch, ctx.env, ctx.extractor);
+  const outcome = args.reject
+    ? rejectBranchInProject(resolved.projectPath, args.branch, ctx.env)
+    : await acceptBranchInProject(resolved.projectPath, args.branch, ctx.env, ctx.extractor);
   return { body: outcome.body, exitCode: outcome.exitCode };
 }
 
@@ -2161,7 +2166,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "merge",
     description:
-      "Merge a reviewed draft branch (draft/chNN, named in `write`'s receipt) into main, then run the after-write steps for its chapter: outline tick, dated note, README, continuity, commit, think sync. A conflict changes nothing.",
+      "Accept a reviewed change branch onto main, the way the screen accepts it: a draft branch (draft/chNN, named in `write`'s receipt) merges and runs the after-write steps for its unit (outline tick, dated note, README, continuity, commit, think sync); a revise/, edit/ or plan/ branch (research plan/save/waive/link/distill, promote, fact record) merges and runs the after-revision steps for each unit it changes. With `reject`, the branch is deleted instead and main is not touched. Either way the branch's worktree is removed. A conflict changes nothing; a branch that is not a change branch is refused, naming the kinds.",
     args: MERGE_ARGS,
     run: runMergeVerb,
     positionalArgs: ["branch"],

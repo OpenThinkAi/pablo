@@ -47,9 +47,9 @@ How the research steps work:
   list the open ones, and `write` names the first: `historical-fiction: checklist item #3
   people: Who ran the ice houses is open`.
 - **Merge order.** `waive` and `link` rewrite the whole checklist from main, so accept
-  each `plan/` branch in the screen (bare `pablo`) before the next; two unaccepted ones
-  conflict. Name several items at once (`waive 3,5-8 "..."`, `link 1,2 <note>`) to close
-  them on one branch.
+  each `plan/` branch (`pablo merge --project <slug> <branch>`, or in the screen) before
+  the next; two unaccepted ones conflict. Name several items at once (`waive 3,5-8 "..."`,
+  `link 1,2 <note>`) to close them on one branch.
 - **Distill.** `research distill` turns the notes into short, sourced rows
   (`| Fact | Source | Story date |`) in `facts/period.md`, replacing the file's earlier
   rows. A fact with no source, a source that is not a note, over 280 characters or with a

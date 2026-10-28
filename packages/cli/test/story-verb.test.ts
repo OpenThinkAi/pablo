@@ -18,7 +18,8 @@ import { deleteBranch } from "../src/branch";
 import { main, repeatedFlag } from "../src/cli";
 import type { HarnessProvider } from "../src/harness/provider";
 import { scriptedAgent } from "./scripted-agent";
-import { mergeChanges, mergeDraftInProject } from "../src/novel/merge";
+import { mergeChanges } from "../src/novel/merge";
+import { acceptBranchInProject } from "../src/review-finish";
 import { radioMachine } from "../src/outputs/radio/casting-side";
 import { OUTPUTS, registerOutput } from "../src/outputs/registry";
 import { STORY } from "../src/outputs/story";
@@ -556,7 +557,7 @@ test("AC4: --review stops on every stage's branch, waits until it is accepted, r
   expect(existsSync(join(work, ".pablo", "out"))).toBe(false);
 
   // The author merges the draft (`pablo merge draft/story`); the run publishes and finishes.
-  const merged = await mergeDraftInProject(work, "draft/story", env, writer);
+  const merged = await acceptBranchInProject(work, "draft/story", env, writer);
   expect(merged.exitCode).toBe(0);
   result = await runStory({ project: slug }, ctx, deps);
   body = result.body as Record<string, any>;

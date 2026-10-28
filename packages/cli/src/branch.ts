@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -298,6 +298,22 @@ export function mergeBranch(repo: string, branch: string, env: Env = process.env
 }
 
 /**
+ * Removes the now-empty directories a worktree sat in (`worktrees/<slug>/plan/` once `plan/x` is gone), up to and not
+ * including `<pabloHome>/worktrees`, so accepted and rejected branches leave nothing behind in the cache. Best effort.
+ */
+function pruneEmptyParents(path: string, env: Env): void {
+  const root = join(pabloHome(env), "worktrees");
+  for (let dir = dirname(path); dir.startsWith(root + "/"); dir = dirname(dir)) {
+    try {
+      if (readdirSync(dir).length > 0) return;
+      rmdirSync(dir);
+    } catch {
+      return;
+    }
+  }
+}
+
+/**
  * Deletes the branch and its worktree. An unmerged branch is refused unless
  * `force` — a rejected draft is deleted with `force: true`, a merged one
  * without.
@@ -318,6 +334,7 @@ export function deleteBranch(
     } catch (err) {
       return { ok: false, notice: `pablo: git worktree remove failed: ${errMessage(err)}` };
     }
+    pruneEmptyParents(path, opts.env ?? process.env);
   } else {
     try {
       git(repo, ["worktree", "prune"]);
