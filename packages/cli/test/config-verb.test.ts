@@ -162,11 +162,24 @@ test("test: with no provider configured it refuses and points at the starter con
   expect(r.text).toContain("pablo init --config");
 });
 
+test("test: with no intents block, every provider an intent routes to by kind is tested", async () => {
+  const s = scope({ providers: GLOBAL.providers });
+  const calls: string[] = [];
+  const r = await configTest({ env: s.env }, { adapterFor: (_c, id) => (calls.push(id), fakeAdapter(id)) });
+  expect(calls.sort()).toEqual(["anthropic", "local"]);
+  expect(r.text).toMatch(/-> anthropic \(by kind\): ok/);
+  expect(r.text).toMatch(/-> local \(by kind\): ok/);
+  expect(r.exitCode).toBe(0);
+  const bad = await configTest({ env: s.env }, { adapterFor: (_c, id) => fakeAdapter(id, id === "anthropic" ? "402 credit balance" : undefined) });
+  expect(bad.exitCode).toBe(1);
+  expect(bad.text).toContain("anthropic: error");
+});
+
 test("test: all ok exits 0; with no mapped intents it checks the default route", async () => {
   const s = scope({ providers: GLOBAL.providers });
   const calls: string[] = [];
   const r = await configTest({ env: s.env }, { adapterFor: (_c, id) => (calls.push(id), fakeAdapter(id)) });
-  expect(calls).toEqual(["local"]);
+  expect(calls.sort()).toEqual(["anthropic", "local"]);
   expect(r.exitCode).toBe(0);
   expect(r.body["ok"]).toBe(true);
 });

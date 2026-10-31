@@ -262,8 +262,9 @@ is given, and `--json` prints one JSON object.
   result is validated like a normal load first, so an inline key, an intent naming
   no provider, or a work repointing a remote provider is a refusal and nothing is
   written. Other keys in the file are kept.
-- `config test` sends one tiny request per mapped intent (the default route when none
-  is mapped) and prints ok or the error per provider. On a `claude-code` provider that
+- `config test` sends one tiny request per mapped intent, plus one for each provider an
+  unmapped intent routes to by kind that no mapped intent already covers (labelled
+  `(by kind)`, as `config show` does), and prints ok or the error per provider. On a `claude-code` provider that
   request is one `claude -p`; a missing `claude` or a signed-out login is reported
   with its fix (`claude auth login`). Exit `1` if any failed. The
   request allows 1024 output tokens so a reasoning model can think and still answer;
