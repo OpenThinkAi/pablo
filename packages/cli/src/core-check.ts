@@ -3,7 +3,7 @@
  * outputs"): what `pablo check --output <type>` adds to the tells and provenance scan. A unit of any output is held
  * to the story core it tells:
  *
- * - **story-time** (the story-time gate, a hard rule): a line that names a year after the unit's own year, or names
+ * - **story-time** (the story-time gate, a hard rule): a line that names a year after the unit's own year (the end of its story-date range, AGT-2287), or names
  *   a thing the timeline (`bible/timeline.md`) dates after it. The unit's date is its frontmatter `story_date`, else
  *   the story date of the first beat its plan row maps it to. The gate is core's `gateTimeline`, the same code the
  *   drafting pack and the critic use, so the three cannot disagree about what exists yet.
@@ -20,7 +20,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { FACTS_FILE, PERIOD_FACTS_FILE, beatsFile, continuityFile, gateTimeline, parseBeatRows } from "@openthink/pablo-core";
+import { FACTS_FILE, PERIOD_FACTS_FILE, beatsFile, continuityFile, gateTimeline, parseBeatRows, planBeatsFor } from "@openthink/pablo-core";
 import type { Hit } from "./check";
 import { readMarker, trackOf } from "./marker";
 import { parseFrontmatter } from "./novel/machine";
@@ -118,6 +118,28 @@ function laterThings(timeline: string, storyDate: string): LaterThing[] {
   });
 }
 
+/**
+ * The date the unit's story-time is judged at (AGT-2287): the end of its story-date range. A unit over several beats
+ * is dated first to last; its frontmatter carries `story_date_end`, else the plan row's last beat's date stands in (a
+ * draft written before the range existed). The later of that and `storyDateOf` wins, so a single-date unit is unchanged.
+ */
+export function storyEndDateOf(workDir: string, def: OutputDefinition, unit: number | undefined, text: string): string | undefined {
+  const start = storyDateOf(workDir, def, unit, text);
+  let end = parseFrontmatter(text)["story_date_end"]?.trim().replace(/^["']|["']$/g, "") || undefined;
+  if (end === undefined && unit !== undefined) {
+    const beats = planBeatsFor(workDir, def.id, unit) ?? def.plan(workDir).find((row) => row.unit === unit)?.beats ?? [];
+    const last = beats.at(-1);
+    if (beats.length > 1 && last !== undefined) {
+      const rows = parseBeatRows(read(join(workDir, beatsFile(workDir))), beatsFile(workDir));
+      end = rows.find((row) => row.chapter === last)?.storyDate || undefined;
+    }
+  }
+  if (end === undefined) return start;
+  if (start === undefined) return end;
+  const [a, b] = [yearIn(start), yearIn(end)];
+  return a !== undefined && (b === undefined || a > b) ? start : end;
+}
+
 /** The unit's story date: its frontmatter `story_date`, else its plan row's first beat's. */
 export function storyDateOf(workDir: string, def: OutputDefinition, unit: number | undefined, text: string): string | undefined {
   const own = parseFrontmatter(text)["story_date"]?.trim().replace(/^["']|["']$/g, "");
@@ -178,7 +200,7 @@ export function coreCheck(workDir: string, def: OutputDefinition, files: readonl
     const text = read(file);
     const label = relative(workDir, file).split("\\").join("/");
     const unit = def.unitOfPath(label);
-    const date = storyDateOf(workDir, def, unit, text);
+    const date = storyEndDateOf(workDir, def, unit, text);
     const year = date === undefined ? undefined : yearIn(date);
     const later = date === undefined || timeline === "" ? [] : laterThings(timeline, date);
     const lines = text.split("\n");
@@ -190,7 +212,7 @@ export function coreCheck(workDir: string, def: OutputDefinition, files: readonl
       const found: Hit[] = [];
       if (year !== undefined) {
         for (const m of line.matchAll(/\b(1[6-9]\d{2}|20\d{2})\b/g)) {
-          if (Number(m[1]) > year) found.push({ path: label, line: i + 1, rule: "story-time", excerpt: excerptOf(line), detail: `${m[1]} is after the unit's date (${date})` });
+          if (Number(m[1]) > year) found.push({ path: label, line: i + 1, rule: "story-time", excerpt: excerptOf(line), detail: `${m[1]} is after the unit's last date (${date})` });
         }
         const words = contentWords(line);
         const linePairs = new Set(words.slice(1).map((w, k) => `${words[k]} ${w}`));

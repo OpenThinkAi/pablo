@@ -299,7 +299,7 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
   const chapter =
     beats.length === 1
       ? [
-          `- Story date: ${beat.storyDate}`,
+          `- Story date (scaffolding, never print it): ${beat.storyDate}`,
           `- Working title: ${beat.title}`,
           ...(script ? [] : [`- ${pov(beat)}`]),
           `- Beat: ${beat.beat}`,
@@ -307,10 +307,10 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
         ].join("\n")
       : [
           `- Working title: ${beat.title}`,
-          `- ${label === undefined ? "This chapter" : script ? "This scene" : "This piece"} tells ${beats.length} beats, in order; tell all of them and nothing beyond them:`,
+          `- ${label === undefined ? "This chapter" : script ? "This scene" : "This piece"} tells ${beats.length} beats, in order; tell all of them and nothing beyond them. The dates and titles are scaffolding: never print a date line or a heading for a beat, show the time through the scene:`,
           ...beats.map(
             (b, i) =>
-              `  ${i + 1}. Story date: ${b.storyDate}. Title: ${b.title}. ${script ? "" : `${pov(b)}. `}Beat: ${b.beat}`,
+              `  ${i + 1}. Story date (scaffolding, never print it): ${b.storyDate}. Title: ${b.title}. ${script ? "" : `${pov(b)}. `}Beat: ${b.beat}`,
           ),
           length,
         ].join("\n");

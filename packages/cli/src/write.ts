@@ -196,6 +196,8 @@ interface FrontmatterFields {
   readonly title: string;
   readonly pov: string;
   readonly storyDate: string;
+  /** The last beat's date when a unit tells several beats on different dates (AGT-2287); omitted for one date. */
+  readonly storyDateEnd?: string | undefined;
   readonly words: number;
   readonly model: string;
   readonly generated: string;
@@ -206,7 +208,7 @@ interface FrontmatterFields {
 
 /**
  * The hand-written frontmatter block, key order fixed: `chapter`, `title`,
- * `pov`, `story_date`, `status`, `words`, `model`, `generated`,
+ * `pov`, `story_date` (and `story_date_end` when a unit's beats span dates, AGT-2287), `status`, `words`, `model`, `generated`,
  * `prompt_hash` — the real vault's chapter 1 order (AC2), plus the
  * provenance keys `pablo check` requires, then `direction` when one steered
  * the draft (AGT-1562).
@@ -218,6 +220,7 @@ function buildFrontmatter(fields: FrontmatterFields): string {
     `title: ${yamlScalar(fields.title)}`,
     `pov: ${yamlScalar(fields.pov)}`,
     `story_date: ${yamlScalar(fields.storyDate)}`,
+    ...(fields.storyDateEnd === undefined || fields.storyDateEnd === fields.storyDate ? [] : [`story_date_end: ${yamlScalar(fields.storyDateEnd)}`]),
     "status: draft",
     `words: ${fields.words}`,
     `model: ${yamlScalar(fields.model)}`,
@@ -241,6 +244,12 @@ function draftBranchName(repo: string, base: string): string {
   for (let v = 2; ; v += 1) {
     if (!branchExists(repo, `${base}-v${v}`)) return `${base}-v${v}`;
   }
+}
+
+/** The date of the last beat a unit tells, or undefined when it tells one beat. */
+function lastBeatDate(inputs: { readonly beat: { readonly storyDate: string }; readonly moreBeats?: readonly { readonly storyDate: string }[] | undefined }): string | undefined {
+  const last = inputs.moreBeats?.at(-1)?.storyDate;
+  return last === undefined || last === "" ? undefined : last;
 }
 
 /** One line per `pablo check` hit, in the exact format `check.ts`'s `runCheck` prints. */
@@ -662,6 +671,7 @@ export async function runWrite(
     title: packResult.inputs.beat.title,
     pov: packResult.inputs.beat.pov,
     storyDate: packResult.inputs.beat.storyDate,
+    storyDateEnd: lastBeatDate(packResult.inputs),
     words: wordCount,
     model: draftAdapter.model,
     generated,

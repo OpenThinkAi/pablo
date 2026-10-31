@@ -425,6 +425,36 @@ test("AC3: check --output radio refuses a mention dated after the unit's year (s
   expect(plain.core).toBeUndefined();
 });
 
+test("AGT-2287: a unit with a story-date range flags only a year after the range's end; a single story_date works as before", () => {
+  const { vault, work } = twoOutputWork();
+  const path = join(work, "outputs", "radio", "episodes", "02-black-ice.md");
+  const yearHits = () => {
+    const outcome = checkWork(vault, work, undefined, "radio");
+    if (!outcome.ok) throw new Error(outcome.message);
+    return (outcome.core ?? []).filter((h) => h.rule === "story-time" && /^\d{4} is after/.test(h.detail ?? "")).map((h) => h.detail);
+  };
+  const body = "NARRATOR: Spring came late.\nWILFRED: In 1933 we sold the lot.\nODILE: By 1934 it was done.\n";
+  // Two beats two years apart: only the year after the range's end (1934) is flagged.
+  writeFileSync(path, EPISODE_TWO.replace("story_date: Winter 1931\n", "story_date: Winter 1931\nstory_date_end: Spring 1933\n") + body.replace("In 1933", "In 1932").replace("By 1934", "By 1933") + "WILFRED: In 1934 it was gone.\n");
+  expect(yearHits()).toEqual(["1934 is after the unit's last date (Spring 1933)"]);
+  // Back-compat: the same text with only story_date flags the later years against that single date.
+  writeFileSync(path, EPISODE_TWO + body);
+  expect(yearHits()).toEqual(["1933 is after the unit's last date (Winter 1931)", "1934 is after the unit's last date (Winter 1931)"]);
+});
+
+test("AGT-2287: a unit with no story_date_end takes the end from its plan row's last beat", () => {
+  const { vault, work } = twoOutputWork();
+  // Chapter 1 tells beats 1-3 (January 1929 to Summer 1931); its frontmatter holds only the first date.
+  writeFileSync(join(work, "outputs", "novel", "plan.md"), "| unit | title | beats | status |\n|---|---|---|---|\n| 1 | The Last Full Cut | 1-3 | draft |\n");
+  const path = join(work, "chapters", "01-the-last-full-cut.md");
+  writeFileSync(path, `${readFileSync(path, "utf8")}\nIt was 1931 and then 1999.\n`);
+  const outcome = checkWork(vault, work, undefined, "novel");
+  if (!outcome.ok) throw new Error(outcome.message);
+  const years = (outcome.core ?? []).filter((h) => h.rule === "story-time" && /is after/.test(h.detail ?? "")).map((h) => h.detail ?? "");
+  expect(years.some((d) => d.startsWith("1931"))).toBe(false);
+  expect(years.some((d) => d.startsWith("1999"))).toBe(true);
+});
+
 test("AC3: the radio unit's pack still gates the timeline by its story date", () => {
   const { vault, work } = twoOutputWork();
   const marker = readMarker(work);
