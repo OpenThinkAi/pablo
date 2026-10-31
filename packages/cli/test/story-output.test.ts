@@ -152,6 +152,8 @@ test("AC1: output add story, then write --output story drafts outputs/story/stor
   const text = git(v.vault, "show", "draft/story:novels/ice-house/outputs/story/story.md");
   expect(text).toContain("story: 1");
   expect(text).toContain("status: draft");
+  // AGT-2287: four beats on different dates: the frontmatter carries the range, first to last.
+  expect(text).toMatch(/^story_date: .+\nstory_date_end: .+\nstatus: draft$/m);
   expect(text).toContain("The ice rang wrong under the horse.");
   expect(existsSync(join(v.work, "outputs", "story", "story.md"))).toBe(false);
 
@@ -159,6 +161,9 @@ test("AC1: output add story, then write --output story drafts outputs/story/stor
   const prompt = prompts.join("\n");
   expect(prompt).toContain("the whole piece");
   expect(prompt).toContain("tells 4 beats");
+  // AGT-2287: the beat rows say the dates are scaffolding, not something to print.
+  expect(prompt).toContain("Story date (scaffolding, never print it):");
+  expect(prompt).toContain("never print a date line");
   expect(prompt).toContain("# Story rules");
   expect(prompt).toContain("about 2400 words");
 });

@@ -174,7 +174,8 @@ function frontmatterLines(text: string): number {
 /** `story_date` from a chapter's frontmatter, if it has one. */
 function storyDateOf(text: string): string | undefined {
   const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1];
-  const m = front === undefined ? null : /^story_date:\s*(.+)$/m.exec(front);
+  // A unit over several beats carries `story_date_end` (AGT-2287): what exists is judged at the range's end.
+  const m = front === undefined ? null : /^story_date_end:\s*(.+)$/m.exec(front) ?? /^story_date:\s*(.+)$/m.exec(front);
   return m?.[1]?.trim().replace(/^["']|["']$/g, "") || undefined;
 }
 

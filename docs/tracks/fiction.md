@@ -54,7 +54,9 @@ The fiction track runs three checks on every unit:
 
 - `continuity`: facts that contradict the work's continuity ledger (`pablo critique`, and
   `pablo check --across` between outputs).
-- `story-time`: something mentioned that is dated after the unit's own year.
+- `story-time`: something mentioned that is dated after the unit's own year. A unit over several
+  beats (a story) is dated first to last: a draft's frontmatter carries `story_date_end` beside
+  `story_date`, and only a year after the end of that range is flagged.
 - `unknown-name`: a name the bible, `facts.md` and the output's continuity do not know. A
   character file's name counts too, so `bible/characters/clara-vane.md` clears Clara and Vane
   even when the file's text never writes the display name.

@@ -528,7 +528,7 @@ The same inputs give the same `prompt_hash`.
 Without `--dry-run`, the pack is sent once. While it streams, progress goes to
 stderr. The answer is cleaned up: em-dashes become commas, en-dashes become "to",
 and curly quotes become straight. The unit is written one sentence per line, with
-frontmatter in this order: `<noun>`, `title`, `pov`, `story_date`, `status: draft`,
+frontmatter in this order: `<noun>`, `title`, `pov`, `story_date` (then `story_date_end`, the last beat's date, when a unit tells several beats on different dates), `status: draft`,
 `words`, `model`, `generated`, `prompt_hash`, then `direction` if given. For a novel,
 `<noun>` is `chapter`.
 
