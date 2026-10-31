@@ -92,7 +92,11 @@ test("a hit names the term, why it is out of period and the period it belongs to
   const result = await checkAnachronisms(work, [unit], { ask: fake.ask, progress: (line) => progress.push(line) });
   expect(result?.asked).toBe(1);
   // The wait is visible: what is asked, then each batch.
-  expect(progress).toEqual([`anachronism: asking the check model about 4 new word(s) in 1 batch(es); known verdicts come from ${LEXICON_FILE}`, "anachronism: batch 1/1"]);
+  expect(progress).toEqual([
+    "anachronism: 0 of 4 word verdict(s) from the cache (injected), 4 to ask",
+    `anachronism: asking injected about 4 word(s) in 1 batch(es); known verdicts come from ${LEXICON_FILE}`,
+    "anachronism: batch 1/1",
+  ]);
   expect(result?.notice).toBeUndefined();
   expect(result?.hits).toEqual([
     {
@@ -112,9 +116,9 @@ test("a hit names the term, why it is out of period and the period it belongs to
   // Cached in the work, per (period, term), in-period verdicts too.
   expect(existsSync(join(work, LEXICON_FILE))).toBe(true);
   const known = readLexicon(work)?.periods[PERIOD] ?? {};
-  expect(known["teenager"]).toEqual({ inPeriod: false, ...TEENAGER.teenager });
-  expect(known["hauled"]).toEqual({ inPeriod: true });
-  expect(known["river"]).toEqual({ inPeriod: true });
+  expect(known["teenager"]).toEqual({ inPeriod: false, ...TEENAGER.teenager, model: "injected" });
+  expect(known["hauled"]).toEqual({ inPeriod: true, model: "injected" });
+  expect(known["river"]).toEqual({ inPeriod: true, model: "injected" });
 });
 
 test("a cached hit: a re-check makes no model call for known terms and reports the same hit", async () => {
@@ -194,7 +198,7 @@ test("`check` puts anachronism hits in hits[] through the anachronismModel seam"
   expect(result.exitCode).toBe(0);
   const hits = (result.body as { hits: Array<{ rule: string; term?: string }> }).hits;
   expect(hits.filter((h) => h.rule === "anachronism").map((h) => h.term)).toEqual(["teenager"]);
-  expect((result.body as { anachronism?: unknown }).anachronism).toEqual({ asked: 1 });
+  expect((result.body as { anachronism?: unknown }).anachronism).toEqual({ asked: 1, model: "injected", cached: 0, new: 4 });
 });
 
 test("helpers: the period, the terms of a line and a lenient verdict parse (JSON arrays are still read)", () => {
@@ -233,11 +237,14 @@ test("etymology, undated, self-contradicting and spelling verdicts give no hit; 
 
 test("a lexicon cached before AGT-2284 with an undated, N/A or spelling verdict reports no hit and asks nothing", async () => {
   const { work, unit } = tempWork("The depot and the labor.");
-  const old = { periods: { [PERIOD]: { depot: { inPeriod: false, why: "x", belongs: "N/A" }, labor: { inPeriod: false, why: "spelling variant", belongs: "the 1830s" }, the: { inPeriod: false, why: "y", belongs: "a later period" } } } };
+  const m = "injected";
+  const old = { periods: { [PERIOD]: { depot: { inPeriod: false, why: "x", belongs: "N/A", model: m }, labor: { inPeriod: false, why: "spelling variant", belongs: "the 1830s", model: m }, the: { inPeriod: false, why: "y", belongs: "a later period", model: m } } } };
   writeLexicon(work, old);
   const fake = fakeAsk({});
   const result = await checkAnachronisms(work, [unit], { ask: fake.ask });
   expect(result?.hits).toEqual([]);
+  // `depot` and `labor` stay cached (their dropped verdicts are never re-asked); no model call is made.
+  expect(result?.asked).toBe(0);
   expect(fake.prompts).toEqual([]);
 });
 
@@ -263,7 +270,7 @@ test("the line protocol: a Gemma 4 reply and a Claude reply both give verdicts, 
     expect(result?.hits.map((h) => h.term).sort()).toEqual(["radio", "teenager"]);
     expect(result?.hits.find((h) => h.term === "radio")?.belongs).toBe("the 1920s onward");
     // Every unlisted term is in period once the reply says END, and the answer budget is stated (mlx_lm's default is 512).
-    expect(readLexicon(work)?.periods[RADIO_1918]?.["parlour"]).toEqual({ inPeriod: true });
+    expect(readLexicon(work)?.periods[RADIO_1918]?.["parlour"]).toEqual({ inPeriod: true, model: "injected" });
     expect(requests[0]?.maxTokens).toBe(ASK_MAX_TOKENS);
     expect(requests[0]?.prompt).toContain("END");
   }
@@ -370,12 +377,107 @@ test("a legacy facts/lexicon.json seeds a missing cache and is never written", a
   mkdirSync(join(work, "facts"), { recursive: true });
   const legacy = { periods: { [PERIOD]: { teenager: { inPeriod: false, why: "1940s word", belongs: "the 1940s" }, hauled: { inPeriod: true }, ice: { inPeriod: true }, river: { inPeriod: true } } } };
   writeFileSync(join(work, LEGACY_LEXICON_FILE), JSON.stringify(legacy));
-  const result = await checkAnachronisms(work, [unit], {
+  // The seed records no model, so a known model does not reuse it (AGT-2288): it asks again.
+  const fake = fakeAsk({});
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask });
+  expect(result?.asked).toBe(1);
+  expect(result?.hits).toEqual([]);
+  expect(JSON.parse(readFileSync(join(work, LEGACY_LEXICON_FILE), "utf8"))).toEqual(legacy);
+  // Marked `"model": "*"` (the author's own verdicts), the seed is obeyed by every model.
+  const own = { periods: { [PERIOD]: { teenager: { inPeriod: false, why: "1940s word", belongs: "the 1940s", model: "*" }, hauled: { inPeriod: true, model: "*" }, ice: { inPeriod: true, model: "*" }, river: { inPeriod: true, model: "*" } } } };
+  writeFileSync(join(work, LEGACY_LEXICON_FILE), JSON.stringify(own));
+  rmSync(join(work, LEXICON_FILE));
+  const again = await checkAnachronisms(work, [unit], {
     ask: async () => {
       throw new Error("the model was called");
     },
   });
-  expect(result?.asked).toBe(0);
+  expect(again?.asked).toBe(0);
+  expect(again?.hits.map((h) => h.term)).toEqual(["teenager"]);
+});
+
+// ---------------------------------------------------------------- AGT-2288: verdicts belong to the model that gave them
+
+test("a verdict cached by model A is not used by model B; B asks again and its answer replaces A's", async () => {
+  const { work, unit } = tempWork("The teenager hauled ice from the river.");
+  const a = fakeAsk(TEENAGER);
+  const first = await checkAnachronisms(work, [unit], { ask: a.ask, model: "local/qwen" });
+  expect(first?.hits.map((h) => h.term)).toEqual(["teenager"]);
+  expect(first?.model).toBe("local/qwen");
+
+  // Model B says nothing is out of period: it is asked about every word, and A's hit is gone.
+  const b = fakeAsk({});
+  const progress: string[] = [];
+  const second = await checkAnachronisms(work, [unit], { ask: b.ask, model: "claude-code/claude-opus", progress: (l) => progress.push(l) });
+  expect(second?.asked).toBe(1);
+  expect(second?.cached).toBe(0);
+  expect(second?.hits).toEqual([]);
+  expect(b.prompts.flatMap(termsOf)).toContain("teenager");
+  expect(progress[0]).toBe("anachronism: 0 of 4 word verdict(s) from the cache (claude-code/claude-opus), 4 to ask");
+  expect(readLexicon(work)?.periods[PERIOD]?.["teenager"]).toEqual({ inPeriod: true, model: "claude-code/claude-opus" });
+
+  // The same model again reuses its own verdicts and says how many.
+  const never = async (): Promise<string> => {
+    throw new Error("the model was called");
+  };
+  const third = await checkAnachronisms(work, [unit], { ask: never, model: "claude-code/claude-opus", progress: (l) => progress.push(l) });
+  expect(third?.asked).toBe(0);
+  expect(third?.cached).toBe(4);
+  expect(progress).toContain("anachronism: 4 of 4 word verdict(s) from the cache (claude-code/claude-opus), 0 to ask");
+});
+
+test("a hand-written verdict marked model * is obeyed by every model; an unmarked legacy one is not reused", async () => {
+  const { work, unit } = tempWork("The teenager hauled ice.");
+  writeLexicon(work, { periods: { [PERIOD]: { teenager: { inPeriod: false, why: "1940s word", belongs: "the 1940s", model: "*" }, hauled: { inPeriod: true } } } });
+  const fake = fakeAsk({});
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask, model: "local/qwen" });
   expect(result?.hits.map((h) => h.term)).toEqual(["teenager"]);
-  expect(JSON.parse(readFileSync(join(work, LEGACY_LEXICON_FILE), "utf8"))).toEqual(legacy);
+  // `hauled` has no model: asked again. `teenager` (model *) is not.
+  expect(fake.prompts.flatMap(termsOf)).toEqual(["hauled", "ice"]);
+});
+
+test("--fresh drops the period's cached verdicts, whoever gave them", async () => {
+  const { work, unit } = tempWork("The teenager hauled ice.");
+  await checkAnachronisms(work, [unit], { ask: fakeAsk(TEENAGER).ask, model: "local/qwen" });
+  const fake = fakeAsk({});
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask, model: "local/qwen", fresh: true });
+  expect(result?.asked).toBe(1);
+  expect(result?.cached).toBe(0);
+  expect(result?.hits).toEqual([]);
+  expect(fake.prompts.flatMap(termsOf)).toContain("teenager");
+});
+
+test("a draft branch is checked against main's period brief, not its own stale one", async () => {
+  const { vault, work } = tempWork("The teenager hauled ice from the river.");
+  writeFileSync(join(vault, ".gitignore"), ".pablo/\n");
+  git(vault, "init", "-q", "-b", "main");
+  git(vault, "config", "user.email", "t@example.com");
+  git(vault, "config", "user.name", "T");
+  git(vault, "add", "-A");
+  git(vault, "commit", "-q", "-m", "init");
+  const tree = join(mkdtempSync(join(tmpdir(), "pablo-anachronism-wt-")), "draft");
+  roots.push(dirname(tree));
+  git(vault, "worktree", "add", "-q", "-b", "draft/ch01", tree);
+  const draftWork = join(tree, "novels", "ice-house");
+  // Main's brief moves on after the branch was cut.
+  const NEW = "The Hudson ice trade, winter 1890.";
+  writeFileSync(join(work, "bible", "period.md"), `# Period\n\n## When and where\n\n${NEW}\n`);
+  const fake = fakeAsk({});
+  await checkAnachronisms(draftWork, [join(draftWork, "chapters", "01-the-last-full-cut.md")], { ask: fake.ask, coreDir: work });
+  expect(fake.prompts[0]).toContain(NEW);
+  expect(fake.prompts[0]).not.toContain(PERIOD);
+  expect(Object.keys(readLexicon(work)?.periods ?? {})).toEqual([NEW]);
+});
+
+test("--fresh keeps the author's model * verdicts and drops the rest; re-asking an unmarked legacy verdict says so", async () => {
+  const { work, unit } = tempWork("The teenager hauled ice.");
+  writeLexicon(work, { periods: { [PERIOD]: { teenager: { inPeriod: false, why: "1940s word", belongs: "the 1940s", model: "*" }, hauled: { inPeriod: true, model: "local/qwen" }, ice: { inPeriod: true } } } });
+  const progress: string[] = [];
+  const fake = fakeAsk({});
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask, model: "local/qwen", progress: (l) => progress.push(l) });
+  expect(result?.hits.map((h) => h.term)).toEqual(["teenager"]);
+  expect(progress).toContain(`anachronism: 1 verdict(s) predate model tracking and will be asked again; mark your own edits "model": "*" in ${LEXICON_FILE} to keep them`);
+  const fresh = await checkAnachronisms(work, [unit], { ask: fakeAsk({}).ask, model: "local/qwen", fresh: true });
+  expect(fresh?.hits.map((h) => h.term)).toEqual(["teenager"]);
+  expect(fresh?.cached).toBe(1);
 });

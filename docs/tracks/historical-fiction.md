@@ -84,7 +84,7 @@ as known), this track runs two more on every unit:
   The period is the `## When and where` section of `bible/period.md`; with no brief the
   check is skipped and says so. The unit's distinct words go to the `check` intent's
   model (function words and names the bible or continuity already knows are not sent),
-  verdicts are cached per (period, term) in the work's `.pablo/lexicon.json` in the main
+  verdicts are cached per (period, term, model) in the work's `.pablo/lexicon.json` in the main
   checkout, and you can edit a verdict there to overrule the model. A fully cached unit
   makes no model call. Words the model leaves unjudged make the check fail (exit `1`),
   never a silent pass.

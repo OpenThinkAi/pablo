@@ -189,6 +189,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     vault: { type: "string" }, // AGT-1709: audition/cast/voices --vault
     across: { type: "boolean", default: false }, // AGT-1671: check --across
     strict: { type: "boolean", default: false }, // AGT-2188: check --strict
+    fresh: { type: "boolean", default: false }, // AGT-2288: check --fresh
     finding: { type: "string" }, // AGT-1671: promote --finding
     keep: { type: "string" }, // AGT-1671: promote --keep
     engine: { type: "string" }, // AGT-1683: perform --engine
