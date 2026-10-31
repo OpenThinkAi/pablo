@@ -4,7 +4,7 @@
 // cli.ts passes `screenPlanner` in through runScreen's options. The id is the key row's (keys.ts `PLANNING_VERBS`).
 
 import { isAbsolute, relative, resolve } from "node:path";
-import { distillFactsInProject, linkChecklistItem, planChecklist, recordFactInProject, saveResearchInProject, waiveChecklistItem } from "./research-verbs";
+import { addChecklistItem, distillFactsInProject, linkChecklistItem, planChecklist, recordFactInProject, saveResearchInProject, waiveChecklistItem } from "./research-verbs";
 import { saveCore } from "./save";
 import type { VerbResult } from "./verbs";
 
@@ -42,6 +42,11 @@ export function screenPlanner(vaultRoot: string, projectPath: string, env: NodeJ
           const [title, note, sources, items] = parts(line);
           if (!title || !note || !sources) return bad("Type <title> | <note> | <source> [<source>...] | <item numbers, optional>");
           return resultOf(saveResearchInProject(projectPath, { title, note, sources: sources.split(/\s+/) }, env, items ? items.split(/\s+/) : []));
+        }
+        case "research.add": {
+          const [question, topic] = parts(line);
+          if (!question) return bad("Type <question> | <topic, optional>");
+          return resultOf(addChecklistItem(projectPath, question, topic || undefined, env));
         }
         case "research.waive": case "research.link": {
           const m = /^(\S+)\s+([\s\S]+)$/.exec(line);

@@ -19,6 +19,7 @@ import {
   type ChecklistOrigin,
   type ChecklistItem,
   type ChecklistRow,
+  categoryId,
   checklistItems,
   defaultChecklistMax,
   MAX_CHECKLIST_ITEMS,
@@ -302,6 +303,45 @@ export function waiveItemInProject(projectPath: string, item: ItemSelector, reas
       ...(out.written.sha ? { sha: out.written.sha } : {}),
       ...(waived.length === 1 ? { item: waived[0] } : {}),
       items: waived,
+      open: out.items.filter((i) => i.status === "open").length,
+    },
+    exitCode: 0,
+  };
+}
+
+/**
+ * `research add "<question>" [--topic <t>]` (AGT-2282): one open item appended to the checklist, numbered after the
+ * last, on a new `plan/` branch. The topic is the item's category (default: `people` on a period checklist; a thesis
+ * checklist has only `claim`). Like `waive`/`link` it rewrites the whole table from main, so accept the branch
+ * before the next.
+ */
+export function addItemInProject(projectPath: string, question: string | undefined, topic: string | undefined, planSessionFor: PlanSessionFor): VerbResult {
+  const item = (question ?? "").replace(/\s+/g, " ").trim();
+  if (item === "") return refuse('pablo: research add: name the question to research (pablo research add "<question>" [--topic <t>] --project <slug>)');
+  if (item.length > MAX_ITEM_CHARS) return refuse(`pablo: research add: keep the question under ${MAX_ITEM_CHARS} characters`);
+  const read = readChecklistFor(projectPath, "add", planSessionFor);
+  if (!read.ok) return read.result;
+  const categories = categoriesFor(checklistOrigin(read.track));
+  const category = topic === undefined || topic.trim() === "" ? categories[0]! : categoryId(topic);
+  if (!categories.includes(category)) return refuse(`pablo: research add: "${topic}" is not a checklist topic (${categories.join(", ")})`);
+  if (read.rows.some((r) => r.item.toLowerCase().replace(/\s+/g, " ").trim() === item.toLowerCase())) {
+    return refuse("pablo: research add: that question is already on the checklist");
+  }
+  if (read.rows.length >= MAX_CHECKLIST_ITEMS) return refuse(`pablo: research add: the checklist is at its cap of ${MAX_CHECKLIST_ITEMS} items`);
+  const number = read.rows.reduce((n, r) => Math.max(n, r.number), 0) + 1;
+  const rows = [...read.rows, { number, category, item, sources: [] }];
+  const planned = planSessionFor(projectPath);
+  if (!planned.ok) return planned.result;
+  const out = writeRows(planned.session, planned.dir, rows, read.track, sourcedNoteIds(projectPath, read.track), `research: add checklist item #${number}`);
+  if (!out.written.ok) return fail(out.written.notice);
+  return {
+    body: {
+      ok: true,
+      path: out.path,
+      branch: planned.session.branch,
+      ...(out.written.sha ? { sha: out.written.sha } : {}),
+      item: out.items.find((i) => i.number === number),
+      items: out.items.filter((i) => i.number === number),
       open: out.items.filter((i) => i.status === "open").length,
     },
     exitCode: 0,

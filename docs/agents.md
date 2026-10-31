@@ -104,7 +104,7 @@ them without reading this page.
    source), `invented`, or decided by the `author`.
 8. **Research through pablo, and send only distilled facts to the writer.** On
    `historical-fiction` and `nonfiction` works the gate wants a checklist where every
-   item is sourced or waived: `plan_research`, `save_research` (with `items`),
+   item is sourced or waived: `plan_research`, `add_research_item` (for what the plan missed), `save_research` (with `items`),
    `waive_research_item`, `link_research_item`, then `distill_facts` for the period
    facts. The drafting model sees only those distilled facts, never `research/`.
    `web_search` and `web_fetch` are pablo's own tools for finding sources.
@@ -138,7 +138,7 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `revise` | The same, but returns the candidate text instead of committing it |
 | `guide` | The path from nothing to a finished piece for a track and an output. Call it first; no project needed |
 | `check` | Tells, banned names and provenance gaps in the drafted text, plus the track's checks (story-time, unknown names; anachronism and fact accuracy on historical fiction; claim support on nonfiction) |
-| `plan_research` / `save_research` / `waive_research_item` / `link_research_item` / `distill_facts` | The research gate: derive the checklist, keep a sourced note, close an item, and distill notes to sourced period facts. See [historical-fiction](tracks/historical-fiction.md) |
+| `plan_research` / `add_research_item` / `save_research` / `waive_research_item` / `link_research_item` / `distill_facts` | The research gate: derive the checklist, keep a sourced note, close an item, and distill notes to sourced period facts. See [historical-fiction](tracks/historical-fiction.md) |
 | `record_fact` | Record one fact tagged `researched`, `invented` or `author` |
 | `critique` | Comment on a change branch: continuity contradictions, things mentioned before their date, voice tells |
 | `read` / `search` | Read a file in the work, or search it |

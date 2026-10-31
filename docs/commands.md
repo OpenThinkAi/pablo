@@ -876,6 +876,20 @@ refused (exit 2); nothing new to add is refused too. Over MCP this is the
 ```
 
 ```
+pablo research add "<question>" [--topic <t>] --project <slug>
+```
+
+`add` appends one open item to the checklist when `research plan` left out
+something the story turns on. It is numbered after the last item, on its own `plan/`
+branch (the checklist must already be merged). `--topic` is the item's category
+(`people` by default; `places`, `technology`, `language`, `daily-life`, `politics`,
+`dates`; a thesis checklist has only `claim`). A question already on the list, or an
+empty or over-200-character one, is refused. Like `waive` and `link` it rewrites
+the whole table from main, so accept its branch before the next one. Over MCP:
+`add_research_item` (`question`, `topic`). The result has the `waive` shape, with the
+new item as `item`.
+
+```
 pablo research waive <#,#,a-b> "<reason>" --project <slug>
 pablo research link <#,#,a-b> <note> --project <slug>
 ```
@@ -1137,7 +1151,7 @@ It serves:
 |---|---|
 | Where things stand | `resume`, `status`, `timeline` |
 | Writing | `write`, `prose`, `revise` (deprecated aliases, removed next release: `draft_unit`, `draft_chapter` for `write`; `revise_passage` for `revise` with `branch`) |
-| Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `distill_facts`, `plan_research`, `waive_research_item`, `link_research_item`, `record_fact` |
+| Planning and checks | `save`, `check`, `critique`, `promote`, `save_research`, `distill_facts`, `plan_research`, `add_research_item`, `waive_research_item`, `link_research_item`, `record_fact` |
 | Starting a work | `guide` (call it first), `init`, `story`, `output_add` |
 | Accepting or rejecting a change branch | `merge` |
 | Setup and publishing | `output` (list, remove, plan), `migrate`, `publish` |

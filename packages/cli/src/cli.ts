@@ -410,7 +410,7 @@ export function researchFactText(raw: unknown): string {
     ].join("\n");
   }
   if (typeof body["open"] === "number") {
-    // `research waive|link`, or `research save --item` (AGT-2111).
+    // `research add|waive|link`, or `research save --item` (AGT-2111).
     const items = (Array.isArray(body["items"]) ? body["items"] : [body["item"]]) as { number: number; category: string; item: string; status: string }[];
     const saved = body["note"] !== undefined;
     const head = saved ? `saved ${String(body["path"])} and research/checklist.md` : `updated ${String(body["path"])}`;
@@ -1618,7 +1618,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
 
   // `research save|distill|plan|waive|link` (AGT-2106, AGT-2109, AGT-2111) and `fact record` (AGT-2106) run off their `VERBS` entries, as `pablo mcp` does.
   if (args.verb === "research" || args.verb === "fact") {
-    const subs = args.verb === "research" ? ["save", "distill", "plan", "waive", "link"] : ["record"];
+    const subs = args.verb === "research" ? ["save", "distill", "plan", "add", "waive", "link"] : ["record"];
     const sub = args.rest[0] ?? "";
     const usage = `pablo ${args.verb} ${subs.join("|")} --project <slug> ...`;
     if (projectPath === undefined || !subs.includes(sub)) {
