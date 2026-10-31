@@ -13,6 +13,7 @@ import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { writeMarker } from "../src/marker";
 import { addOutput } from "../src/output-verbs";
 import { runStory } from "../src/story";
+import { withoutBeats } from "../src/story-adopt";
 import type { StoryDeps } from "../src/story";
 import type { VerbContext } from "../src/verbs";
 import { scriptedAgent } from "./scripted-agent";
@@ -227,6 +228,25 @@ test("AGT-2289: stages before --from must be complete: the refusal names what is
   expect(existsSync(join(work, "_archived"))).toBe(false);
   expect(existsSync(join(work, "outputs", "_removed"))).toBe(false);
   expect(allFiles(work)).toContain("bible/characters/rosa.md");
+});
+
+test("AGT-2289: an uncommitted edit in an output refuses before anything moves", async () => {
+  const { work, ctx } = handBuilt();
+  writeFileSync(join(work, "outputs", "story", "story.md"), "unsaved edit\n", "utf8");
+  const result = await runStory({ project: "one-passage", from: "bible" }, ctx, { agent: harness().agent, writer: fakeWriter(), now: NOW });
+  expect(result.exitCode).toBe(2);
+  expect((result.body as any).message).toContain("uncommitted changes");
+  expect(existsSync(join(work, "_archived"))).toBe(false);
+  expect(readFileSync(join(work, "bible", "characters", "rosa.md"), "utf8")).toBe(OLD_ROSA);
+  expect(readFileSync(join(work, "outline", "beats.md"), "utf8")).toContain("The Letter");
+});
+
+test("AGT-2289: withoutBeats clears only the beats table, wherever it sits", () => {
+  const acts = "| Act | Years | What |\n|---|---|---|\n| I | 1900 | x |";
+  const beats = "| # | Story date | Title |\n|---|---|---|\n| 1 | 1900 | A |";
+  expect(withoutBeats(`${beats}\n\n${acts}\n`)).toBe(`| # | Story date | Title |\n|---|---|---|\n\n${acts}\n`);
+  expect(withoutBeats(`${acts}\n\n${beats}\n`)).toBe(`${acts}\n\n| # | Story date | Title |\n|---|---|---|\n`);
+  expect(withoutBeats(`${acts}\n`)).toBe(`${acts}\n`);
 });
 
 test("AGT-2289: on historical-fiction the research gate must be open before a later stage; uncommitted changes are refused", async () => {

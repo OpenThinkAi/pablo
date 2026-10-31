@@ -119,7 +119,7 @@ export function applyArchive(work: string, plan: ArchivePlan, dest: string): str
   return touched;
 }
 
-/** Every file under `rel` in `work`, for moving an output's artifact directory (the novel's chapter directory). */
+/** Moves every file under `rel` into `dest`, keeping paths; returns the work-relative paths touched, both sides. */
 export function moveDirToArchive(work: string, rel: string, dest: string): string[] {
   const touched: string[] = [];
   for (const file of filesUnder(work, rel)) {

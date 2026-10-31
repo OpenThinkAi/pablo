@@ -61,7 +61,7 @@ import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, rea
 import { mergeDraft } from "./novel/merge";
 import { dirtyPaths } from "./migrate";
 import { addOutput, removeOutput } from "./output-verbs";
-import { ARCHIVE_DIR, applyArchive, archiveDest, moveDirToArchive, planArchive } from "./story-adopt";
+import { applyArchive, archiveDest, moveDirToArchive, planArchive } from "./story-adopt";
 import { assumedThesis } from "./outputs/essay/scaffold";
 import { radioMachine } from "./outputs/radio/casting-side";
 import { episodeState } from "./outputs/radio/state";
@@ -1142,7 +1142,8 @@ async function adoptFrom(args: StoryArgs, from: string, run0: { vault: string; r
   // The stages before `from` must already be complete.
   const missing = stages.slice(0, at).flatMap((stage) => (stageMissing(work, stage) ?? []).map((m) => `${stage}: ${m}`));
   if (missing.length > 0) {
-    return refuse(`pablo: story: --from ${from} keeps the stages before it, and ${[...new Set(missing.map((m) => m.split(":")[0]))].join(", ")} ${new Set(missing.map((m) => m.split(":")[0])).size === 1 ? "is" : "are"} not complete; nothing was moved`, missing);
+    const short = [...new Set(missing.map((m) => m.split(":")[0]))];
+    return refuse(`pablo: story: --from ${from} keeps the stages before it, and ${short.join(", ")} ${short.length === 1 ? "is" : "are"} not complete; nothing was moved`, missing);
   }
 
   const prompt = args.prompt?.trim() || prior?.prompt || promptOf(work, marker.marker.title);
@@ -1161,8 +1162,12 @@ async function adoptFrom(args: StoryArgs, from: string, run0: { vault: string; r
     const dir = outputDefinition(id)?.artifactDir;
     return dir !== undefined && !dir.startsWith("outputs/") ? [dir] : [];
   });
-  const relOf = (rel: string): string => join(work, rel);
-  const dirty = dirtyPaths(vault, [...plan.moves, ...plan.rewrites.map((r) => r.rel), ...outputDirs, "pablo.json"].filter((rel) => existsSync(relOf(rel))).map((rel) => join(work, rel).slice(vault.length + 1)));
+  const abs = (rel: string): string => join(work, rel);
+  // Everything this run will move or rewrite, including what `output remove` will archive, so no refusal comes after a move.
+  const dirty = dirtyPaths(
+    vault,
+    [...plan.moves, ...plan.rewrites.map((r) => r.rel), ...outputDirs, ...declared.map((id) => `outputs/${id}`), "pablo.json"].filter((rel) => existsSync(abs(rel))).map((rel) => relative(vault, abs(rel))),
+  );
   if (dirty.length > 0) return refuse(`pablo: story: uncommitted changes in ${dirty.join(", ")}; commit or discard them first; nothing was moved`, dirty);
 
   const dest = archiveDest(work, from, date);
@@ -1177,7 +1182,7 @@ async function adoptFrom(args: StoryArgs, from: string, run0: { vault: string; r
   }
   for (const dir of outputDirs) touched.push(...moveDirToArchive(work, dir, dest));
   if (touched.length > 0) {
-    const committed = gitCommit(vault, `${marker.marker.slug}: archive the ${from} stage and later (pablo story --from)`, [...new Set(touched)].map(relOf));
+    const committed = gitCommit(vault, `${marker.marker.slug}: archive the ${from} stage and later (pablo story --from)`, [...new Set(touched)].map(abs));
     if (!committed.committed) return fail(committed.notice ?? "pablo: story: could not commit the archive", { path: work });
   }
 
@@ -1199,10 +1204,10 @@ async function adoptFrom(args: StoryArgs, from: string, run0: { vault: string; r
     published: {},
     assumptions: prior?.assumptions ?? [],
     ...(prior?.transcripts === undefined ? {} : { transcripts: prior.transcripts }),
-    adopted: { from, archived: touched.length === 0 ? "" : `${ARCHIVE_DIR}/${dest.slice(ARCHIVE_DIR.length + 1)}`, outputs: declared },
+    adopted: { from, archived: plan.moves.length + plan.rewrites.length + outputDirs.length === 0 ? "" : dest, outputs: declared },
   };
   saveState(work, state);
-  ctx.stderr.write(`pablo story: adopting ${marker.marker.slug} from ${from}${touched.length === 0 ? " (nothing to archive)" : `; archived to ${dest}`}\n`);
+  ctx.stderr.write(`pablo story: adopting ${marker.marker.slug} from ${from} (request: ${prompt.split("\n")[0]!.slice(0, 80)})${touched.length === 0 ? " (nothing to archive)" : `; archived to ${dest}`}\n`);
   return advance({ vault, repo, work, slug: marker.marker.slug, title: marker.marker.title, state, ctx, deps });
 }
 
