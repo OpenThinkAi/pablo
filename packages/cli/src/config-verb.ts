@@ -278,11 +278,20 @@ export async function configTest(scope: ConfigScope, deps: ConfigTestDeps): Prom
     return failure(error);
   }
   if (config.providers.size === 0) return failure(new NoModelConfiguredError());
-  // One request per mapped intent; with none mapped, the default route is the one thing to check.
-  const targets: { intent: string; provider: string }[] = [...config.intents].map(([intent, provider]) => ({ intent, provider }));
-  if (targets.length === 0) targets.push({ intent: "(default)", provider: config.defaultProvider });
+  // One request per mapped intent, then one per provider an unmapped intent routes to by kind
+  // that no mapped intent already covers (AGT-2280), so a config with no `intents` block still
+  // tests every provider it can use.
+  const targets: { intent: string; provider: string; byKind?: true }[] = [...config.intents].map(([intent, provider]) => ({ intent, provider }));
+  const covered = new Set(targets.map((t) => t.provider));
+  for (const known of KNOWN_INTENTS) {
+    if (config.intents.has(known.name)) continue;
+    const provider = route(config, known);
+    if (covered.has(provider)) continue;
+    covered.add(provider);
+    targets.push({ intent: known.name, provider, byKind: true });
+  }
 
-  const results: { intent: string; provider: string; ok: boolean; error?: string }[] = [];
+  const results: { intent: string; provider: string; ok: boolean; byKind?: true; error?: string }[] = [];
   for (const target of targets) {
     try {
       const adapter = deps.adapterFor(config, target.provider);
@@ -302,7 +311,7 @@ export async function configTest(scope: ConfigScope, deps: ConfigTestDeps): Prom
   }
   const allOk = results.every((r) => r.ok);
   const lines = [
-    ...results.map((r) => `  ${r.intent} -> ${r.provider}: ${r.ok ? "ok" : `error: ${r.error}`}`),
+    ...results.map((r) => `  ${r.intent} -> ${r.provider}${r.byKind ? " (by kind)" : ""}: ${r.ok ? "ok" : `error: ${r.error}`}`),
     "",
     ...[...providers].map(([id, s]) => `${id}: ${s.ok ? "ok" : "error"}`),
   ];
