@@ -22,6 +22,24 @@ export function titlePrompt(prompt: string): string {
   ].join("\n");
 }
 
+/** The longest title kept; a longer one is cut at the last word that fits, so a slug and directory name stay short. */
+export const TITLE_MAX_CHARS = 80;
+
+/**
+ * A model-written title made safe to print and store: control characters (an ANSI escape included) and bidi
+ * overrides are dropped, whitespace collapses to single spaces, and anything past `TITLE_MAX_CHARS` is cut at a word.
+ */
+export function cleanTitle(raw: string): string {
+  const flat = raw
+    .replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (flat.length <= TITLE_MAX_CHARS) return flat;
+  const cut = flat.slice(0, TITLE_MAX_CHARS + 1);
+  const space = cut.lastIndexOf(" ");
+  return (space > 0 ? cut.slice(0, space) : flat.slice(0, TITLE_MAX_CHARS)).trim();
+}
+
 /** The planner's answer as a title, or undefined when it is not the JSON asked for or reads as a sentence, not a title. */
 export function parseTitleAnswer(text: string): string | undefined {
   const start = text.indexOf("{");
@@ -35,7 +53,7 @@ export function parseTitleAnswer(text: string): string | undefined {
   }
   const raw = (parsed as { title?: unknown } | null)?.title;
   if (typeof raw !== "string") return undefined;
-  const title = raw.replace(/\s+/g, " ").replace(/^["'“”*_#\s]+|["'“”*_.\s]+$/g, "").trim();
+  const title = cleanTitle(raw).replace(/^["'“”*_#\s]+|["'“”*_.\s]+$/g, "").trim();
   const words = title.split(" ").length;
   return title === "" || words > 10 ? undefined : title;
 }

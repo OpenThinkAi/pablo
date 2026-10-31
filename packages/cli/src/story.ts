@@ -62,7 +62,7 @@ import { mergeDraft } from "./novel/merge";
 import { dirtyPaths } from "./migrate";
 import { addOutput, removeOutput } from "./output-verbs";
 import { applyArchive, archiveDest, moveDirToArchive, planArchive } from "./story-adopt";
-import { planTitle } from "./story-title";
+import { cleanTitle, planTitle } from "./story-title";
 import { assumedThesis } from "./outputs/essay/scaffold";
 import { radioMachine } from "./outputs/radio/casting-side";
 import { episodeState } from "./outputs/radio/state";
@@ -173,7 +173,7 @@ const LOGLINE_CUT = /\s+(?:is|are|was|were|has|have|must|decides?|faces?|finds?|
 export function titleFromPremise(overviewText: string): string | undefined {
   // The title sits under the heading, or on it ("## Title: The Last Ferry", AGT-2290).
   const heading = /^##[ \t]+Title[ \t]*:[ \t]*([^\r\n]*\S[^\r\n]*)/im.exec(overviewText)?.[1] ?? /^##[ \t]+Title[ \t]*\r?\n+([^\r\n#][^\r\n]*)/im.exec(overviewText)?.[1];
-  const given = heading?.replace(/^["'“”*_\s]+|["'“”*_.\s]+$/g, "").trim();
+  const given = heading === undefined ? undefined : cleanTitle(heading).replace(/^["'“”*_\s]+|["'“”*_.\s]+$/g, "").trim();
   if (given !== undefined && given !== "") return given;
   const logline = /^##[ \t]+Logline[ \t]*\r?\n+([^\r\n#][^\r\n]*)/im.exec(overviewText)?.[1]?.trim();
   if (logline === undefined || logline === "") return undefined;

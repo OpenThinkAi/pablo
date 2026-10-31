@@ -413,6 +413,11 @@ test("AGT-2290 AC2: a premise whose heading carries the title (## Title: X) rena
   expect(git(v.vault, "log", "--format=%s")).toContain("rosa-leaves: title from the premise");
   expect(v.lines.map((l) => l.trim())).toContain('pablo story: title from the premise: "What the Olives Remember" (the slug and directory stay rosa-leaves, so paths and branches do not move)');
   expect(titleFromPremise("## Title: **The Last Passage.**\n")).toBe("The Last Passage");
+  // A model-written title is made safe to print and store: no escapes, no bidi overrides, no runaway length.
+  expect(titleFromPremise("## Title: The \u001b[31mRed\u001b[0m Ferry‮\n")).toBe("The [31mRed [0m Ferry");
+  const long = titleFromPremise(`## Title: ${"Olive ".repeat(30)}\n`) ?? "";
+  expect(long.length).toBeLessThanOrEqual(80);
+  expect(long.endsWith("Olive")).toBe(true);
 });
 
 // ---------------------------------------------------------------------------
