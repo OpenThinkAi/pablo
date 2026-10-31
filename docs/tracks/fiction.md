@@ -57,7 +57,10 @@ The fiction track runs three checks on every unit:
 - `story-time`: something mentioned that is dated after the unit's own year.
 - `unknown-name`: a name the bible, `facts.md` and the output's continuity do not know. A
   character file's name counts too, so `bible/characters/clara-vane.md` clears Clara and Vane
-  even when the file's text never writes the display name.
+  even when the file's text never writes the display name. Three kinds of word are never
+  hits: a kinship term of address (Mother, Father, Nonna, Papà), the plural of a known title
+  (Doges, when the period facts or bible name the Doge), and a demonym or party name whose
+  place or polity is known (Russians, with Russia known).
 
 `pablo check --project ice-house --output novel` also reports the mechanical tells (dashes,
 curly quotes, stock names, `Flagged:` lines) and units that lack `model` or `prompt_hash`

@@ -505,3 +505,35 @@ test("AGT-2226: on historical fiction a name only a research note carries is kno
   writeFileSync(join(work, "pablo.json"), `${JSON.stringify({ ...marker, track: "historical-fiction" }, null, 2)}\n`);
   expect(unknownNames(vault, work)).toEqual([]);
 });
+
+// --- AGT-2285: forms of address, plural titles, demonyms and party names are not names ------------------------------
+
+test("AGT-2285: a kinship term of address (Mother, Father, Nonna, Papà) is never an unknown-name hit, but a real name beside it still is", () => {
+  const { vault, work } = twoOutputWork();
+  writeFileSync(
+    join(work, "outputs", "radio", "episodes", "02-black-ice.md"),
+    `${EPISODE_TWO}ODILE: He is a Savoyard, Mother.\nODILE: Yes, Father, and Nonna agrees. Papà knows, and Grandmother too.\nODILE: Tell Uncle Halvorsen.\n`,
+  );
+  expect(unknownNames(vault, work)).toEqual(["Savoyard", "Halvorsen"]);
+});
+
+test("AGT-2285: a title in the period facts clears its plural; without the title the plural is still flagged", () => {
+  const { vault, work } = twoOutputWork();
+  writeFileSync(join(work, "outputs", "radio", "episodes", "02-black-ice.md"), `${EPISODE_TWO}ODILE: The Doges ruled the lagoon.\n`);
+  expect(unknownNames(vault, work)).toEqual(["Doges"]);
+  mkdirSync(join(work, "facts"), { recursive: true });
+  writeFileSync(join(work, "facts", "period.md"), "- The Doge was elected for life.\n");
+  expect(unknownNames(vault, work)).toEqual([]);
+});
+
+test("AGT-2285: a demonym or party name clears when its place or polity is known; a near-miss name does not", () => {
+  const { vault, work } = twoOutputWork();
+  writeFileSync(
+    join(work, "outputs", "radio", "episodes", "02-black-ice.md"),
+    `${EPISODE_TWO}ODILE: The Russians, the Sardinians and the Republicans all came, and Russell stayed.\n`,
+  );
+  expect(unknownNames(vault, work)).toEqual(["Russians", "Sardinians", "Republicans", "Russell"]);
+  mkdirSync(join(work, "facts"), { recursive: true });
+  writeFileSync(join(work, "facts", "period.md"), "- Russia and Sardinia were at war; the Republic fell.\n");
+  expect(unknownNames(vault, work)).toEqual(["Russell"]);
+});
