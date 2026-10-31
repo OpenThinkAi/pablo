@@ -23,6 +23,7 @@ import {
   parseVerdicts,
   periodOf,
   readLexicon,
+  writeLexicon,
   termsByLine,
 } from "../src/anachronism";
 import { adapterAsk } from "../src/critique";
@@ -228,6 +229,16 @@ test("etymology, undated, self-contradicting and spelling verdicts give no hit; 
   expect(fake.prompts[0]).toContain("THING, PRACTICE or IDIOM");
   expect(fake.prompts[0]).toContain("labor/labour");
   expect(fake.prompts[0]).toContain("year or decade");
+});
+
+test("a lexicon cached before AGT-2284 with an undated, N/A or spelling verdict reports no hit and asks nothing", async () => {
+  const { work, unit } = tempWork("The depot and the labor.");
+  const old = { periods: { [PERIOD]: { depot: { inPeriod: false, why: "x", belongs: "N/A" }, labor: { inPeriod: false, why: "spelling variant", belongs: "the 1830s" }, the: { inPeriod: false, why: "y", belongs: "a later period" } } } };
+  writeLexicon(work, old);
+  const fake = fakeAsk({});
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask });
+  expect(result?.hits).toEqual([]);
+  expect(fake.prompts).toEqual([]);
 });
 
 test("parseVerdicts drops a verdict with no date, `N/A`, or a spelling reason, and keeps a dated one", () => {

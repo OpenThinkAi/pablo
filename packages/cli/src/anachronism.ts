@@ -88,6 +88,9 @@ export interface AnachronismResult {
 }
 
 const EXCERPT_MAX = 120;
+/** A model's `why` and `belongs` are capped so a bad reply cannot bloat the lexicon. */
+const VERDICT_TEXT_MAX = 200;
+
 /** A `belongs` that names a time: a year, a decade or a century. "N/A" and "a later period" do not. */
 const DATED = /\b\d{3,4}s?\b|\bcentur(?:y|ies)\b/i;
 
@@ -104,10 +107,6 @@ function reportableVerdict(why: unknown, belongs: unknown): { why: string; belon
   if (w === "" || b === "" || !DATED.test(b) || NOT_A_THING.test(w)) return undefined;
   return { why: w.slice(0, VERDICT_TEXT_MAX), belongs: b.slice(0, VERDICT_TEXT_MAX) };
 }
-
-/** A model's `why` and `belongs` are capped so a bad reply cannot bloat the lexicon. */
-const VERDICT_TEXT_MAX = 200;
-
 
 /** Function words never worth a verdict: no period owns them. Lower-case, apostrophes straight. */
 const STOPWORDS = new Set(
@@ -460,8 +459,10 @@ export async function checkAnachronisms(workDir: string, files: readonly string[
       for (const term of line.terms) {
         const entry = known[term];
         if (entry === undefined || entry.inPeriod) continue;
-        const why = entry.why ?? "no reason given";
-        const belongs = entry.belongs ?? "a later period";
+        // A verdict cached before AGT-2284 (no date, `N/A`, a spelling reason) is dropped here too, never re-asked.
+        const verdict = reportableVerdict(entry.why, entry.belongs);
+        if (verdict === undefined) continue;
+        const { why, belongs } = verdict;
         const trimmed = line.raw.trim();
         hits.push({
           path: unit.label,

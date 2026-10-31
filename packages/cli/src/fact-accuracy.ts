@@ -119,7 +119,7 @@ export function factAccuracyPrompt(label: string, sentences: readonly Sentence[]
 }
 
 /** A reply that is not the contradictions JSON: the one failure a retry with a stricter instruction can fix (AGT-2284). */
-export class UnreadableReply extends Error {
+class UnreadableReply extends Error {
   constructor() {
     super("the model's reply was not the contradictions JSON");
   }
