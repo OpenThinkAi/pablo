@@ -27,15 +27,15 @@
  * AGT-1237's `write` to call directly and put the hits in its receipt.
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { branchExists, ensureWorktree, repoRoot, waitingBranches } from "./branch";
 import type { TextSource } from "@openthink/pablo-core";
-import { joinSentences } from "@openthink/pablo-core";
+import { FACTS_FILE, PERIOD_FACTS_FILE, joinSentences } from "@openthink/pablo-core";
 import { parseFrontmatter } from "./novel/machine";
 import { readMarker, trackOf } from "./marker";
 import { checkClaimSupport, readClaimSources } from "./claim-support";
-import { anachronismBody, checkAnachronisms } from "./anachronism";
+import { anachronismBody, checkAnachronisms, lexiconHome } from "./anachronism";
 import { coreCheck } from "./core-check";
 import type { Ask } from "./critique";
 import { factAccuracyAsk, runFactAccuracy, savedFactHits } from "./fact-accuracy";
@@ -596,10 +596,11 @@ export async function withFactAccuracy(
   output: string | undefined,
   ask: () => Ask | string,
   progress?: (line: string) => void,
+  coreDir?: string,
 ): Promise<{ outcome: CheckSuccess; factAccuracy?: FactAccuracySummary }> {
   const def = output === undefined ? undefined : outputDefinition(output);
   if (def === undefined) return { outcome };
-  const run = await runFactAccuracy({ workDir, def, files: outcome.scanned, ask, ...(progress ? { progress } : {}) });
+  const run = await runFactAccuracy({ workDir, ...(coreDir !== undefined ? { coreDir } : {}), def, files: outcome.scanned, ask, ...(progress ? { progress } : {}) });
   if (run === undefined) return { outcome };
   return {
     outcome: { ...outcome, hits: [...outcome.hits, ...run.hits] },
@@ -610,8 +611,10 @@ export async function withFactAccuracy(
 /** What the model-backed checks added to a scan: every hit (the scan's first), their JSON blocks, and the notices to print. */
 export interface ModelChecked {
   readonly hits: readonly Hit[];
-  readonly anachronism?: { asked: number; notice?: string; failed?: true };
+  readonly anachronism?: { asked: number; model?: string; cached?: number; new?: number; notice?: string; failed?: true };
   readonly factAccuracy?: FactAccuracySummary;
+  /** Core files that differ between a draft branch and main (the checks read main's), work-relative (AGT-2288). */
+  readonly coreFromMain?: readonly string[];
   /** Each check's notice when it stopped short, for the prose form's stderr. */
   readonly notices: readonly string[];
 }
@@ -625,20 +628,57 @@ export async function runModelChecks(
   outcome: CheckSuccess,
   workDir: string,
   output: string | undefined,
-  options: { readonly env: NodeJS.ProcessEnv; readonly progress?: (line: string) => void; readonly factAsk?: () => Ask | string },
+  options: { readonly env: NodeJS.ProcessEnv; readonly progress?: (line: string) => void; readonly factAsk?: () => Ask | string; readonly fresh?: boolean },
 ): Promise<ModelChecked> {
   const progress = options.progress;
-  const anachronism = await checkAnachronisms(workDir, outcome.scanned, { env: options.env, ...(progress ? { progress } : {}) });
-  const fact = await withFactAccuracy(outcome, workDir, output, options.factAsk ?? (() => factAccuracyAsk(options.env, workDir)), progress);
+  // On a draft branch's worktree the core is main's, only the unit text is the branch's (AGT-2288).
+  const core = mainCore(workDir);
+  const anachronism = await checkAnachronisms(workDir, outcome.scanned, { env: options.env, ...(options.fresh ? { fresh: true } : {}), ...(core ? { coreDir: core.dir } : {}), ...(progress ? { progress } : {}) });
+  const fact = await withFactAccuracy(outcome, workDir, output, options.factAsk ?? (() => factAccuracyAsk(options.env, workDir)), progress, core?.dir);
   // An anachronism run that left terms unjudged is a check error, never a silent pass (AGT-2187).
   const anachronismNotice = anachronism?.notice === undefined ? undefined : anachronism.failed ? `pablo: check error: ${anachronism.notice}` : anachronism.notice;
-  const notices = [anachronismNotice, fact.factAccuracy?.notice].filter((n): n is string => n !== undefined);
+  const coreNotice = core === undefined || core.differs.length === 0 ? undefined : `pablo: this branch's core differs from main (${core.differs.join(", ")}); the checks used main's`;
+  const notices = [coreNotice, anachronismNotice, fact.factAccuracy?.notice].filter((n): n is string => n !== undefined);
   return {
+    ...(core !== undefined && core.differs.length > 0 ? { coreFromMain: core.differs } : {}),
     hits: [...fact.outcome.hits, ...(anachronism?.hits ?? [])],
     notices,
     ...(anachronism !== undefined ? { anachronism: anachronismBody(anachronism) } : {}),
     ...(fact.factAccuracy !== undefined ? { factAccuracy: fact.factAccuracy } : {}),
   };
+}
+
+/**
+ * The core a model check reads for a work in a draft branch's worktree (AGT-2288, D-10): the same work in the main
+ * checkout (`dir`), and which core files (the period facts, `facts.md`, the bible, its period brief) differ from the
+ * branch's. `undefined` when `workDir` is the main checkout itself. Only the unit text is the branch's.
+ */
+export function mainCore(workDir: string): { dir: string; differs: string[] } | undefined {
+  const dir = lexiconHome(workDir);
+  if (dir === workDir) return undefined;
+  const files = (root: string): string[] => {
+    const out = [PERIOD_FACTS_FILE, FACTS_FILE];
+    const walk = (rel: string): void => {
+      const abs = join(root, rel);
+      if (!existsSync(abs)) return;
+      for (const name of readdirSync(abs)) {
+        const child = `${rel}/${name}`;
+        if (statSync(join(root, child)).isDirectory()) walk(child);
+        else if (name.endsWith(".md")) out.push(child);
+      }
+    };
+    walk("bible");
+    return out;
+  };
+  const read = (root: string, rel: string): string | undefined => {
+    try {
+      return readFileSync(join(root, rel), "utf8");
+    } catch {
+      return undefined;
+    }
+  };
+  const differs = [...new Set([...files(dir), ...files(workDir)])].filter((rel) => read(dir, rel) !== read(workDir, rel)).sort();
+  return { dir, differs };
 }
 
 /** What the track's checks found on one freshly drafted unit (AGT-2115): the hits, and a notice for each check that could not run. */
@@ -683,6 +723,8 @@ export interface CheckArgs {
   readonly branch?: string | undefined;
   /** `check --strict` (AGT-2188): exit 1 when any hit is reported. */
   readonly strict?: boolean | undefined;
+  /** `check --fresh` (AGT-2288): drop the period's cached anachronism verdicts and ask the check model again. */
+  readonly fresh?: boolean | undefined;
 }
 
 /** The line `check` prints when there is nothing drafted to scan (AGT-2188). */
@@ -736,7 +778,7 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   }
 
   // A historical-fiction work also gets the model-backed checks: anachronism (AGT-2113) and fact accuracy (AGT-2112).
-  const model = await runModelChecks(outcome, scanDir, args.output, { env: process.env, progress: (line) => process.stderr.write(`${line}\n`), ...(factAsk ? { factAsk } : {}) });
+  const model = await runModelChecks(outcome, scanDir, args.output, { env: process.env, ...(args.fresh ? { fresh: true } : {}), progress: (line) => process.stderr.write(`${line}\n`), ...(factAsk ? { factAsk } : {}) });
   const hits = model.hits;
   if (!args.json) for (const notice of model.notices) console.error(notice);
   if (!args.json && outcome.branch !== undefined) console.error(`pablo: checked the pending draft on ${outcome.branch}`);
@@ -755,7 +797,7 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   const radioLines = hasRadio ? radioCheckLines(radioBody) : [];
 
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(model.anachronism !== undefined ? { anachronism: model.anachronism } : {}), ...(model.factAccuracy !== undefined ? { factAccuracy: model.factAccuracy } : {}), ...(outcome.branch !== undefined ? { branch: outcome.branch } : {}), ...(nothing !== undefined && !hasRadio ? { notice: nothing } : {}) }));
+    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(model.anachronism !== undefined ? { anachronism: model.anachronism } : {}), ...(model.factAccuracy !== undefined ? { factAccuracy: model.factAccuracy } : {}), ...(model.coreFromMain !== undefined ? { coreFromMain: model.coreFromMain } : {}), ...(outcome.branch !== undefined ? { branch: outcome.branch } : {}), ...(nothing !== undefined && !hasRadio ? { notice: nothing } : {}) }));
   } else if (hits.length === 0 && outcome.unprovenanced.length === 0 && (outcome.core ?? []).length === 0 && radioLines.length === 0) {
     console.log(nothing ?? "no hits");
   } else {

@@ -23,6 +23,13 @@
  * check fails with a notice. A legacy `facts/lexicon.json` (AGT-2113 kept it in the work) seeds a missing cache. The
  * cache key is the period text, so rewriting the brief's "When and where" section starts a fresh set of verdicts.
  *
+ * Each cached verdict records the model that gave it, `<provider>/<model>` (AGT-2288, D-13: the `check` intent can be
+ * moved to another model, a `claude-code` one included). A check on one model reuses only the verdicts that model
+ * gave: another model's are asked again and replaced. A verdict with no `model` (a lexicon from before AGT-2288) is
+ * from an unknown model, so a known model does not reuse it either; it is re-asked, and the answer is stored with the
+ * model. A hand-edited verdict that every model should obey carries `"model": "*"`. `check --fresh` clears the period's
+ * verdicts first. A run prints how many verdicts came from the cache and from which model.
+ *
  * `anachronismModel.ask` is the test seam: tests inject a fake there, so no test calls a real model.
  */
 
@@ -55,13 +62,21 @@ export const END_MARKER = "END";
 const LINE_FORMAT = "term | what is out of period, in one short sentence | when it arrived, a year or decade, e.g. the 1950s";
 
 /** The model the check asks; a test-only injection point, so no test reaches a real model. */
-export const anachronismModel: { ask?: Ask } = {};
+export const anachronismModel: { ask?: Ask; model?: string } = {};
+
+/** A verdict that every model obeys: the mark for one the author wrote by hand (AGT-2288). */
+export const ANY_MODEL = "*";
+
+/** The identity of a check model that cannot be built (no config) or whose verdicts predate model tracking. */
+export const UNKNOWN_MODEL = "unknown";
 
 /** One cached verdict on a term. `why` and `belongs` are set when the term is out of period. */
 export interface LexiconEntry {
   readonly inPeriod: boolean;
   readonly why?: string;
   readonly belongs?: string;
+  /** `<provider>/<model>` that gave this verdict (AGT-2288); absent on a legacy entry, `*` on a hand-written one. */
+  readonly model?: string;
 }
 
 /** `.pablo/lexicon.json`: period text to lower-cased term to verdict. */
@@ -81,6 +96,12 @@ export interface AnachronismResult {
   readonly hits: AnachronismHit[];
   /** How many model calls the run made (0 on a fully cached re-check). */
   readonly asked: number;
+  /** The check model's identity, `<provider>/<model>` (`unknown` when it could not be built). */
+  readonly model?: string;
+  /** How many distinct words were judged from the lexicon without a model call, for `model`. */
+  readonly cached?: number;
+  /** How many distinct words were not in the lexicon for `model` and so were asked. */
+  readonly new?: number;
   /** Set when some terms could not be judged (no period brief, no model, a failed call): the check is incomplete. */
   readonly notice?: string;
   /** Set when the check could not judge every term (a failed call, a reply missing verdicts, a broken lexicon): a check error, never a pass. */
@@ -182,10 +203,10 @@ function readText(path: string): string {
  * continuity ledger that does not start a sentence (so a sentence's ordinary first word is not taken for a name).
  * A draft word spelt with a capital that is one of these is a name the core settled, so no model is asked about it.
  */
-export function knownNamesOf(workDir: string): Set<string> {
+export function knownNamesOf(workDir: string, coreDir: string = workDir): Set<string> {
   const outputs = join(workDir, "outputs");
   const ledgers = existsSync(outputs) ? readdirSync(outputs).map((type) => join(outputs, type, "continuity.md")) : [];
-  const files = [...markdownUnder(join(workDir, "bible")), join(workDir, FACTS_FILE), join(workDir, continuityFile(workDir)), ...ledgers];
+  const files = [...markdownUnder(join(coreDir, "bible")), join(coreDir, FACTS_FILE), join(workDir, continuityFile(workDir)), ...ledgers];
   const names = new Set<string>();
   for (const file of files) {
     for (const line of readText(file).split("\n")) {
@@ -384,14 +405,29 @@ function outOfPeriod(inPeriod: boolean, why: unknown, belongs: unknown): Lexicon
   return verdict === undefined ? { inPeriod: true } : { inPeriod: false, ...verdict };
 }
 
-/** The real model: the planner role under the `check` intent. Throws when no provider can be built. */
-function realAsk(env: NodeJS.ProcessEnv, workDir: string): Ask {
-  return adapterAsk(createPlanner(loadConfig({ env, projectDir: workDir }), { keys: { env }, intent: CHECK_INTENT }).adapter, undefined, ASK_MAX_TOKENS);
+/** The real model: the planner role under the `check` intent, with its `<provider>/<model>` identity. Throws when no provider can be built. */
+function realAsk(env: NodeJS.ProcessEnv, workDir: string): { ask: Ask; model: string } {
+  const adapter = createPlanner(loadConfig({ env, projectDir: workDir }), { keys: { env }, intent: CHECK_INTENT }).adapter;
+  return { ask: adapterAsk(adapter, undefined, ASK_MAX_TOKENS), model: `${adapter.id}/${adapter.model}` };
+}
+
+/** Whether `entry` may be reused by the check model `model`: it gave it, or the author wrote it for every model. */
+function usable(entry: LexiconEntry | undefined, model: string): entry is LexiconEntry {
+  return entry !== undefined && (entry.model === ANY_MODEL || (model !== UNKNOWN_MODEL && entry.model === model) || (model === UNKNOWN_MODEL && entry.model === undefined));
 }
 
 export interface AnachronismOptions {
   /** The model seam; defaults to `anachronismModel.ask`, else the `check` intent's planner (built only when needed). */
   readonly ask?: Ask;
+  /** The injected `ask`'s identity (`<provider>/<model>`); default `anachronismModel.model`, else `injected`. */
+  readonly model?: string;
+  /** `check --fresh` (AGT-2288): drop this period's cached verdicts before judging. */
+  readonly fresh?: boolean;
+  /**
+   * The work whose core (period brief, bible, `facts.md`) is read when it is not `workDir` itself: main's, for a draft
+   * branch's worktree (AGT-2288). The lexicon and the units stay where they are.
+   */
+  readonly coreDir?: string;
   readonly env?: NodeJS.ProcessEnv;
   /** Where the progress lines go (the CLI's stderr), so a first run's model calls are a visible wait. */
   readonly progress?: (line: string) => void;
@@ -406,35 +442,55 @@ export async function checkAnachronisms(workDir: string, files: readonly string[
   const marker = readMarker(workDir);
   if (!marker.ok || trackOf(marker.marker) !== "historical-fiction") return undefined;
 
-  const briefPath = join(workDir, PERIOD_BRIEF_FILE);
+  const coreDir = options.coreDir ?? workDir;
+  const briefPath = join(coreDir, PERIOD_BRIEF_FILE);
   const period = periodOf(existsSync(briefPath) ? readFileSync(briefPath, "utf8") : "");
   if (period === undefined) return { hits: [], asked: 0, notice: `anachronism: skipped; ${PERIOD_BRIEF_FILE} has no period brief yet` };
 
-  const names = knownNamesOf(workDir);
+  const names = knownNamesOf(workDir, coreDir);
   const units = files.map((file) => ({ label: relative(workDir, file), lines: termsByLine(existsSync(file) ? readFileSync(file, "utf8") : "", names) }));
   const home = lexiconHome(workDir);
   const read = readLexicon(home, workDir);
   const lexicon = read ?? { periods: {} };
-  const known = (lexicon.periods[period] ??= {});
   if (read === undefined) {
     return { hits: [], asked: 0, failed: true, notice: `anachronism: not run; ${LEXICON_FILE} is not a lexicon (fix or delete it; it is never overwritten)` };
   }
+  if (options.fresh === true && lexicon.periods[period] !== undefined) {
+    lexicon.periods[period] = {};
+    writeLexicon(home, lexicon);
+  }
+  const known = (lexicon.periods[period] ??= {});
 
-  const unknown = [...new Set(units.flatMap((u) => u.lines.flatMap((l) => l.terms)))].filter((term) => known[term] === undefined).sort();
+  // Who judges: the injected seam, else the `check` intent's model. One that cannot be built is `unknown`; the error
+  // is reported only when a word needs asking (a lexicon of hand-written verdicts still works without a model).
+  let ask: Ask | undefined = options.ask ?? anachronismModel.ask;
+  let model = ask === undefined ? UNKNOWN_MODEL : (options.model ?? anachronismModel.model ?? "injected");
+  let buildError: Error | undefined;
+  if (ask === undefined) {
+    try {
+      ({ ask, model } = realAsk(options.env ?? process.env, workDir));
+    } catch (error) {
+      buildError = error as Error;
+    }
+  }
+  const allTerms = [...new Set(units.flatMap((u) => u.lines.flatMap((l) => l.terms)))];
+  // A verdict another model gave (or a legacy one with no model) is not this model's: it is asked again and replaced.
+  const unknown = allTerms.filter((term) => !usable(known[term], model)).sort();
+  const cached = allTerms.length - unknown.length;
+  options.progress?.(`anachronism: ${cached} of ${allTerms.length} word verdict(s) from the cache (${model}), ${unknown.length} to ask`);
   let asked = 0;
   let notice: string | undefined;
   if (unknown.length > 0) {
-    let ask: Ask | undefined = options.ask ?? anachronismModel.ask;
     const batches = Math.ceil(unknown.length / TERMS_PER_ASK);
     try {
-      ask ??= realAsk(options.env ?? process.env, workDir);
-      options.progress?.(`anachronism: asking the check model about ${unknown.length} new word(s) in ${batches} batch(es); known verdicts come from ${LEXICON_FILE}`);
+      if (ask === undefined) throw buildError ?? new Error("no check model");
+      options.progress?.(`anachronism: asking ${model} about ${unknown.length} word(s) in ${batches} batch(es); known verdicts come from ${LEXICON_FILE}`);
       for (let i = 0; i < unknown.length; i += TERMS_PER_ASK) {
         const batch = unknown.slice(i, i + TERMS_PER_ASK);
         asked++;
         options.progress?.(`anachronism: batch ${asked}/${batches}`);
         const verdicts = parseVerdicts(await ask(lexiconPrompt(period, batch)), batch);
-        for (const [term, entry] of verdicts) known[term] = entry;
+        for (const [term, entry] of verdicts) known[term] = { ...entry, model };
         // Saved after every batch, so a run that fails part way keeps what it learned.
         if (verdicts.size > 0) writeLexicon(home, lexicon);
       }
@@ -444,9 +500,9 @@ export async function checkAnachronisms(workDir: string, files: readonly string[
       const next = message.startsWith("pablo:")
         ? ""
         : " Check the provider the `check` intent routes to (`pablo config test`; `pablo init --config` if none is set).";
-      notice = `anachronism: incomplete; ${unknown.filter((t) => known[t] === undefined).length} new word(s) not judged, cached verdicts still reported: ${message.replace(/\.$/, "")}.${next}`;
+      notice = `anachronism: incomplete; ${unknown.filter((t) => !usable(known[t], model)).length} new word(s) not judged, cached verdicts still reported: ${message.replace(/\.$/, "")}.${next}`;
     }
-    const unjudged = unknown.filter((term) => known[term] === undefined).length;
+    const unjudged = unknown.filter((term) => !usable(known[term], model)).length;
     if (notice === undefined && unjudged > 0) {
       notice = `anachronism: incomplete; ${unjudged} term(s) got no verdict (the check model's reply was cut short or not in the asked \`term | why | belongs\` lines ending in ${END_MARKER}); cached verdicts still reported, and they will be asked again`;
     }
@@ -458,7 +514,7 @@ export async function checkAnachronisms(workDir: string, files: readonly string[
     for (const line of unit.lines) {
       for (const term of line.terms) {
         const entry = known[term];
-        if (entry === undefined || entry.inPeriod) continue;
+        if (!usable(entry, model) || entry.inPeriod) continue;
         // A verdict cached before AGT-2284 (no date, `N/A`, a spelling reason) is dropped here too, never re-asked.
         const verdict = reportableVerdict(entry.why, entry.belongs);
         if (verdict === undefined) continue;
@@ -477,13 +533,13 @@ export async function checkAnachronisms(workDir: string, files: readonly string[
       }
     }
   }
-  return { hits, asked, ...(notice !== undefined ? { notice } : {}), ...(failed ? { failed: true as const } : {}) };
+  return { hits, asked, model, cached, new: unknown.length, ...(notice !== undefined ? { notice } : {}), ...(failed ? { failed: true as const } : {}) };
 }
 
 /**
  * The `anachronism` block of `check`'s JSON body: how many model calls the run made, the notice when it is
  * incomplete, and `failed` when terms went unjudged (`check` then exits non-zero).
  */
-export function anachronismBody(result: AnachronismResult): { asked: number; notice?: string; failed?: true } {
-  return { asked: result.asked, ...(result.notice !== undefined ? { notice: result.notice } : {}), ...(result.failed ? { failed: true as const } : {}) };
+export function anachronismBody(result: AnachronismResult): { asked: number; model?: string; cached?: number; new?: number; notice?: string; failed?: true } {
+  return { asked: result.asked, ...(result.model !== undefined ? { model: result.model } : {}), ...(result.cached !== undefined ? { cached: result.cached } : {}), ...(result.new !== undefined ? { new: result.new } : {}), ...(result.notice !== undefined ? { notice: result.notice } : {}), ...(result.failed ? { failed: true as const } : {}) };
 }

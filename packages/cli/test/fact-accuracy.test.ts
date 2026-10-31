@@ -7,9 +7,9 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkWork, runCheck, screenChecks, withFactAccuracy } from "../src/check";
+import { checkWork, runCheck, runModelChecks, screenChecks, withFactAccuracy } from "../src/check";
 import type { CheckSuccess } from "../src/check";
 import type { Ask } from "../src/critique";
 import { STRICT_JSON_RETRY, checkFactAccuracy, draftSentences, factAccuracyModel, factHitsPath, parseContradictions, savedFactHits } from "../src/fact-accuracy";
@@ -279,4 +279,41 @@ test("the prompt carries the unit's story date and each fact's date; a date cont
   expect(ask.prompts[0]).toContain("story date 1929-01");
   expect(ask.prompts[0]).toContain("F1. The river ice houses closed in 1934 (from 1934)");
   void vault;
+});
+
+// ---------------------------------------------------------------- AGT-2288: a draft branch is checked against main's core
+
+function git(dir: string, ...args: string[]): void {
+  const r = Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "pipe", stderr: "pipe" });
+  if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.toString()}`);
+}
+
+test("a branch cut before the facts were re-distilled is checked against main's facts, and the differing file is named", async () => {
+  const { vault, dir } = work([AGREE_FACT]);
+  writeFileSync(join(vault, ".gitignore"), ".pablo/\n");
+  git(vault, "init", "-q", "-b", "main");
+  git(vault, "config", "user.email", "t@example.com");
+  git(vault, "config", "user.name", "T");
+  git(vault, "add", "-A");
+  git(vault, "commit", "-q", "-m", "init");
+  const tree = join(mkdtempSync(join(tmpdir(), "pablo-fact-wt-")), "draft");
+  roots.push(dirname(tree));
+  git(vault, "worktree", "add", "-q", "-b", "draft/ch01", tree);
+  const draftDir = join(tree, "novels", "ice-house");
+  // Main re-distills after the branch was cut: a new fact; the branch still has the one-fact file.
+  writeFileSync(join(dir, "facts", "period.md"), ["| Fact | Source | Story date |", "|---|---|---|", AGREE_FACT, SCALE_FACT, ""].join("\n"));
+
+  const ask = fakeAsk([["Twenty-two inch squares", "thirty inches square", "the cakes were thirty inches"]]);
+  const outcome = scan(draftDir, vault);
+  const model = await runModelChecks(outcome, draftDir, "novel", { env: { PATH: "/usr/bin:/bin" }, factAsk: () => ask });
+
+  expect(ask.prompts).toHaveLength(1);
+  expect(ask.prompts[0]).toContain("thirty inches square");
+  expect(model.hits.filter((h) => h.rule === "fact-accuracy")).toHaveLength(1);
+  expect(model.coreFromMain).toEqual(["facts/period.md"]);
+  expect(model.notices.some((n) => n.includes("core differs from main") && n.includes("facts/period.md"))).toBe(true);
+
+  // The same check on main itself reads its own core and names nothing.
+  const onMain = await runModelChecks(scan(dir, vault), dir, "novel", { env: { PATH: "/usr/bin:/bin" }, factAsk: () => fakeAsk([]) });
+  expect(onMain.coreFromMain).toBeUndefined();
 });

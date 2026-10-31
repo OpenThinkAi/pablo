@@ -676,7 +676,7 @@ Outside a work, or without a terminal, bare `pablo` prints the help.
 ### check
 
 ```
-pablo check --project <slug> [--file F] [--output <type> [--unit N]] [--branch <b>] [--strict]
+pablo check --project <slug> [--file F] [--output <type> [--unit N]] [--branch <b>] [--strict] [--fresh]
 pablo check --project <slug> --across
 ```
 
@@ -739,6 +739,18 @@ not seen and a fully cached one makes no model call. A first run on a long work 
 take a while: it says on stderr how many new words it is asking about and prints each
 batch as it goes. `anachronism.asked` is how many model calls the run made.
 
+Each cached verdict records the model that gave it (`"model": "<provider>/<model>"`,
+e.g. `claude-code/claude-opus-5-5`), and a check reuses only its own model's verdicts:
+move the `check` intent to another model and its words are asked again, the new answers
+replacing the old. `check` says on stderr how many word verdicts came from the cache
+and from which model (`anachronism: 412 of 430 word verdict(s) from the cache
+(local/qwen), 18 to ask`); the JSON has `anachronism.model`, `anachronism.cached` and
+`anachronism.new`. `--fresh` (MCP `fresh`) drops the period's cached verdicts, any
+model's, and asks everything again. A verdict with no `model` (a lexicon from before
+this, or a `facts/lexicon.json` seed) is from an unknown model, so a named model does
+not reuse it and asks again; write `"model": "*"` on a verdict you hand-edit so every
+model obeys it. If the check model cannot be built, only unmarked verdicts are used.
+
 When any word goes unjudged (no model configured, a model error, a reply missing
 verdicts) the check fails: the hits it did find are still reported,
 `anachronism.notice` names what went wrong and where to look, `anachronism.failed` is
@@ -748,8 +760,8 @@ verdicts) the check fails: the hits it did find are still reported,
 The lexicon is machine state under the work's `.pablo/` (gitignored), and always the
 one in the repository's main checkout: a check run in a draft branch's worktree writes
 there too, so the cache survives the merge that removes the worktree. Edit a verdict
-there (`inPeriod`, `why`, `belongs`) to overrule the model; a hand-edited verdict is
-used as is. A lexicon that does not parse is left alone and the check fails with a
+there (`inPeriod`, `why`, `belongs`, and `"model": "*"`) to overrule the model; a
+hand-edited verdict marked `*` is used as is. A lexicon that does not parse is left alone and the check fails with a
 notice. A `facts/lexicon.json` from an earlier pablo seeds a missing cache and is never
 written. Verdicts are keyed by the period text, so rewriting the brief's
 `## When and where` section starts a fresh set.
@@ -792,6 +804,13 @@ The summary is `factAccuracy: {checked, notice?}`: how many units were sent, and
 the run stopped short (no model configured, or the model failed). A notice never fails
 the check. The hits are also kept in `.pablo/fact-accuracy.json`, so the screen shows
 them on a unit with its other check hits until the unit's text changes.
+
+On a pending draft (`--branch`, a `--unit` not on main yet, and `write`'s checks after
+a draft) only the unit text is the branch's. The core the checks read, the period facts
+(`facts/period.md`), `facts.md`, the bible and its period brief, is main's, so a branch
+cut before the facts were re-distilled is held to the current ones. A core file that
+differs between the branch and main is named: `pablo: this branch's core differs from
+main (facts/period.md); the checks used main's` on stderr, and `coreFromMain` in the JSON.
 
 Hits are data: without `--strict` exit is `0` either way, except an anachronism run
 that left words unjudged (exit `1`, `anachronism.failed`).

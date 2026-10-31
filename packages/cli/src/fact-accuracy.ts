@@ -209,6 +209,8 @@ export function factAccuracyAsk(env: NodeJS.ProcessEnv, projectDir: string): Ask
 
 export interface FactAccuracyOptions {
   readonly workDir: string;
+  /** Where `facts/period.md` is read when not `workDir`: main's, for a draft branch's worktree (AGT-2288). */
+  readonly coreDir?: string;
   readonly def: OutputDefinition;
   /** The unit files `check` scanned, absolute. */
   readonly files: readonly string[];
@@ -225,7 +227,7 @@ export interface FactAccuracyOptions {
  */
 export async function runFactAccuracy(opts: FactAccuracyOptions): Promise<FactAccuracyRun | undefined> {
   if (!factAccuracyApplies(opts.workDir)) return undefined;
-  const facts = readPeriodFacts(opts.workDir);
+  const facts = readPeriodFacts(opts.coreDir ?? opts.workDir);
   if (facts === undefined) return undefined;
 
   const units = opts.files
