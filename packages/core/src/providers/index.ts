@@ -39,7 +39,6 @@ export {
   configPath,
   DEFAULT_CLAUDE_BINARY,
   DEFAULT_CLAUDE_CODE_TIMEOUT_MS,
-  isClaudeCode,
   refuseWorkBinary,
   defaultConfig,
   DEFAULT_TIMEOUT_MS,
@@ -60,13 +59,10 @@ export { createAnthropicAdapter, PREFERRED_OUTPUT as ANTHROPIC_PREFERRED_OUTPUT 
 export type { ClaudeCodeAdapterOptions, ClaudeRun, ClaudeRunner, ClaudeRunResult } from "./claude-code";
 export {
   CLAUDE_BUILT_IN_TOOLS,
-  CLAUDE_CODE_PREFERRED_OUTPUT,
   CLAUDE_FLAGS,
   claudeArgs,
   createClaudeCodeAdapter,
-  resolveBinary,
   serialiseConversation,
-  spawnClaude,
   subscriptionEnv,
 } from "./claude-code";
 export type { OpenAiAdapterOptions } from "./openai";

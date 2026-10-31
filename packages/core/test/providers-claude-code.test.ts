@@ -14,6 +14,7 @@ import {
   createClaudeCodeAdapter,
   createProviders,
   DEFAULT_CLAUDE_CODE_TIMEOUT_MS,
+  EndpointHung,
   mergeProjectConfig,
   parseConfig,
   ProviderConfigError,
@@ -22,7 +23,7 @@ import {
   subscriptionEnv,
   withReceipts,
 } from "../src";
-import type { Adapter, ChatEvent, ChatRequest, CompletionEvent, ProviderConfig, Receipt } from "../src";
+import type { Adapter, ChatEvent, ClaudeRunner, ChatRequest, CompletionEvent, ProviderConfig, Receipt } from "../src";
 import { makeFakeClaude, okReply } from "./fake-claude";
 
 const CC = { kind: "claude-code", model: "claude-test-model" };
@@ -303,4 +304,19 @@ describe("usage", () => {
     });
     expect(env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "o", PATH: "/bin" });
   });
+});
+
+test("a model id that starts with '-' is refused: it would read as a flag", () => {
+  expect(() => provider({ model: "--dangerously-skip-permissions" })).toThrow(/must be a model id/);
+});
+
+test("a turn that runs past its timeout is EndpointHung, worded for claude -p", async () => {
+  const fake = makeFakeClaude();
+  const slow: ClaudeRunner = (run) =>
+    new Promise((_resolve, reject) => run.signal.addEventListener("abort", () => reject(new Error("killed")), { once: true }));
+  const adapter = createClaudeCodeAdapter({ provider: provider({ timeoutMs: 50 }), env: fake.env, runner: slow });
+  const error = await drain(adapter.complete({ prompt: "x" })).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(EndpointHung);
+  expect((error as Error).message).toContain("`claude -p` gave no reply");
+  expect((error as Error).message).toContain("providers.cc.timeoutMs");
 });

@@ -113,11 +113,6 @@ export interface ProviderConfig {
   readonly binary?: string;
 }
 
-/** Whether a provider runs `claude -p` on the Claude login rather than calling an HTTP endpoint with a key. */
-export function isClaudeCode(provider: Pick<ProviderConfig, "kind">): boolean {
-  return provider.kind === "claude-code";
-}
-
 export interface PabloConfig {
   /** Insertion-ordered: routing picks "the first local" and "the first cloud" from here. */
   readonly providers: ReadonlyMap<string, ProviderConfig>;
@@ -420,6 +415,8 @@ function readClaudeCodeProvider(
     );
   }
   const model = allowIncomplete && rawModel === undefined ? "" : readString(rawModel, `${where}: "model"`);
+  // It goes into argv after `--model`, and a work's pablo.json may set it: one that starts with "-" would read as a flag.
+  if (model.startsWith("-")) throw new ProviderConfigError(`pablo: ${where}: "model" must be a model id, not something starting with "-"`);
   const binary = readString(entry["binary"] ?? sameKind?.binary ?? DEFAULT_CLAUDE_BINARY, `${where}: "binary"`);
 
   const rawTimeout = entry["timeoutMs"] ?? sameKind?.timeoutMs ?? DEFAULT_CLAUDE_CODE_TIMEOUT_MS;

@@ -323,6 +323,15 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Adap
   const binary = provider.binary ?? DEFAULT_CLAUDE_BINARY;
   const where = provider.endpoint;
 
+  /** `EndpointHung`, worded for a process rather than a server. */
+  function hung(elapsedMs: number, timeoutMs: number): EndpointHung {
+    const error = new EndpointHung(where, elapsedMs, timeoutMs);
+    error.message =
+      `pablo: \`claude -p\` gave no reply in ${Math.round(timeoutMs / 1000)}s (provider "${provider.id}"). Retry, or raise its "timeoutMs" ` +
+      `(\`pablo config set providers.${provider.id}.timeoutMs <ms>\`).`;
+    return error;
+  }
+
   /** One `claude -p` process, start to finish, in its own empty directory. */
   async function turn(request: TurnRequest): Promise<TurnResult> {
     const env = subscriptionEnv(options.env ?? process.env);
@@ -332,7 +341,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Adap
     if (model === "") {
       throw new ProviderConfigError(`pablo: provider "${provider.id}" has no "model" — run \`pablo config set providers.${provider.id}.model <model id>\``);
     }
-    // A whole-turn timeout: `claude -p` prints nothing until the reply is done, so a short idle timeout would cut off every long turn.
+    // A whole-turn timeout, never shorter than the provider's own: `claude -p` prints nothing until the reply is done, so a
+    // caller's idle timeout (`config test` sends 20s) would cut off a turn that is only slow to start.
     const timeoutMs = Math.max(request.timeoutMs ?? 0, provider.timeoutMs);
     const timeout = AbortSignal.timeout(timeoutMs);
     const signal = request.signal === undefined ? timeout : AbortSignal.any([request.signal, timeout]);
@@ -346,13 +356,13 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions): Adap
       result = await runner({ argv: claudeArgs(executable, model, systemFile), stdin: request.prompt, env, cwd: dir, signal });
     } catch (error) {
       if (request.signal?.aborted === true) throw request.signal.reason ?? error;
-      if (timeout.aborted) throw new EndpointHung(where, now() - started, timeoutMs);
+      if (timeout.aborted) throw hung(now() - started, timeoutMs);
       throw error;
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
     if (request.signal?.aborted === true) throw request.signal.reason;
-    if (timeout.aborted) throw new EndpointHung(where, now() - started, timeoutMs);
+    if (timeout.aborted) throw hung(now() - started, timeoutMs);
 
     let reply: ClaudeReply | undefined;
     try {

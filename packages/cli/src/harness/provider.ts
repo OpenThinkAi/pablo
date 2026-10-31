@@ -18,7 +18,7 @@
 
 import { createProviders } from "@openthink/pablo-core";
 import type { Adapter, Intent, PabloConfig, ProvidersOptions, SkippedProvider } from "@openthink/pablo-core";
-import { keyReference } from "../config-verb";
+import { CLAUDE_LOGIN, keyReference } from "../config-verb";
 
 /** The intent the agent loop's calls carry. */
 export const AGENT_INTENT: Intent = { name: "agent", kind: "planning" };
@@ -66,7 +66,7 @@ export function adapterProvider(adapter: Adapter, over: Partial<Omit<HarnessProv
 
 /** What to check when a session fails outside the loop: the provider the `agent` intent routed to. */
 export function providerHint(provider: HarnessProvider): string {
-  const key = provider.local ? "" : provider.credential === "claude-login" ? " and its Claude login (`claude auth login`)" : ` and its key (${provider.credential})`;
+  const key = provider.local ? "" : provider.credential === CLAUDE_LOGIN ? " and its Claude login (`claude auth login`)" : ` and its key (${provider.credential})`;
   return (
     `Check the "${provider.adapter.id}" provider${key}: \`pablo config show\` shows where the "agent" intent routes, ` +
     `\`pablo config set intents.agent <provider>\` picks another, and \`pablo config test\` then checks it.`
