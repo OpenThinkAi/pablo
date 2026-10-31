@@ -217,7 +217,7 @@ test("the CLI dispatches pablo research distill and names both research actions"
     Object.assign(process.env, saved);
   }
   expect(JSON.parse(logs[0] as string).message).toContain("research/ has no notes");
-  expect(JSON.parse(logs[1] as string).message).toContain('"save", "distill", "plan", "waive" and "link"');
+  expect(JSON.parse(logs[1] as string).message).toContain('"save", "distill", "plan", "add", "waive" and "link"');
 });
 
 test("period facts round-trip through the table, pipes and all; the header is not a fact", () => {

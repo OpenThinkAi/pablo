@@ -241,6 +241,28 @@ test("research waive sets an item waived with its reason on a plan branch; no re
   expect((unknown.body as { message: string }).message).toContain("has no item #9");
 });
 
+test("research add appends an open item numbered after the last, on a plan branch; bad input is refused", async () => {
+  const { vault, env } = setup("historical-fiction", { "bible/period.md": BRIEF, [CHECKLIST_FILE]: CHECKLIST });
+  const r = await research(vault, env, { sub: "add", entry: "What became of the conscripts in Russia?", topic: "politics" });
+  expect(r.exitCode).toBe(0);
+  const body = r.body as { path: string; branch: string; item: { number: number; category: string; status: string }; open: number };
+  expect(body.branch).toMatch(/^plan\//);
+  expect(body.item).toMatchObject({ number: 4, category: "politics", status: "open" });
+  expect(body.open).toBe(4);
+  expect(sh(vault, "show", `${body.branch}:${body.path}`)).toContain("| 4 | politics | What became of the conscripts in Russia? | open |  |  |");
+
+  // The default topic is people.
+  const dflt = await research(vault, env, { sub: "add", entry: "Who carried the news home?" });
+  expect((dflt.body as { item: { category: string } }).item.category).toBe("people");
+
+  expect((await research(vault, env, { sub: "add", entry: "  " })).exitCode).toBe(2);
+  expect((await research(vault, env, { sub: "add", entry: "x".repeat(201) })).exitCode).toBe(2);
+  const badTopic = await research(vault, env, { sub: "add", entry: "Something", topic: "weather" });
+  expect((badTopic.body as { message: string }).message).toContain("is not a checklist topic");
+  const dup = await research(vault, env, { sub: "add", entry: "how thick  ice had to be" });
+  expect((dup.body as { message: string }).message).toContain("already on the checklist");
+});
+
 test("research link closes an item with an existing sourced note; a note without sources is refused", async () => {
   const { vault, env } = setup("historical-fiction", {
     "bible/period.md": BRIEF,

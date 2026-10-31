@@ -183,6 +183,14 @@ function researchSteps(track: TrackId): GuideStep[] {
     {
       phase: "research",
       stage: "research",
+      optional: true,
+      title: "add an item the plan missed",
+      command: `pablo research add "<question>" [--topic <t>] ${P}`,
+      detail: `one open item on its own branch; accept it (pablo merge ${P} <branch>, or the screen) before the next checklist change`,
+    },
+    {
+      phase: "research",
+      stage: "research",
       gate: true,
       title: "source each checklist item with a note",
       command: `pablo research save ${P} --title <text> --note <text> --source <url> --item <#>`,

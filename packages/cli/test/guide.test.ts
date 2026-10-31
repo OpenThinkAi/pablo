@@ -60,7 +60,10 @@ test("research is a gated checklist on historical-fiction and nonfiction, option
   expect(research("fiction", "novel").every((s) => s.optional === true && s.gate === undefined)).toBe(true);
   for (const [t, o] of [["historical-fiction", "novel"], ["historical-fiction", "narrated"]] as const) {
     const steps = research(t, o);
-    expect(steps.every((s) => s.gate === true)).toBe(true);
+    // `research add` (AGT-2282) follows `plan` as an optional step; every other research step is the gate.
+    expect(steps.filter((s) => s.gate !== true).map((s) => s.command)).toEqual([expect.stringContaining('pablo research add "<question>"')]);
+    const cmds = steps.map((s) => s.command);
+    expect(cmds.findIndex((c) => c.includes("pablo research add"))).toBe(cmds.findIndex((c) => c.includes("pablo research plan")) + 1);
     expect(steps.map((s) => s.command).join("\n")).toContain("pablo research plan");
     expect(steps.map((s) => s.command).join("\n")).toContain("pablo research waive");
   }

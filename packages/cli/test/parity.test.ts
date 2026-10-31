@@ -36,7 +36,7 @@ const PARITY: Readonly<Record<string, Entry>> = {
   story: tui("ai.compose"),
   output: tui("ai.compose", "output.add"),
   promote: tui("ai.compose"),
-  research: tui("research.plan", "research.save", "research.waive", "research.link", "research.distill"),
+  research: tui("research.plan", "research.add", "research.save", "research.waive", "research.link", "research.distill"),
   fact: tui("fact.record"),
   critique: tui("review.comment", "output.critique"),
   merge: tui("review.finish"),

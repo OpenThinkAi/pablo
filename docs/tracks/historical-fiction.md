@@ -31,6 +31,7 @@ The stages, in order: `premise`, `period`, `research`, `period-facts`, `bible`, 
 | 2 | Save the period brief, `bible/period.md` (gate) | `pablo save --stage bible/period.md` |
 | 3 | Plan the research checklist, `research/checklist.md` (gate) | `pablo research plan` |
 | 4 | Source each item with a note (gate) | `pablo research save --title ... --note ... --source <url> --item <#>` |
+| 4b | Add an item the plan missed (optional) | `pablo research add "<question>" [--topic <t>]` |
 | 5 | Or waive an item with a reason (gate) | `pablo research waive <#,#,a-b> "<reason>"` |
 | 6 | Distill the research into period facts, `facts/period.md` (gate) | `pablo research distill` |
 | 7 | Bible, acts, beats, decide every `[pick]` | `pablo save --stage ...` |
