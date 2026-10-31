@@ -18,7 +18,7 @@ import { paneWords } from "../../tui/src/word-count";
 import { readWorkStatus, reportWithWords } from "../src/work-state";
 import { workBookStages } from "../src/book";
 import { screenTargetStore } from "../src/edit-session";
-import { waitingForReview } from "../src/branch";
+import { readerLeftovers, waitingBranches, waitingForReview } from "../src/branch";
 import { readNovelState } from "../src/novel/machine";
 
 const WORK = fileURLToPath(new URL("./fixtures/vault/novels/ice-house", import.meta.url));
@@ -88,6 +88,51 @@ describe("waitingForReview", () => {
     branchWithChange(work, "draft/ch02");
     git(work, "merge", "-q", "--no-edit", "draft/ch02");
     expect(waitingForReview(work)).toEqual([]);
+  });
+});
+
+describe("waitingForReview is the work's own (AGT-2283)", () => {
+  /** A vault repo with two works, a/ and b/, each with a file. */
+  function twoWorks(): { vault: string; a: string; b: string } {
+    const vault = realpathSync(mkdtempSync(join(tmpdir(), "pablo-status-two-")));
+    dirs.push(vault);
+    for (const w of ["a", "b"]) {
+      cpSync(WORK, join(vault, w), { recursive: true });
+    }
+    execFileSync("git", ["init", "-q", "-b", "main", vault]);
+    git(vault, "add", "-A");
+    git(vault, "commit", "-qm", "seed");
+    return { vault, a: join(vault, "a"), b: join(vault, "b") };
+  }
+  function change(vault: string, work: string, branch: string): void {
+    git(vault, "checkout", "-q", "-b", branch);
+    writeFileSync(join(work, "chapters", "01-the-last-full-cut.md"), `Changed on ${branch}.\n`);
+    git(vault, "commit", "-qam", "change");
+    git(vault, "checkout", "-q", "main");
+  }
+
+  test("a branch on work A shows nothing waiting on work B", () => {
+    const { vault, a, b } = twoWorks();
+    change(vault, a, "draft/ch02");
+    expect(waitingForReview(a)).toEqual(["draft/ch02"]);
+    expect(waitingForReview(b)).toEqual([]);
+  });
+
+  test("a branch with nothing left that main lacks (squash-merged) is not waiting", () => {
+    const { vault, a } = twoWorks();
+    change(vault, a, "revise/ab12");
+    git(vault, "merge", "-q", "--squash", "revise/ab12");
+    git(vault, "commit", "-qm", "squashed");
+    expect(waitingForReview(a)).toEqual([]);
+  });
+
+  test("a reader/ branch is never waiting, and doctor's helper lists it", () => {
+    const { vault, a } = twoWorks();
+    change(vault, a, "reader/atara-2026-10-04");
+    change(vault, a, "draft/ch02");
+    expect(waitingForReview(a)).toEqual(["draft/ch02"]);
+    expect(waitingBranches(vault)).toEqual({ ok: true, branches: ["draft/ch02"] });
+    expect(readerLeftovers(vault)).toEqual([{ branch: "reader/atara-2026-10-04" }]);
   });
 });
 

@@ -5,7 +5,9 @@
  * - the config file is found (absent is a warning: pablo has no built-in model) and parses;
  * - every provider the config routes to answers (`config test`'s one tiny request);
  * - the vault is found and is a git repo;
- * - the search backend answers (absent is a warning: research then has no web).
+ * - the search backend answers (absent is a warning: research then has no web);
+ * - no `reader/` branch is left in the vault (the retired reader flow, D-20, AGT-2283): named with the
+ *   cleanup command, a warning, and never deleted by doctor.
  *
  * Every line that is not ok says how to fix it. `ok` is false, and the verb
  * exits non-zero, when any check with status `fail` exists; a `warn` never
@@ -19,6 +21,7 @@ import { configPath, createSearchBackend, loadConfig, ProviderConfigError } from
 import type { PabloConfig, SearchBackend } from "@openthink/pablo-core";
 import { BILLING_LABEL, configTest, realConfigTestDeps } from "./config-verb";
 import type { ConfigTestDeps } from "./config-verb";
+import { readerLeftovers } from "./branch";
 import { findVault } from "./project";
 
 type Env = Record<string, string | undefined>;
@@ -39,6 +42,8 @@ export interface WritingDoctorDeps {
   readonly configTestDeps: ConfigTestDeps;
   /** Whether `dir` is inside a git work tree. */
   readonly isGitRepo: (dir: string) => boolean;
+  /** `reader/` branches left in the git repo at `repo`, with the worktree each is checked out in. */
+  readonly readerBranches: (repo: string) => { branch: string; worktree?: string }[];
   /** The search backend for a config's `web` block; undefined when none is configured. */
   readonly searchBackend: (config: PabloConfig) => SearchBackend | undefined;
 }
@@ -49,6 +54,7 @@ export function realWritingDoctorDeps(env: Env, cwd: string): WritingDoctorDeps 
     cwd,
     configTestDeps: realConfigTestDeps(),
     isGitRepo: (dir) => spawnSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" }).stdout?.trim() === "true",
+    readerBranches: readerLeftovers,
     searchBackend: (config) => createSearchBackend(config.web),
   };
 }
@@ -128,6 +134,21 @@ export async function runWritingDoctor(deps: WritingDoctorDeps): Promise<Writing
             fix: `run \`git -C ${vault.path} init\`; pablo keeps every draft and edit branch in the vault's history`,
           },
     );
+  }
+
+  // Leftovers of the retired reader flow (D-20). Named only; deleting them is the author's call.
+  if (vault.ok && deps.isGitRepo(vault.path)) {
+    const left = deps.readerBranches(vault.path);
+    if (left.length > 0) {
+      const removals = left.filter((l) => l.worktree !== undefined).map((l) => `git -C ${vault.path} worktree remove --force ${l.worktree}`);
+      const drop = `git -C ${vault.path} branch -D ${left.map((l) => l.branch).join(" ")}`;
+      checks.push({
+        name: "reader branches",
+        status: "warn",
+        detail: `${left.length} leftover from the retired reader flow: ${left.map((l) => l.branch).join(", ")}. pablo no longer reads them; doctor never deletes them`,
+        fix: `once you have kept anything you want from them, run ${[...removals, drop].join(" && ")}`,
+      });
+    }
   }
 
   // Search backend.

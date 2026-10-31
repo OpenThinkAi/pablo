@@ -1149,7 +1149,7 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       // `dir` goes on too: the main pane reads the selected stage's file from it (AGT-1527).
       // Branches waiting for review and their diffs against main come from the branch layer (AGT-1538).
       const repo = repoRoot(screen.dir);
-      const waiting = repo === undefined ? undefined : waitingBranches(repo);
+      const waiting = repo === undefined ? undefined : waitingBranches(repo, screen.dir);
       const vault = findVault(cwd);
       const marked = readMarker(screen.dir);
       const slug = marked.ok ? marked.marker.slug : undefined;

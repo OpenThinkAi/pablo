@@ -20,7 +20,7 @@ the verbs with their usage. `pablo <verb> --help` (or `pablo help <verb>`) print
 just that verb's usage, flags and an example; an unknown verb exits 1 naming it.
 
 Most writing verbs never touch `main`. They commit to a change branch (`draft/`,
-`revise/`, `edit/`, `plan/` or `reader/`), and you accept that branch when you have
+`revise/`, `edit/` or `plan/`), and you accept that branch when you have
 read it. See [Reviewing and accepting](#reviewing-and-accepting).
 
 ---
@@ -612,9 +612,9 @@ on their own branch:
 | `revise/<id>` | revising in the screen, or the MCP `revise` tool with `branch` |
 | `edit/...` | editing by hand in the screen |
 | `plan/...` | an agent session's planning writes; `promote`; `research save`; `fact record`; `agent --tag-facts` |
-| `reader/<round>` | nothing now; left over from an earlier version, kept so an old vault still lists it |
+| `reader/<round>` | nothing now; left over from the retired reader flow. It is not a review branch: `status` and `resume` never list it, and `pablo doctor` names any that remain with the command to delete them (it deletes nothing itself) |
 
-`status` and `resume` list them under `waiting`.
+`status` and `resume` list them under `waiting`: only branches whose merge would change something under the work's own directory. A branch of another work in the same vault, or one with nothing left that `main` lacks (already merged, squashed or cherry-picked), is not waiting.
 
 ### merge
 
@@ -1240,7 +1240,7 @@ that each loader passes its pin through, without loading a model.
 
 | Verb | What it does |
 |---|---|
-| `pablo doctor [--json]` | reports the casting side's state, uv and config, and checks the writing side: the config file is found and valid, each provider the config routes to answers, the vault is a git repo, the search backend answers. Each failing line says how to fix it; exits 1 when a required check fails (a missing config file or search backend is a warning, not a failure). Never installs anything |
+| `pablo doctor [--json]` | reports the casting side's state, uv and config, and checks the writing side: the config file is found and valid, each provider the config routes to answers, the vault is a git repo, the search backend answers; any `reader/` branches left from the retired reader flow are named (a warning) with the cleanup command, never deleted. Each failing line says how to fix it; exits 1 when a required check fails (a missing config file or search backend is a warning, not a failure). Never installs anything |
 | `pablo audition --role R --describe "..." [-n 6] [--designer qwen3\|voxcpm2] [--traits '{...}'] [--seed S]` | renders candidate voices reading a test passage, scored. `audition --dry-run` installs and checks the casting side without loading a model |
 | `pablo cast --role R --candidate n [--recast] [--notes "..."]` | freezes a candidate as a voice card in the shared library. `cast --auto --project <slug> [--episode N\|--all]` matches unbound roles to library voices; add `--design` to design voices for roles with no match. Synthetic voices only |
 | `pablo describe_voice --describe "..." [--gender f\|m\|x] [--role R]` | normalises a `CAST:` description into the voice traits vocabulary with the deterministic mapper: the traits found, the phrases it could not normalise, and the designer instruct. Loads no model and writes nothing; the same function as the MCP tool |
