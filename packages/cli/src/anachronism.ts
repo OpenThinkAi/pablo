@@ -52,7 +52,7 @@ export const ASK_MAX_TOKENS = 4096;
 export const END_MARKER = "END";
 
 /** The shape of one reply line, as the prompt states it (an echo of it is not a verdict). */
-const LINE_FORMAT = "term | why it is out of period, in one short sentence | the period it belongs to, e.g. the 1950s";
+const LINE_FORMAT = "term | what is out of period, in one short sentence | when it arrived, a year or decade, e.g. the 1950s";
 
 /** The model the check asks; a test-only injection point, so no test reaches a real model. */
 export const anachronismModel: { ask?: Ask } = {};
@@ -91,9 +91,21 @@ const EXCERPT_MAX = 120;
 /** A model's `why` and `belongs` are capped so a bad reply cannot bloat the lexicon. */
 const VERDICT_TEXT_MAX = 200;
 
-function capped(text: unknown, fallback: string): string {
-  const trimmed = typeof text === "string" ? text.trim() : "";
-  return trimmed === "" ? fallback : trimmed.slice(0, VERDICT_TEXT_MAX);
+/** A `belongs` that names a time: a year, a decade or a century. "N/A" and "a later period" do not. */
+const DATED = /\b\d{3,4}s?\b|\bcentur(?:y|ies)\b/i;
+
+/** A `why` that is about spelling, style or word history rather than a thing out of period (AGT-2284). */
+const NOT_A_THING = /\b(?:spelling|spelled|spelt|variant|hyphen\w*|capitali[sz]\w*|punctuation|etymolog\w*|word origin|stylistic)\b/i;
+
+/**
+ * An out-of-period verdict is reported only when it names what is out of period and when it arrived (AGT-2284): no
+ * date, a contradiction (`belongs to N/A`) or a spelling/etymology reason makes it noise, and it is read as in period.
+ */
+function reportableVerdict(why: unknown, belongs: unknown): { why: string; belongs: string } | undefined {
+  const w = typeof why === "string" ? why.trim() : "";
+  const b = typeof belongs === "string" ? belongs.trim() : "";
+  if (w === "" || b === "" || !DATED.test(b) || NOT_A_THING.test(w)) return undefined;
+  return { why: w.slice(0, VERDICT_TEXT_MAX), belongs: b.slice(0, VERDICT_TEXT_MAX) };
 }
 
 /** Function words never worth a verdict: no period owns them. Lower-case, apostrophes straight. */
@@ -270,7 +282,8 @@ export function lexiconPrompt(period: string, terms: readonly string[]): string 
   return [
     `You judge anachronisms for a historical story set in: ${period}`,
     "",
-    "For each term below, decide whether a person of that time and place could plausibly use it: the word itself, the object or idea it names, or the idiom it belongs to. A word that existed but meant something else then counts as in period. Names of people and places count as in period unless they did not exist yet.",
+    "For each term below, decide whether the THING, PRACTICE or IDIOM it names existed in that time and place: an object, a custom, an institution, a way of speaking. Judge what the term refers to, not the word's etymology, first recorded date or spelling. A word that existed but meant something else then counts as in period. A spelling or style variant (labor/labour, a hyphenated date, a capitalisation) is never out of period. Names of people and places count as in period unless they did not exist yet.",
+    "Report a term only when you can name what is out of period and the year or decade it arrived. If you cannot give a date, the term is in period: do not list it.",
     "",
     "List only the terms that are OUT of period, one per line, in exactly this form:",
     LINE_FORMAT,
@@ -316,7 +329,7 @@ function jsonVerdicts(text: string, wanted: ReadonlySet<string>): Map<string, Le
     if (typeof term !== "string" || typeof inPeriod !== "boolean") continue;
     const key = termOf(term.trim());
     if (!wanted.has(key)) continue;
-    verdicts.set(key, inPeriod ? { inPeriod: true } : { inPeriod: false, why: capped(why, "no reason given"), belongs: capped(belongs, "a later period") });
+    verdicts.set(key, outOfPeriod(inPeriod, why, belongs));
   }
   return verdicts;
 }
@@ -354,7 +367,7 @@ export function parseVerdicts(reply: string, asked: readonly string[]): Map<stri
       verdicts.set(term, { inPeriod: true });
       continue;
     }
-    verdicts.set(term, { inPeriod: false, why: capped(why, "no reason given"), belongs: capped(cells?.[2], "a later period") });
+    verdicts.set(term, outOfPeriod(false, why, cells?.[2]));
   }
   if (closed) {
     for (const term of asked) if (!verdicts.has(term)) verdicts.set(term, { inPeriod: true });
@@ -362,6 +375,13 @@ export function parseVerdicts(reply: string, asked: readonly string[]): Map<stri
   }
   if (verdicts.size === 0) return jsonVerdicts(text, wanted) ?? verdicts;
   return verdicts;
+}
+
+/** The cached verdict for a model's answer on a term: out of period only when `reportableVerdict` accepts it. */
+function outOfPeriod(inPeriod: boolean, why: unknown, belongs: unknown): LexiconEntry {
+  if (inPeriod) return { inPeriod: true };
+  const verdict = reportableVerdict(why, belongs);
+  return verdict === undefined ? { inPeriod: true } : { inPeriod: false, ...verdict };
 }
 
 /** The real model: the planner role under the `check` intent. Throws when no provider can be built. */
@@ -439,8 +459,10 @@ export async function checkAnachronisms(workDir: string, files: readonly string[
       for (const term of line.terms) {
         const entry = known[term];
         if (entry === undefined || entry.inPeriod) continue;
-        const why = entry.why ?? "no reason given";
-        const belongs = entry.belongs ?? "a later period";
+        // A verdict cached before AGT-2284 (no date, `N/A`, a spelling reason) is dropped here too, never re-asked.
+        const verdict = reportableVerdict(entry.why, entry.belongs);
+        if (verdict === undefined) continue;
+        const { why, belongs } = verdict;
         const trimmed = line.raw.trim();
         hits.push({
           path: unit.label,

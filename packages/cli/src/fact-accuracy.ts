@@ -53,6 +53,8 @@ export interface FactAccuracyRun {
   readonly hits: readonly FactHit[];
   /** Units sent to the model (a unit with no relevant facts is not). */
   readonly checked: number;
+  /** Units that had facts to be held to but were not checked (the run stopped before them or at them, AGT-2284). */
+  readonly notRun?: number;
   readonly notice?: string;
 }
 
@@ -116,6 +118,17 @@ export function factAccuracyPrompt(label: string, sentences: readonly Sentence[]
   ].join("\n\n");
 }
 
+/** A reply that is not the contradictions JSON: the one failure a retry with a stricter instruction can fix (AGT-2284). */
+class UnreadableReply extends Error {
+  constructor() {
+    super("the model's reply was not the contradictions JSON");
+  }
+}
+
+/** Appended to the prompt on the one retry: the reply was not JSON, so say exactly what shape is wanted. */
+export const STRICT_JSON_RETRY =
+  'Your last reply was not valid JSON. Reply with ONLY the JSON object {"contradictions": [...]} and nothing else: no prose, no explanation, no markdown fences, no thinking. Use [] when nothing contradicts.';
+
 /** The contradictions a reply names, keeping only ones that point at a shown sentence and a shown fact. */
 export function parseContradictions(reply: string, sentences: number, facts: number): Array<{ sentence: number; fact: number; why: string }> {
   let value: { contradictions?: unknown } | undefined;
@@ -125,7 +138,7 @@ export function parseContradictions(reply: string, sentences: number, facts: num
     value = undefined;
   }
   const list = typeof value === "object" && value !== null && Array.isArray(value.contradictions) ? value.contradictions : undefined;
-  if (list === undefined) throw new Error("the model's reply was not the contradictions JSON");
+  if (list === undefined) throw new UnreadableReply();
   const out: Array<{ sentence: number; fact: number; why: string }> = [];
   const seen = new Set<string>();
   for (const item of list as unknown[]) {
@@ -149,14 +162,23 @@ const sourcePath = (fact: PeriodFact): string => (fact.source.startsWith("resear
 
 /**
  * One unit's fact-accuracy hits (`text` its contents, `path` its report label) against `facts`, the facts it is
- * held to. No facts or no sentences: no model call, no hits. Throws when the model fails or its reply is unreadable.
+ * held to. No facts or no sentences: no model call, no hits. An unreadable reply is asked once more with a stricter JSON
+ * instruction. Throws when the model fails or the second reply is unreadable too.
  */
 export async function checkFactAccuracy(text: string, path: string, facts: readonly PeriodFact[], ask: Ask, storyDate?: string): Promise<FactHit[]> {
   if (facts.length === 0) return [];
   const sentences = draftSentences(text);
   if (sentences.length === 0) return [];
-  const reply = await ask(factAccuracyPrompt(path, sentences, facts, storyDate));
-  return parseContradictions(reply, sentences.length, facts.length)
+  const prompt = factAccuracyPrompt(path, sentences, facts, storyDate);
+  let contradictions: Array<{ sentence: number; fact: number; why: string }>;
+  try {
+    contradictions = parseContradictions(await ask(prompt), sentences.length, facts.length);
+  } catch (error) {
+    if (!(error instanceof UnreadableReply)) throw error;
+    // One retry, with a stricter JSON instruction; a second unreadable reply throws and the run reports it (AGT-2284).
+    contradictions = parseContradictions(await ask(`${prompt}\n\n${STRICT_JSON_RETRY}`), sentences.length, facts.length);
+  }
+  return contradictions
     .map(({ sentence, fact, why }) => {
       const s = sentences[sentence - 1] as Sentence;
       const f = facts[fact - 1] as PeriodFact;
@@ -228,7 +250,7 @@ export async function runFactAccuracy(opts: FactAccuracyOptions): Promise<FactAc
     }
     ask ??= opts.ask();
     if (typeof ask === "string") {
-      notice = `fact-accuracy not run: ${ask}`;
+      notice = `fact-accuracy not run: ${ask} (${sent} unit${sent === 1 ? "" : "s"} not run)`;
       break;
     }
     opts.progress?.(`fact-accuracy: ${unit.label} (${checked + 1}/${sent}), ${unit.facts.length} period fact${unit.facts.length === 1 ? "" : "s"}, asking the check model…`);
@@ -238,12 +260,13 @@ export async function runFactAccuracy(opts: FactAccuracyOptions): Promise<FactAc
       hits.push(...found);
       saved[unit.label] = found;
     } catch (error) {
-      notice = `fact-accuracy stopped at ${unit.label}: ${(error as Error).message}`;
+      notice = `fact-accuracy stopped at ${unit.label}: ${(error as Error).message}${error instanceof UnreadableReply ? " (after one retry)" : ""} (${sent - checked} unit${sent - checked === 1 ? "" : "s"} not run)`;
       break;
     }
   }
   saveFactHits(opts.workDir, units.filter((u) => saved[u.label] !== undefined).map((u) => ({ label: u.label, text: u.text, hits: saved[u.label] as FactHit[] })));
-  return { hits, checked, ...(notice !== undefined ? { notice } : {}) };
+  const notRun = notice === undefined ? 0 : sent - checked;
+  return { hits, checked, ...(notRun > 0 ? { notRun } : {}), ...(notice !== undefined ? { notice } : {}) };
 }
 
 // ---------------------------------------------------------------- saved hits, for the screen
