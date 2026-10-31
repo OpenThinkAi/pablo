@@ -62,6 +62,7 @@ import { mergeDraft } from "./novel/merge";
 import { dirtyPaths } from "./migrate";
 import { addOutput, removeOutput } from "./output-verbs";
 import { applyArchive, archiveDest, moveDirToArchive, planArchive } from "./story-adopt";
+import { planTitle } from "./story-title";
 import { assumedThesis } from "./outputs/essay/scaffold";
 import { radioMachine } from "./outputs/radio/casting-side";
 import { episodeState } from "./outputs/radio/state";
@@ -170,7 +171,8 @@ const LOGLINE_CUT = /\s+(?:is|are|was|were|has|have|must|decides?|faces?|finds?|
  * says neither, so the caller keeps the title it has.
  */
 export function titleFromPremise(overviewText: string): string | undefined {
-  const heading = /^##[ \t]+Title[ \t]*\r?\n+([^\r\n#][^\r\n]*)/im.exec(overviewText)?.[1];
+  // The title sits under the heading, or on it ("## Title: The Last Ferry", AGT-2290).
+  const heading = /^##[ \t]+Title[ \t]*:[ \t]*([^\r\n]*\S[^\r\n]*)/im.exec(overviewText)?.[1] ?? /^##[ \t]+Title[ \t]*\r?\n+([^\r\n#][^\r\n]*)/im.exec(overviewText)?.[1];
   const given = heading?.replace(/^["'“”*_\s]+|["'“”*_.\s]+$/g, "").trim();
   if (given !== undefined && given !== "") return given;
   const logline = /^##[ \t]+Logline[ \t]*\r?\n+([^\r\n#][^\r\n]*)/im.exec(overviewText)?.[1]?.trim();
@@ -388,15 +390,19 @@ async function chooseTrack(args: StoryArgs, prompt: string, ctx: VerbContext, de
   }
   // The planner can take seconds: say what the wait is.
   ctx.stderr.write("pablo story: choosing a track from the prompt\n");
-  let planner = deps.planner;
-  if (planner === undefined) {
-    try {
-      planner = createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig }), { keys: deps.keys ?? { env: ctx.env } }).adapter;
-    } catch (error) {
-      return { track: "fiction", inferred: false, why: `the planner could not be set up (${(error as Error).message}); fiction by default` };
-    }
-  }
+  const planner = storyPlanner(ctx, deps);
+  if (planner instanceof Error) return { track: "fiction", inferred: false, why: `the planner could not be set up (${planner.message}); fiction by default` };
   return inferTrack(prompt, planner);
+}
+
+/** The planner `story` asks (AGT-2103, AGT-2290): the injected one, else pablo's own; an Error when it cannot be set up. */
+function storyPlanner(ctx: VerbContext, deps: StoryDeps): Adapter | Error {
+  if (deps.planner !== undefined) return deps.planner;
+  try {
+    return createPlanner(loadConfig({ env: ctx.env, readFile: deps.readConfig }), { keys: deps.keys ?? { env: ctx.env } }).adapter;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
 }
 
 /** Refuses, before anything is written, a requested output the run's track does not allow (D-7). */
@@ -601,6 +607,7 @@ function retitleFromPremise(run: Run): void {
     paths.push(file);
   }
   gitCommit(run.vault, `${run.slug}: title from the premise`, paths);
+  progress(run, `title from the premise: "${title}" (the slug and directory stay ${run.slug}, so paths and branches do not move)`);
   run.title = title;
 }
 
@@ -1268,7 +1275,13 @@ export async function runStory(args: StoryArgs, ctx: VerbContext, deps: StoryDep
 
   const now = deps.now ?? (() => new Date());
   const date = localDate(now());
-  const title = args.title?.trim() || titleFromPrompt(prompt);
+  let title = args.title?.trim() ?? "";
+  if (title === "") {
+    // AGT-2290: one planner call names the work (a title, not a prompt prefix); the slug is cut from it.
+    ctx.stderr.write("pablo story: titling the work from the prompt\n");
+    const planner = storyPlanner(ctx, deps);
+    title = (planner instanceof Error ? undefined : await planTitle(prompt, planner)) ?? titleFromPrompt(prompt);
+  }
   const slug = freeSlug(vault.path, title);
   const category = outputs.includes("novel") ? "novels" : "stories";
   const work = join(vault.path, category, slug);

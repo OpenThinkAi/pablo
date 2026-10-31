@@ -1080,6 +1080,15 @@ Writes a work end to end from a prompt. It:
 2. Builds the story core through the agent harness (research, premise, bible, acts, beats), each stage on a `plan/` branch. A `historical-fiction` run builds that track's core instead: premise, the period brief (`bible/period.md`), the research checklist (pablo runs `research plan` on the brief), research (the agent sources each open item with `save_research` or waives it with a reason, every write on the stage's one branch), period facts (pablo runs `research distill`), then bible, acts and beats.
 3. Drafts, merges and publishes each requested output.
 
+Without `--title`, one planner call on the prompt names the work (a short title about the story, not a prefix of
+the request) and the work's slug is cut from that title; the run prints `pablo story: titling the work from the
+prompt` while it waits. If the planner can't be reached or answers with something unreadable, the title falls back to
+the prompt's first words. When the premise stage writes a `## Title` in `bible/overview.md` (under the heading, or
+`## Title: <title>`), the run updates `title` in `pablo.json` (and the README and rules-file headings) to it on the
+same branch, and prints `pablo story: title from the premise: "<title>" (the slug and directory stay <slug>, ...)`:
+the slug never moves once the work is created, so paths and branches stay put. A `--title` you pass, and the title
+of a work adopted with `--from`, are never replaced.
+
 `--output` is repeatable. The default is one written output, `story` or `novel`
 depending on the length the prompt asks for. A type that can't run here (radio
 without the casting side) is refused before anything is written.
