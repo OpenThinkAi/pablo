@@ -1118,6 +1118,7 @@ refused. Both are also MCP tools.
 ```
 pablo story "<prompt>" [--output <type>]... [--review] [--no-check] [--title T] [--words N] [--track <t>]
 pablo story --project <slug>
+pablo story --project <slug> --from <stage> [--output <type>]... [--review] [--no-check]
 ```
 
 Writes a work end to end from a prompt. It:
@@ -1153,6 +1154,34 @@ to change it. With `--review`, the run
 stops on each branch for you to accept; `pablo story --project <slug>` then picks the
 run up again. Progress is kept in `<work>/.pablo/story.json`, so a stopped or failed
 run resumes where it was. Runs on the same provider as `agent`.
+
+#### Adopting an existing work: `--from <stage>`
+
+`pablo story --project <slug> --from <stage>` takes a work `pablo story` did not build (written by hand, or whose
+`.pablo/story.json` is gone) or restarts one from a core stage. `<stage>` is one of the work's core stages
+(`research`, `premise`, `bible`, `acts`, `beats` on fiction; `premise`, `period`, `research-plan`, `research`,
+`period-facts`, `bible`, `acts`, `beats` on historical-fiction). A nonfiction work is refused.
+
+- Every stage before `<stage>` is kept and must be complete, or the run is refused naming what is missing (on
+  historical-fiction that includes the research gate: a sourced note and a closed checklist, and the period facts for
+  anything after them). Nothing is moved before every refusal has been checked; uncommitted changes to a file that
+  would move are refused too.
+- What `<stage>` and the later stages produced is archived, never deleted, under `_archived/<stage>-<date>[-K]/`,
+  keeping each file's path (`premise`: `bible/overview.md`; `period`: `bible/period.md`; `research-plan`:
+  `research/checklist.md`; `research`: the notes in `research/` other than the checklist, so a restart from
+  `research` re-opens the checklist's items; `period-facts`: `facts/period.md`; `bible`: every file under `bible/`
+  except the premise and period brief). `acts` archives a copy of the outline and resets it; `beats` archives a copy
+  and clears only the beats table, keeping the acts. The work's outputs derive from the core, so each is archived
+  too, as `pablo output remove` does (`outputs/_removed/`; the novel's `chapters/` under the same `_archived/`
+  folder) and added again when the run reaches it. `facts.md` and the work's `pablo.json` are not touched beyond
+  that.
+- A fresh `.pablo/story.json` is written and the run goes on from `<stage>` exactly as a resumed run would,
+  with `--review` stopping on each branch. The result gains `adopted: {from, archived, outputs}`. The outputs
+  rebuilt are `--output` if given, else the previous run's, else the ones the work declared, else the length-cue
+  default. The request is `"<prompt>"` if given with `--from`, else the previous run's, else the README's "Asked
+  for" quote, else the title. The work keeps its title (the premise stage does not rename an adopted work).
+- Without `--from`, `--project` on a work with no run record is refused and names `--from`. `--from` without
+  `--project` is refused. A run waiting on an unmerged branch is refused until it is accepted or dropped.
 
 Every turn of the agent loop in a core stage appends a receipt to `<work>/.pablo/receipts.jsonl`
 (`intent` `research` or `plan`, `provider`, `model`, tokens, `cost_usd`, and `tool_calls`, the

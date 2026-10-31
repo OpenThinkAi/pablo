@@ -49,7 +49,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { PLAN_INTENT, WORK_RULES_FILE, createPlanner, createProviders, fileReceiptSink, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
 import type { Adapter, Intent, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
@@ -59,7 +59,9 @@ import { ensureGitignoreEntry, gitCommit, SLUG_PATTERN } from "./init";
 import type { CastingDeps } from "./radio";
 import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, readMarker, trackOf, writeMarker } from "./marker";
 import { mergeDraft } from "./novel/merge";
-import { addOutput } from "./output-verbs";
+import { dirtyPaths } from "./migrate";
+import { addOutput, removeOutput } from "./output-verbs";
+import { applyArchive, archiveDest, moveDirToArchive, planArchive } from "./story-adopt";
 import { assumedThesis } from "./outputs/essay/scaffold";
 import { radioMachine } from "./outputs/radio/casting-side";
 import { episodeState } from "./outputs/radio/state";
@@ -197,6 +199,12 @@ export interface StoryArgs {
    * planner infers `historical-fiction` from a prompt naming a period or event, else `fiction`. Ignored on resume.
    */
   readonly track?: string | undefined;
+  /**
+   * `--from <stage>` (AGT-2289, D-22): adopt the work `project` names, whether or not `pablo story` built it, and run
+   * from this core stage. Earlier stages must be complete and are kept; the stage's and later stages' files, and the
+   * work's outputs, are archived (never deleted) under `_archived/`. Needs `project`.
+   */
+  readonly from?: string | undefined;
   /** `--no-check` (AGT-2115): skip the track's checks after each drafted unit. */
   readonly noCheck?: boolean | undefined;
   /** The same, as the verb's schema spells it (`pablo story --no-check`, the MCP tool). */
@@ -279,6 +287,8 @@ interface StoryState {
   published: Record<string, PublishedRecord>;
   assumptions: StoryAssumption[];
   finished?: boolean;
+  /** Set when the run adopted an existing work with `--from` (AGT-2289): the stage, and where what it replaced went. */
+  adopted?: { readonly from: string; readonly archived: string; readonly outputs: readonly string[] };
   /** Each core stage's saved transcript, as paths relative to the work (AGT-2191). */
   transcripts?: string[];
 }
@@ -1052,6 +1062,7 @@ async function advance(run: Run): Promise<VerbResult> {
       path: run.work,
       title: run.title,
       ...(state.track === undefined ? {} : { track: state.track }),
+      ...(state.adopted === undefined ? {} : { adopted: state.adopted }),
       outputs: state.outputs,
       review: state.review,
       core,
@@ -1099,6 +1110,107 @@ function settlePending(run: Run): VerbResult | undefined {
   return undefined;
 }
 
+/** The request a hand-built work was asked for: the README's `> ` quote under "Asked for", else the work's title. */
+function promptOf(work: string, title: string): string {
+  const readme = existsSync(join(work, "README.md")) ? readFileSync(join(work, "README.md"), "utf8") : "";
+  const quote = /Asked for on [^\n]*:\n\n((?:>[^\n]*\n?)+)/.exec(readme)?.[1];
+  const text = quote?.split("\n").map((l) => l.replace(/^>\s?/, "")).join("\n").trim();
+  return text !== undefined && text !== "" ? text : `Continue the work titled "${title}".`;
+}
+
+/**
+ * `pablo story --project <slug> --from <stage>` (AGT-2289, D-22): everything before `from` stays and must be complete
+ * (the research gate open on historical-fiction); `from` and later stages' files, and every declared output, are
+ * archived under `_archived/<from>-<date>/` (outputs through `output remove`'s own archive), never deleted; a fresh
+ * run record then resumes at `from`. Every refusal comes before anything is moved.
+ */
+async function adoptFrom(args: StoryArgs, from: string, run0: { vault: string; repo: string; work: string; ctx: VerbContext; deps: StoryDeps }): Promise<VerbResult> {
+  const { vault, repo, work, ctx, deps } = run0;
+  const marker = readMarker(work);
+  if (!marker.ok) return refuse(marker.message);
+  const track = trackOf(marker.marker);
+  if (track === "nonfiction") return refuse("pablo: story: pablo story writes fiction; a nonfiction work is built with its own verbs (pablo guide); nothing was moved");
+  const stages = storyStages(track);
+  const at = stages.indexOf(from as StoryCoreStage);
+  if (at < 0) return refuse(`pablo: story: --from ${JSON.stringify(from)} is not a stage of the ${track} core (stages: ${stages.join(", ")}); nothing was moved`, [`--from ${stages.join(" | ")}`]);
+
+  const prior = readState(work);
+  if (prior?.pending?.branch !== undefined && branchExists(repo, prior.pending.branch) && prior.pending.sha !== undefined && !isMerged(repo, prior.pending.sha)) {
+    return refuse(`pablo: story: the run is waiting on ${prior.pending.branch}; accept or drop it first; nothing was moved`, [prior.pending.branch]);
+  }
+
+  // The stages before `from` must already be complete.
+  const missing = stages.slice(0, at).flatMap((stage) => (stageMissing(work, stage) ?? []).map((m) => `${stage}: ${m}`));
+  if (missing.length > 0) {
+    const short = [...new Set(missing.map((m) => m.split(":")[0]))];
+    return refuse(`pablo: story: --from ${from} keeps the stages before it, and ${short.join(", ")} ${short.length === 1 ? "is" : "are"} not complete; nothing was moved`, missing);
+  }
+
+  const prompt = args.prompt?.trim() || prior?.prompt || promptOf(work, marker.marker.title);
+  const declared = Object.keys(marker.marker.outputs);
+  const requested = [...new Set((args.output ?? []).map((o) => o.trim()).filter((o) => o !== ""))];
+  const outputs = requested.length > 0 ? requested : prior?.outputs !== undefined && prior.outputs.length > 0 ? [...prior.outputs] : declared.length > 0 ? declared : [defaultOutput(prompt)];
+  const blocked = await ensureOutputs(outputs);
+  if (blocked !== undefined) return blocked;
+  const offTrack = outputsOffTrack(outputs, track);
+  if (offTrack !== undefined) return offTrack;
+
+  const now = deps.now ?? (() => new Date());
+  const date = localDate(now());
+  const plan = planArchive(work, stages.slice(at));
+  const outputDirs = declared.flatMap((id) => {
+    const dir = outputDefinition(id)?.artifactDir;
+    return dir !== undefined && !dir.startsWith("outputs/") ? [dir] : [];
+  });
+  const abs = (rel: string): string => join(work, rel);
+  // Everything this run will move or rewrite, including what `output remove` will archive, so no refusal comes after a move.
+  const dirty = dirtyPaths(
+    vault,
+    [...plan.moves, ...plan.rewrites.map((r) => r.rel), ...outputDirs, ...declared.map((id) => `outputs/${id}`), "pablo.json"].filter((rel) => existsSync(abs(rel))).map((rel) => relative(vault, abs(rel))),
+  );
+  if (dirty.length > 0) return refuse(`pablo: story: uncommitted changes in ${dirty.join(", ")}; commit or discard them first; nothing was moved`, dirty);
+
+  const dest = archiveDest(work, from, date);
+  const touched = applyArchive(work, plan, dest);
+  // A hand-built work may not ignore its machine state yet (`pablo story` arranges it for the works it creates).
+  if (ensureGitignoreEntry(vault, ".pablo/")) touched.push(relative(work, join(vault, ".gitignore")));
+  // Outputs derive from the core: archive each (readers first), as `output remove` does, then a directory it leaves (the novel's chapters).
+  const derived = (id: string): boolean => outputDefinition(id)?.derive !== undefined;
+  for (const id of [...declared].sort((a, b) => Number(derived(b)) - Number(derived(a)))) {
+    const removed = removeOutput(vault, work, id, { now });
+    if (!removed.ok) return { body: removed, exitCode: removed.code };
+  }
+  for (const dir of outputDirs) touched.push(...moveDirToArchive(work, dir, dest));
+  if (touched.length > 0) {
+    const committed = gitCommit(vault, `${marker.marker.slug}: archive the ${from} stage and later (pablo story --from)`, [...new Set(touched)].map(abs));
+    if (!committed.committed) return fail(committed.notice ?? "pablo: story: could not commit the archive", { path: work });
+  }
+
+  const stageDone = stages.slice(0, at).map((s) => `core:${s}`);
+  const state: StoryState = {
+    version: 1,
+    prompt,
+    outputs,
+    review: args.review === true || prior?.review === true,
+    ...(args.noCheck === true || args["no-check"] === true || prior?.noCheck === true ? { noCheck: true } : {}),
+    ...(args.words !== undefined ? { words: args.words } : prior?.words !== undefined ? { words: prior.words } : {}),
+    started: now().toISOString(),
+    track: prior?.track?.track === track ? prior.track : { track, inferred: false, why: "the adopted work's pablo.json" },
+    // An adopted work keeps its own title; the premise stage does not rename it.
+    titled: true,
+    done: stageDone,
+    plan: [],
+    drafts: {},
+    published: {},
+    assumptions: prior?.assumptions ?? [],
+    ...(prior?.transcripts === undefined ? {} : { transcripts: prior.transcripts }),
+    adopted: { from, archived: plan.moves.length + plan.rewrites.length + outputDirs.length === 0 ? "" : dest, outputs: declared },
+  };
+  saveState(work, state);
+  ctx.stderr.write(`pablo story: adopting ${marker.marker.slug} from ${from} (request: ${prompt.split("\n")[0]!.slice(0, 80)})${touched.length === 0 ? " (nothing to archive)" : `; archived to ${dest}`}\n`);
+  return advance({ vault, repo, work, slug: marker.marker.slug, title: marker.marker.title, state, ctx, deps });
+}
+
 /**
  * `pablo story "<prompt>" [--output <type>]... [--review] [--title T] [--words N]`
  * starts a run; `pablo story --project <slug> [--review]` resumes one. The body
@@ -1115,12 +1227,21 @@ export async function runStory(args: StoryArgs, ctx: VerbContext, deps: StoryDep
   }
   const prompt = args.prompt?.trim() ?? "";
 
+  if (args.from !== undefined && args.project === undefined) {
+    return refuse("pablo: story: --from needs --project <slug>, the work to adopt and run from that stage", ["--project <slug>"]);
+  }
+
   if (args.project !== undefined) {
+    if (args.from !== undefined) {
+      const project = resolveProject(vault.path, args.project);
+      if (!project.ok) return { body: { ok: false, code: project.code, message: project.message, tried: project.tried }, exitCode: project.code };
+      return adoptFrom(args, args.from.trim(), { vault: vault.path, repo, work: project.path, ctx, deps });
+    }
     if (prompt !== "") return refuse('pablo: story: pass "<prompt>" to start a story, or --project <slug> to continue one, not both');
     const project = resolveProject(vault.path, args.project);
     if (!project.ok) return { body: { ok: false, code: project.code, message: project.message, tried: project.tried }, exitCode: project.code };
     const state = readState(project.path);
-    if (state === undefined) return refuse(`pablo: story: no pablo story run is recorded in ${join(project.path, STATE_FILE)}`, [`"<prompt>" (start a run)`]);
+    if (state === undefined) return refuse(`pablo: story: no pablo story run is recorded in ${join(project.path, STATE_FILE)}; to adopt this work and run from a stage, pass --from <stage>`, [`--from <stage> (adopt this work)`, `"<prompt>" (start a new run)`]);
     const marker = readMarker(project.path);
     if (!marker.ok) return refuse(marker.message);
     if (args.review === true) state.review = true;

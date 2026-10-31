@@ -1113,6 +1113,7 @@ async function runStoryCli(args: ParsedArgs, argv: readonly string[], cwd: strin
       words,
       project: args.project,
       track: args.track,
+      from: typeof args.values["from"] === "string" ? args.values["from"] : undefined,
       noCheck: args.noCheck,
     },
     { cwd, env: process.env, stderr: process.stderr },
