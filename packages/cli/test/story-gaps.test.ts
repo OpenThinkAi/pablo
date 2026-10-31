@@ -353,6 +353,74 @@ test("AC5: titleFromPremise and the request-derived working title", () => {
 });
 
 // ---------------------------------------------------------------------------
+// AGT-2290: the title from one planner call, then from the premise
+// ---------------------------------------------------------------------------
+
+const markerTitle = (r: VerbResult): string => (JSON.parse(readFileSync(join((r.body as Record<string, any>).path as string, "pablo.json"), "utf8")) as { title: string }).title;
+
+const TITLE_ANSWER = '{"title": "What the Olives Remember"}';
+
+test("AGT-2290 AC1: without --title one planner call names the work and the slug is cut from that title, not the prompt", async () => {
+  const v = tempVault();
+  const planner = fakeTrackPlanner(undefined, TITLE_ANSWER);
+  const result = await runStory({ prompt: SPEC, review: true }, v.ctx, depsFor(fakeHarness(null).agent, { planner }));
+  const body = result.body as Record<string, any>;
+  expect(result.exitCode).toBe(0);
+  expect(planner.titled).toHaveLength(1);
+  expect(planner.titled[0]).toContain(SPEC);
+  expect(body.project).toBe("what-the-olives-remember");
+  const marker = JSON.parse(readFileSync(join(body.path as string, "pablo.json"), "utf8")) as { title: string; slug: string };
+  expect(marker).toMatchObject({ title: "What the Olives Remember", slug: "what-the-olives-remember" });
+  expect(readFileSync(join(body.path as string, "README.md"), "utf8").split("\n")[0]).toBe("# What the Olives Remember");
+});
+
+test("AGT-2290 AC1: --title skips the title call; an unreadable answer or an unreachable planner falls back to the prompt-derived title", async () => {
+  const given = tempVault();
+  const planner = fakeTrackPlanner(undefined, TITLE_ANSWER);
+  const named = await runStory({ prompt: SPEC, review: true, title: "Camogli" }, given.ctx, depsFor(fakeHarness(null).agent, { planner }));
+  expect(planner.titled).toEqual([]);
+  expect((named.body as Record<string, any>).project).toBe("camogli");
+
+  const unreadable = tempVault();
+  const bad = fakeTrackPlanner(undefined, "no idea, sorry");
+  const a = await runStory({ prompt: SPEC, review: true }, unreadable.ctx, depsFor(fakeHarness(null).agent, { planner: bad }));
+  expect(bad.titled).toHaveLength(1);
+  expect(markerTitle(a)).toBe("A family who lives there and discovers an");
+
+  const broken = tempVault();
+  const down = fakeTrackPlanner();
+  (down as any).complete = async function* () {
+    throw new Error("connection refused");
+  };
+  const b = await runStory({ prompt: SPEC, review: true, track: "fiction" }, broken.ctx, depsFor(fakeHarness(null).agent, { planner: down }));
+  expect(b.exitCode).toBe(0);
+  expect(markerTitle(b)).toBe("A family who lives there and discovers an");
+});
+
+test("AGT-2290 AC2: a premise whose heading carries the title (## Title: X) renames pablo.json; the slug stays and status says so", async () => {
+  const v = tempVault();
+  const base = stageCalls(undefined);
+  const inline = { ...base, premise: [["propose", { stage: "premise", content: overview(undefined).replace("## Logline", "## Title: What the Olives Remember\n\n## Logline") }]] as Call[] };
+  const { provider } = scriptedAgent((message) => inline[stageOf(message) as keyof typeof inline] ?? []);
+  const planner = fakeTrackPlanner(undefined, '{"title": "Rosa Leaves"}');
+  const result = await runStory({ prompt: SPEC, output: ["story"] }, v.ctx, depsFor(provider, { planner }));
+  const body = result.body as Record<string, any>;
+  expect(result.exitCode).toBe(0);
+  expect(body.project).toBe("rosa-leaves");
+  expect(body.title).toBe("What the Olives Remember");
+  expect((JSON.parse(readFileSync(join(body.path as string, "pablo.json"), "utf8")) as { title: string; slug: string })).toMatchObject({ title: "What the Olives Remember", slug: "rosa-leaves" });
+  expect(git(v.vault, "status", "--porcelain", "--", body.path as string)).toBe("");
+  expect(git(v.vault, "log", "--format=%s")).toContain("rosa-leaves: title from the premise");
+  expect(v.lines.map((l) => l.trim())).toContain('pablo story: title from the premise: "What the Olives Remember" (the slug and directory stay rosa-leaves, so paths and branches do not move)');
+  expect(titleFromPremise("## Title: **The Last Passage.**\n")).toBe("The Last Passage");
+  // A model-written title is made safe to print and store: no escapes, no bidi overrides, no runaway length.
+  expect(titleFromPremise("## Title: The \u001b[31mRed\u001b[0m Ferry‮\n")).toBe("The [31mRed [0m Ferry");
+  const long = titleFromPremise(`## Title: ${"Olive ".repeat(30)}\n`) ?? "";
+  expect(long.length).toBeLessThanOrEqual(80);
+  expect(long.endsWith("Olive")).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
 // AC6: a progress line per stage
 // ---------------------------------------------------------------------------
 
@@ -363,8 +431,11 @@ test("AC6: a run prints one stderr line per stage, in order, and nothing else", 
     // AGT-2103: the track the run chose, and why, before anything is written.
     "pablo story: choosing a track from the prompt",
     "pablo story: track fiction (inferred: the request names no historical period or event)",
+    // AGT-2290: the work is titled by one planner call before it is created, and renamed from the premise's title.
+    "pablo story: titling the work from the prompt",
     "pablo story: research (core stage 1 of 5)",
     "pablo story: premise (core stage 2 of 5)",
+    "pablo story: title from the premise: \"The Last Passage\" (the slug and directory stay a-family-who-lives-there-and, so paths and branches do not move)",
     "pablo story: bible (core stage 3 of 5)",
     "pablo story: acts (core stage 4 of 5)",
     "pablo story: beats (core stage 5 of 5)",

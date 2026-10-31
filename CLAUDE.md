@@ -294,7 +294,11 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 record or restarts from a stage: earlier stages must be
                 complete, the stage's and later files and the outputs are
                 archived under `_archived/` (outputs via `removeOutput`),
-                never deleted. A requested type whose `ensure()` fails
+                never deleted. Without `--title` one planner call names the
+                work (AGT-2290, `src/story-title.ts`; the slug is cut from
+                that title, `titleFromPrompt` the fallback) and the premise's
+                `## Title` (under the heading or `## Title: X`) later
+                renames `pablo.json`, the slug staying. A requested type whose `ensure()` fails
                 (or that is not registered) is refused before anything is
                 written; an unrequested type's `ensure()` is never called.
                 Merges find a draft branch's output by `outputForBranch`, so
