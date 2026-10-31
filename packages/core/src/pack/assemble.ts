@@ -288,7 +288,9 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
     script ? "" : `Point of view: ${b.pov} (close third person, one point-of-view character per scene)`;
   const brief = [
     `You are drafting ${label ?? `chapter ${inputs.unit ?? beat.chapter}`} of ${form}, working title "${inputs.work.title}".`,
-    label === undefined || script
+    inputs.part !== undefined
+      ? `This is a first draft the author will cut and reshape. Write this part and nothing`
+      : label === undefined || script
       ? `This is a first draft the author will cut and reshape. Write the ${noun} and nothing`
       : "This is a first draft the author will cut and reshape. Write the whole piece and nothing",
     "else: no title, no notes, no summary, no questions.",
@@ -513,7 +515,13 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       name: "task",
       heading: "",
       text: [
-        ...(script
+        ...(inputs.part !== undefined
+          ? [
+              `Write part ${inputs.part.number} of ${inputs.part.of} now, as scenes, not summary. About ${inputs.wordTarget} words, within ten percent.`,
+              inputs.part.number === 1 ? "Open the piece." : "Continue straight on from the end of the text so far; do not recap it.",
+              inputs.part.number === inputs.part.of ? "This is the last part: close the piece." : "Do not close the piece; later parts carry on.",
+            ]
+          : script
           ? [`Write the scene now: one scene, not a sequence of them. Scene, not summary. About ${inputs.wordTarget} words, within ten percent.`]
           : [
               `Write the chapter now, in at least ${minScenes} scenes with a line break between`,
