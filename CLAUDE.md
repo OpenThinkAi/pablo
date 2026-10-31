@@ -691,7 +691,7 @@ ships TypeScript that Bun runs directly. Add a `build` check to
 
 The three TypeScript packages are published to npm (`@openthink/pablo-core`,
 `@openthink/pablo-tui`, `@openthink/pablo`, the bin) in lockstep at one
-version (0.2.x); `CONTRIBUTING.md`'s `Releasing` section is the procedure. The root
+version; `CONTRIBUTING.md`'s `Releasing` section is the procedure. The root
 `package.json` is a private workspace shell with no version.
 
 ## Conventions

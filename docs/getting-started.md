@@ -21,7 +21,7 @@ pablo --version
 
 `npm install -g @openthink/pablo` also works; pablo still runs on Bun.
 
-The commands that open a window (`read`, `review`, `mixer`) need one more step,
+The commands that open a window (`review`, `mixer`) need one more step,
 which you can skip if you will not use them:
 
 ```sh
@@ -98,6 +98,16 @@ export ANTHROPIC_API_KEY=sk-ant-...
 }
 ```
 
+**Claude on your subscription.** With Claude Code installed and signed in, a
+`claude-code` provider sends requests through `claude -p` on your Claude plan, with
+no API key:
+
+```sh
+pablo config set providers.claude-code.kind claude-code
+pablo config set providers.claude-code.model the-claude-model-id-you-use
+pablo config set intents.draft claude-code
+```
+
 Every option, including the macOS Keychain for keys, is in
 [configuration.md](configuration.md).
 
@@ -138,6 +148,7 @@ core:
   beats: 0
   facts: decided
 novel: 0 of 0 chapters drafted
+track: fiction
 waiting for review: none
 next: core: write bible/overview.md
 ```
@@ -256,7 +267,7 @@ continuity ledger, and commits. `pablo status` now says `next: novel: write chap
 ## 8. Check and publish
 
 ```sh
-pablo check --project lighthouse                    # tells, banned names, missing provenance
+pablo check --project lighthouse                    # tells, provenance, dates, unknown names
 pablo publish --project lighthouse --target draft   # one markdown file in .pablo/out/
 ```
 

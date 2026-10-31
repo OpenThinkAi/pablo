@@ -158,12 +158,14 @@ The rest (`promote`, `migrate`, `bind`, and the radio tools `audition`, `cast`,
 ## The built-in agent
 
 pablo also ships its own agent: its own tool loop on the model the `agent` intent goes
-to (Claude, or any OpenAI-compatible model with tool calls), configured as pablo. Its
+to (Claude through an API key or, with a `claude-code` provider, your Claude
+subscription, or any OpenAI-compatible model with tool calls), configured as pablo. Its
 system prompt is the rules above, the work's judgement policy and the work's
 `STYLE.md`, and its only tools are pablo's (see
 [configuration.md](configuration.md#the-model-behind-pablo-agent-and-pablo-story)).
 `critique` and `check --across` run on the `check` intent and `pablo agent --tag-facts`
-on `plan`; no model call goes through a Claude Code login or `claude -p`.
+on `plan`; a model call goes through your Claude Code login (`claude -p`) only when
+its intent routes to a provider you declared with `kind: "claude-code"`.
 
 - `pablo agent --project <slug> "<message>"` runs one conversation in the terminal.
 - `a c` in the screen (bare `pablo`) opens the same conversation as a view.

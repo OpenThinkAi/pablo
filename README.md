@@ -44,14 +44,14 @@ screen with review mode, and an experimental radio-drama pipeline that needs App
 
 ```sh
 bun add -g @openthink/pablo         # needs Bun 1.1+ (https://bun.sh)
-bun pm -g trust @openthink/ui-leaf  # only for read, review and mixer windows
+bun pm -g trust @openthink/ui-leaf  # only for the review and mixer windows
 ```
 
 The trust step is optional; see [getting started](docs/getting-started.md#1-install)
 for what it runs.
 
 You also need git and a model: any OpenAI-compatible server (LM Studio, Ollama,
-llama.cpp, MLX) or an Anthropic API key.
+llama.cpp, MLX), an Anthropic API key, or Claude Code signed in to a Claude plan.
 
 ## Documentation
 

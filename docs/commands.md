@@ -1245,7 +1245,8 @@ pablo agent --project <slug> --tag-facts
 
 Runs one session of pablo's own agent loop on the provider the config's `agent`
 intent goes to (see `docs/configuration.md`): Claude through an `anthropic` provider,
-or any OpenAI-compatible model with tool calls. With no cloud provider configured and
+Claude on your subscription through a `claude-code` provider, or any OpenAI-compatible
+model with tool calls. With no cloud provider configured and
 no `intents.agent` set, it runs on the local model and says so on stderr. Its system
 prompt carries the work's policy and `STYLE.md`. Its tools are pablo's MCP tools and
 nothing else, including `web_search` and `web_fetch` (see `docs/configuration.md`,

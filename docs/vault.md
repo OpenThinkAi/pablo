@@ -105,6 +105,8 @@ before writing, and commits only that file.
 | `publish` | no | `{}` | Per-target publish settings |
 | `track` | no | `"fiction"` | The kind of work: `fiction`, `historical-fiction` or `nonfiction`. Any other value is refused, naming the allowed ones. `status` and `resume` report it |
 | `policy` | no | the track's policy | The judgement policy for `pablo agent` (see below) |
+| `realNames` | no | `true` | `false` keeps real people's names out of the distilled period facts (see [configuration.md](configuration.md#per-work-realnames)) |
+| `think` | no | `true` | `false` skips the `think sync` at the end of `pablo merge` (see [configuration.md](configuration.md#per-work-think)) |
 | `providers`, `intents` | no | the global config's | This work's model routing, merged over `~/.config/pablo/config.json` (see [configuration.md](configuration.md#per-work-providers-and-intents)) |
 | `format` | old | | `"format": "novel"` is the pre-outputs form. It still works; `pablo migrate outputs` converts the work |
 
