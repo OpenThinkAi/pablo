@@ -147,7 +147,7 @@ pablo sends eight kinds of request. Each is an *intent*:
 | `continuity` | the fact extraction `merge` runs | the first local provider |
 | `plan` | `pablo story`'s premise, bible, acts and beats stages, the track choice, and `pablo agent --tag-facts` | the first non-local provider |
 | `agent` | the built-in agent (`pablo agent`, the screen's compose view) | the first non-local provider |
-| `check` | the critic that judges a branch (`critique`, `check --across`) | the `plan` mapping when `check` is unmapped, else the first non-local provider |
+| `check` | the critic that judges a branch (`critique`, `check --across`) and historical fiction's `anachronism` and `fact-accuracy` checks | the `plan` mapping when `check` is unmapped, else the first non-local provider |
 | `research` | `pablo story`'s research stage; `research distill` (`distill_facts`): research notes, raw, to period facts; `research plan` (`plan_research`): the period brief or thesis to a research checklist | the first non-local provider (map it to a local one to keep notes on this machine) |
 
 If no provider of the wanted sort exists, the request goes to `default` (the first
