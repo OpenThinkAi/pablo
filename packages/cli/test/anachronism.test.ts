@@ -244,7 +244,8 @@ test("a lexicon cached before AGT-2284 with an undated, N/A or spelling verdict 
   const result = await checkAnachronisms(work, [unit], { ask: fake.ask });
   expect(result?.hits).toEqual([]);
   // `depot` and `labor` stay cached (their dropped verdicts are never re-asked); no model call is made.
-  expect(fake.prompts.flatMap(termsOf)).toEqual([]);
+  expect(result?.asked).toBe(0);
+  expect(fake.prompts).toEqual([]);
 });
 
 test("parseVerdicts drops a verdict with no date, `N/A`, or a spelling reason, and keeps a dated one", () => {
@@ -466,4 +467,17 @@ test("a draft branch is checked against main's period brief, not its own stale o
   expect(fake.prompts[0]).toContain(NEW);
   expect(fake.prompts[0]).not.toContain(PERIOD);
   expect(Object.keys(readLexicon(work)?.periods ?? {})).toEqual([NEW]);
+});
+
+test("--fresh keeps the author's model * verdicts and drops the rest; re-asking an unmarked legacy verdict says so", async () => {
+  const { work, unit } = tempWork("The teenager hauled ice.");
+  writeLexicon(work, { periods: { [PERIOD]: { teenager: { inPeriod: false, why: "1940s word", belongs: "the 1940s", model: "*" }, hauled: { inPeriod: true, model: "local/qwen" }, ice: { inPeriod: true } } } });
+  const progress: string[] = [];
+  const fake = fakeAsk({});
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask, model: "local/qwen", progress: (l) => progress.push(l) });
+  expect(result?.hits.map((h) => h.term)).toEqual(["teenager"]);
+  expect(progress).toContain(`anachronism: 1 verdict(s) predate model tracking and will be asked again; mark your own edits "model": "*" in ${LEXICON_FILE} to keep them`);
+  const fresh = await checkAnachronisms(work, [unit], { ask: fakeAsk({}).ask, model: "local/qwen", fresh: true });
+  expect(fresh?.hits.map((h) => h.term)).toEqual(["teenager"]);
+  expect(fresh?.cached).toBe(1);
 });

@@ -77,7 +77,7 @@ export const USAGE_LINES: readonly string[] = [
     "                                            per unit to the check intent's model",
     "                                            a unit not yet accepted is checked on its draft branch;",
     "                                            --strict exits 1 on any hit",
-    "                                            --fresh drops cached anachronism verdicts",
+    "                                            --fresh drops cached anachronism verdicts (model \"*\" ones stay)",
     "  pablo check --project <slug> --across     contradictions between the outputs' ledgers,",
     "                                            each with a promote action",
     "  pablo promote --project <slug> --finding <id> --keep <type>",

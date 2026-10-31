@@ -182,7 +182,7 @@ function worthJudging(term: string): boolean {
 }
 
 /** Every `.md` under `dir`, recursively. */
-function markdownUnder(dir: string): string[] {
+export function markdownUnder(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((name) => {
     const full = join(dir, name);
@@ -456,7 +456,8 @@ export async function checkAnachronisms(workDir: string, files: readonly string[
     return { hits: [], asked: 0, failed: true, notice: `anachronism: not run; ${LEXICON_FILE} is not a lexicon (fix or delete it; it is never overwritten)` };
   }
   if (options.fresh === true && lexicon.periods[period] !== undefined) {
-    lexicon.periods[period] = {};
+    // The author's own rulings (`"model": "*"`) are not the model's to re-ask, so they stay.
+    lexicon.periods[period] = Object.fromEntries(Object.entries(lexicon.periods[period] ?? {}).filter(([, entry]) => entry.model === ANY_MODEL));
     writeLexicon(home, lexicon);
   }
   const known = (lexicon.periods[period] ??= {});
@@ -477,7 +478,11 @@ export async function checkAnachronisms(workDir: string, files: readonly string[
   // A verdict another model gave (or a legacy one with no model) is not this model's: it is asked again and replaced.
   const unknown = allTerms.filter((term) => !usable(known[term], model)).sort();
   const cached = allTerms.length - unknown.length;
-  options.progress?.(`anachronism: ${cached} of ${allTerms.length} word verdict(s) from the cache (${model}), ${unknown.length} to ask`);
+  if (allTerms.length > 0) options.progress?.(`anachronism: ${cached} of ${allTerms.length} word verdict(s) from the cache (${model}), ${unknown.length} to ask`);
+  const unmarked = unknown.filter((term) => known[term] !== undefined && known[term].model === undefined).length;
+  if (unmarked > 0) {
+    options.progress?.(`anachronism: ${unmarked} verdict(s) predate model tracking and will be asked again; mark your own edits "model": "*" in ${LEXICON_FILE} to keep them`);
+  }
   let asked = 0;
   let notice: string | undefined;
   if (unknown.length > 0) {

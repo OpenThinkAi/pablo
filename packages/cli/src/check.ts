@@ -27,7 +27,7 @@
  * AGT-1237's `write` to call directly and put the hits in its receipt.
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { branchExists, ensureWorktree, repoRoot, waitingBranches } from "./branch";
 import type { TextSource } from "@openthink/pablo-core";
@@ -35,7 +35,7 @@ import { FACTS_FILE, PERIOD_FACTS_FILE, joinSentences } from "@openthink/pablo-c
 import { parseFrontmatter } from "./novel/machine";
 import { readMarker, trackOf } from "./marker";
 import { checkClaimSupport, readClaimSources } from "./claim-support";
-import { anachronismBody, checkAnachronisms, lexiconHome } from "./anachronism";
+import { anachronismBody, checkAnachronisms, lexiconHome, markdownUnder } from "./anachronism";
 import { coreCheck } from "./core-check";
 import type { Ask } from "./critique";
 import { factAccuracyAsk, runFactAccuracy, savedFactHits } from "./fact-accuracy";
@@ -637,10 +637,12 @@ export async function runModelChecks(
   const fact = await withFactAccuracy(outcome, workDir, output, options.factAsk ?? (() => factAccuracyAsk(options.env, workDir)), progress, core?.dir);
   // An anachronism run that left terms unjudged is a check error, never a silent pass (AGT-2187).
   const anachronismNotice = anachronism?.notice === undefined ? undefined : anachronism.failed ? `pablo: check error: ${anachronism.notice}` : anachronism.notice;
-  const coreNotice = core === undefined || core.differs.length === 0 ? undefined : `pablo: this branch's core differs from main (${core.differs.join(", ")}); the checks used main's`;
+  // Said only when a model check read main's core (the core check in `checkWork` still reads the branch's own).
+  const usedMain = core !== undefined && core.differs.length > 0 && (anachronism !== undefined || fact.factAccuracy !== undefined);
+  const coreNotice = usedMain ? `pablo: this branch's core differs from main (${core.differs.join(", ")}); the anachronism and fact-accuracy checks used main's` : undefined;
   const notices = [coreNotice, anachronismNotice, fact.factAccuracy?.notice].filter((n): n is string => n !== undefined);
   return {
-    ...(core !== undefined && core.differs.length > 0 ? { coreFromMain: core.differs } : {}),
+    ...(usedMain ? { coreFromMain: core.differs } : {}),
     hits: [...fact.outcome.hits, ...(anachronism?.hits ?? [])],
     notices,
     ...(anachronism !== undefined ? { anachronism: anachronismBody(anachronism) } : {}),
@@ -656,20 +658,7 @@ export async function runModelChecks(
 export function mainCore(workDir: string): { dir: string; differs: string[] } | undefined {
   const dir = lexiconHome(workDir);
   if (dir === workDir) return undefined;
-  const files = (root: string): string[] => {
-    const out = [PERIOD_FACTS_FILE, FACTS_FILE];
-    const walk = (rel: string): void => {
-      const abs = join(root, rel);
-      if (!existsSync(abs)) return;
-      for (const name of readdirSync(abs)) {
-        const child = `${rel}/${name}`;
-        if (statSync(join(root, child)).isDirectory()) walk(child);
-        else if (name.endsWith(".md")) out.push(child);
-      }
-    };
-    walk("bible");
-    return out;
-  };
+  const files = (root: string): string[] => [PERIOD_FACTS_FILE, FACTS_FILE, ...markdownUnder(join(root, "bible")).map((abs) => relative(root, abs).split("\\").join("/"))];
   const read = (root: string, rel: string): string | undefined => {
     try {
       return readFileSync(join(root, rel), "utf8");

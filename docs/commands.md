@@ -746,9 +746,10 @@ replacing the old. `check` says on stderr how many word verdicts came from the c
 and from which model (`anachronism: 412 of 430 word verdict(s) from the cache
 (local/qwen), 18 to ask`); the JSON has `anachronism.model`, `anachronism.cached` and
 `anachronism.new`. `--fresh` (MCP `fresh`) drops the period's cached verdicts, any
-model's, and asks everything again. A verdict with no `model` (a lexicon from before
+model's, and asks everything again; verdicts marked `"model": "*"` stay. A verdict with no `model` (a lexicon from before
 this, or a `facts/lexicon.json` seed) is from an unknown model, so a named model does
-not reuse it and asks again; write `"model": "*"` on a verdict you hand-edit so every
+not reuse it and asks again (stderr says how many: `N verdict(s) predate model
+tracking and will be asked again`); write `"model": "*"` on a verdict you hand-edit so every
 model obeys it. If the check model cannot be built, only unmarked verdicts are used.
 
 When any word goes unjudged (no model configured, a model error, a reply missing
@@ -806,11 +807,12 @@ the check. The hits are also kept in `.pablo/fact-accuracy.json`, so the screen 
 them on a unit with its other check hits until the unit's text changes.
 
 On a pending draft (`--branch`, a `--unit` not on main yet, and `write`'s checks after
-a draft) only the unit text is the branch's. The core the checks read, the period facts
+a draft) only the unit text is the branch's. The core the anachronism and fact-accuracy
+checks read (the core check's name and story-time scan still reads the branch's), the period facts
 (`facts/period.md`), `facts.md`, the bible and its period brief, is main's, so a branch
 cut before the facts were re-distilled is held to the current ones. A core file that
 differs between the branch and main is named: `pablo: this branch's core differs from
-main (facts/period.md); the checks used main's` on stderr, and `coreFromMain` in the JSON.
+main (facts/period.md); the anachronism and fact-accuracy checks used main's` on stderr, and `coreFromMain` in the JSON.
 
 Hits are data: without `--strict` exit is `0` either way, except an anachronism run
 that left words unjudged (exit `1`, `anachronism.failed`).
