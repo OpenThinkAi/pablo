@@ -11,7 +11,7 @@
  *   bible, the timeline, the beats, `facts.md`, nor this output's own ledger (names and places, against the bible
  *   and `facts.md`). Another output's ledger is not consulted: a name only the novel established is unknown to the
  *   radio show until it is promoted. Also known (AGT-2197): the work's own title, the period facts
- *   (`facts/period.md`), each character file's name (a slug-only file, `clara-vane.md`, still clears Clara and Vane), and on a nonfiction or historical-fiction work the research notes (AGT-2226). Headings are not scanned, and a word right
+ *   (`facts/period.md`), each character file's name (a slug-only file, `clara-vane.md`, still clears Clara and Vane), and on a nonfiction or historical-fiction work the research notes (AGT-2226). Not names either (AGT-2285): kinship terms used as forms of address (Mother, Father, Nonna, Papà), a plural of a known title (Doges, with Doge known), and a demonym or party name whose place or polity is known (Russians, with Russia known). Headings are not scanned, and a word right
  *   after an opening quote (a sign's "Please") is not a name.
  *
  * Pure over the work directory: reads, never writes. The hits use `check`'s `Hit` shape, so `check` prints them
@@ -31,7 +31,12 @@ const MONTHS_AND_DAYS = new Set(
   "January February March April May June July August September October November December Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split(" "),
 );
 /** Capitalised words that are not names: honorifics and the pronoun. */
-const NOT_NAMES = new Set(["I", "Mr", "Mrs", "Ms", "Miss", "Dr", "Doctor", "God", "Sir", "Madam", "Ma", "Pa"]);
+const NOT_NAMES = new Set(["I", "Mr", "Mrs", "Ms", "Miss", "Dr", "Doctor", "God", "Sir", "Madam", "Ma", "Pa", ...[
+  // Kinship terms used as forms of address ("He is a Savoyard, Mother."): common nouns, never names (AGT-2285).
+  "Mother", "Father", "Mom", "Mum", "Mommy", "Mummy", "Mama", "Mamma", "Mamá", "Mamà", "Dad", "Daddy", "Papa", "Papá", "Papà", "Pappa", "Maman", "Papi", "Mami",
+  "Grandmother", "Grandfather", "Grandma", "Grandpa", "Granny", "Gran", "Grandad", "Grandmama", "Grandpapa", "Nonna", "Nonno", "Nana", "Abuela", "Abuelo", "Oma", "Opa",
+  "Aunt", "Auntie", "Uncle", "Sister", "Brother", "Son", "Daughter", "Zia", "Zio", "Tante", "Onkel", "Cousin", "Godmother", "Godfather",
+]]);
 const STOP = new Set("the a an and or but of to in on at by for with from as is was are were be been it its this that his her their".split(" "));
 
 function read(path: string): string {
@@ -90,7 +95,7 @@ function knownWords(workDir: string, output: string): Set<string> {
     for (const name of readdirSync(charactersDir)) if (name.endsWith(".md")) texts.push(name.slice(0, -3).replace(/(^|[-_]+)([a-z])/g, (_m, sep: string, c: string) => `${sep === "" ? "" : " "}${c.toUpperCase()}`));
   }
   const known = new Set<string>();
-  for (const text of texts) for (const word of text.match(/[A-Za-z][A-Za-z'-]*/g) ?? []) known.add(word.replace(/'s$/, ""));
+  for (const text of texts) for (const word of text.match(/\p{L}[\p{L}'-]*/gu) ?? []) known.add(word.replace(/'s$/, ""));
   return known;
 }
 
@@ -127,7 +132,7 @@ export function storyDateOf(workDir: string, def: OutputDefinition, unit: number
 /** The capitalised names on a line that do not start a sentence. */
 function namesOn(line: string): string[] {
   const names: string[] = [];
-  const re = /[A-Z][a-z][A-Za-z'-]*/g;
+  const re = /\p{Lu}\p{Ll}[\p{L}'-]*/gu;
   let match: RegExpExecArray | null;
   while ((match = re.exec(line)) !== null) {
     const raw = line.slice(0, match.index);
@@ -141,6 +146,24 @@ function namesOn(line: string): string[] {
     names.push(word);
   }
   return names;
+}
+
+/** Plural and demonym endings, longest first: Doges, Russians, Sardinians, Republicans, Venetians. */
+const SUFFIXES = ["ians", "ian", "ans", "an", "ers", "er", "ese", "ish", "ies", "es", "s"];
+
+/**
+ * Whether a known word is the place, polity, title or office behind `name` (AGT-2285): a plural title (Doges <- Doge)
+ * or a demonym or party name (Russians <- Russia, Republicans <- Republic). The stem left after a suffix must be at
+ * least four letters and the known word must be that stem plus at most two letters, so Russell does not clear Russians.
+ */
+function derivedFromKnown(name: string, known: ReadonlySet<string>): boolean {
+  for (const suffix of SUFFIXES) {
+    if (!name.endsWith(suffix)) continue;
+    const stem = name.slice(0, -suffix.length);
+    if (stem.length < 4) continue;
+    for (const word of known) if (word.length >= stem.length && word.length <= stem.length + 2 && word.startsWith(stem)) return true;
+  }
+  return false;
 }
 
 /**
@@ -178,7 +201,7 @@ export function coreCheck(workDir: string, def: OutputDefinition, files: readonl
         }
       }
       for (const name of new Set(namesOn(line))) {
-        if (!known.has(name)) found.push({ path: label, line: i + 1, rule: "unknown-name", excerpt: excerptOf(line), detail: name });
+        if (!known.has(name) && !derivedFromKnown(name, known)) found.push({ path: label, line: i + 1, rule: "unknown-name", excerpt: excerptOf(line), detail: name });
       }
       hits.push(...found);
     }
