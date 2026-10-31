@@ -1977,6 +1977,12 @@ const STORY_ARGS = z.object({
   title: z.string().optional().describe("The work's title (default: a working title from the prompt)."),
   words: z.number().int().positive().optional().describe("The story's length in words (default: the prompt's word cue, else the story output's own)."),
   project: z.string().optional().describe("Continue the `pablo story` run recorded in this work (its slug)."),
+  from: z
+    .string()
+    .optional()
+    .describe(
+      "With `project`: adopt that existing work (built by hand, or whose run record is gone) and run from this core stage (e.g. premise, bible, acts, beats). Earlier stages are kept and must be complete (on historical-fiction, the research gate open); this stage's and later stages' files and the work's outputs are archived under _archived/ and outputs/_removed/, never deleted. A work with no run record is refused without it.",
+    ),
   "no-check": WRITE_ARGS.shape["no-check"],
   track: z
     .string()

@@ -289,7 +289,12 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 cue). On demand it accepts every branch and answers
                 `ask_author` with "assume and say so"; `--review` stops on
                 each branch and `--project <slug>` resumes from
-                `.pablo/story.json`. A requested type whose `ensure()` fails
+                `.pablo/story.json`. `--project <slug> --from <stage>`
+                (AGT-2289, `src/story-adopt.ts`) adopts a work with no run
+                record or restarts from a stage: earlier stages must be
+                complete, the stage's and later files and the outputs are
+                archived under `_archived/` (outputs via `removeOutput`),
+                never deleted. A requested type whose `ensure()` fails
                 (or that is not registered) is refused before anything is
                 written; an unrequested type's `ensure()` is never called.
                 Merges find a draft branch's output by `outputForBranch`, so
