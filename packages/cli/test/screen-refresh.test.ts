@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +42,9 @@ test("refresh: the book read again shows a branch made after the first read, and
   const stages = before?.stages ?? [];
   expect(stages.some((s) => s.id === "chapters")).toBe(true);
   git(vault, "checkout", "-q", "-b", "edit/abc123");
-  git(vault, "commit", "-q", "--allow-empty", "-m", "an edit");
+  writeFileSync(join(project, "notes.md"), "an edit\n");
+  git(vault, "add", "-A");
+  git(vault, "commit", "-q", "-m", "an edit");
   git(vault, "checkout", "-q", "main");
   expect(refresh()?.branches).toEqual(["edit/abc123"]);
 });

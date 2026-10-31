@@ -13,9 +13,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 type Env = Record<string, string | undefined>;
 
@@ -174,26 +174,82 @@ export function listBranches(repo: string): { ok: true; branches: BranchList } |
   return { ok: true, branches };
 }
 
-/** Change branches with commits `main` does not have yet: the ones waiting for review. Sorted by name; a git failure is a notice. */
-export function waitingBranches(repo: string): { ok: true; branches: string[] } | { ok: false; notice: string } {
+/** Whether merging `name` into `main` would change anything under `rel` (a path in the repo; "." is all of it). */
+function changesUnder(repo: string, name: string, rel: string): boolean {
+  // The branch must touch the directory at all (its diff from where it left main).
+  try {
+    git(repo, ["diff", "--quiet", `main...${name}`, "--", rel]);
+    return false;
+  } catch (err) {
+    if ((err as { status?: number }).status !== 1) throw err;
+  }
+  // And something must be left that main lacks: a squashed or cherry-picked branch merges to the tree main already has.
+  let merged: string;
+  try {
+    merged = git(repo, ["merge-tree", "--write-tree", "main", name]).split("\n")[0]!.trim();
+  } catch {
+    return true; // conflicts (or an old git): the branch has real changes
+  }
+  try {
+    git(repo, ["diff", "--quiet", "main", merged, "--", rel]);
+    return false;
+  } catch (err) {
+    if ((err as { status?: number }).status !== 1) throw err;
+    return true;
+  }
+}
+
+/**
+ * The branches waiting for review: review branches (draft/, revise/, edit/, plan/; `reader/` is a retired kind, D-20,
+ * and never waits) whose merge into `main` would change something. With `workDir`, only a change under that work's
+ * own directory counts, so another work's branch in the same vault repository is not waiting here (AGT-2283).
+ * Sorted by name; a git failure is a notice.
+ */
+export function waitingBranches(repo: string, workDir?: string): { ok: true; branches: string[] } | { ok: false; notice: string } {
   const listed = listBranches(repo);
   if (!listed.ok) return listed;
-  const waiting: string[] = [];
-  for (const name of Object.values(listed.branches).flat().sort()) {
+  let rel = ".";
+  if (workDir !== undefined) {
     try {
-      if (Number(git(repo, ["rev-list", "--count", `main..${name}`]).trim()) > 0) waiting.push(name);
+      rel = relative(realpathSync(repo), realpathSync(workDir)) || ".";
+    } catch {
+      rel = ".";
+    }
+  }
+  const waiting: string[] = [];
+  const { reader: _retired, ...review } = listed.branches;
+  for (const name of Object.values(review).flat().sort()) {
+    try {
+      if (changesUnder(repo, name, rel)) waiting.push(name);
     } catch (err) {
-      return { ok: false, notice: `pablo: git rev-list failed: ${errMessage(err)}` };
+      return { ok: false, notice: `pablo: git diff failed: ${errMessage(err)}` };
     }
   }
   return { ok: true, branches: waiting };
 }
 
-/** The branches waiting for review in the repository holding `dir`; none when `dir` is not in a repository or git fails. What `status` and `resume` report. */
+/** The branches waiting for review in the work at `dir`; none when `dir` is not in a repository or git fails. What `status` and `resume` report. */
 export function waitingForReview(dir: string): string[] {
   const repo = repoRoot(dir);
-  const waiting = repo === undefined ? undefined : waitingBranches(repo);
+  const waiting = repo === undefined ? undefined : waitingBranches(repo, dir);
   return waiting?.ok ? waiting.branches : [];
+}
+
+/** `reader/` branches left in the repository at `repo`, each with the worktree it is still checked out in (if any). */
+export function readerLeftovers(repo: string): { branch: string; worktree?: string }[] {
+  const listed = listBranches(repo);
+  if (!listed.ok) return [];
+  const trees = new Map<string, string>();
+  try {
+    let path = "";
+    for (const line of git(repo, ["worktree", "list", "--porcelain"]).split("\n")) {
+      if (line.startsWith("worktree ")) path = line.slice(9);
+      else if (line.startsWith("branch refs/heads/")) trees.set(line.slice(18), path);
+    }
+  } catch {
+    /* no worktree info: list the branches alone */
+  }
+  return listed.branches.reader.map((branch) => ({ branch, ...(trees.has(branch) ? { worktree: trees.get(branch)! } : {}) }));
 }
 
 /**

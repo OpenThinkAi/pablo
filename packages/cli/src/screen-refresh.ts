@@ -12,7 +12,7 @@ import { repoRoot, waitingBranches } from "./branch";
 export function screenRefresh(dir: string): () => BookSnapshot | undefined {
   return () => {
     const repo = repoRoot(dir);
-    const waiting = repo === undefined ? { ok: true as const, branches: [] } : waitingBranches(repo);
+    const waiting = repo === undefined ? { ok: true as const, branches: [] } : waitingBranches(repo, dir);
     // A git that fails this once keeps what the screen has; the next tick tries again.
     if (!waiting.ok) return undefined;
     return { stages: workBookStages(dir, waiting.branches), branches: waiting.branches };

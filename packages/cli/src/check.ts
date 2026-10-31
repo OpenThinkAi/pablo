@@ -520,7 +520,7 @@ function pendingDraft(workDir: string, def: OutputDefinition | undefined, unit: 
     if (!branchExists(repo, name)) return { ok: false, message: `pablo: check --branch ${name}: no such branch` };
   } else {
     if (def === undefined || unit === undefined) return { ok: false, message: "pablo: check: a pending draft needs a unit" };
-    const waiting = waitingBranches(repo);
+    const waiting = waitingBranches(repo, workDir);
     if (!waiting.ok) return { ok: false, message: waiting.notice };
     const drafts = waiting.branches.filter((b) => def.unitOfBranch(b) === unit).sort((a, b) => draftVersion(a) - draftVersion(b));
     name = drafts[drafts.length - 1];

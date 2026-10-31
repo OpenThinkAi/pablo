@@ -16,6 +16,7 @@ interface Setup {
   git?: boolean;
   providerOk?: boolean;
   search?: "ok" | "down";
+  readers?: { branch: string; worktree?: string }[];
 }
 
 function setup(o: Setup = {}): { deps: WritingDoctorDeps; root: string; pings: string[] } {
@@ -45,6 +46,7 @@ function setup(o: Setup = {}): { deps: WritingDoctorDeps; root: string; pings: s
       },
     },
     isGitRepo: () => o.git !== false,
+    readerBranches: () => o.readers ?? [],
     searchBackend: () =>
       o.search === undefined
         ? undefined
@@ -125,6 +127,21 @@ describe("doctor writing side (AGT-2146)", () => {
     const r = await runWritingDoctor(setup({ config: FULL, search: "down" }).deps);
     expect(r.ok).toBe(false);
     expect(r.checks.find((x) => x.name === "search")).toMatchObject({ status: "fail", detail: "could not reach searxng" });
+  });
+
+  test("leftover reader/ branches are named with the cleanup command, as a warning", async () => {
+    const r = await runWritingDoctor(setup({ config: FULL, search: "ok", readers: [{ branch: "reader/atara-2026-10-04", worktree: "/tmp/wt" }, { branch: "reader/b" }] }).deps);
+    expect(r.ok).toBe(true);
+    const c = r.checks.find((x) => x.name === "reader branches");
+    expect(c?.status).toBe("warn");
+    expect(c?.detail).toContain("reader/atara-2026-10-04, reader/b");
+    expect(c?.fix).toContain("worktree remove --force /tmp/wt");
+    expect(c?.fix).toContain("branch -D reader/atara-2026-10-04 reader/b");
+  });
+
+  test("no reader/ branches, no reader check", async () => {
+    const r = await runWritingDoctor(setup({ config: FULL, search: "ok" }).deps);
+    expect(r.checks.find((x) => x.name === "reader branches")).toBeUndefined();
   });
 
   test("the text report shows a fix line under each problem", async () => {
