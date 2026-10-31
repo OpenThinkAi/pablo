@@ -56,7 +56,10 @@ const KNOWN_INTENTS: readonly Intent[] = [
 
 const NUMBER_FIELDS = new Set(["timeoutMs", "temperature"]);
 const BOOLEAN_FIELDS = new Set(["local", "thinking"]);
-const PROVIDER_FIELDS = ["kind", "endpoint", "model", "local", "key", "timeoutMs", "temperature", "thinking"] as const;
+const PROVIDER_FIELDS = ["kind", "endpoint", "model", "local", "key", "timeoutMs", "temperature", "thinking", "binary"] as const;
+
+/** What `show` prints as a `claude-code` provider's credential (AGT-2281): the Claude login, never a key. */
+export const CLAUDE_LOGIN = "claude-login";
 
 function refuse(message: string): ConfigResult {
   return { exitCode: EXIT_REFUSED, body: { ok: false, message }, text: message };
@@ -69,6 +72,7 @@ function failure(error: unknown): ConfigResult {
 
 /** A key as the config names it: never its value. */
 export function keyReference(provider: ProviderConfig): string {
+  if (provider.kind === "claude-code") return CLAUDE_LOGIN;
   const key = provider.key;
   if (key.from === "none") return "none";
   if (key.from === "env") return `env:${key.variable}`;
@@ -104,6 +108,8 @@ export function configShow(scope: ConfigScope): ConfigResult {
     model: p.model,
     local: p.local,
     key: keyReference(p),
+    // `claude-code` (AGT-2281): the program it runs and how it is paid for, in place of a URL and a key.
+    ...(p.kind === "claude-code" ? { binary: p.binary ?? "claude", auth: "Claude login (subscription; no API key)", billing: "subscription" } : {}),
     timeoutMs: p.timeoutMs,
     ...(p.temperature === undefined ? {} : { temperature: p.temperature }),
     ...(p.thinking === undefined ? {} : { thinking: p.thinking }),
@@ -144,6 +150,9 @@ export function configShow(scope: ConfigScope): ConfigResult {
         p.temperature === undefined ? "" : ` temperature=${p.temperature}`,
         p.thinking === undefined ? "" : ` thinking=${p.thinking}`,
       ].join("");
+      if (p.kind === "claude-code") {
+        return `  ${p.id}  claude-code  binary=${p.binary}  model=${p.model}  uses your Claude login (claude -p, subscription; no API key)  timeoutMs=${p.timeoutMs}${extra}`;
+      }
       return `  ${p.id}  ${p.kind}${p.local ? " local" : ""}  ${p.endpoint}  model=${p.model}  key=${p.key}  timeoutMs=${p.timeoutMs}${extra}`;
     }),
     "",

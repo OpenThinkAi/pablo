@@ -6,7 +6,9 @@
  * config (`createProviders(config).route`), and its key resolves the way every
  * provider's does (an env variable or a `keychain:` reference, never the
  * config file). A config with an Anthropic provider sends the session to
- * Claude through the native adapter; a config with only the local writer runs
+ * Claude through the native adapter; a `claude-code` provider (AGT-2281) runs
+ * each turn as `claude -p` on the author's Claude login, with pablo's tools
+ * through the loop's text protocol; a config with only the local writer runs
  * it on the local model.
  *
  * `agent` is the intent's name, so `"intents": { "agent": "<provider>" }` in
@@ -26,7 +28,7 @@ export interface HarnessProvider {
   readonly adapter: Adapter;
   /** A local provider: its turns cost nothing. */
   readonly local: boolean;
-  /** Where the key comes from, as the config names it (`env:ANTHROPIC_API_KEY`, `keychain:…`, `none`): a source label, never the key. */
+  /** Where the key comes from, as the config names it (`env:ANTHROPIC_API_KEY`, `keychain:…`, `none`, `claude-login`): a source label, never the key. */
   readonly credential: string;
   /**
    * Whether the provider honours a forced `tool_choice` (`required` or a named
@@ -64,7 +66,7 @@ export function adapterProvider(adapter: Adapter, over: Partial<Omit<HarnessProv
 
 /** What to check when a session fails outside the loop: the provider the `agent` intent routed to. */
 export function providerHint(provider: HarnessProvider): string {
-  const key = provider.local ? "" : ` and its key (${provider.credential})`;
+  const key = provider.local ? "" : provider.credential === "claude-login" ? " and its Claude login (`claude auth login`)" : ` and its key (${provider.credential})`;
   return (
     `Check the "${provider.adapter.id}" provider${key}: \`pablo config show\` shows where the "agent" intent routes, ` +
     `\`pablo config set intents.agent <provider>\` picks another, and \`pablo config test\` then checks it.`

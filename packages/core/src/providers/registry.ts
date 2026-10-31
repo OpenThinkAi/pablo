@@ -9,6 +9,7 @@
  */
 
 import { createAnthropicAdapter } from "./anthropic";
+import { createClaudeCodeAdapter } from "./claude-code";
 import type { AdapterKind, PabloConfig, ProviderConfig } from "./config";
 import { NoModelConfiguredError, ProviderConfigError } from "./errors";
 import type { KeyLookup, KeySource } from "./keys";
@@ -26,6 +27,8 @@ type AdapterFactory = (options: OpenAiAdapterOptions) => Adapter;
 const ADAPTERS: Record<AdapterKind, AdapterFactory> = {
   "openai-compatible": createOpenAiAdapter,
   anthropic: createAnthropicAdapter,
+  // No key, no fetch: one `claude -p` per turn on the Claude login (AGT-2281).
+  "claude-code": (options) => createClaudeCodeAdapter({ provider: options.provider, meter: options.meter, ...(options.now === undefined ? {} : { now: options.now }) }),
 };
 
 export interface Providers {
@@ -162,8 +165,8 @@ export function createProviders(config: PabloConfig, options: ProvidersOptions =
     if (found.error !== undefined) throw found.error;
     return found.value;
   };
-  // A local provider needs no key; any other is unusable without one.
-  const unusable: Unusable = (provider) => (provider.local ? undefined : lookup(provider).problem);
+  // A local provider needs no key, nor does `claude-code` (it runs on the Claude login); any other is unusable without one.
+  const unusable: Unusable = (provider) => (provider.local || provider.kind === "claude-code" ? undefined : lookup(provider).problem);
   const told = new Set<string>();
 
   const configFor = (id: string): ProviderConfig => {

@@ -246,6 +246,21 @@ export interface Adapter {
    */
   readonly preferredOutput: OutputMode;
   /**
+   * `false` when the provider takes no native tool calls at all (AGT-2281: the
+   * `claude-code` kind): `chat()` refuses a turn that offers tools, and the
+   * agent loop runs pablo's tools through its text protocol instead, listing
+   * them in the system prompt and reading each reply for a `{"tool",
+   * "arguments"}` call. Absent means native tools.
+   */
+  readonly nativeTools?: boolean;
+  /**
+   * `"subscription"` when the provider's calls are paid by the author's plan
+   * rather than per token (AGT-2281: `claude -p` on the Claude login). Its
+   * turns cost 0, receipts say `billing: "subscription"`, and the agent loop
+   * never reports it as an unpriced model. Absent means per-token pricing.
+   */
+  readonly billing?: "subscription";
+  /**
    * Streams a completion. Throws `EndpointHung` when the endpoint sends no
    * bytes for the idle timeout, so a wait is always either visible progress or
    * a named error.

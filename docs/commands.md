@@ -250,17 +250,22 @@ is given, and `--json` prints one JSON object.
 
 - `config show` prints the merged providers (kind, endpoint, model, `local`, timeout)
   and which provider each intent routes to. A key is shown as its reference
-  (`env:NAME`, `keychain:service/account`), never its value. With `--project <slug>`
+  (`env:NAME`, `keychain:service/account`), never its value. A `claude-code` provider
+  shows its `binary` and that it uses your Claude login (`key` is `claude-login` in
+  `--json`, with `auth` and `billing: "subscription"`). With `--project <slug>`
   the work's `pablo.json` `providers` and `intents` are merged over the global file.
 - `config set <path> <value>` edits `$XDG_CONFIG_HOME/pablo/config.json`, or with
   `--project` the work's `pablo.json`. Paths: `default` (global only),
   `intents.<intent>`, and `providers.<id>.<field>` with field one of `kind`,
-  `endpoint`, `model`, `local`, `key`, `timeoutMs`, `temperature`, `thinking`. The
+  `endpoint`, `model`, `local`, `key`, `timeoutMs`, `temperature`, `thinking`,
+  `binary` (`claude-code` only; global only). The
   result is validated like a normal load first, so an inline key, an intent naming
   no provider, or a work repointing a remote provider is a refusal and nothing is
   written. Other keys in the file are kept.
 - `config test` sends one tiny request per mapped intent (the default route when none
-  is mapped) and prints ok or the error per provider. Exit `1` if any failed. The
+  is mapped) and prints ok or the error per provider. On a `claude-code` provider that
+  request is one `claude -p`; a missing `claude` or a signed-out login is reported
+  with its fix (`claude auth login`). Exit `1` if any failed. The
   request allows 1024 output tokens so a reasoning model can think and still answer;
   a reply that is only thinking names the `"thinking": false` fix. A
   billing or credit error (an exhausted balance, a quota, `402`) is labelled

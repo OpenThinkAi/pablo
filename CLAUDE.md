@@ -66,12 +66,19 @@ packages/core   @openthink/pablo-core — TTY-free, dependency-free. The
                 adapters' streaming/normalization path, not by any manuscript
                 — no CriticMarkup is ever written to a vault file), the
                 context-pack assembler, the provider adapters
-                (`providers/`: OpenAI-compatible and Anthropic; `registry.ts`
+                (`providers/`: OpenAI-compatible, Anthropic, and
+                `claude-code.ts`'s `claude-code` kind (AGT-2281): one
+                `claude -p` per turn on the Claude login, conversation
+                serialised into stdin, every Claude Code tool, setting and
+                MCP server off, run in an empty temp dir, API-key env vars
+                stripped; `nativeTools: false` and `billing:
+                "subscription"` on its adapter; `registry.ts`
                 maps an intent to a provider, `planner.ts` routes the
                 planning intents (`plan`, and `check` which follows `plan`
                 until mapped) through it for story planning, `critique`,
                 `check --across` and `agent --tag-facts` — any provider kind,
-                no `claude -p` and no Claude-login path, AGT-2128, D-12/D-13),
+                AGT-2128, D-12/D-13; the Claude login is reached only as a
+                declared `claude-code` provider under pablo's own loop),
                 `queue.ts` keeps one request in flight per local endpoint,
                 `rates.ts` the measured endpoint rates for wait estimates,
                 `keys.ts` API keys from the environment or the Keychain,
@@ -121,8 +128,8 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `<!-- writer-only -->` sections; AGT-1553), pablo's MCP tools
                 by their plain names and nothing else, on the provider the
                 config's `agent` intent routes to (`provider.ts`, AGT-2121:
-                its key resolves like any provider's; the Claude login is not
-                used). A tool added to `VERBS` reaches both `pablo mcp`
+                its key resolves like any provider's; the Claude login is
+                used only by a `claude-code` provider, AGT-2281). A tool added to `VERBS` reaches both `pablo mcp`
                 and the harness. `pablo agent --tag-facts` (AGT-1570) is the one-time
                 catch-up: it tags every untagged bible and continuity fact on a
                 `plan/` branch through `record-fact.ts`'s writer, never a chapter;
@@ -154,7 +161,10 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 protocol when a required call did not come (on a provider
                 with `forcedToolChoice: false`, Anthropic, it sends `auto` and
                 asks in the system prompt: the newest Claude models refuse a
-                forced choice with HTTP 400), and prices the turns with
+                forced choice with HTTP 400), runs an adapter with
+                `nativeTools: false` (`claude-code`) wholly on that text
+                protocol (tools in the system prompt, every reply read for a
+                call; `textToolsSystem`), and prices the turns with
                 core's `costUsd`, naming an unpriced model in the result
                 rather than reading it as free. `runHarness` and the
                 composer run on it (AGT-2121); tests drive it with the

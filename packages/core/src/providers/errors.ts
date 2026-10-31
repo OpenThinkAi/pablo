@@ -118,3 +118,43 @@ export class ToolsDisabledError extends ProviderConfigError {
     );
   }
 }
+
+/**
+ * A `claude-code` provider (AGT-2281) whose `claude` executable is not there:
+ * not on PATH, or not at the configured `binary` path. Refused before anything
+ * is started.
+ */
+export class ClaudeCodeMissingError extends ProviderConfigError {
+  override readonly name = "ClaudeCodeMissingError";
+
+  constructor(
+    readonly binary: string,
+    readonly providerId?: string,
+  ) {
+    const field = providerId === undefined ? '"binary"' : `\`pablo config set providers.${providerId}.binary <path>\``;
+    super(
+      `pablo: cannot find \`${binary}\` (Claude Code) to run \`claude -p\`. Install Claude Code (https://claude.com/claude-code) ` +
+        `and log in once (\`claude auth login\`), or point ${field} at the claude executable.`,
+    );
+  }
+}
+
+/**
+ * `claude -p` answered that the Claude login is missing, expired or rejected
+ * (AGT-2281). The fix is the author's: `claude auth login` (on Claude Code
+ * 2.1.x the login is the `auth login` subcommand, not a bare `claude login`).
+ */
+export class ClaudeCodeSignedOutError extends ProviderConfigError {
+  override readonly name = "ClaudeCodeSignedOutError";
+
+  constructor(
+    readonly providerId: string,
+    /** What claude said, one line, never a credential. */
+    readonly detail: string,
+  ) {
+    super(
+      `pablo: provider "${providerId}" runs \`claude -p\` on your Claude login, and it is not signed in (claude said: ${detail}). ` +
+        `Log in with \`claude auth login\` (Claude Code's login command; \`/login\` inside \`claude\` does the same), then run \`pablo config test\`.`,
+    );
+  }
+}

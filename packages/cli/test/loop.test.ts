@@ -382,3 +382,67 @@ describe("parseTextToolCalls", () => {
     expect(parseTextToolCalls('{"tool": "", "arguments": {}}')).toEqual([]);
   });
 });
+
+// AGT-2281: a provider with no native tools (the `claude-code` kind) runs wholly on the text protocol.
+describe("runLoop on a provider with no native tools", () => {
+  function noNative(turns: readonly ScriptedTurn[], model = "claude-opus-5-5") {
+    const inner = scripted(turns, model);
+    const adapter: Adapter & { requests: typeof inner.requests } = { ...inner, nativeTools: false, billing: "subscription" };
+    return adapter;
+  }
+
+  test("tools go in the system prompt, never on the wire; a fenced call runs; plain text is the answer", async () => {
+    const status = recordingTool("status", { stage: "bible" });
+    const adapter = noNative([
+      [text('Checking.\n```json\n{"tool": "status", "arguments": {"title": "ice-house"}}\n```'), done(1000, 100)],
+      [text("The bible is next."), done(2000, 200)],
+    ]);
+    const receipts: Receipt[] = [];
+    const { entries, messages } = await collect("where are we?", {
+      adapter,
+      system: "You are pablo",
+      tools: [status.spec],
+      ctx,
+      receipts: { sink: (r) => void receipts.push(r), intent: "agent" },
+    });
+
+    expect(status.runs).toEqual([{ title: "ice-house" }]);
+    for (const request of adapter.requests) {
+      expect(request.tools).toEqual([]);
+      expect(request.toolChoice).toBeUndefined();
+      expect(request.system).toContain("You are pablo");
+      expect(request.system).toContain("# Tools");
+      expect(request.system).toContain("- status: The status tool.");
+    }
+    expect(entries.map((e) => e.kind)).toEqual(["session", "assistant", "tool_call", "tool_result", "assistant", "result"]);
+    expect(entries[1]).toEqual({ kind: "assistant", text: "Checking." });
+    expect(entries[2]).toMatchObject({ kind: "tool_call", id: "text-1-1", tool: "status" });
+    expect(messages[2]).toMatchObject({ role: "tool", toolCallId: "text-1-1" });
+    // A subscription costs nothing and is never an unpriced model, however many tokens it reports.
+    const result = resultOf(entries);
+    expect(result).toMatchObject({ ok: true, text: "The bible is next.", costUsd: 0 });
+    expect(result?.unpricedModel).toBeUndefined();
+    expect(receipts.map((r) => [r.billing, r.cost_usd])).toEqual([
+      ["subscription", 0],
+      ["subscription", 0],
+    ]);
+  });
+
+  test("a JSON object in a final answer is not a call unless it names an offered tool or is fenced", async () => {
+    const status = recordingTool("status");
+    const adapter = noNative([[text('The cast so far: {"name": "Ned", "role": "keeper"}.'), done()]]);
+    const { entries } = await collect("who is in it?", { adapter, system: "s", tools: [status.spec], ctx });
+    expect(status.runs).toEqual([]);
+    expect(resultOf(entries)).toMatchObject({ ok: true, text: 'The cast so far: {"name": "Ned", "role": "keeper"}.' });
+  });
+
+  test("a step that needs a call is steered from the prompt, and the re-prompt still backs it up", async () => {
+    const status = recordingTool("status");
+    const adapter = noNative([[text("I think it is fine."), done()], [text('```json\n{"tool": "status", "arguments": {"title": "w"}}\n```'), done()], [text("Done."), done()]]);
+    const { entries } = await collect("go", { adapter, system: "s", tools: [status.spec], ctx, toolChoice: "required" });
+    expect(adapter.requests[0]?.system).toContain("This step needs a tool call");
+    expect(adapter.requests[0]?.toolChoice).toBeUndefined();
+    expect(status.runs).toEqual([{ title: "w" }]);
+    expect(resultOf(entries)).toMatchObject({ ok: true, text: "Done." });
+  });
+});

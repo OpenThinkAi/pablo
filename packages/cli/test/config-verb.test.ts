@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
 import { configSet, configShow, configTest } from "../src/config-verb";
+import { makeFakeClaude, okReply } from "../../core/test/fake-claude";
 
 // Every test points XDG_CONFIG_HOME at a temp dir: the real ~/.config/pablo is never read or written.
 function scope(withConfig?: object, withProject?: object) {
@@ -202,4 +203,56 @@ test("test: the probe leaves a reasoning model room to think before it answers",
   const r = await configTest({ env: s.env }, { adapterFor: () => probe });
   expect(r.exitCode).toBe(0);
   expect(budgets[0]).toBeGreaterThanOrEqual(512);
+});
+
+// AGT-2281: the `claude-code` kind, end to end through the real CLI with a fake `claude` first on PATH.
+test("claude-code: set, show says it uses the Claude login, intents.agent routes to it, test runs one claude -p", () => {
+  const s = scope();
+  const fake = makeFakeClaude();
+  fake.reply(okReply("ok"));
+  const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+  const env = { ...process.env, ...s.env, ...fake.env, PATH: `${fake.bin}:${process.env["PATH"] ?? ""}`, ANTHROPIC_API_KEY: "sk-ant-not-for-claude" };
+  const run = (...args: string[]) => Bun.spawnSync(["bun", "run", cli, "config", ...args], { env });
+  expect(run("set", "providers.claude-code.kind", "claude-code").exitCode).toBe(0);
+  expect(run("set", "providers.claude-code.model", "claude-test-model").exitCode).toBe(0);
+  expect(run("set", "intents.agent", "claude-code").exitCode).toBe(0);
+  expect(JSON.parse(readFileSync(s.globalFile, "utf8"))).toEqual({
+    providers: { "claude-code": { kind: "claude-code", model: "claude-test-model" } },
+    intents: { agent: "claude-code" },
+  });
+
+  const show = run("show");
+  expect(show.exitCode).toBe(0);
+  expect(show.stdout.toString()).toContain("claude-code  claude-code  binary=claude  model=claude-test-model  uses your Claude login");
+  expect(show.stdout.toString()).toContain("agent -> claude-code\n");
+  const body = JSON.parse(run("show", "--json").stdout.toString());
+  expect(body.providers[0]).toMatchObject({ kind: "claude-code", key: "claude-login", binary: "claude", billing: "subscription" });
+
+  // An endpoint or key on it is refused, and nothing is written.
+  expect(run("set", "providers.claude-code.key", "env:ANTHROPIC_API_KEY").exitCode).toBe(2);
+
+  const tested = run("test");
+  expect(tested.stdout.toString()).toContain("agent -> claude-code: ok");
+  expect(tested.exitCode).toBe(0);
+  const calls = fake.calls();
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.argv).toContain("-p");
+  expect(calls[0]!.env["ANTHROPIC_API_KEY"]).toBeUndefined();
+});
+
+test("claude-code: config test reports a signed-out login and a missing claude with their fixes", () => {
+  const s = scope({ providers: { "claude-code": { kind: "claude-code", model: "m" } }, intents: { agent: "claude-code" } });
+  const fake = makeFakeClaude();
+  fake.reply({ type: "result", is_error: true, result: "Not logged in · Please run /login" }, 1);
+  const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+  const base = { ...process.env, ...s.env, ...fake.env };
+  const signedOut = Bun.spawnSync(["bun", "run", cli, "config", "test"], { env: { ...base, PATH: `${fake.bin}:${process.env["PATH"] ?? ""}` } });
+  expect(signedOut.exitCode).toBe(1);
+  expect(signedOut.stdout.toString()).toContain("claude auth login");
+
+  const bunDir = dirname(process.execPath);
+  const missing = Bun.spawnSync([process.execPath, "run", cli, "config", "test"], { env: { ...base, PATH: `${bunDir}:/usr/bin:/bin` } });
+  expect(missing.exitCode).toBe(1);
+  expect(missing.stdout.toString()).toContain("cannot find `claude`");
+  expect(missing.stdout.toString()).toContain("providers.claude-code.binary");
 });

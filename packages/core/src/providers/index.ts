@@ -29,11 +29,18 @@ export {
   ProviderConfigError,
   ProviderResponseError,
   ToolsDisabledError,
+  ClaudeCodeMissingError,
+  ClaudeCodeSignedOutError,
 } from "./errors";
 export type { AdapterKind, DroppedKey, LoadConfigOptions, PabloConfig, ParseOptions, ProviderConfig } from "./config";
 export {
+  claudeCodeEndpoint,
   configDir,
   configPath,
+  DEFAULT_CLAUDE_BINARY,
+  DEFAULT_CLAUDE_CODE_TIMEOUT_MS,
+  isClaudeCode,
+  refuseWorkBinary,
   defaultConfig,
   DEFAULT_TIMEOUT_MS,
   isLoopbackEndpoint,
@@ -50,6 +57,18 @@ export type { EndpointRates } from "./rates";
 export { RateMeter } from "./rates";
 export type { AnthropicAdapterOptions } from "./anthropic";
 export { createAnthropicAdapter, PREFERRED_OUTPUT as ANTHROPIC_PREFERRED_OUTPUT } from "./anthropic";
+export type { ClaudeCodeAdapterOptions, ClaudeRun, ClaudeRunner, ClaudeRunResult } from "./claude-code";
+export {
+  CLAUDE_BUILT_IN_TOOLS,
+  CLAUDE_CODE_PREFERRED_OUTPUT,
+  CLAUDE_FLAGS,
+  claudeArgs,
+  createClaudeCodeAdapter,
+  resolveBinary,
+  serialiseConversation,
+  spawnClaude,
+  subscriptionEnv,
+} from "./claude-code";
 export type { OpenAiAdapterOptions } from "./openai";
 export { createOpenAiAdapter, PREFERRED_OUTPUT } from "./openai";
 export type { Providers, ProvidersOptions, Routed, SkippedProvider, Unusable } from "./registry";

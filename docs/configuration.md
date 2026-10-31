@@ -49,7 +49,7 @@ A map from a name you choose to one model endpoint. The names are yours: `local`
 
 | Field | Meaning | Default |
 |---|---|---|
-| `kind` | `"openai-compatible"` or `"anthropic"` | `"openai-compatible"` |
+| `kind` | `"openai-compatible"`, `"anthropic"` or `"claude-code"` (Claude on your subscription, below) | `"openai-compatible"` |
 | `endpoint` | Base URL, http or https (the `/chat/completions` or `/messages` path is added) | required |
 | `model` | Model id the endpoint expects | required |
 | `local` | `true` for a model on your own machine. Local providers get one request at a time and are preferred for drafting | `false` |
@@ -58,9 +58,57 @@ A map from a name you choose to one model endpoint. The names are yours: `local`
 | `thinking` | `false` tells a reasoning model not to think before it answers. On an OpenAI-compatible provider it sends `chat_template_kwargs.enable_thinking: false` (local servers: Qwen3, Gemma) and `thinking: {"type": "disabled"}` (hosted DeepSeek). On an `anthropic` provider it sends `thinking: {"type": "disabled"}`; left unset, no thinking parameter is sent and Claude behaves as before. Set it to `false` if a model fails with "only thinking" or `config test` reports it. A DeepSeek v4-pro route needs it, or `research distill` spends its whole budget reasoning | off for local OpenAI-compatible providers; unset otherwise |
 | `tools` | OpenAI-compatible only: `false` for a server that cannot take native tool calls. A chat turn that offers tools is then refused with an error naming the provider, instead of being sent to a server that would ignore them | `true` |
 | `key` | Where the API key is. See below | the environment |
+| `binary` | `claude-code` only: the `claude` executable, a name looked up on `PATH` or a path. Set it in this file only | `"claude"` |
 
 Common local endpoints: LM Studio `http://127.0.0.1:1234/v1`, Ollama
 `http://127.0.0.1:11434/v1`, llama.cpp's server `http://127.0.0.1:8080/v1`.
+
+### Claude on your subscription: `kind: "claude-code"`
+
+A `claude-code` provider runs Claude through Claude Code's `claude -p` on your Claude
+login, so its calls are paid by your Claude plan rather than an API key. It has no
+`endpoint` and no `key`; its fields are `model` (required, any id `claude --model`
+takes) and `binary` (default `claude`), plus `timeoutMs` (the whole turn, default
+`600000`, since `claude -p` prints nothing until it is done). `temperature` and
+`thinking` are accepted and not sent. `endpoint`, `key`, `local` and `"tools": true`
+are refused.
+
+```sh
+pablo config set providers.claude-code.kind claude-code
+pablo config set providers.claude-code.model the-claude-model-id-you-use
+pablo config set intents.agent claude-code     # any intent can route to it
+pablo config test
+```
+
+`pablo config show` lists it as `uses your Claude login (claude -p, subscription; no
+API key)`. You need Claude Code installed and signed in (`claude auth login`, or
+`/login` inside `claude`); a missing `claude` or a signed-out login is a refusal naming
+that fix.
+
+How it runs: one `claude -p` per model call, a new process each time. The
+conversation so far is written into the prompt, which goes on stdin; pablo's system
+prompt goes in a file. It runs in a new empty temp directory (removed afterwards),
+never your vault, with every Claude Code tool switched off and none of your Claude
+Code settings, hooks, plugins, skills, MCP servers or `CLAUDE.md` loaded:
+`--tools ""`, `--disallowedTools` naming every built-in, `--strict-mcp-config
+--mcp-config '{"mcpServers":{}}'`, `--setting-sources ""`, `--safe-mode`,
+`--disable-slash-commands`, `--no-session-persistence`, `--permission-mode dontAsk`,
+`--output-format json`. It takes no native tool calls, so pablo's agent loop lists its
+own tools in the system prompt and reads each reply for a `{"tool", "arguments"}`
+JSON call, which it checks and runs itself, as for any provider.
+
+**Your API key is never used by it.** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+`ANTHROPIC_BASE_URL` and the Bedrock, Vertex and Foundry switches are removed from
+`claude`'s environment, so a key in your shell cannot make it bill the API.
+`CLAUDE_CODE_OAUTH_TOKEN` (a subscription token from `claude setup-token`) is kept.
+
+Receipts record each call with `billing: "subscription"` and `cost_usd: 0`, and the
+agent's cost line does not report it as an unpriced model. Your plan's own usage
+limits still apply; when `claude` reports one, the call fails with its message.
+
+A work's `pablo.json` may not add a `claude-code` provider, turn another provider into
+one, or set `binary` (it names a program pablo runs); it may change `model` and
+`timeoutMs` on one declared here, as on any remote provider.
 
 ## `web`
 
@@ -106,7 +154,8 @@ If no provider of the wanted sort exists, the request goes to `default` (the fir
 provider unless you set it). With no provider at all it refuses, naming
 `pablo init --config`. `intents` overrides the choice per intent. Every model
 call pablo makes goes through one of these intents, to a provider of any kind; pablo
-never runs `claude -p` or uses your Claude Code login.
+runs `claude -p` on your Claude login only for a provider you declare with
+`kind: "claude-code"`.
 
 **A provider whose key does not resolve is skipped.** A non-local provider with no key (its
 environment variable is unset, or its Keychain item is missing) is passed over for the next
@@ -210,9 +259,11 @@ The built-in agent (`pablo agent`, `pablo story`, the screen's compose view) is 
 own tool loop. `pablo agent` and the compose view run on whichever provider the `agent`
 intent goes to; `pablo story` runs its research stage on the `research` intent and its
 premise, bible, acts and beats stages on `plan`. Each can be Claude
-through an `anthropic` provider, or any OpenAI-compatible model with tool calls
-(Gemma 4 behind `mlx_lm` included). It needs that provider's key, the same as any
-other request; your Claude Code login is not used. With no non-local provider
+through an `anthropic` provider, Claude on your subscription through a `claude-code`
+provider (its tools then go through the loop's text protocol), or any OpenAI-compatible
+model with tool calls (Gemma 4 behind `mlx_lm` included). It needs that provider's key,
+the same as any other request; your Claude Code login is used only by a `claude-code`
+provider. With no non-local provider
 configured, the agent runs on the local model.
 
 ## What leaves your machine
