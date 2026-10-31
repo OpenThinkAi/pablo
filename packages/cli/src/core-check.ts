@@ -11,7 +11,7 @@
  *   bible, the timeline, the beats, `facts.md`, nor this output's own ledger (names and places, against the bible
  *   and `facts.md`). Another output's ledger is not consulted: a name only the novel established is unknown to the
  *   radio show until it is promoted. Also known (AGT-2197): the work's own title, the period facts
- *   (`facts/period.md`), and on a nonfiction work the research notes. Headings are not scanned, and a word right
+ *   (`facts/period.md`), each character file's name (a slug-only file, `clara-vane.md`, still clears Clara and Vane), and on a nonfiction or historical-fiction work the research notes (AGT-2226). Headings are not scanned, and a word right
  *   after an opening quote (a sign's "Please") is not a name.
  *
  * Pure over the work directory: reads, never writes. The hits use `check`'s `Hit` shape, so `check` prints them
@@ -80,7 +80,14 @@ function knownWords(workDir: string, output: string): Set<string> {
   const marker = readMarker(workDir);
   if (marker.ok) {
     texts.push(marker.marker.title);
-    if (trackOf(marker.marker) === "nonfiction") texts.push(...markdownUnder(join(workDir, "research")));
+    // Research notes name the work's real people and period objects (AGT-2226: on historical fiction too, as on nonfiction).
+    const track = trackOf(marker.marker);
+    if (track === "nonfiction" || track === "historical-fiction") texts.push(...markdownUnder(join(workDir, "research")));
+  }
+  // A character file's name is a known name even when its text carries no display name (AGT-2226): `clara-vane.md` -> Clara, Vane.
+  const charactersDir = join(workDir, "bible", "characters");
+  if (existsSync(charactersDir)) {
+    for (const name of readdirSync(charactersDir)) if (name.endsWith(".md")) texts.push(name.slice(0, -3).replace(/(^|[-_]+)([a-z])/g, (_m, sep: string, c: string) => `${sep === "" ? "" : " "}${c.toUpperCase()}`));
   }
   const known = new Set<string>();
   for (const text of texts) for (const word of text.match(/[A-Za-z][A-Za-z'-]*/g) ?? []) known.add(word.replace(/'s$/, ""));

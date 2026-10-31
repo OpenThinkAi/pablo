@@ -76,7 +76,8 @@ a refusal from `write`. A real name the agent fails to list is not detected: rea
 ## Checks
 
 On top of the [fiction checks](fiction.md#checks) (`continuity`, `story-time`,
-`unknown-name`), this track runs two more on every unit:
+`unknown-name`; here a name in the work's `research/` notes, such as a period object, counts
+as known), this track runs two more on every unit:
 
 - **anachronism**: a word, object or idiom out of the work's period (`rule: "anachronism"`).
   The period is the `## When and where` section of `bible/period.md`; with no brief the

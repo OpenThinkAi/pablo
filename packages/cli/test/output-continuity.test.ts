@@ -478,3 +478,30 @@ test("AGT-2197: check without --output runs the same core check as with it; head
   if (!bare.ok) throw new Error(bare.message);
   expect((bare.core ?? []).map((h) => `${h.rule}:${h.detail}`)).toEqual((named.core ?? []).map((h) => `${h.rule}:${h.detail}`));
 });
+
+// --- AGT-2226: a slug-only character file clears its name; research names are known on historical fiction ----------
+
+function unknownNames(vault: string, work: string): string[] {
+  const outcome = checkWork(vault, work, undefined, "radio");
+  if (!outcome.ok) throw new Error(outcome.message);
+  return (outcome.core ?? []).filter((h) => h.rule === "unknown-name").map((h) => h.detail ?? "");
+}
+
+test("AGT-2226: a slug-only character file (clara-vane.md, no display name in the text) clears Clara and Vane", () => {
+  const { vault, work } = twoOutputWork();
+  writeFileSync(join(work, "outputs", "radio", "episodes", "02-black-ice.md"), `${EPISODE_TWO}ODILE: Ask Clara Vane about the hoist.\n`);
+  expect(unknownNames(vault, work)).toEqual(["Clara", "Vane"]);
+  writeFileSync(join(work, "bible", "characters", "clara-vane.md"), "- **clara-vane**: the telegraph clerk, quick and wary.\n");
+  expect(unknownNames(vault, work)).toEqual([]);
+});
+
+test("AGT-2226: on historical fiction a name only a research note carries is known; on fiction it is not", () => {
+  const { vault, work } = twoOutputWork();
+  writeFileSync(join(work, "outputs", "radio", "episodes", "02-black-ice.md"), `${EPISODE_TWO}ODILE: Tap it out on the Bunnell Triumph.\n`);
+  mkdirSync(join(work, "research"), { recursive: true });
+  writeFileSync(join(work, "research", "telegraph.md"), "# Telegraph\n\nThe Bunnell Triumph key was standard in 1931 depots.\n");
+  expect(unknownNames(vault, work)).toEqual(["Bunnell", "Triumph"]);
+  const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as Record<string, unknown>;
+  writeFileSync(join(work, "pablo.json"), `${JSON.stringify({ ...marker, track: "historical-fiction" }, null, 2)}\n`);
+  expect(unknownNames(vault, work)).toEqual([]);
+});
