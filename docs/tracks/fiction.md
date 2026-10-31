@@ -55,7 +55,9 @@ The fiction track runs three checks on every unit:
 - `continuity`: facts that contradict the work's continuity ledger (`pablo critique`, and
   `pablo check --across` between outputs).
 - `story-time`: something mentioned that is dated after the unit's own year.
-- `unknown-name`: a name the bible, `facts.md` and the output's continuity do not know.
+- `unknown-name`: a name the bible, `facts.md` and the output's continuity do not know. A
+  character file's name counts too, so `bible/characters/clara-vane.md` clears Clara and Vane
+  even when the file's text never writes the display name.
 
 `pablo check --project ice-house --output novel` also reports the mechanical tells (dashes,
 curly quotes, stock names, `Flagged:` lines) and units that lack `model` or `prompt_hash`

@@ -421,7 +421,7 @@ const STAGE_TEXT: Readonly<Record<(typeof STORY_CORE_STAGES)[number], string>> =
   premise:
     'Read the research notes (read, search) and propose the premise with propose (stage "premise"): bible/overview.md with ## Title (the work\'s own short title, two to six words, about the story and not the request), ## Logline (one or two sentences), ## Premise, ## Themes, ## Tone and ## Structure.',
   bible:
-    'Propose the cast (propose stage "cast", one character per call, with a lowercase-hyphen name) and the places (stage "places"), and the timeline (stage "timeline": a | Year | Real events | In the story | table with a row for every year a beat will be set in). Record any other fact the story stands on with record_fact, tagged researched with its source, or invented.',
+    'Propose the cast (propose stage "cast", one character per call, with a lowercase-hyphen name; the content opens with a # heading holding the character display name as the story writes it) and the places (stage "places"), and the timeline (stage "timeline": a | Year | Real events | In the story | table with a row for every year a beat will be set in). Record any other fact the story stands on with record_fact, tagged researched with its source, or invented.',
   acts: 'Propose the acts table with propose (stage "acts"): rows of | Act | Years | What it accomplishes |.',
   beats: 'Propose the beats with propose (stage "beats"): one row per story unit, | # | Story date | Title (working) | Beat | POV | Status |, status "outline".',
 };
@@ -440,7 +440,7 @@ const HISTORICAL_TEXT: Readonly<Partial<Record<StoryCoreStage, string>>> = {
   period:
     'Write the period brief with propose (stage "period"): bible/period.md with ## When and where (the years and the place), ## The events (the real history the story runs through) and ## What the story must be true to (the people, places, technology, language, daily life, politics and dates a reader could check). pablo derives the research checklist from it. Propose nothing else.',
   bible:
-    'Propose the cast (propose stage "cast", one character per call, with a lowercase-hyphen name) and the places (stage "places"), and the timeline (stage "timeline": a | Year | Real events | In the story | table with a row for every year a beat will be set in). Keep them true to the period brief and the distilled period facts (facts/period.md). Record any other fact the story stands on with record_fact, tagged researched with its source, or invented.',
+    'Propose the cast (propose stage "cast", one character per call, with a lowercase-hyphen name; the content opens with a # heading holding the character display name as the story writes it) and the places (stage "places"), and the timeline (stage "timeline": a | Year | Real events | In the story | table with a row for every year a beat will be set in). Keep them true to the period brief and the distilled period facts (facts/period.md). Record any other fact the story stands on with record_fact, tagged researched with its source, or invented.',
 };
 
 /**
