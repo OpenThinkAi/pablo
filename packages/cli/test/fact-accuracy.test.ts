@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { checkWork, runCheck, screenChecks, withFactAccuracy } from "../src/check";
 import type { CheckSuccess } from "../src/check";
 import type { Ask } from "../src/critique";
-import { checkFactAccuracy, draftSentences, factAccuracyModel, factHitsPath, parseContradictions, savedFactHits } from "../src/fact-accuracy";
+import { STRICT_JSON_RETRY, checkFactAccuracy, draftSentences, factAccuracyModel, factHitsPath, parseContradictions, savedFactHits } from "../src/fact-accuracy";
 import { VERBS } from "../src/verbs";
 import { anachronismModel } from "../src/anachronism";
 
@@ -138,15 +138,47 @@ test("only historical fiction is checked, and only with facts/period.md", async 
 test("a model that cannot be built or fails is a notice, never a failed check", async () => {
   const { vault, dir } = work([SCALE_FACT]);
   const none = await withFactAccuracy(scan(dir, vault), dir, "novel", () => "no provider is configured");
-  expect(none.factAccuracy).toEqual({ checked: 0, notice: "fact-accuracy not run: no provider is configured" });
+  expect(none.factAccuracy).toEqual({ checked: 0, notRun: 1, notice: "fact-accuracy not run: no provider is configured (1 unit not run)" });
   const failing: Ask = async () => {
     throw new Error("endpoint down");
   };
   const failed = await withFactAccuracy(scan(dir, vault), dir, "novel", () => failing);
-  expect(failed.factAccuracy?.notice).toBe(`fact-accuracy stopped at ${UNIT}: endpoint down`);
-  const garbled: Ask = async () => "I could not decide.";
+  expect(failed.factAccuracy?.notice).toBe(`fact-accuracy stopped at ${UNIT}: endpoint down (1 unit not run)`);
+});
+
+test("a reply that is not the contradictions JSON is asked once more, strictly; a second failure is counted as not run (AGT-2284)", async () => {
+  const { vault, dir } = work([SCALE_FACT]);
+  const prompts: string[] = [];
+  const garbled: Ask = async (prompt) => {
+    prompts.push(prompt);
+    return "I could not decide.";
+  };
   const unread = await withFactAccuracy(scan(dir, vault), dir, "novel", () => garbled);
-  expect(unread.factAccuracy?.notice).toContain("not the contradictions JSON");
+  expect(prompts).toHaveLength(2);
+  expect(prompts[0]).not.toContain(STRICT_JSON_RETRY);
+  expect(prompts[1]).toContain(STRICT_JSON_RETRY);
+  expect(unread.outcome.hits.filter((h) => h.rule === "fact-accuracy")).toEqual([]);
+  expect(unread.factAccuracy?.checked).toBe(0);
+  expect(unread.factAccuracy?.notRun).toBe(1);
+  expect(unread.factAccuracy?.notice).toContain("not the contradictions JSON (after one retry) (1 unit not run)");
+
+  // A malformed first reply that the retry fixes is a normal run: one retry, no notice.
+  let calls = 0;
+  const recovers: Ask = async () => (++calls === 1 ? "Sorry, here is my analysis:" : '{"contradictions": []}');
+  const fixed = await withFactAccuracy(scan(dir, vault), dir, "novel", () => recovers);
+  expect(calls).toBe(2);
+  expect(fixed.factAccuracy).toEqual({ checked: 1 });
+});
+
+test("a model error is not retried", async () => {
+  const { vault, dir } = work([SCALE_FACT]);
+  let calls = 0;
+  const failing: Ask = async () => {
+    calls++;
+    throw new Error("endpoint down");
+  };
+  await withFactAccuracy(scan(dir, vault), dir, "novel", () => failing);
+  expect(calls).toBe(1);
 });
 
 test("prose mode says which unit it is asking about before each model call", async () => {

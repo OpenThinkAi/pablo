@@ -204,9 +204,38 @@ test("helpers: the period, the terms of a line and a lenient verdict parse (JSON
     { line: 4, raw: "The drive-in's sign, and it was okay.", terms: ["drive-in", "sign", "okay"] },
   ]);
   const verdicts = parseVerdicts('Sure:\n[{"term":"Okay","inPeriod":false},{"term":"other","inPeriod":false},{"term":"sign"}]', ["okay", "sign"]);
-  expect([...verdicts]).toEqual([["okay", { inPeriod: false, why: "no reason given", belongs: "a later period" }]]);
+  // A verdict with no reason and no date is noise, read as in period (AGT-2284).
+  expect([...verdicts]).toEqual([["okay", { inPeriod: true }]]);
   const long = parseVerdicts(JSON.stringify([{ term: "okay", inPeriod: false, why: "x".repeat(500), belongs: "the 1830s" }]), ["okay"]);
   expect(long.get("okay")?.why).toHaveLength(200);
+});
+
+// ---------------------------------------------------------------- AGT-2284: etymology and spelling are not anachronisms
+
+test("etymology, undated, self-contradicting and spelling verdicts give no hit; a dated thing out of period still does", async () => {
+  const { work, unit } = tempWork("The teenager hauled ice from the river, and the labor was hard.");
+  const fake = fakeAsk({
+    teenager: { why: "the word came into use in the 1940s", belongs: "the 1940s onward" },
+    hauled: { why: "first recorded as a verb late", belongs: "N/A" },
+    ice: { why: "the word is older than the thing", belongs: "" },
+    river: { why: "the etymology of the word is 1950", belongs: "the 1950s" },
+    labor: { why: "American spelling of labour", belongs: "the 1830s" },
+  });
+  const result = await checkAnachronisms(work, [unit], { ask: fake.ask });
+  expect(result?.notice).toBeUndefined();
+  expect(result?.hits.map((h) => h.term)).toEqual(["teenager"]);
+  // The prompt asks about things, practices and idioms, wants a date, and rules out spelling variants.
+  expect(fake.prompts[0]).toContain("THING, PRACTICE or IDIOM");
+  expect(fake.prompts[0]).toContain("labor/labour");
+  expect(fake.prompts[0]).toContain("year or decade");
+});
+
+test("parseVerdicts drops a verdict with no date, `N/A`, or a spelling reason, and keeps a dated one", () => {
+  const reply = ["depot | word from French | N/A", "levies | spelling variant | the 1800s", "okay | modern assent | the 1830s", "END", ""].join("\n");
+  const verdicts = parseVerdicts(reply, ["depot", "levies", "okay"]);
+  expect(verdicts.get("depot")).toEqual({ inPeriod: true });
+  expect(verdicts.get("levies")).toEqual({ inPeriod: true });
+  expect(verdicts.get("okay")).toEqual({ inPeriod: false, why: "modern assent", belongs: "the 1830s" });
 });
 
 // ---------------------------------------------------------------- AGT-2187: local models, loud failures, fewer words
@@ -250,7 +279,8 @@ test("the line parser tolerates bullets, tables, emphasis and a thinking block, 
   const table = "<think>radio? 1918...</think>\n| Term | Why | Period |\n|---|---|---|\n| **Radio** | broadcasting began in 1920 | the 1920s |\n1. okay: first recorded in 1839\nEND";
   expect([...parseVerdicts(table, asked)]).toEqual([
     ["radio", { inPeriod: false, why: "broadcasting began in 1920", belongs: "the 1920s" }],
-    ["okay", { inPeriod: false, why: "first recorded in 1839", belongs: "a later period" }],
+    // `okay: why` with no period it belongs to names no date, so it is dropped (AGT-2284).
+    ["okay", { inPeriod: true }],
     ["parlour", { inPeriod: true }],
   ]);
   // No END: only the listed term gets a verdict, so the rest are asked again rather than passed.

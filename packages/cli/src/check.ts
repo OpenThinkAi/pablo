@@ -580,6 +580,8 @@ export function screenChecks(vaultRoot: string, workDir?: string): (file: string
 /** What `check --output` adds for a historical-fiction work (AGT-2112): its fact-accuracy run's count and any notice. */
 export interface FactAccuracySummary {
   readonly checked: number;
+  /** Units not checked because the run stopped (no model, a failed call, a reply still unreadable after a retry). */
+  readonly notRun?: number;
   readonly notice?: string;
 }
 
@@ -601,7 +603,7 @@ export async function withFactAccuracy(
   if (run === undefined) return { outcome };
   return {
     outcome: { ...outcome, hits: [...outcome.hits, ...run.hits] },
-    factAccuracy: { checked: run.checked, ...(run.notice !== undefined ? { notice: run.notice } : {}) },
+    factAccuracy: { checked: run.checked, ...(run.notRun !== undefined ? { notRun: run.notRun } : {}), ...(run.notice !== undefined ? { notice: run.notice } : {}) },
   };
 }
 

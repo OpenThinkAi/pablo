@@ -721,15 +721,17 @@ A citation is a bracket of research note ids (`@<id>`) and/or claims row numbers
 resolves is never a hit; a citation that resolves to nothing is named in the hit.
 
 On a **historical-fiction** work, every unit also gets the **anachronism** check
-(`rule: "anachronism"` in `hits[]`): a word, object or idiom out of the work's
-period. Each hit carries `term`, `why` (why it is out of period) and `belongs` (the
-period it belongs to); `detail` says the same in one line. The period is the
+(`rule: "anachronism"` in `hits[]`): a thing, practice or idiom out of the work's
+period, not word etymology or spelling. Each hit carries `term`, `why` (what is out of
+period) and `belongs` (when it arrived, a year or decade); `detail` says the same in one
+line. A verdict with no date, one that contradicts itself (`belongs to N/A`) or one
+about spelling or style (labor/labour, a hyphenated date) is dropped, not reported. The period is the
 `## When and where` section of `bible/period.md` (else its first paragraph); with no
 brief the check is skipped and `anachronism.notice` says so. The unit's distinct
 words, never its sentences, go to the model the `check` intent routes to. Function
 words, month and day names, and capitalised names the bible, `facts.md` or a
 continuity ledger already uses mid-sentence are never sent. The model lists only the
-words that are out of period, one `term | why | belongs` line each, then a line `END`;
+terms that are out of period, one `term | what | when it arrived` line each, then a line `END`;
 a reply that never reaches `END` (cut short, or in another shape) leaves the words it
 did not list unjudged rather than passing them. Every verdict is cached per (period,
 term) in the work's `.pablo/lexicon.json`, so a re-check asks only about words it has
@@ -760,7 +762,10 @@ is held to the facts its drafting pack was given: every undated row, and every r
 dated on or before the unit's story date. The model names each sentence a fact
 contradicts. Each `fact-accuracy` hit in `hits[]` quotes the draft sentence
 (`excerpt`), the fact (`fact`) and its source note (`source`, `research/<id>.md`), with
-all three in `detail`. A unit with no relevant facts is not sent. `--unit N` checks only
+all three in `detail`. A unit with no relevant facts is not sent. A reply that is not
+the contradictions JSON is asked once more with a stricter JSON instruction; if that is
+unreadable too, the run stops with a notice (`fact-accuracy stopped at <unit>: ... (after
+one retry) (N units not run)`) and `factAccuracy.notRun` counts the units left unchecked. `--unit N` checks only
 unit N of the output, on any track (every check above narrows to it); a unit it does not
 have, or `--unit` with `--file`, is a refusal, exit `2`.
 

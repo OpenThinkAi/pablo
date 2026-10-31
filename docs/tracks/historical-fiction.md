@@ -79,7 +79,7 @@ On top of the [fiction checks](fiction.md#checks) (`continuity`, `story-time`,
 `unknown-name`; here a name in the work's `research/` notes, such as a period object, counts
 as known), this track runs two more on every unit:
 
-- **anachronism**: a word, object or idiom out of the work's period (`rule: "anachronism"`).
+- **anachronism**: a thing, practice or idiom out of the work's period, not etymology or spelling (`rule: "anachronism"`).
   The period is the `## When and where` section of `bible/period.md`; with no brief the
   check is skipped and says so. The unit's distinct words go to the `check` intent's
   model (function words and names the bible or continuity already knows are not sent),
