@@ -13,7 +13,7 @@ import { readCoreState, undecidedPicks } from "../../core/machine";
 import type { CoreState } from "../../core/machine";
 import { frontmatterField } from "../novel/plan";
 import type { OutputDefinition, OutputReport, OutputUnit, UnitPreconditions } from "../types";
-import { buildStoryPack, storyBeats } from "./pack";
+import { buildStoryPack, storyBeats, storyParts } from "./pack";
 import { storyDefaultPlan, STORY_TITLE } from "./plan";
 import { publishStory } from "./publish";
 import { STORY_RITUALS } from "./rituals";
@@ -98,6 +98,7 @@ export const STORY: OutputDefinition = {
   plan: storyDefaultPlan,
   preconditions: storyPreconditions,
   pack: buildStoryPack,
+  parts: storyParts,
   rituals: STORY_RITUALS,
   publish: { targets: STORY_PUBLISH_TARGETS, run: publishStory },
   report: storyReport,

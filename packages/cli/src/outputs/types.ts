@@ -67,6 +67,13 @@ export interface UnitPreconditions {
   readonly missing: readonly string[];
 }
 
+/** A unit drafted one request per part and stitched (AGT-2286). */
+export interface UnitParts {
+  readonly count: number;
+  /** Part `index` (1-based) of the unit's pack; `soFar` is the stitched text of the parts before it. */
+  readonly pack: (index: number, soFar: string) => UnitPackOutcome;
+}
+
 export interface UnitPackOptions {
   readonly words?: number | undefined;
   readonly scenes?: number | undefined;
@@ -193,6 +200,11 @@ export interface OutputDefinition {
   readonly preconditions: (workDir: string, unit: number) => UnitPreconditions;
   /** The writer's pack for `unit`. Pure over the vault and work directory. */
   readonly pack: (vaultRoot: string, workDir: string, unit: number, options: UnitPackOptions) => UnitPackOutcome;
+  /**
+   * AGT-2286: an output whose single unit is long enough to draft in parts (the story over many beats) returns
+   * the part count and a builder for each part's pack, given the text drafted so far; `undefined` means one request.
+   */
+  readonly parts?: (vaultRoot: string, workDir: string, unit: number, options: UnitPackOptions) => UnitParts | undefined;
   readonly rituals: OutputRituals;
   readonly publish: OutputPublish;
   /** The output's state over an already-read core, for `status` and `resume`. Pure over the work directory. */

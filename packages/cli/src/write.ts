@@ -286,7 +286,16 @@ export interface UnitReceiptSummary extends WriteReceiptSummary {
 export function wordTargetNotice(words: number, target: number): string | undefined {
   if (target <= 0 || Math.abs(words - target) <= target * 0.1) return undefined;
   const pct = Math.round((Math.abs(words - target) / target) * 100);
-  return `pablo: warning: ${words} words is ${pct}% ${words < target ? "under" : "over"} the ${target}-word target (allowed: within 10%)`;
+  const base = `pablo: warning: ${words} words is ${pct}% ${words < target ? "under" : "over"} the ${target}-word target (allowed: within 10%)`;
+  // AGT-2286: a thin draft reads as a summary, so say what to do about it.
+  return words < target
+    ? `${base}\n  next: expand the thin beats in the outline and re-draft with --force (or re-draft as is: each run is a fresh draw)`
+    : base;
+}
+
+/** The draft is more than 10% under its word target (AGT-2286): `underTarget` on the result and `--json`. */
+export function isUnderTarget(words: number, target: number): boolean {
+  return target > 0 && words < target - target * 0.1;
 }
 
 function emitWriteSuccess(
@@ -301,9 +310,11 @@ function emitWriteSuccess(
   notices: readonly string[] = [],
   /** The draft is more than 10% off its word target (AGT-2198): a warning, never a failure. */
   lengthWarning?: string,
+  /** The draft is more than 10% under its word target (AGT-2286). */
+  underTarget = false,
 ): void {
   if (json) {
-    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, ...(notices.length === 0 ? {} : { checkNotices: notices }), ...(lengthWarning === undefined ? {} : { lengthWarning }), ...(from === undefined ? {} : { from }) }));
+    console.log(JSON.stringify({ ok: true, path, branch: branch.name, worktree: branch.worktree, commit: branch.sha, receipt, check: hits, ...(notices.length === 0 ? {} : { checkNotices: notices }), ...(lengthWarning === undefined ? {} : { lengthWarning }), ...(underTarget ? { underTarget: true } : {}), ...(from === undefined ? {} : { from }) }));
     return;
   }
   console.log(`wrote ${path} (${receipt.words} words) on branch ${branch.name}`);
@@ -444,8 +455,24 @@ export async function runWrite(
 
   const { pack } = packResult;
 
+  // AGT-2286: a long single unit may be drafted beat by beat; every part's pack must build before anything is sent.
+  const partsPlan = args.dryRun || output.parts === undefined
+    ? undefined
+    : output.parts(vaultRoot, projectPath, chapter, { words, scenes, marker: markerResult.marker, direction, output: output.id, ...(deps.env === undefined ? {} : { env: deps.env }) });
+  if (partsPlan !== undefined) {
+    for (let index = 1; index <= partsPlan.count; index += 1) {
+      const check = partsPlan.pack(index, "");
+      if (!check.ok) {
+        emitError(check.message, undefined, check.code, args.json);
+        return check.code;
+      }
+    }
+  }
+
   if (args.dryRun) {
     const notReadyMessage = `${output.noun} ${chapter} is not ready to draft`;
+    const dryParts = output.parts?.(vaultRoot, projectPath, chapter, { words, scenes, marker: markerResult.marker, direction, output: output.id, ...(deps.env === undefined ? {} : { env: deps.env }) });
+    if (dryParts !== undefined && !args.json) console.log(`note: a real run drafts this beat by beat (${dryParts.count} requests, stitched); the pack below is the whole outline`);
     if (notReady && !args.json) console.error(`warning: ${notReadyMessage}: ${preconditions.missing.join("; ")}`);
     if (args.json) {
       const actionByName = new Map(pack.adjustments.map((a) => [a.name, a.action]));
@@ -469,6 +496,7 @@ export async function runWrite(
         expectedOutputTokens: pack.expectedOutputTokens,
         prompt_hash: pack.hash,
         adjustments: pack.adjustments,
+        ...(dryParts === undefined ? {} : { beatByBeat: dryParts.count }),
         ...(notReady ? { warnings: [{ kind: "preconditions", message: notReadyMessage, missing: preconditions.missing }] } : {}),
         // The layered voice (AGT-2139): every layer used, lowest first, and any voice pablo.json names that was not found.
         ...(pack.voiceLayers === undefined ? {} : { voiceLayers: pack.voiceLayers }),
@@ -602,30 +630,32 @@ export async function runWrite(
   // Providers instance; runWrite builds one Providers per CLI invocation (one
   // call per process), so no additional serialization is needed here.
   const draftAdapter = deps.adapter ?? providers.adapter(providerId);
-  const wrapped = withReceipts(draftAdapter, fileReceiptSink(projectPath), { pack, intent: "draft", address: { output: output.id, unit: chapter } });
 
   const stderr = deps.stderr ?? process.stderr;
   const now = deps.now ?? (() => new Date());
 
-  const startedAt = Date.now();
-  let firstTokenAt: number | undefined;
-  let lastProgressAt = startedAt;
-  let tokenEvents = 0;
-  let text = "";
-  let stats: CompletionStats | undefined;
-
-  stderr.write("waiting for first token…\n");
-
-  try {
+  /**
+   * One request: stream `unitPack` through the writer, with its receipt logged against `unitPack` (one line per
+   * request), progress to stderr. Throws what the adapter throws.
+   */
+  const streamPack = async (unitPack: typeof pack, label: string): Promise<{ text: string; stats: CompletionStats | undefined }> => {
+    const wrapped = withReceipts(draftAdapter, fileReceiptSink(projectPath), { pack: unitPack, intent: "draft", address: { output: output.id, unit: chapter } });
+    const startedAt = Date.now();
+    let firstTokenAt: number | undefined;
+    let lastProgressAt = startedAt;
+    let tokenEvents = 0;
+    let streamed = "";
+    let stats: CompletionStats | undefined;
+    stderr.write(`waiting for first token${label}…\n`);
     for await (const ev of wrapped.complete({
-      prompt: pack.prompt,
-      maxTokens: pack.expectedOutputTokens * 2,
+      prompt: unitPack.prompt,
+      maxTokens: unitPack.expectedOutputTokens * 2,
       temperature,
       ...(seed === undefined ? {} : { seed }),
-      timeoutMs: packTimeoutMs(pack, providers.rates(providerId)),
+      timeoutMs: packTimeoutMs(unitPack, providers.rates(providerId)),
     })) {
       if (ev.type === "token") {
-        text += ev.text;
+        streamed += ev.text;
         tokenEvents += 1;
         const nowMs = Date.now();
         if (firstTokenAt === undefined) {
@@ -634,14 +664,57 @@ export async function runWrite(
           stderr.write(`first token after ${seconds(nowMs - startedAt)}s\n`);
         } else if (nowMs - lastProgressAt >= PROGRESS_INTERVAL_MS) {
           // Stream chunks are not tokens: count what the text weighs, the way the final count does (AGT-2198).
-          const streamed = Math.max(tokenEvents, estimateTokens(text));
-          const rate = streamed / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
-          stderr.write(`~${streamed} tokens, ${rate.toFixed(1)} tok/s\n`);
+          const count = Math.max(tokenEvents, estimateTokens(streamed));
+          const rate = count / Math.max((nowMs - firstTokenAt) / 1000, 0.001);
+          stderr.write(`~${count} tokens, ${rate.toFixed(1)} tok/s\n`);
           lastProgressAt = nowMs;
         }
       } else {
         stats = ev.stats;
       }
+    }
+    return { text: streamed, stats };
+  };
+
+  // A long single unit (the story over many beats, AGT-2286) is drafted one request per beat and stitched.
+  let normalized = "";
+  let stats: CompletionStats | undefined;
+  try {
+    if (partsPlan === undefined) {
+      const one = await streamPack(pack, "");
+      stderr.write("\n");
+      normalized = normalizeOutput(one.text);
+      stats = one.stats;
+    } else {
+      const pieces: string[] = [];
+      let firstMs = 0;
+      let elapsedMs = 0;
+      let tokensRead = 0;
+      let tokensWritten = 0;
+      for (let index = 1; index <= partsPlan.count; index += 1) {
+        const partPack = partsPlan.pack(index, pieces.join("\n\n"));
+        if (!partPack.ok) {
+          discardBranch();
+          emitError(partPack.message, undefined, partPack.code, args.json);
+          return partPack.code;
+        }
+        stderr.write(`beat ${index} of ${partsPlan.count}\n`);
+        const part = await streamPack(partPack.pack, ` (beat ${index})`);
+        stderr.write("\n");
+        const piece = normalizeOutput(part.text);
+        if (piece === "" || part.stats === undefined) {
+          discardBranch();
+          emitError(`pablo: the model returned an empty answer for beat ${index} of ${partsPlan.count}; nothing written`, undefined, 2, args.json);
+          return 2;
+        }
+        pieces.push(piece);
+        if (index === 1) firstMs = part.stats.timeToFirstTokenMs;
+        elapsedMs += part.stats.elapsedMs;
+        tokensRead += part.stats.tokensRead ?? partPack.pack.totalTokens;
+        tokensWritten += part.stats.tokensWritten;
+      }
+      normalized = pieces.join("\n\n");
+      stats = { timeToFirstTokenMs: firstMs, elapsedMs, tokensRead, tokensWritten, tokensPerSecond: elapsedMs > 0 ? tokensWritten / (elapsedMs / 1000) : 0 };
     }
   } catch (error) {
     stderr.write("\n");
@@ -653,9 +726,6 @@ export async function runWrite(
     throw error;
   }
 
-  stderr.write("\n");
-
-  const normalized = normalizeOutput(text);
   if (normalized === "" || stats === undefined) {
     discardBranch();
     emitError("pablo: the model returned an empty answer; nothing written", undefined, 2, args.json);
@@ -738,6 +808,6 @@ export async function runWrite(
     notices = checked.notices;
   }
 
-  emitWriteSuccess(args.json, workRelativePath, receipt, reported, branch, undefined, notices, wordTargetNotice(wordCount, packResult.inputs.wordTarget));
+  emitWriteSuccess(args.json, workRelativePath, receipt, reported, branch, undefined, notices, wordTargetNotice(wordCount, packResult.inputs.wordTarget), isUnderTarget(wordCount, packResult.inputs.wordTarget));
   return 0;
 }

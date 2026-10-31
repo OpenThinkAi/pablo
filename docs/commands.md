@@ -433,7 +433,13 @@ pablo write --project <slug> --chapter N [flags]
 
 Drafts one unit of an output on your configured writer model. A draft more than
 10% off its word target gets a warning (stderr; `lengthWarning` in JSON); the
-draft is still written. While it streams, stderr shows `~N tokens`, estimated from
+draft is still written. One more than 10% under also carries `underTarget: true`
+in `--json`, and the warning says what to do next (expand the thin beats, then
+re-draft with `--force`). A `story` over more than four beats is drafted beat by
+beat: one request per beat, each given its share of `--words` and the end of the
+text so far, stitched into the one unit, with one receipt line per request and
+the totals on the result (`--dry-run` shows the whole outline and notes it, and
+`beatByBeat` in JSON). While it streams, stderr shows `~N tokens`, estimated from
 the text so far, not the number of stream chunks. `--chapter N` is
 short for `--output novel --unit N`. A work with several outputs needs `--output`.
 The `story` output has a single unit, so `write --output story` needs no `--unit`.
