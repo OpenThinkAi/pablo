@@ -98,6 +98,11 @@ export interface Receipt {
   readonly cost_usd?: number;
   /** The names of the tools the turn called, in order; present (and non-empty) only on an agent-loop turn that called some (AGT-2191). */
   readonly tool_calls?: readonly string[];
+  /**
+   * `"subscription"` on a call to a provider paid by the author's plan, not per token (AGT-2281: the
+   * `claude-code` kind); its `cost_usd` is then 0, never a missing price. Absent means per-token pricing.
+   */
+  readonly billing?: "subscription";
 }
 
 export type ReceiptSink = (receipt: Receipt) => void | Promise<void>;
@@ -134,6 +139,7 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
   const now = options.now ?? (() => Date.now());
   const clock = options.clock ?? (() => new Date());
   const { pack } = options;
+  const subscription = adapter.billing === "subscription";
 
   async function write(receipt: Receipt): Promise<void> {
     try {
@@ -166,6 +172,8 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
       ...(pack?.voiceLayers === undefined ? {} : { voice_layers: pack.voiceLayers.layers }),
       ...(pack?.voiceLayers === undefined || pack.voiceLayers.missing.length === 0 ? {} : { voice_missing: pack.voiceLayers.missing }),
       ...(pack?.periodFacts === undefined ? {} : { period_facts: pack.periodFacts }),
+      // A subscription call costs nothing per token, and says so rather than leaving the cost to be read as unknown.
+      ...(subscription ? { billing: "subscription" as const, cost_usd: 0 } : {}),
     };
   }
 
@@ -206,7 +214,7 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
         tokens_read: usage?.inputTokens ?? null,
         tokens_written: usage?.outputTokens ?? null,
         ttft_ms: firstAt === undefined ? null : Math.round(firstAt - started),
-        ...(options.cost === undefined || usage === undefined ? {} : { cost_usd: options.cost(usage, request.model ?? adapter.model) }),
+        ...(subscription || options.cost === undefined || usage === undefined ? {} : { cost_usd: options.cost(usage, request.model ?? adapter.model) }),
         ...(toolNames.length === 0 ? {} : { tool_calls: toolNames }),
       });
     };
@@ -216,6 +224,8 @@ export function withReceipts(adapter: Adapter, log: ReceiptSink, options: WithRe
     id: adapter.id,
     model: adapter.model,
     preferredOutput: adapter.preferredOutput,
+    ...(adapter.nativeTools === undefined ? {} : { nativeTools: adapter.nativeTools }),
+    ...(adapter.billing === undefined ? {} : { billing: adapter.billing }),
     ...(innerChat === undefined ? {} : { chat: chatWithReceipts(innerChat) }),
 
     async *complete(request: CompletionRequest): AsyncIterable<CompletionEvent> {

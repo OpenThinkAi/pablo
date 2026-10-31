@@ -46,10 +46,32 @@ import { readWebConfig } from "../web/search";
 import type { WebConfig } from "../web/search";
 import type { KeySource } from "./keys";
 
-/** Which adapter drives a provider: an OpenAI-compatible endpoint, or Anthropic's Messages API. */
-export type AdapterKind = "openai-compatible" | "anthropic";
+/**
+ * Which adapter drives a provider: an OpenAI-compatible endpoint, Anthropic's
+ * Messages API, or `claude-code` (AGT-2281): one `claude -p` per turn on the
+ * author's Claude login (the subscription), with no endpoint and no key.
+ */
+export type AdapterKind = "openai-compatible" | "anthropic" | "claude-code";
 
-const ADAPTER_KINDS: readonly AdapterKind[] = ["openai-compatible", "anthropic"];
+const ADAPTER_KINDS: readonly AdapterKind[] = ["openai-compatible", "anthropic", "claude-code"];
+
+/** The `claude-code` kind's executable when the entry names no `binary`: `claude`, found on PATH. */
+export const DEFAULT_CLAUDE_BINARY = "claude";
+
+/**
+ * A `claude -p` turn sends nothing until the whole reply is ready, so its
+ * timeout bounds the turn rather than an idle gap: ten minutes unless the
+ * entry sets `timeoutMs`.
+ */
+export const DEFAULT_CLAUDE_CODE_TIMEOUT_MS = 600_000;
+
+/** The fields a `claude-code` entry refuses: it has no endpoint, no key, is never "local", and never takes native tools. */
+const CLAUDE_CODE_REFUSED = ["endpoint", "key", "local"] as const;
+
+/** The pseudo-endpoint a `claude-code` provider carries, for rate meters and messages: it names the binary, not a URL. */
+export function claudeCodeEndpoint(binary: string): string {
+  return `claude-code:${binary}`;
+}
 
 export interface ProviderConfig {
   readonly id: string;
@@ -83,6 +105,12 @@ export interface ProviderConfig {
    * tools it would ignore or mangle. Absent means tools are sent.
    */
   readonly tools?: boolean;
+  /**
+   * The `claude-code` kind only: the `claude` executable to run, a name looked
+   * up on PATH or a path (default `claude`). Set only in the global config; a
+   * work's pablo.json may not name a program for pablo to run.
+   */
+  readonly binary?: string;
 }
 
 export interface PabloConfig {
@@ -245,6 +273,7 @@ export function mergeProjectConfig(base: PabloConfig, text: string, source = "pa
     for (const [id, entry] of Object.entries(rawProviders)) {
       const existing = providers.get(id);
       refuseWorkKey(id, entry, source);
+      refuseWorkBinary(id, entry, source);
       const read = readProvider(id, entry, source, existing, options.allowIncomplete === true);
       // Overriding a global provider keeps its key (readProvider inherits it); a provider the work adds has none,
       // and so does one whose endpoint, kind or local flag the work changes (`repoints`): the global key was bound
@@ -285,6 +314,10 @@ function readProvider(
   const kind = entry["kind"] ?? existing?.kind ?? "openai-compatible";
   if (!ADAPTER_KINDS.includes(kind as AdapterKind)) {
     throw new ProviderConfigError(`pablo: ${where}: unknown "kind" — known kinds are ${ADAPTER_KINDS.join(", ")}`);
+  }
+  if (kind === "claude-code") return readClaudeCodeProvider(id, entry, where, existing, allowIncomplete);
+  if (entry["binary"] !== undefined) {
+    throw new ProviderConfigError(`pablo: ${where}: "binary" applies only to kind "claude-code"`);
   }
 
   const rawEndpoint = entry["endpoint"] ?? existing?.endpoint;
@@ -345,8 +378,98 @@ function readProvider(
   };
 }
 
+/**
+ * A `claude-code` entry (AGT-2281): `model` (required, passed to `--model`),
+ * `binary` (default `claude`), and the optional `timeoutMs`, `temperature`
+ * and `thinking` every kind takes (`claude -p` has no sampling or thinking
+ * flag, so the last two are accepted and not sent). It has no endpoint and no
+ * key: `claude -p` runs on the author's Claude login. It is never `local`, and
+ * it takes no native tools (`"tools": true` is refused), so the agent loop
+ * drives pablo's tools through its text protocol.
+ */
+function readClaudeCodeProvider(
+  id: string,
+  entry: Record<string, unknown>,
+  where: string,
+  existing: ProviderConfig | undefined,
+  allowIncomplete: boolean,
+): ProviderConfig {
+  for (const field of CLAUDE_CODE_REFUSED) {
+    if (entry[field] === undefined) continue;
+    throw new ProviderConfigError(
+      `pablo: ${where}: kind "claude-code" takes no "${field}" — it runs \`claude -p\` on your Claude login (no endpoint, no API key, never local). ` +
+        `Its fields are "model" and, optionally, "binary" (default "${DEFAULT_CLAUDE_BINARY}").`,
+    );
+  }
+  if (entry["tools"] === true) {
+    throw new ProviderConfigError(
+      `pablo: ${where}: kind "claude-code" takes no native tools ("tools": true) — pablo drives its tools through a text protocol, and Claude Code's own tools are always off.`,
+    );
+  }
+  const sameKind = existing?.kind === "claude-code" ? existing : undefined;
+  const rawModel = entry["model"] ?? sameKind?.model;
+  if (!allowIncomplete && rawModel === undefined) {
+    throw new ProviderConfigError(
+      `pablo: ${where}: "model" must be set — pablo has no built-in model, not even for kind "claude-code". ` +
+        `Run \`pablo config set providers.${id}.model <model id>\` (any id \`claude --model\` takes).`,
+    );
+  }
+  const model = allowIncomplete && rawModel === undefined ? "" : readString(rawModel, `${where}: "model"`);
+  // It goes into argv after `--model`, and a work's pablo.json may set it: one that starts with "-" would read as a flag.
+  if (model.startsWith("-")) throw new ProviderConfigError(`pablo: ${where}: "model" must be a model id, not something starting with "-"`);
+  const binary = readString(entry["binary"] ?? sameKind?.binary ?? DEFAULT_CLAUDE_BINARY, `${where}: "binary"`);
+
+  const rawTimeout = entry["timeoutMs"] ?? sameKind?.timeoutMs ?? DEFAULT_CLAUDE_CODE_TIMEOUT_MS;
+  if (typeof rawTimeout !== "number" || !Number.isFinite(rawTimeout) || rawTimeout <= 0) {
+    throw new ProviderConfigError(`pablo: ${where}: "timeoutMs" must be a positive number of milliseconds`);
+  }
+  const rawTemperature = entry["temperature"] ?? sameKind?.temperature;
+  if (
+    rawTemperature !== undefined &&
+    (typeof rawTemperature !== "number" || !Number.isFinite(rawTemperature) || rawTemperature < 0 || rawTemperature > 2)
+  ) {
+    throw new ProviderConfigError(`pablo: ${where}: "temperature" must be a number from 0 to 2`);
+  }
+  const thinking = entry["thinking"] ?? sameKind?.thinking;
+  if (thinking !== undefined && typeof thinking !== "boolean") {
+    throw new ProviderConfigError(`pablo: ${where}: "thinking" must be true or false`);
+  }
+  return {
+    id,
+    endpoint: claudeCodeEndpoint(binary),
+    model,
+    kind: "claude-code",
+    local: false,
+    key: { from: "none" },
+    timeoutMs: rawTimeout,
+    tools: false,
+    binary,
+    ...(rawTemperature === undefined ? {} : { temperature: rawTemperature }),
+    ...(thinking === undefined ? {} : { thinking }),
+  };
+}
+
+/**
+ * Refuses a `binary` on a work's provider entry (AGT-2281): pablo.json is
+ * committed and can come from anyone, and the field names a program pablo
+ * runs. The executable is chosen only in the global config.
+ */
+export function refuseWorkBinary(id: string, entry: unknown, source: string): void {
+  if (!isRecord(entry) || entry["binary"] === undefined) return;
+  throw new ProviderConfigError(
+    `pablo: ${source}: provider "${id}": a work's pablo.json may not set "binary" — it names a program pablo runs. ` +
+      `Set it in the global config (\`pablo config set providers.${id}.binary <path>\`, without --project) and remove it from ${source}.`,
+  );
+}
+
 /** The fields a work may change on a provider whose endpoint is remote: none of them say where a request (and its key) goes. */
 const WORK_SAFE_FIELDS = ["model", "timeoutMs", "temperature", "thinking", "tools"] as const;
+
+/** Whether a provider's requests leave the machine (or spend the author's subscription): anything but a loopback endpoint. */
+function isRemote(provider: ProviderConfig): boolean {
+  if (provider.kind === "claude-code") return true;
+  return provider.endpoint !== "" && !isLoopbackEndpoint(provider.endpoint);
+}
 
 /** `127.0.0.1` (any `127.x`), `localhost` or `::1`: a request to it never leaves the machine. */
 export function isLoopbackEndpoint(endpoint: string): boolean {
@@ -419,8 +542,10 @@ function sameKey(a: KeySource, b: KeySource): boolean {
  */
 function checkWorkProvider(merged: ProviderConfig, existing: ProviderConfig | undefined, source: string): void {
   const where = `pablo: ${source}: provider "${merged.id}"`;
-  if (merged.endpoint === "") return; // incomplete (a `config set` in progress): no endpoint to judge yet
-  const remote = !isLoopbackEndpoint(merged.endpoint);
+  // A `claude-code` provider is treated as remote: it spends the author's Claude subscription, as a remote
+  // provider spends a key, so a work may not add one, nor turn another provider into one.
+  if (merged.kind !== "claude-code" && merged.endpoint === "") return; // incomplete (a `config set` in progress): no endpoint to judge yet
+  const remote = isRemote(merged);
   if (existing === undefined) {
     if (remote) {
       throw new ProviderConfigError(
@@ -430,7 +555,7 @@ function checkWorkProvider(merged: ProviderConfig, existing: ProviderConfig | un
     }
     return;
   }
-  if (!remote && isLoopbackEndpoint(existing.endpoint)) return;
+  if (!remote && !isRemote(existing)) return;
   const changed =
     merged.endpoint !== existing.endpoint || merged.kind !== existing.kind || merged.local !== existing.local || !sameKey(merged.key, existing.key);
   if (changed) {

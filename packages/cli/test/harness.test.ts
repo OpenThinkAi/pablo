@@ -115,6 +115,17 @@ test("an anthropic provider takes the agent intent; its credential is the key's 
   expect(provider.forcedToolChoice).toBe(false);
 });
 
+test("a claude-code provider takes the agent intent with no key: the Claude login, no native tools, subscription billing (AGT-2281)", () => {
+  const config = parseWithTestDefaults(JSON.stringify({ providers: { cc: { kind: "claude-code", model: "claude-test-1" } }, intents: { agent: "cc" } }));
+  const provider = harnessProvider(config, { keys: { env: {} } });
+  expect(provider.adapter.id).toBe("cc");
+  expect(provider.skipped).toEqual([]);
+  expect(provider).toMatchObject({ local: false, credential: "claude-login" });
+  expect(provider.adapter.nativeTools).toBe(false);
+  expect(provider.adapter.billing).toBe("subscription");
+  expect(providerHint(provider)).toContain("claude auth login");
+});
+
 test("an anthropic provider with no key is skipped: the agent falls back to the local writer and the skip is reported (AGT-2127)", () => {
   const config = parseWithTestDefaults(JSON.stringify({ providers: { anthropic: { kind: "anthropic" } } }));
   const told: string[] = [];

@@ -34,6 +34,14 @@
  * run like a native call. A reply that still names no tool ends the session as
  * a failed result naming what the model said.
  *
+ * Providers with no native tools (AGT-2281: an adapter with `nativeTools:
+ * false`, the `claude-code` kind) run on the same protocol from the start:
+ * no tools ever go on the wire, the system prompt lists them and the reply
+ * shape (`textToolsSystem`), and every reply is read for a call. A reply
+ * that names an offered tool (or carries a ```json fence) is run as calls;
+ * one that does not is the final answer. A step that needs a call is
+ * steered from the system prompt, and the one re-prompt still backs it up.
+ *
  * Forced tool choice: Anthropic's newest models answer a forced `tool_choice`
  * (`required` or a named tool) with HTTP 400. A spec with `forcedToolChoice:
  * false` (the harness sets it for an Anthropic provider) sends `auto` on the
@@ -41,7 +49,9 @@
  * system prompt; the text-protocol re-prompt still backs it up.
  *
  * Cost (`result.costUsd`) is the turns' reported usage times core's per-model
- * price table (`costUsd`); a local provider costs 0. A model the table does not
+ * price table (`costUsd`); a local provider costs 0, and so does a
+ * subscription one (`billing: "subscription"`, AGT-2281), which is never
+ * named as unpriced. A model the table does not
  * know costs 0 too, but the result names it (`unpricedModel`) so the transcript
  * says the cost is incomplete rather than reading as free. Provider failures (an endpoint that hangs, `tools: false`, a
  * provider with no `chat()`) end the session as a failed result rather than a
@@ -175,6 +185,31 @@ export function parseTextToolCalls(text: string): readonly TextToolCall[] {
   return [];
 }
 
+/**
+ * The system-prompt block for a provider with no native tools (AGT-2281): the
+ * tools as text and the one reply shape that calls them. The same JSON shape
+ * the re-prompt asks for, so `parseTextToolCalls` reads both.
+ */
+export function textToolsSystem(tools: readonly JsonSchemaTool[]): string {
+  const listed = tools.map((tool) => `- ${tool.name}: ${tool.description}\n  parameters: ${JSON.stringify(tool.parameters)}`);
+  return [
+    "# Tools",
+    "You can call the tools below, and only these. To call one, reply with exactly one JSON object inside a ```json fence and nothing else:",
+    "```json",
+    '{"tool": "<name>", "arguments": { ... }}',
+    "```",
+    "To call several in order, put a JSON array of such objects in the one fence. Each result comes back to you in the next turn.",
+    "When you need no tool, answer in plain text with no ```json fence: that reply is your final answer.",
+    "Tools:",
+    ...listed,
+  ].join("\n");
+}
+
+/** A reply's text with its ```json fences removed: the words around a text-protocol call, if any. */
+function outsideFences(text: string): string {
+  return text.replace(/```(?:json)?\s*[\s\S]*?```/g, "").trim();
+}
+
 /** The system-prompt line that asks for a tool call when the wire cannot force one. */
 function steerLine(choice: ToolChoice): string {
   return typeof choice === "object"
@@ -231,19 +266,25 @@ export async function* runLoop(
   const started = now();
   const maxTurns = spec.maxTurns ?? DEFAULT_MAX_TURNS;
   const model = spec.model ?? spec.adapter.model;
+  // A subscription provider (AGT-2281) costs 0 a turn and is never an unpriced model.
+  const subscription = spec.adapter.billing === "subscription";
+  const costOptions = { local: spec.local, subscription, prices: spec.prices };
   const adapter =
     spec.receipts === undefined
       ? spec.adapter
       : withReceipts(spec.adapter, spec.receipts.sink, {
           intent: spec.receipts.intent,
-          cost: (usage, modelId) => costUsd(usage, modelId, { local: spec.local, prices: spec.prices }),
+          cost: (usage, modelId) => costUsd(usage, modelId, costOptions),
         });
   const chat = adapter.chat?.bind(adapter);
   const needsCall = spec.toolChoice !== undefined && spec.toolChoice !== "auto" && spec.toolChoice !== "none";
-  // A provider that refuses a forced choice gets `auto` on the wire and the requirement in the prompt.
-  const steer = needsCall && spec.forcedToolChoice === false;
+  // No native tools (AGT-2281): the tools live in the system prompt and every reply is read for a text-protocol call.
+  const native = spec.adapter.nativeTools !== false;
+  const system = native || jsonTools.length === 0 ? spec.system : `${spec.system}\n\n${textToolsSystem(jsonTools)}`;
+  // A provider that refuses a forced choice gets `auto` on the wire and the requirement in the prompt; one with no native tools, the prompt alone.
+  const steer = needsCall && (spec.forcedToolChoice === false || !native);
   const firstChoice: ToolChoice = steer ? "auto" : (spec.toolChoice ?? "auto");
-  const firstSystem = steer ? `${spec.system}\n\n${steerLine(spec.toolChoice!)}` : spec.system;
+  const firstSystem = steer ? `${system}\n\n${steerLine(spec.toolChoice!)}` : system;
 
   let turns = 0;
   let cost = 0;
@@ -263,7 +304,7 @@ export async function* runLoop(
 
   const messages: ChatMessage[] = [...history, { role: "user", content: message }];
   if (chat === undefined) {
-    yield result(false, "", [`pablo: provider "${spec.adapter.id}" cannot run an agent session (it has no chat()). Map the "agent" intent to an openai-compatible or anthropic provider in pablo's config; \`pablo config show\` lists them.`]);
+    yield result(false, "", [`pablo: provider "${spec.adapter.id}" cannot run an agent session (it has no chat()). Map the "agent" intent to an openai-compatible, anthropic or claude-code provider in pablo's config; \`pablo config show\` lists them.`]);
     return messages;
   }
 
@@ -288,10 +329,10 @@ export async function* runLoop(
     const first = turns === 1;
     // A snapshot: the history keeps growing after this request is sent, and an adapter (or a test) may hold onto it.
     const request: ChatRequest = {
-      system: first ? firstSystem : spec.system,
+      system: first ? firstSystem : system,
       messages: [...messages],
-      tools: textProtocol ? [] : jsonTools,
-      ...(textProtocol || jsonTools.length === 0 ? {} : { toolChoice: first ? firstChoice : "auto" }),
+      tools: textProtocol || !native ? [] : jsonTools,
+      ...(textProtocol || !native || jsonTools.length === 0 ? {} : { toolChoice: first ? firstChoice : "auto" }),
       ...(spec.model === undefined ? {} : { model: spec.model }),
       ...(spec.maxTokens === undefined ? {} : { maxTokens: spec.maxTokens }),
       ...(spec.temperature === undefined ? {} : { temperature: spec.temperature }),
@@ -306,9 +347,9 @@ export async function* runLoop(
       yield result(false, "", [messageOf(error)]);
       return messages;
     }
-    cost += costUsd(turn.usage, model, { local: spec.local, prices: spec.prices });
+    cost += costUsd(turn.usage, model, costOptions);
     const reported = (turn.usage.inputTokens ?? 0) + (turn.usage.outputTokens ?? 0) > 0;
-    if (spec.local !== true && reported && priceFor(model, spec.prices) === undefined) unpriced = model;
+    if (spec.local !== true && !subscription && reported && priceFor(model, spec.prices) === undefined) unpriced = model;
 
     let calls: readonly ToolCall[] = turn.calls;
     if (textProtocol) {
@@ -320,6 +361,13 @@ export async function* runLoop(
         return messages;
       }
       textProtocol = false;
+    } else if (!native && jsonTools.length > 0) {
+      const parsed = parseTextToolCalls(turn.text);
+      // A JSON object in a final answer is not a call unless it names an offered tool or sits in the protocol's fence.
+      const isCall = parsed.some((call) => byName.has(call.name)) || (parsed.length > 0 && /```json/.test(turn.text));
+      calls = isCall ? parsed.map((call, i) => ({ id: `text-${turns}-${i + 1}`, name: call.name, arguments: call.arguments })) : [];
+      const said = isCall ? outsideFences(turn.text) : turn.text.trim();
+      if (said !== "") yield { kind: "assistant", text: isCall ? said : turn.text };
     } else if (turn.text.trim() !== "") {
       yield { kind: "assistant", text: turn.text };
     }

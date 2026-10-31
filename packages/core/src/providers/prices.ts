@@ -52,12 +52,14 @@ export function priceFor(model: string, table: PriceTable = DEFAULT_PRICES): Mod
 export interface CostOptions {
   /** A local provider: the cost is 0 whatever the model is called. */
   readonly local?: boolean | undefined;
+  /** Paid by the author's plan, not per token (AGT-2281, `claude -p` on the Claude login): the cost is 0 and the model is never "unpriced". */
+  readonly subscription?: boolean | undefined;
   readonly prices?: PriceTable | undefined;
 }
 
-/** One turn's cost in US dollars: usage times the model's price; 0 for a local provider, an unknown model, or unreported usage. */
+/** One turn's cost in US dollars: usage times the model's price; 0 for a local or subscription provider, an unknown model, or unreported usage. */
 export function costUsd(usage: ChatUsage, model: string, options: CostOptions = {}): number {
-  if (options.local === true) return 0;
+  if (options.local === true || options.subscription === true) return 0;
   const price = priceFor(model, options.prices);
   if (price === undefined) return 0;
   const input = ((usage.inputTokens ?? 0) / 1_000_000) * price.inputPerMillion;
