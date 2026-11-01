@@ -9,7 +9,8 @@ then `numerals.spell_numbers`, the caps rules and the lexicon. In order:
   Doctor, `St.` Saint, `Gov.` Governor, `Sen.` Senator, `Rep.` Representative, `Prof.` Professor, `Gen.` General,
   `Lt.` Lieutenant, `Sgt.` Sergeant; after a name `Jr.` Junior, `Sr.` Senior (titles keep their capital); `vs.`/`vs` versus, `etc.` et
   cetera, `e.g.` for example, `i.e.` that is, `approx.` approximately, `No. 2` number 2; `Jan.`..`Dec.` before a
-  day number the month and the day as an ordinal (`Oct. 22` -> "October twenty-second"). An abbreviation that
+  day number the month and the day as an ordinal (`Oct. 22` -> "October twenty-second"); a full month name
+  before a day number likewise (`April 23` -> "April twenty-third", `May 5, 2026` -> "May fifth, twenty twenty-six"). An abbreviation that
   ends its line keeps a full stop.
 - **Dates** `10/22/2026` -> "October twenty-second, 2026" (three slash parts: month, day, year).
 - **Times** `3:15` -> "three fifteen", `3:05` -> "three oh five", `12:00` -> "twelve", `3:00 p.m.`, `3pm`,
@@ -108,6 +109,7 @@ _VERSUS = re.compile(r"\bvs\b\.?")
 _PLAIN = re.compile(r"(?<![\w.])(etc\.|e\.g\.|i\.e\.|approx\.)")
 _NUMBER_ABBREV = re.compile(r"\bNo\.\s?(?=\d)")
 _MONTH_DAY = re.compile(r"\b(" + "|".join(MONTHS) + r")\.\s+(\d{1,2})(?:st|nd|rd|th)?\b(?![\d:/.]\d)")
+_FULL_MONTH_DAY = re.compile(r"\b(" + "|".join(MONTH_NAMES[1:]) + r")\s+(\d{1,2})(?:st|nd|rd|th)?\b(?![\d:/.]\d)")
 
 
 def _ends(match: re.Match[str]) -> bool:
@@ -248,6 +250,7 @@ def expand(text: str, changes: Changes | None = None, keep: Collection[str] = ()
     rule(_PLAIN, lambda m: _stop(m, PLAIN[m.group(1)]))
     rule(_NUMBER_ABBREV, lambda m: "number ", 0)
     rule(_MONTH_DAY, lambda m: f"{MONTHS[m.group(1)]} {ordinal(int(m.group(2)))}")
+    rule(_FULL_MONTH_DAY, lambda m: f"{m.group(1)} {ordinal(int(m.group(2)))}")
     rule(_DATE, _date, 0)
     rule(_TIME, _time, 0)
     rule(_HOUR_AMPM, _hour_ampm, 0)

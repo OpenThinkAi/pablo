@@ -369,3 +369,11 @@ def test_shorthand_moves_take_keys_only_where_it_changes_the_line() -> None:
     assert SPOKEN_PARAM in spoken_params([("N", "Mr. Smith & sons")])
     assert spoken_params([("N", "Mister Smith and sons")]) == {}
     assert expand("no shorthand here") == "no shorthand here"
+
+
+def test_a_full_month_name_before_a_day_says_the_day_as_an_ordinal() -> None:
+    assert say("On April 23, 2026, AEI reported", True) == "On April twenty-third, twenty twenty-six, A.E.I. reported"
+    assert say("In a May 5, 2026, report", False) == "In a May fifth, twenty twenty-six, report"
+    assert say("on July 5th", False) == "on July fifth"
+    # a month before a year, or a bare month, is left alone
+    assert say("In May 2026 and in June", False) == "In May twenty twenty-six and in June"
