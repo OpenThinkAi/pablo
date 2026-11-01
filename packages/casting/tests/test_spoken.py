@@ -19,7 +19,7 @@ from pablo_casting.engines import (
     Pass,
     VoiceRef,
     adapt,
-    dotted,
+    as_letters,
     engine_text,
     is_shouted,
     normalise_caps,
@@ -89,9 +89,9 @@ def test_changes_record_each_token() -> None:
 
 
 def test_acronyms_as_spaced_letters_when_on() -> None:
-    assert dotted("AI") == "A I" and dotted("GDP") == "G D P" and dotted("AEI") == "A E I"
-    assert dotted("CEOs") == "C E Os" and dotted("AI's") == "A I's"
-    assert dotted("A") is None and dotted("ABCDEFG") is None and dotted("McDonald") is None
+    assert as_letters("AI") == "A I" and as_letters("GDP") == "G D P" and as_letters("AEI") == "A E I"
+    assert as_letters("CEOs") == "C E Os" and as_letters("AI's") == "A I's"
+    assert as_letters("A") is None and as_letters("ABCDEFG") is None and as_letters("McDonald") is None
     assert normalise_caps("CEOs at AEI and FRI", acronyms=True) == "C E Os at A E I and F R I"
     assert normalise_caps("I trust AI.", acronyms=True) == "I trust A I."  # the full stop stays the sentence's
 
@@ -102,7 +102,7 @@ def test_acronym_mode_off_is_todays_behaviour() -> None:
 
 
 def test_roman_numerals_stay_words() -> None:
-    assert dotted("II") is None and dotted("XIV") is None
+    assert as_letters("II") is None and as_letters("XIV") is None
     assert normalise_caps("World War II and the AI", acronyms=True) == "World War Ii and the A I"
 
 
