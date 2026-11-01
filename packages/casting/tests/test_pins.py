@@ -140,6 +140,8 @@ def test_audiobox_loads_the_pinned_revision(monkeypatch: pytest.MonkeyPatch) -> 
     calls: list[tuple[str, dict[str, object]]] = []
 
     class Model:
+        target_transform = {axis: {"mean": 5.0, "std": 2.0} for axis in ("CE", "CU", "PC", "PQ")}
+
         def to(self, device: object) -> Model:
             return self
 
@@ -152,6 +154,10 @@ def test_audiobox_loads_the_pinned_revision(monkeypatch: pytest.MonkeyPatch) -> 
             calls.append((repo, kwargs))
             return Model()
 
+    class Normalize:
+        def __init__(self, mean: float, std: float) -> None:
+            self.mean, self.std = mean, std
+
     class AesPredictor:
         # The library's shape: a dataclass whose __post_init__ calls setup_model.
         def __init__(self, checkpoint_pth: str | None, data_col: str = "path") -> None:
@@ -163,11 +169,15 @@ def test_audiobox_loads_the_pinned_revision(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(scorers, "dist_version", lambda package: scorers.AUDIOBOX_COPIED_FROM)
     fake_torch(monkeypatch)
-    fake_module(monkeypatch, "audiobox_aesthetics.model.aes", AesMultiOutput=AesMultiOutput)
-    fake_module(monkeypatch, "audiobox_aesthetics.infer", AesPredictor=AesPredictor)
+    fake_module(monkeypatch, "audiobox_aesthetics.model.aes", AesMultiOutput=AesMultiOutput, Normalize=Normalize)
+    fake_module(monkeypatch, "audiobox_aesthetics.infer", AesPredictor=AesPredictor, AXES_NAME=["CE", "CU", "PC", "PQ"])
     predictor = scorers.AudioboxScorer().model()
     assert calls == [("facebook/audiobox-aesthetics", {"revision": pinned("facebook/audiobox-aesthetics")})]
     assert isinstance(predictor.model, Model)  # type: ignore[attr-defined]
+    # The copied setup_model must also build the per-axis normalisers `forward` un-normalises through (AGT-2299).
+    transforms = predictor.target_transform  # type: ignore[attr-defined]
+    assert sorted(transforms) == ["CE", "CU", "PC", "PQ"]
+    assert all((t.mean, t.std) == (5.0, 2.0) for t in transforms.values())
 
 
 def test_audiobox_refuses_an_audiobox_release_other_than_the_one_its_loader_copies(monkeypatch: pytest.MonkeyPatch) -> None:
