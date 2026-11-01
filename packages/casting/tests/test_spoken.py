@@ -12,13 +12,14 @@ from pablo_casting import outputs
 from pablo_casting.cli import run
 from pablo_casting.engines import (
     ACRONYMS_PARAM,
+    ACRONYMS_VERSION,
     SPOKEN_PARAM,
     TURBO,
     PassLine,
     Pass,
     VoiceRef,
     adapt,
-    dotted,
+    as_letters,
     engine_text,
     is_shouted,
     normalise_caps,
@@ -87,12 +88,12 @@ def test_changes_record_each_token() -> None:
     assert changes == [("10-20%", "ten to twenty percent"), ("-7.66", "minus seven point six six")]
 
 
-def test_acronyms_as_dotted_letters_when_on() -> None:
-    assert dotted("AI") == "A.I." and dotted("GDP") == "G.D.P." and dotted("AEI") == "A.E.I."
-    assert dotted("CEOs") == "C.E.O.s" and dotted("AI's") == "A.I.'s"
-    assert dotted("A") is None and dotted("ABCDEFG") is None and dotted("McDonald") is None
-    assert normalise_caps("CEOs at AEI and FRI", acronyms=True) == "C.E.O.s at A.E.I. and F.R.I."
-    assert normalise_caps("I trust AI.", acronyms=True) == "I trust A.I."  # no doubled full stop
+def test_acronyms_as_spaced_letters_when_on() -> None:
+    assert as_letters("AI") == "A I" and as_letters("GDP") == "G D P" and as_letters("AEI") == "A E I"
+    assert as_letters("CEOs") == "C E Os" and as_letters("AI's") == "A I's"
+    assert as_letters("A") is None and as_letters("ABCDEFG") is None and as_letters("McDonald") is None
+    assert normalise_caps("CEOs at AEI and FRI", acronyms=True) == "C E Os at A E I and F R I"
+    assert normalise_caps("I trust AI.", acronyms=True) == "I trust A I."  # the full stop stays the sentence's
 
 
 def test_acronym_mode_off_is_todays_behaviour() -> None:
@@ -101,8 +102,8 @@ def test_acronym_mode_off_is_todays_behaviour() -> None:
 
 
 def test_roman_numerals_stay_words() -> None:
-    assert dotted("II") is None and dotted("XIV") is None
-    assert normalise_caps("World War II and the AI", acronyms=True) == "World War Ii and the A.I."
+    assert as_letters("II") is None and as_letters("XIV") is None
+    assert normalise_caps("World War II and the AI", acronyms=True) == "World War Ii and the A I"
 
 
 def test_a_shouted_line_keeps_capitalising() -> None:
@@ -111,20 +112,20 @@ def test_a_shouted_line_keeps_capitalising() -> None:
     assert normalise_caps("WE ARE THE CHAMPIONS, AI.", acronyms=True) == "We Are The Champions, Ai."
     # A shouted phrase inside a line (three caps words in a row, or two with one too long for an acronym) too.
     assert normalise_caps("Good evening from THE HARBOUR LIGHT, where", acronyms=True) == "Good evening from The Harbour Light, where"
-    assert normalise_caps("US GDP rose", acronyms=True) == "U.S. G.D.P. rose"
+    assert normalise_caps("US GDP rose", acronyms=True) == "U S G D P rose"
 
 
 def test_the_lexicon_overrides_an_acronym() -> None:
     entries = parse("NASA -> nasa\nzinfandel -> zin-fan-DELL")
     line = "NASA said AI likes ZINFANDEL"
     params = spoken_params([("N", line)], entries, acronyms=True)
-    assert params[ACRONYMS_PARAM] is True
-    assert turbo_text(line, "N", params["lexicon"], True) == "nasa said A.I. likes zin-fan-DELL"
+    assert params[ACRONYMS_PARAM] == ACRONYMS_VERSION
+    assert turbo_text(line, "N", params["lexicon"], True) == "nasa said A I likes zin-fan-DELL"
 
 
 def test_the_requested_lines() -> None:
     said = lambda text: turbo_text(text, "NARRATOR", None, True)  # noqa: E731
-    assert said("AI could push unemployment to 10-20% within one to five years.") == "A.I. could push unemployment to ten to twenty percent within one to five years."
+    assert said("AI could push unemployment to 10-20% within one to five years.") == "A I could push unemployment to ten to twenty percent within one to five years."
     assert said("a net rating of -7.66 and opponents shot .376") == "a net rating of minus seven point six six and opponents shot point three seven six"
 
 
@@ -145,14 +146,14 @@ def test_take_keys_move_only_for_lines_the_new_rules_change() -> None:
     ranged = adapt(TURBO, one("10-20%"), {"N": voice()}, None, None)
     assert ranged[SPOKEN_PARAM] == 1 and ACRONYMS_PARAM not in ranged
     assert ACRONYMS_PARAM not in adapt(TURBO, one("AI here"), {"N": voice()}, None, None)  # fiction: off
-    assert adapt(TURBO, one("AI here"), {"N": voice()}, None, None, (), (), True)[ACRONYMS_PARAM] is True
+    assert adapt(TURBO, one("AI here"), {"N": voice()}, None, None, (), (), True)[ACRONYMS_PARAM] == ACRONYMS_VERSION
 
 
 def test_engine_text_follows_the_take_key() -> None:
     def inputs(params: dict[str, object]) -> TakeInputs:
         return TakeInputs(engine=EngineId("chatterbox-turbo", "0" * 64, "0", "0"), voice="v", lines=(Line("N", "AI at 10-20%"),), seed=0, direction=Direction(), params=params)
 
-    assert engine_text(TURBO, inputs({ACRONYMS_PARAM: True})) == "A.I. at ten to twenty percent"
+    assert engine_text(TURBO, inputs({ACRONYMS_PARAM: ACRONYMS_VERSION})) == "A I at ten to twenty percent"
     assert engine_text(TURBO, inputs({})) == "Ai at ten to twenty percent"
 
 
@@ -209,8 +210,8 @@ def test_pronounce_lists_changed_lines_tokens_and_unresolved_words(tmp_path: Pat
     assert [line["line"] for line in lines] == [3, 7]  # the fog line is said as written
     first = lines[0]
     assert first["speaker"] == "NARRATOR"
-    assert first["changes"] == [{"from": "AI", "to": "A.I."}, {"from": "10-20%", "to": "ten to twenty percent"}]  # in line order
-    assert first["engine"] == "A.I. could push unemployment to ten to twenty percent within one to five years."
+    assert first["changes"] == [{"from": "AI", "to": "A I"}, {"from": "10-20%", "to": "ten to twenty percent"}]  # in line order
+    assert first["engine"] == "A I could push unemployment to ten to twenty percent within one to five years."
     assert lines[1]["changes"] == [{"from": "NASA", "to": "nasa"}]  # the lexicon wins; the chain through caps is one change
     unresolved = {row["token"]: row for row in body["unresolved"]}  # type: ignore[union-attr]
     assert set(unresolved) == {"Brookings", "Institution", "Okafor"}  # "The", "NARRATOR"'s sentence starts and NASA are decided
@@ -244,8 +245,8 @@ def test_a_nonfiction_perform_reads_acronyms_as_letters_and_the_words_gate_keeps
     assert code == 0, body
     assert factory.engine is not None
     first, second = factory.engine.calls[0], factory.engine.calls[1]
-    assert second["text"].startswith("Mind the A.I. at ten to twenty percent")
-    assert second["inputs"].params[ACRONYMS_PARAM] is True and second["inputs"].params[SPOKEN_PARAM] == 1
+    assert second["text"].startswith("Mind the A I at ten to twenty percent")
+    assert second["inputs"].params[ACRONYMS_PARAM] == ACRONYMS_VERSION and second["inputs"].params[SPOKEN_PARAM] == 1
     # The shouted-title line keeps today's capitalising and gets no new param.
     assert "The Harbour Light" in first["text"] and ACRONYMS_PARAM not in first["inputs"].params
     assert any("Mind the AI at 10-20%" in line for line in LineSpy.seen)  # the gate judges the script's own words
@@ -372,7 +373,7 @@ def test_shorthand_moves_take_keys_only_where_it_changes_the_line() -> None:
 
 
 def test_a_full_month_name_before_a_day_says_the_day_as_an_ordinal() -> None:
-    assert say("On April 23, 2026, AEI reported", True) == "On April twenty-third, twenty twenty-six, A.E.I. reported"
+    assert say("On April 23, 2026, AEI reported", True) == "On April twenty-third, twenty twenty-six, A E I reported"
     assert say("In a May 5, 2026, report", False) == "In a May fifth, twenty twenty-six, report"
     assert say("on July 5th", False) == "on July fifth"
     # a month before a year, or a bare month, is left alone

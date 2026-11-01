@@ -125,13 +125,13 @@ test("pronounce's plain text lists each changed line, its tokens and engine text
       {
         unit: 1,
         file: "outputs/narrated/readings/01-jobs.md",
-        lines: [{ line: 3, speaker: "NARRATOR", text: "AI at 10-20%", engine: "A.I. at ten to twenty percent", changes: [{ from: "10-20%", to: "ten to twenty percent" }, { from: "AI", to: "A.I." }] }],
+        lines: [{ line: 3, speaker: "NARRATOR", text: "AI at 10-20%", engine: "A I at ten to twenty percent", changes: [{ from: "10-20%", to: "ten to twenty percent" }, { from: "AI", to: "A I" }] }],
       },
     ],
     unresolved: [{ token: "Okafor", kind: "capitalised", count: 2, first: { unit: 1, line: 7 } }],
   });
   expect(text).toContain("acronyms read as letters");
-  expect(text).toContain('  3 NARRATOR: "10-20%" -> "ten to twenty percent", "AI" -> "A.I."');
-  expect(text).toContain("      A.I. at ten to twenty percent");
+  expect(text).toContain('  3 NARRATOR: "10-20%" -> "ten to twenty percent", "AI" -> "A I"');
+  expect(text).toContain("      A I at ten to twenty percent");
   expect(text).toContain("  Okafor  capitalised, 2x, first unit 1 line 7");
 });

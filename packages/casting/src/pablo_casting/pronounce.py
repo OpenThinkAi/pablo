@@ -5,7 +5,7 @@
 `outputs/radio/episodes/`, narrated's `outputs/narrated/readings/`) and, for
 every spoken line whose engine input differs from its text, reports the line
 number, the speaker, each token the normalisers changed (`"10-20%" -> "ten to
-twenty percent"`, `"AI" -> "A.I."`, a lexicon respelling) and the whole text
+twenty percent"`, `"AI" -> "A I"`, a lexicon respelling) and the whole text
 the engine reads. The engine text is built exactly as `perform` builds it
 (`engines.spoken_params` then `turbo_text`, or `chatterbox_text` inside a
 `[DRAMA]` scene), with the output's lexicon (`lexicon.lexicon_path`) and the
@@ -29,7 +29,7 @@ from pathlib import Path
 
 from pablo_casting import outputs
 from pablo_casting.binding import episode_files
-from pablo_casting.engines import ACRONYMS_PARAM, LEXICON_PARAM, chatterbox_text, dotted, is_shouted, spoken_params, turbo_text
+from pablo_casting.engines import ACRONYMS_PARAM, ACRONYMS_VERSION, LEXICON_PARAM, as_letters, chatterbox_text, is_shouted, spoken_params, turbo_text
 from pablo_casting.lexicon import Entry, acronym_mode, lexicon_path, load
 from pablo_casting.script import parse_script
 from pablo_casting.spoken import mask, undecided
@@ -79,7 +79,7 @@ def _unresolved(text: str, speaker: str, entries: Sequence[Entry], acronyms: boo
             continue
         if word.split("'")[0] == "I":  # I, I'm, I'll
             continue
-        if letters_on and dotted(word) is not None:
+        if letters_on and as_letters(word) is not None:
             continue  # read as letters
         letters = [c for c in word if c.isalpha()]
         caps = len(letters) > 1 and all(c.isupper() for c in letters)
@@ -114,7 +114,7 @@ def cmd_pronounce(work: Path, episode: int | None) -> Result:
         for spoken in script.lines:
             params = spoken_params([(spoken.speaker, spoken.text)], entries, acronyms)
             respelt = params.get(LEXICON_PARAM)
-            letters = params.get(ACRONYMS_PARAM) is True
+            letters = params.get(ACRONYMS_PARAM) == ACRONYMS_VERSION
             changes: list[tuple[str, str]] = []
             read = chatterbox_text if spoken.drama else turbo_text  # a [DRAMA] scene's engine
             engine = read(spoken.text, spoken.speaker, respelt, letters, changes)

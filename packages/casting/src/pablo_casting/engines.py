@@ -49,9 +49,9 @@ text is never changed; only the engine input is. Evidence (AGT-1677, Matt
 title-cased; ZONOS2 spelled caps letter by letter.
 
 **Acronyms** (AGT-2302): on a nonfiction work (`lexicon.acronym_mode`) an
-acronym of 2-6 capitals reaches the engine as dotted letters (`AI` -> `A.I.`,
-`CEOs` -> `C.E.O.s`), which a probe heard Turbo say right where `Ai` was read
-"eye". Roman numerals, words the work's lexicon respells and shouted lines or
+acronym of 2-6 capitals reaches the engine as spaced letters (`AI` -> `A I`,
+`CEOs` -> `C E Os`): `Ai` was read "eye", and dotted letters ("A.I.") were read
+"ay eye eye ah" in a long line, while spaced ones read cleanly (heard by the author). Roman numerals, words the work's lexicon respells and shouted lines or
 phrases keep the capitalising above. The pass's `acronyms` param records it,
 set only where it changes the engine input; the AGT-2302 number forms
 (`numerals.py`: ranges, minus signs, leading-dot decimals) add `spoken` the
@@ -104,6 +104,8 @@ ADAPTER_VERSION = 2  # 2: numerals spelled out for the engine (AGT-1789)
 
 ACRONYMS_PARAM = "acronyms"
 """Take-key param: acronyms read as letters (`normalise_caps`); set only on a nonfiction work's passes it changes."""
+ACRONYMS_VERSION = 2
+"""The `acronyms` param's value: 2 since acronyms are spaced letters (`True` keys were dotted ones), so no dotted take is reused."""
 SPOKEN_PARAM = "spoken"
 """Take-key param: the AGT-2302 spoken forms (`spoken.py`, the number forms) changed this pass's engine input (the value is their version)."""
 SPOKEN_VERSION = 1
@@ -128,15 +130,18 @@ def is_shouted(text: str) -> bool:
     return caps_words >= 2 and upper * 3 > len(letters) * 2
 
 
-def dotted(word: str) -> str | None:
-    """`word` as dotted letters when it is an acronym (`AI` -> `A.I.`, `CEOs` -> `C.E.O.s`), else None.
+def as_letters(word: str) -> str | None:
+    """`word` as spaced letters when it is an acronym (`AI` -> `A I`, `CEOs` -> `C E Os`), else None.
+
+    Spaced, not dotted: Turbo read "A.I." in a long line as "ay eye eye ah" (the full stops read as
+    sentence breaks), where "A I" read cleanly; heard by the author, 2026-11-01.
 
     Roman numerals (`II`, `XIV`, `CD`) are not acronyms.
     """
     match = _ACRONYM.fullmatch(word)
     if match is None or _ROMAN.fullmatch(match.group(1)):
         return None
-    return "".join(f"{c}." for c in match.group(1)) + (match.group(2) or "")
+    return " ".join(match.group(1)) + (match.group(2) or "")
 
 
 def _is_caps(word: str) -> bool:
@@ -151,7 +156,7 @@ def _shouted_phrases(text: str) -> set[int]:
     run: list[re.Match[str]] = []
 
     def close() -> None:
-        if len(run) >= 3 or (len(run) == 2 and any(dotted(m.group(0)) is None for m in run)):
+        if len(run) >= 3 or (len(run) == 2 and any(as_letters(m.group(0)) is None for m in run)):
             starts.update(m.start() for m in run)
         run.clear()
 
@@ -173,7 +178,7 @@ def normalise_caps(text: str, acronyms: bool = False, keep: Collection[str] = ()
     and mixed-case words (`McDonald`) are left alone.
 
     With `acronyms` (AGT-2302, nonfiction works) an acronym of 2-6 capitals is read
-    as letters instead (`AI` -> `A.I.`, `CEOs` -> `C.E.O.s`; `dotted`), except a word
+    as letters instead (`AI` -> `A I`, `CEOs` -> `C E Os`; `as_letters`), except a word
     in `keep` (lower-case: the words the work's lexicon respells, so `NASA -> nasa`
     still wins), every word of a shouted line (`is_shouted`, of `shouted` when
     given, else of `text`) and of a shouted phrase inside one (`_shouted_phrases`:
@@ -186,11 +191,8 @@ def normalise_caps(text: str, acronyms: bool = False, keep: Collection[str] = ()
     def fix(match: re.Match[str]) -> str:
         word = match.group(0)
         if letters_on and match.start() not in phrases and word.lower() not in keep:
-            spoken = dotted(word)
+            spoken = as_letters(word)
             if spoken is not None:
-                end = match.end()
-                if end < len(match.string) and match.string[end] == "." and spoken.endswith("."):
-                    spoken = spoken[:-1]  # "AI." reads "A.I.", not "A.I.."
                 return spoken
         letters = [c for c in word if c.isalpha()]
         if len(letters) < 2 or not all(c.isupper() for c in letters):
@@ -509,14 +511,14 @@ def spoken_params(lines: Iterable[tuple[str, str]], lexicon: Sequence[Entry] = (
     if any(read_text(text, speaker, respelt) != legacy_read_text(text, speaker, respelt) for speaker, text in rows):
         params[SPOKEN_PARAM] = SPOKEN_VERSION
     if acronyms and any(read_text(text, speaker, respelt, True) != read_text(text, speaker, respelt) for speaker, text in rows):
-        params[ACRONYMS_PARAM] = True
+        params[ACRONYMS_PARAM] = ACRONYMS_VERSION
     return params
 
 
 def engine_text(spec: EngineSpec, inputs: TakeInputs) -> str:
     """The text the engine reads, derived from the take key's own lines."""
     lexicon = inputs.params.get(LEXICON_PARAM)
-    acronyms = inputs.params.get(ACRONYMS_PARAM) is True
+    acronyms = inputs.params.get(ACRONYMS_PARAM) == ACRONYMS_VERSION  # an old `True` key was dotted text: not reproduced as letters
     if spec.name == TURBO.name:
         return " ".join(turbo_text(line.text, line.speaker, lexicon, acronyms) for line in inputs.lines)
     if spec.name == CHATTERBOX.name:
