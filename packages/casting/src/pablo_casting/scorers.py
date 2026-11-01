@@ -398,8 +398,8 @@ class AudioboxScorer(_Lazy):
                 f"{installed} is installed: re-check AesPredictor.setup_model against PinnedPredictor in scorers.py, "
                 f"then update AUDIOBOX_COPIED_FROM (and the audiobox pin in pins.py if the weights moved)"
             )
-        from audiobox_aesthetics.infer import AesPredictor
-        from audiobox_aesthetics.model.aes import AesMultiOutput
+        from audiobox_aesthetics.infer import AXES_NAME, AesPredictor
+        from audiobox_aesthetics.model.aes import AesMultiOutput, Normalize
 
         repo, revision = self.info.weights, _revision(self.info)
 
@@ -419,6 +419,11 @@ class AudioboxScorer(_Lazy):
                 model.to(self.device)
                 model.eval()
                 self.model = model
+                # The original's last statement: `forward` un-normalises each axis through these (AGT-2299).
+                self.target_transform = {
+                    axis: Normalize(mean=model.target_transform[axis]["mean"], std=model.target_transform[axis]["std"])
+                    for axis in AXES_NAME
+                }
 
         return PinnedPredictor(checkpoint_pth=None, data_col="path")
 
