@@ -93,7 +93,7 @@ import numpy as np
 
 from pablo_casting.binding import BindingRefusal, library_dir, pin_state, read_cast, read_episode
 from pablo_casting.directions import Direction as ScriptDirection
-from pablo_casting.lexicon import PARAM as LEXICON_PARAM, Entry, load as load_lexicon, respelt_words
+from pablo_casting.lexicon import PARAM as LEXICON_PARAM, Entry, acronym_mode, load as load_lexicon, respelt_words
 from pablo_casting.engines import (
     DRAMA_ENGINE,
     ENGINE_SPECS,
@@ -375,6 +375,8 @@ class Performer:
     totals: Totals = field(default_factory=Totals)
     lexicon: list[Entry] | None = None
     """The work's pronunciation lexicon; loaded from `outputs/radio/pronounce.md` when not given (AGT-1798)."""
+    acronyms: bool | None = None
+    """Acronyms read as letters (AGT-2302); from the work's track when not given (`lexicon.acronym_mode`: nonfiction)."""
     receipt_tags: dict[str, object] = field(default_factory=dict)
     """Merged into every `take` and `gate` receipt (design on demand tags its trial passes, AGT-1699)."""
     air: float = DEFAULT_AIR
@@ -385,6 +387,8 @@ class Performer:
     def __post_init__(self) -> None:
         if self.lexicon is None:
             self.lexicon = load_lexicon(self.work)
+        if self.acronyms is None:
+            self.acronyms = acronym_mode(self.work)
 
     def route(self, take_pass: Pass) -> tuple[EngineSpec, PerformEngine]:
         """The engine a pass renders through: the dramatic one for a `[DRAMA]` line, else the episode's."""
@@ -403,7 +407,7 @@ class Performer:
         direction = _direction(first)
         voices = {line.speaker: self.roles[line.speaker].voice for line in take_pass.lines}
         spec, engine = self.route(take_pass)
-        params = adapt(spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, reasons, self.lexicon or ())
+        params = adapt(spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, reasons, self.lexicon or (), bool(self.acronyms))
         if self.air != DEFAULT_AIR:
             params["air"] = self.air  # the stored take's ending depends on it, so its key does too
         return TakeInputs(

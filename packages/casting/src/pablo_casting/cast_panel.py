@@ -26,7 +26,7 @@ from pablo_casting.binding import BindingRefusal, pin_state, read_cast, read_epi
 from pablo_casting.engines import DEFAULT_ENGINE, DRAMA_ENGINE, ENGINE_SPECS, EngineFactory, EngineUnavailable, Pass, PassLine, VoiceRef, adapt
 from pablo_casting.fix import recast_lines
 from pablo_casting.gates import GateRefusal, load_card
-from pablo_casting.lexicon import load as load_lexicon
+from pablo_casting.lexicon import acronym_mode, load as load_lexicon
 from pablo_casting.library import card_hash
 from pablo_casting.manifest import read_version, versions
 from pablo_casting.perform import card_transcript, runs_between_cues
@@ -155,7 +155,7 @@ def cmd_preview(env: Mapping[str, str], work: Path, episode: int, line: str | No
         engine.load()
     except EngineUnavailable as missing:
         return _refused(str(missing))
-    params = adapt(spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, (), load_lexicon(work))
+    params = adapt(spec, take_pass, voices, direction.emotion if direction else None, direction.intensity if direction else None, (), load_lexicon(work), acronym_mode(work))
     inputs = TakeInputs(
         engine=engine.identity,
         voice=digest,

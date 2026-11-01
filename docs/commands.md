@@ -1228,7 +1228,7 @@ It serves:
 | Setup and publishing | `output` (list, remove, plan), `migrate`, `publish` |
 | Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule`, `voice_edit`, `voice_remove`, `voice_use` |
 | Reading | `read`, `search`, `web_search`, `web_fetch` |
-| Radio | `bind`, `audition`, `cast`, `voices`, `describe_voice`, `perform`, `mix`, `fix` |
+| Radio | `bind`, `audition`, `cast`, `voices`, `describe_voice`, `pronounce`, `perform`, `mix`, `fix` |
 
 `init`, `story`, `output_add` and `merge` take the same arguments as the verbs and
 refuse the same way. `merge` accepts a change branch of any kind (or with `reject`
@@ -1315,6 +1315,7 @@ that each loader passes its pin through, without loading a model.
 | `pablo audition --role R --describe "..." [-n 6] [--designer qwen3\|voxcpm2] [--traits '{...}'] [--seed S]` | renders candidate voices reading a test passage, scored. `audition --dry-run` installs and checks the casting side without loading a model |
 | `pablo cast --role R --candidate n [--recast] [--notes "..."]` | freezes a candidate as a voice card in the shared library. `cast --auto --project <slug> [--episode N\|--all]` matches unbound roles to library voices; add `--design` to design voices for roles with no match. Synthetic voices only |
 | `pablo describe_voice --describe "..." [--gender f\|m\|x] [--role R]` | normalises a `CAST:` description into the voice traits vocabulary with the deterministic mapper: the traits found, the phrases it could not normalise, and the designer instruct. Loads no model and writes nothing; the same function as the MCP tool |
+| `pablo pronounce --project <slug> --output radio\|narrated [--unit N \| --episode N] [--json]` | shows what the engine will say before any render: for each script line whose engine input differs from its text, the line number, the speaker, each changed token (`"10-20%" -> "ten to twenty percent"`, `"AI" -> "A.I."`) and the full engine text; then the capitalised or ALL-CAPS words no rule or lexicon entry decided, to consider for `pronounce.md`, and what the shorthand rules could not decide: links, abbreviation-like words ending in a full stop, and letters stuck to a number that are no known unit. Without a unit, every script of the output. Read-only, loads no model; the same function as the MCP tool. See *What the engine reads* below |
 | `pablo voices list [--auto-admitted] \| show <slug> \| retire <slug> [--reason "..."]` | the shared voice library; a retired voice still plays for stories already pinned to it |
 | `pablo bind --project <slug> --role <NAME> --voice <slug>` | pins a script role to a library voice in the work's `cast.json` |
 | `pablo perform --project <slug> --episode N [--engine chatterbox-turbo\|dia] [--json-lines]` | renders an episode's lines in their bound voices, retrying lines that fail the quality gates; refused while a role is uncast. `--stream` (with `--episode N` or `--all`) mixes and publishes as it goes, and never replaces a human mix: one that still fits is the one rendered, one that no longer fits is rebased onto the new take set (as `mix` does) |
@@ -1354,3 +1355,69 @@ is not cast yet and names the `cast` command. A reading has no sound cues, so it
 mix is the voices alone. `--stream` and `--all` stay the radio output's: a
 narrated unit is performed one at a time. The pronunciation lexicon is the
 output's own, `outputs/narrated/pronounce.md`.
+
+### What the engine reads
+
+The script keeps exactly what the author wrote; only the text sent to the voice
+engine is normalised, in this order, and the quality gates still judge each take
+against the script's own words.
+
+1. **Shorthand is spoken** (every track). URLs and email addresses are left
+   exactly as written (and listed by `pronounce` to rewrite by hand); elsewhere:
+   - abbreviations, case-sensitive: `Mr.` "Mister", `Mrs.` "Missus", `Ms.` "Miz";
+     before a capitalised name `Dr.` "Doctor", `St.` "Saint", `Gov.`, `Sen.`,
+     `Rep.`, `Prof.`, `Gen.`, `Lt.`, `Sgt.` (Governor, Senator, ...); after a
+     name `Jr.` "Junior", `Sr.` "Senior"; `vs.`/`vs` "versus", `etc.` "et
+     cetera", `e.g.` "for example", `i.e.` "that is", `approx.`
+     "approximately", `No. 2` "number two"; `Jan.` to `Dec.` before a day
+     number (`Oct. 22` -> "October twenty-second");
+   - dates and times: `10/22/2026` -> "October twenty-second, twenty
+     twenty-six"; `3:15` "three fifteen", `3:05` "three oh five", `12:00`
+     "twelve", `3:00 p.m.`, `3pm`, `3p` "three p.m.";
+   - fractions: `1/2` one half, `1/3` one third, `2/3` two thirds, `1/4` one
+     quarter, `3/4` three quarters, `1 1/2` one and one half, any other `n/d`
+     "n over d";
+   - decades and periods: `'90s` nineties, `1990s` nineteen nineties, `2020s`
+     twenty twenties, `Q3` "Q three", `FY2026` "fiscal year twenty twenty-six";
+   - magnitudes: `$7T` "seven trillion dollars", `15M` fifteen million,
+     `3B`/`3bn` billion, `4k`/`$40K` thousand (`4K` and `8K` before a screen
+     word or alone stay: a resolution), `10x` "ten times";
+   - units after a number, singular for exactly one: mph, km, km/h, kg, lb/lbs,
+     ft, `in.` (only with its full stop), mi, cm, mm, ml, GB, MB, TB, bps (basis
+     points), pts, ppl, hr/hrs, min/mins, sec/secs, yr/yrs (`1 km` "one
+     kilometer", `2.5 kg` "two point five kilograms");
+   - symbols: `&` and, `%` with no number before it percent, a slash between
+     words or (`and/or` "and or"), `×` or `x` between numbers times, `~`
+     before a number about, `±` plus or minus, `#` before a number number, `@`
+     at.
+2. **Numbers are spoken.** Years as said (`1917` -> "nineteen seventeen"), other
+   numbers as words, ordinals, decimals, dollars and percentages. Ranges between
+   two numbers (`a-b` or `a–b`, spaces allowed, `$` or `%` on either side) are
+   "a to b" with the unit said once: `10-20%` and `10%-20%` -> "ten to twenty
+   percent", `$5-10` -> "five to ten dollars", `22-25 year-olds` -> "twenty-two
+   to twenty-five year-olds". A year then a two-digit end is a year range:
+   `2025-26` -> "twenty twenty-five to twenty-six". When the first number is not
+   smaller it is a score or a pair: `120-119` -> "one hundred twenty, one hundred
+   nineteen". A three-part date (`2025-05-28`) and a number after a word
+   (`COVID-19`) are not ranges. A minus sign after a space, a line start or `(`
+   is said (`-7.66` -> "minus seven point six six"); a hyphen between words or
+   numbers never is. A decimal with no leading digit is said: `.376` -> "point
+   three seven six".
+3. **Capitals.** ALL-CAPS words of two or more letters are said as ordinary words
+   (`THE HARBOUR LIGHT` -> "The Harbour Light"). On a `nonfiction` work, an
+   acronym of 2 to 6 capitals is said as letters instead: `AI` -> "A.I.", `GDP`
+   -> "G.D.P.", `CEOs` -> "C.E.O.s". Roman numerals (`II`, `XIV`), words the
+   lexicon respells, a shouted line (two or more ALL-CAPS words and more than two
+   thirds of its letters capitals) and a shouted phrase inside a line (three
+   ALL-CAPS words in a row, or two with one longer than six letters) keep the
+   word reading. Dotted initialisms (`U.S.`, `U.K.`, `E.U.`, `U.N.`) stay as
+   written, never "us". A fiction work reads capitals as before.
+4. **The lexicon.** The output's `pronounce.md` (`outputs/radio/pronounce.md`,
+   `outputs/narrated/pronounce.md`): one `word -> respelling` per line, optionally
+   `SPEAKER: word -> respelling`, applied last, so an entry such as
+   `NASA -> nasa` wins over the acronym rule, an entry for a word a shorthand
+   rule would change (`vs -> verses`) leaves that word to the lexicon, and a
+   respelling keeps its own capitals (`Zinfandel -> zin-fan-DELL`).
+
+Only takes whose engine text these rules change get a new take key, so a work's
+other takes are reused as they are. Run `pablo pronounce` to see the result.

@@ -106,6 +106,7 @@ const P0_VERBS = [
   "cast",
   "voices",
   "describe_voice",
+  "pronounce",
   "perform",
   "mix",
   "review",
@@ -471,7 +472,7 @@ async function runVerbEntry(name: string, args: ParsedArgs, cwd: string, text: (
 }
 
 /** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
-const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix", "fix", "describe_voice"]);
+const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix", "fix", "describe_voice", "pronounce"]);
 
 /** Plain-text output for a casting verb's body. */
 export function castingText(verb: string, body: Record<string, unknown>): string {
@@ -534,6 +535,27 @@ export function castingText(verb: string, body: Record<string, unknown>): string
     const free = (body["freeText"] as readonly string[] | undefined) ?? [];
     if (free.length > 0) lines.push(`  not normalised: ${free.join("; ")} (choose traits for these and pass --role-traits to cast --auto --design)`);
     lines.push(`  instruct: ${String(body["instruct"])}`);
+  }
+  if (verb === "pronounce" && Array.isArray(body["units"])) {
+    lines.push(`pablo: ${String(body["output"])}: ${String(body["changedLines"])} line(s) said differently from the text${body["acronyms"] === true ? " (acronyms read as letters)" : ""}; lexicon ${String(body["lexicon"])} (${String(body["lexiconEntries"])} entries)`);
+    for (const unit of body["units"] as Array<Record<string, unknown>>) {
+      const rows = (unit["lines"] as Array<Record<string, unknown>> | undefined) ?? [];
+      if (rows.length === 0) continue;
+      lines.push(`${String(unit["file"])}`);
+      for (const row of rows) {
+        const changes = ((row["changes"] as Array<{ from: string; to: string }> | undefined) ?? []).map((c) => `"${c.from}" -> "${c.to}"`).join(", ");
+        lines.push(`  ${String(row["line"])} ${String(row["speaker"])}: ${changes || "(tags only)"}`);
+        lines.push(`      ${String(row["engine"])}`);
+      }
+    }
+    const unresolved = (body["unresolved"] as Array<Record<string, unknown>> | undefined) ?? [];
+    if (unresolved.length > 0) {
+      lines.push("not in the lexicon (add to pronounce.md if the engine says them wrong):");
+      for (const u of unresolved) {
+        const first = u["first"] as { unit?: unknown; line?: unknown } | undefined;
+        lines.push(`  ${String(u["token"])}  ${String(u["kind"])}, ${String(u["count"])}x, first unit ${String(first?.unit)} line ${String(first?.line)}`);
+      }
+    }
   }
   if (verb === "perform" && typeof body["manifest"] === "string") {
     lines.push(`  manifest: ${body["manifest"]}`);
