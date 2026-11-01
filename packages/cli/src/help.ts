@@ -236,7 +236,7 @@ export const USAGE_LINES: readonly string[] = [
     '  pablo describe_voice --describe "..." [--gender f|m|x]',
     "                                            a CAST: description in the traits vocabulary,",
     "                                            and the phrases the mapper could not normalise",
-    "  pablo pronounce --project <slug> --output radio|narrated [--unit N | --episode N]",
+    "  pablo pronounce --project <slug> [--output radio|narrated] [--unit N | --episode N]",
     "                                            what the engine will say: each line said",
     "                                            differently from its text, the tokens changed",
     "                                            and the engine text, plus the capitalised words",

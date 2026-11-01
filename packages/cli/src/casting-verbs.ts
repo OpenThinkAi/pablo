@@ -798,7 +798,11 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       if (args.episode !== undefined && args.unit !== undefined && args.episode !== args.unit) {
         return refuse(`pablo pronounce: --episode ${args.episode} and --unit ${args.unit} name different units`);
       }
-      const output = addressedOutput(args, work, "pronounce");
+      // Without --output: the work's one performed output when it has exactly one (a nonfiction work's narrated), else radio.
+      const marker = readMarker(work);
+      const performed = AUDIO_OUTPUTS.filter((o) => marker.ok && Object.hasOwn(marker.marker.outputs, o));
+      const implied = args.output === undefined && performed.length === 1 ? { ...args, output: performed[0] } : args;
+      const output = addressedOutput(implied, work, "pronounce");
       if (typeof output !== "string") return output;
       return run(["pronounce", ...flag("--episode", args.episode ?? args.unit)], { project: args.project }, ctx, deps, [], output);
     },

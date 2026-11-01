@@ -100,11 +100,11 @@ test("pronounce --output narrated --unit N asks the Python side for that unit of
   expect(calls.some((c) => c.argv[0] === "sync" || c.argv.includes("pull"))).toBe(false);
 });
 
-test("pronounce defaults to radio and every unit, and refuses an output the work does not have or a bare --unit", async () => {
+test("pronounce defaults to the work's one performed output, else radio, and every unit, and refuses an output the work does not have or a bare --unit", async () => {
   const { vault } = narratedWork();
   const { deps, calls } = fakeMachine();
   expect((await verb(deps).run({ project: "ice-house" } as never, ctxIn(vault))).exitCode).toBe(0);
-  expect(calls.at(-1)!.output ?? "radio").toBe("radio"); // radio is the casting side's default
+  expect(calls.at(-1)!.output).toBe("narrated"); // the work's one performed output
   expect(calls.at(-1)!.argv[1]).toBe(`--vault=${vault}`);
   const before = calls.length;
   expect((await verb(deps).run({ project: "ice-house", output: "radio" } as never, ctxIn(vault))).exitCode).toBe(2);

@@ -34,7 +34,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Collection
 
-from pablo_casting.numerals import Changes, _ONES, _under_hundred, cardinal, ordinal, recorded
+from pablo_casting.numerals import Changes, ONES, under_hundred, cardinal, ordinal, recorded
 
 _WORDS = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*")
 
@@ -77,7 +77,7 @@ def number_words(raw: str) -> str:
     """A written number as said, never as a year: "2,000" two thousand, "2.5" two point five."""
     whole, _, fraction = raw.replace(",", "").partition(".")
     words = cardinal(int(whole or "0"))
-    return f"{words} point {' '.join(_ONES[int(d)] for d in fraction)}" if fraction else words
+    return f"{words} point {' '.join(ONES[int(d)] for d in fraction)}" if fraction else words
 
 
 def _is_one(raw: str) -> bool:
@@ -172,7 +172,7 @@ def _time(match: re.Match[str]) -> str:
     h, m = int(hours), int(minutes)
     if h > 23 or m > 59:
         return match.group(0)
-    words = _hour(hours) if m == 0 else f"{_hour(hours)} oh {_ONES[m]}" if m < 10 else f"{_hour(hours)} {_under_hundred(m)}"
+    words = _hour(hours) if m == 0 else f"{_hour(hours)} oh {ONES[m]}" if m < 10 else f"{_hour(hours)} {under_hundred(m)}"
     half = ap or ap_short
     return f"{words} {half.lower()}.m." if half else words
 
@@ -200,14 +200,14 @@ def fraction_words(n: int, d: int) -> str:
 
 
 def _decade_word(tens: int) -> str:
-    return {0: "hundreds", 1: "tens"}.get(tens) or _under_hundred(tens * 10)[:-1] + "ies"
+    return {0: "hundreds", 1: "tens"}.get(tens) or under_hundred(tens * 10)[:-1] + "ies"
 
 
 def _decade(match: re.Match[str]) -> str:
     century, tens = match.group(1), int(match.group(2))
     if century == "20" and tens == 0:
         return "two thousands"
-    return f"{_under_hundred(int(century))} {_decade_word(tens)}"
+    return f"{under_hundred(int(century))} {_decade_word(tens)}"
 
 
 def _magnitude(match: re.Match[str]) -> str:
@@ -255,8 +255,8 @@ def expand(text: str, changes: Changes | None = None, keep: Collection[str] = ()
     rule(_FRACTION, lambda m: fraction_words(int(m.group(1)), int(m.group(2))), 0)
     rule(_DECADE_SHORT, lambda m: _decade_word(int(m.group(1))), 0)
     rule(_DECADE, _decade, 0)
-    rule(_QUARTER, lambda m: f"Q {_ONES[int(m.group(1))]}", 0)
-    rule(_FISCAL, lambda m: "fiscal year " + (m.group(1) if len(m.group(1)) == 4 else _under_hundred(int(m.group(1)))), 0)
+    rule(_QUARTER, lambda m: f"Q {ONES[int(m.group(1))]}", 0)
+    rule(_FISCAL, lambda m: "fiscal year " + (m.group(1) if len(m.group(1)) == 4 else under_hundred(int(m.group(1)))), 0)
     rule(_MAGNITUDE, _magnitude, 0)
     rule(_TIMES_SUFFIX, lambda m: f"{number_words(m.group(1))} times", 0)
     rule(_UNIT, _unit, 0)

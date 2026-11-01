@@ -242,9 +242,9 @@ def turbo_text(text: str, speaker: str = "", lexicon: object = None, acronyms: b
     return tagged_text(text, TURBO_TAGS, speaker, lexicon, acronyms, changes)
 
 
-def chatterbox_text(text: str, speaker: str = "", lexicon: object = None, acronyms: bool = False) -> str:
+def chatterbox_text(text: str, speaker: str = "", lexicon: object = None, acronyms: bool = False, changes: Changes | None = None) -> str:
     """What the original Chatterbox reads for a script line: as Turbo, with `CHATTERBOX_TAGS`."""
-    return tagged_text(text, CHATTERBOX_TAGS, speaker, lexicon, acronyms)
+    return tagged_text(text, CHATTERBOX_TAGS, speaker, lexicon, acronyms, changes)
 
 
 def dia_text(turns: Sequence[tuple[str, str]], tags: Mapping[str, str], lexicon: object = None, acronyms: bool = False) -> str:

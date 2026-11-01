@@ -80,6 +80,11 @@ def make_card(library: Path, slug: str, wps: float = 2.8) -> None:
 
 @pytest.fixture
 def setup(tmp_path: Path) -> tuple[Path, Path]:
+    return make_radio_work(tmp_path)
+
+
+def make_radio_work(tmp_path: Path) -> tuple[Path, Path]:
+    """The invented two-role radio work and its library, cast (the `setup` fixture; other modules call it directly)."""
     work = tmp_path / "work"
     episodes = work / "outputs" / "radio" / "episodes"
     episodes.mkdir(parents=True)

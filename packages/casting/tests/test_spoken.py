@@ -28,7 +28,9 @@ from pablo_casting.engines import (
 from pablo_casting.lexicon import acronym_mode, lexicon_path, parse
 from pablo_casting.numerals import spell_numbers
 from pablo_casting.perform import Performer
+from pablo_casting.spoken import expand, links, undecided
 from pablo_casting.takes import Direction, EngineId, Line, TakeInputs
+from test_perform import SCRIPT, Factory, LineSpy, fake_scorers, go, make_radio_work
 
 
 @pytest.mark.parametrize(
@@ -227,14 +229,12 @@ def test_pronounce_on_a_fiction_work_keeps_caps_and_lists_them(tmp_path: Path) -
 def test_pronounce_refuses_a_missing_unit(tmp_path: Path) -> None:
     work = make_work(tmp_path, "nonfiction", READING)
     (body, code), _ = run(["pronounce", "--work", str(work), "--output", "narrated", "--episode", "4", "--json"], env={})
-    assert code == 2 and body["missing"] == ["narrated unit 4"]
+    assert code == 2 and body["missing"] == ["narrated unit 4"] and body["units"] == [1]
+    assert "its units are 1" in str(body["message"])
 
 
 def test_a_nonfiction_perform_reads_acronyms_as_letters_and_the_words_gate_keeps_the_script_text(tmp_path: Path) -> None:
-    from test_perform import SCRIPT, Factory, LineSpy, fake_scorers, go
-    from test_perform import setup as perform_setup
-
-    work, library = perform_setup.__wrapped__(tmp_path) if hasattr(perform_setup, "__wrapped__") else perform_setup(tmp_path)
+    work, library = make_radio_work(tmp_path)
     (work / "pablo.json").write_text(json.dumps({"title": "W", "slug": "w", "track": "nonfiction"}), encoding="utf-8")
     script = work / "outputs" / "radio" / "episodes" / "01-the-harbour-light.md"
     script.write_text(SCRIPT.replace("Mind the step", "Mind the AI at 10-20%"), encoding="utf-8")
@@ -252,8 +252,6 @@ def test_a_nonfiction_perform_reads_acronyms_as_letters_and_the_words_gate_keeps
 
 
 # --- the shorthand rules (spoken.py), every track ----------------------------------------------------------------
-
-from pablo_casting.spoken import expand, links, undecided  # noqa: E402
 
 
 def say(text: str, acronyms: bool = False, lexicon: object = None) -> str:

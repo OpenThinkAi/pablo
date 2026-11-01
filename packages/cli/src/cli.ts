@@ -544,13 +544,13 @@ export function castingText(verb: string, body: Record<string, unknown>): string
       lines.push(`${String(unit["file"])}`);
       for (const row of rows) {
         const changes = ((row["changes"] as Array<{ from: string; to: string }> | undefined) ?? []).map((c) => `"${c.from}" -> "${c.to}"`).join(", ");
-        lines.push(`  ${String(row["line"])} ${String(row["speaker"])}: ${changes || "(tags only)"}`);
+        lines.push(`  ${String(row["line"])} ${String(row["speaker"])}: ${changes || "(non-verbals only)"}`);
         lines.push(`      ${String(row["engine"])}`);
       }
     }
     const unresolved = (body["unresolved"] as Array<Record<string, unknown>> | undefined) ?? [];
     if (unresolved.length > 0) {
-      lines.push("not in the lexicon (add to pronounce.md if the engine says them wrong):");
+      lines.push("left as written (a word or unit the engine says wrong goes in pronounce.md; rewrite a link by hand):");
       for (const u of unresolved) {
         const first = u["first"] as { unit?: unknown; line?: unknown } | undefined;
         lines.push(`  ${String(u["token"])}  ${String(u["kind"])}, ${String(u["count"])}x, first unit ${String(first?.unit)} line ${String(first?.line)}`);

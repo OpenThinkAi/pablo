@@ -35,7 +35,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-_ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
 _TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
 _SCALES = ((1_000_000_000, "billion"), (1_000_000, "million"), (1000, "thousand"))
 _ORDINAL = {
@@ -44,18 +44,18 @@ _ORDINAL = {
 }
 
 
-def _under_hundred(n: int) -> str:
+def under_hundred(n: int) -> str:
     if n < 20:
-        return _ONES[n]
+        return ONES[n]
     tens, ones = divmod(n, 10)
-    return _TENS[tens] + (f"-{_ONES[ones]}" if ones else "")
+    return _TENS[tens] + (f"-{ONES[ones]}" if ones else "")
 
 
 def _under_thousand(n: int) -> str:
     hundreds, rest = divmod(n, 100)
-    parts = [f"{_ONES[hundreds]} hundred"] if hundreds else []
+    parts = [f"{ONES[hundreds]} hundred"] if hundreds else []
     if rest or not parts:
-        parts.append(_under_hundred(rest))
+        parts.append(under_hundred(rest))
     return " ".join(parts)
 
 
@@ -79,10 +79,10 @@ def year(n: int) -> str:
     """A year as said: 1917 -> "nineteen seventeen", 1905 -> "nineteen oh five", 1900 -> "nineteen hundred"."""
     high, low = divmod(n, 100)
     if low == 0:
-        return f"{_under_hundred(high)} hundred"
+        return f"{under_hundred(high)} hundred"
     if low < 10:
-        return f"{_under_hundred(high)} oh {_ONES[low]}"
-    return f"{_under_hundred(high)} {_under_hundred(low)}"
+        return f"{under_hundred(high)} oh {ONES[low]}"
+    return f"{under_hundred(high)} {under_hundred(low)}"
 
 
 def ordinal(n: int) -> str:
@@ -133,7 +133,7 @@ def recorded(fn: Callable[[re.Match[str]], str], changes: Changes | None) -> Cal
 
 
 def _digits(fraction: str) -> str:
-    return " ".join(_ONES[int(d)] for d in fraction)
+    return " ".join(ONES[int(d)] for d in fraction)
 
 
 def _number_words(whole: str, fraction: str | None, as_year: bool = True) -> str:
@@ -167,7 +167,7 @@ def _spell_range(match: re.Match[str]) -> str:
         # A year range: "2025-26", "1996-97".
         start = _number_words(w1, None)
         end = int(b_digits)
-        return f"{start} to {('oh ' + _ONES[end]) if end < 10 else _under_hundred(end)}"
+        return f"{start} to {('oh ' + ONES[end]) if end < 10 else under_hundred(end)}"
     if a < b:
         return f"{_number_words(w1, f1, plain)} to {_number_words(w2, f2, plain)}{_unit(dollar, percent, b)}"
     # A score or a pair: each side as itself, with its own unit.

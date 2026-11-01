@@ -23,12 +23,13 @@ known unit. Nothing is written.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
 from pablo_casting import outputs
 from pablo_casting.binding import episode_files
-from pablo_casting.engines import LEXICON_PARAM, chatterbox_text, dotted, is_shouted, spoken_params, turbo_text
+from pablo_casting.engines import ACRONYMS_PARAM, LEXICON_PARAM, chatterbox_text, dotted, is_shouted, spoken_params, turbo_text
 from pablo_casting.lexicon import Entry, acronym_mode, lexicon_path, load
 from pablo_casting.script import parse_script
 from pablo_casting.spoken import mask, undecided
@@ -100,9 +101,12 @@ def cmd_pronounce(work: Path, episode: int | None) -> Result:
     where = outputs.scripts_dir(work).relative_to(work)
     if not files:
         missing = f"{output} unit {episode}" if episode is not None else f"scripts in {where}/"
-        return {"ok": False, "code": 2, "message": f"pronounce: no {missing} in {work}", "missing": [missing]}, 2
+        have = [n for n, _path in episode_files(work)]
+        hint = f"; its units are {', '.join(str(n) for n in have)}" if have else f"; {where}/ holds no script with a CAST: line"
+        return {"ok": False, "code": 2, "message": f"pronounce: no {missing} in {work}{hint}", "missing": [missing], "units": have}, 2
     units: list[dict[str, object]] = []
-    tally: dict[str, dict[str, object]] = {}
+    counts: Counter[str] = Counter()
+    first: dict[str, tuple[str, int, int]] = {}  # token -> (kind, unit, line)
     changed = 0
     for number, path in files:
         script = parse_script(path.read_text(encoding="utf-8"))
@@ -110,16 +114,13 @@ def cmd_pronounce(work: Path, episode: int | None) -> Result:
         for spoken in script.lines:
             params = spoken_params([(spoken.speaker, spoken.text)], entries, acronyms)
             respelt = params.get(LEXICON_PARAM)
-            letters = params.get("acronyms") is True
+            letters = params.get(ACRONYMS_PARAM) is True
             changes: list[tuple[str, str]] = []
-            if spoken.drama:
-                engine = chatterbox_text(spoken.text, spoken.speaker, respelt, letters)
-                turbo_text(spoken.text, spoken.speaker, respelt, letters, changes)  # the same normalisers, for the changes
-            else:
-                engine = turbo_text(spoken.text, spoken.speaker, respelt, letters, changes)
+            read = chatterbox_text if spoken.drama else turbo_text  # a [DRAMA] scene's engine
+            engine = read(spoken.text, spoken.speaker, respelt, letters, changes)
             for word, kind in _unresolved(spoken.text, spoken.speaker, entries, acronyms, changes):
-                row = tally.setdefault(word, {"token": word, "kind": kind, "count": 0, "first": {"unit": number, "line": spoken.line}})
-                row["count"] = int(row["count"]) + 1  # type: ignore[call-overload]
+                counts[word] += 1
+                first.setdefault(word, (kind, number, spoken.line))
             if engine == spoken.text:
                 continue
             changed += 1
@@ -134,5 +135,8 @@ def cmd_pronounce(work: Path, episode: int | None) -> Result:
         "lexiconEntries": len(entries),
         "units": units,
         "changedLines": changed,
-        "unresolved": sorted(tally.values(), key=lambda r: (-int(r["count"]), str(r["token"]))),  # type: ignore[call-overload]
+        "unresolved": [
+            {"token": token, "kind": first[token][0], "count": count, "first": {"unit": first[token][1], "line": first[token][2]}}
+            for token, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        ],
     }, 0
