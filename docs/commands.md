@@ -1370,7 +1370,7 @@ against the script's own words.
      name `Jr.` "Junior", `Sr.` "Senior"; `vs.`/`vs` "versus", `etc.` "et
      cetera", `e.g.` "for example", `i.e.` "that is", `approx.`
      "approximately", `No. 2` "number two"; `Jan.` to `Dec.` before a day
-     number (`Oct. 22` -> "October twenty-second");
+     number (`Oct. 22` -> "October twenty-second"), and a full month name before a day number likewise (`April 23` -> "April twenty-third");
    - dates and times: `10/22/2026` -> "October twenty-second, twenty
      twenty-six"; `3:15` "three fifteen", `3:05` "three oh five", `12:00`
      "twelve", `3:00 p.m.`, `3pm`, `3p` "three p.m.";
