@@ -60,6 +60,10 @@ Commands:
 - `check --work W [--episode N]`  unknown directions (with line numbers) and unbound roles.
 - `status --work W --episode N`   ready, or exit 2 with the unbound roles in `missing`.
 - `bind --work W --role R --voice SLUG [--vault V | --library DIR]`  pin a role to a library voice.
+- `pronounce --work W [--episode N]`  what the engine will say (AGT-2302, `pronounce.py`):
+             each line whose engine input differs from its text, the tokens
+             changed, the engine text, and the capitalised words no rule or
+             lexicon entry decided. Read-only; no model is loaded.
 - `perform --work W --episode N [--engine chatterbox-turbo|dia] [--json-lines]
              [--vault V | --library DIR]`  render the episode through the decided
              engine with the gates, retakes and pace policy, into takes and
@@ -165,7 +169,7 @@ Downloader = Callable[[str, "str | None"], str]
 """Downloads a Hub model id at a revision (`None`: the Hub's current one) and returns its local path."""
 ToolkitFactory = Callable[[Mapping[str, str], CastingConfig], Toolkit]
 
-COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix", "mixer", "castpanel", "sounds")
+COMMANDS = ("version", "doctor", "pull", "audition", "cast", "describe", "voices", "takes", "manifest", "script", "check", "status", "bind", "gate", "perform", "mix", "fix", "mixer", "castpanel", "sounds", "pronounce")
 VOICES_SUBCOMMANDS = ("list", "show", "retire")
 DEFAULT_CANDIDATES = 6
 
@@ -972,6 +976,10 @@ def _dispatch(
     assert work is not None
     if args.command == "bind":
         return cmd_bind(env, work, args), args.json
+    if args.command == "pronounce":
+        from pablo_casting.pronounce import cmd_pronounce
+
+        return cmd_pronounce(work, _episode_number(args.episode)), args.json
     if args.command == "castpanel":
         # The mixer's Cast panel (AGT-2157): the episode's roles and bindings, and a library voice read on one line.
         from pablo_casting.cast_panel import cmd_castpanel

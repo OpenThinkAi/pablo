@@ -152,7 +152,7 @@ you:    (reads it, then) pablo merge --project lighthouse draft/ch02
 | `prose` | One-off copy in a named voice, outside any work |
 
 The rest (`promote`, `migrate`, `bind`, and the radio tools `audition`, `cast`,
-`voices`, `perform`, `mix`, `fix`, `describe_voice`) are covered in
+`voices`, `perform`, `mix`, `fix`, `describe_voice`, `pronounce`) are covered in
 [commands.md](commands.md). Each tool's own description says what it takes.
 
 ## The built-in agent

@@ -459,7 +459,8 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `describe`, `voices list|show|retire`, `takes`, `manifest`,
                 `script`, `check`, `status`, `bind`, `gate`, `gate
                 calibrate`, `perform`, `mix`, `fix`, `mixer`, `castpanel`
-                (the mixer's Cast panel reads, AGT-2157), `sounds`; the
+                (the mixer's Cast panel reads, AGT-2157), `sounds`,
+                `pronounce` (AGT-2302); the
                 list is `cli.py`'s `COMMANDS`),
                 never a user-facing binary; same body and exit codes as
                 pablo. The script reader (`script.py`), the direction
@@ -526,7 +527,21 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 optional `SPEAKER:` scope) respells words, both in the engine
                 input only; matching entries are the `lexicon` take-key param,
                 and the words gate accepts whatever Whisper heard for a
-                respelt word. `perform.py` runs the
+                respelt word. AGT-2302: `numerals.py` speaks ranges
+                ("10-20%" -> "ten to twenty percent", year and score
+                ranges), minus signs and leading-dot decimals; on a
+                nonfiction work (`lexicon.acronym_mode`, `pablo.json`
+                `track`) `normalise_caps` reads 2-6 letter acronyms as
+                dotted letters (not Roman numerals, lexicon words or
+                shouted lines/phrases); before the numerals, `spoken.py`'s
+                `expand` speaks shorthand on every track (abbreviations,
+                times, dates, fractions, decades, magnitudes, units,
+                symbols; links masked and left as written).
+                `engines.spoken_params` adds the
+                `spoken`/`acronyms` take-key params only to passes those
+                rules change (no ADAPTER_VERSION bump, so fiction keys
+                stay); `pronounce.py` (`pablo pronounce`) shows the
+                engine text per line, read-only. `perform.py` runs the
                 retake loop (4 derived seeds, first pass kept, else best-of
                 with an auto flag in `flags.json`), the pace policy (role
                 `pace.wps` x 0.85/1.15 for slow/quick; stretch measured and

@@ -69,6 +69,7 @@ const PARITY: Readonly<Record<string, Entry>> = {
   gate: support("pipeline gate inspection"),
   review: support("the review window is itself a front end"),
   mixer: support("is the mixer"),
+  pronounce: support("read-only: what the engine will say for each script line, no model (AGT-2302)"),
 };
 
 const liveVerbs = (): string[] => [...new Set([...ALL_VERBS, ...VERBS.map((v) => v.name)])].sort();

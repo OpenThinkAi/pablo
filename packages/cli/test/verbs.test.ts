@@ -56,6 +56,7 @@ test("VERBS exposes exactly the thirty-six verbs, each project-required verb req
     "output",
     "perform", // AGT-1683
     "promote",
+    "pronounce", // AGT-2302
     "prose",
     "publish",
     "read",

@@ -23,6 +23,10 @@
  *   harness's tool for a description the `CAST:` mapper cannot normalise: the
  *   mapper's traits, the phrases left over and the traits vocabulary, so the
  *   harness can hand `cast --auto --design` its own `role-traits`.
+ * - `pronounce --project W --output radio|narrated [--unit N | --episode N]` (AGT-2302) is read-only and loads no
+ *   model: per script line whose engine input differs from its text, the tokens the normalisers changed (numbers,
+ *   ranges, acronyms on a nonfiction work, lexicon respellings) and the engine text, plus the capitalised words no
+ *   rule or `pronounce.md` entry decided (`pronounce.py`).
  * - `voices list|show|retire` reads the library; `retire` marks a voice
  *   unmatchable without changing its card hash.
  * - `perform --project W --episode N [--engine chatterbox-turbo|dia]
@@ -243,6 +247,13 @@ const DESCRIBE_ARGS = z.object({
   describe: z.string().describe("The role's description as the script's CAST: line gives it, e.g. \"seventies, reedy, smells of the sea\"."),
   gender: z.enum(["f", "m", "x"]).optional().describe("The role's gender from its CAST: entry."),
   role: roleField.optional(),
+});
+
+const PRONOUNCE_ARGS = z.object({
+  project: z.string().describe("The work whose scripts to read."),
+  output: outputArg,
+  unit: unitArg,
+  episode: z.number().int().positive().optional().describe("Only this unit (a radio episode, or with output a narrated unit); default every unit."),
 });
 
 const VOICES_ARGS = z.object({
@@ -772,7 +783,32 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       run(["describe", ...flag("--describe", args.describe), ...flag("--gender", args.gender), ...flag("--role", args.role)], {}, ctx, deps),
   };
 
-  return [audition, cast, voices, perform, mix, fix, describeVoice] as readonly Verb[];
+  const pronounce: Verb<typeof PRONOUNCE_ARGS.shape> = {
+    name: "pronounce",
+    description:
+      "Show what the voice engine will say for a performed output's script lines, before any render: for each line whose engine input differs from its text, the line number, the speaker, each changed token (\"10-20%\" -> \"ten to twenty percent\", \"AI\" -> \"A.I.\" on a nonfiction work, shorthand such as \"Gov.\", \"3:00 p.m.\", \"$7T\" or \"1/3\", a pronounce.md respelling) and the full engine text; then the capitalised or all-caps words no rule or lexicon entry decided, which the author may want to add to the output's pronounce.md, and the links, abbreviation-like words and unknown units it left as written. Read-only; loads no model and writes nothing.",
+    args: PRONOUNCE_ARGS,
+    run: async (args, ctx) => {
+      const where = locate(ctx, args.project);
+      if ("exitCode" in where) return where;
+      const work = where.work as string;
+      if (args.output === undefined && args.unit !== undefined) {
+        return refuseWith(`pablo pronounce: --unit is an output's unit; say --output ${RADIO_ID} --unit ${args.unit}, or --episode ${args.unit}`, [`--output ${RADIO_ID}`]);
+      }
+      if (args.episode !== undefined && args.unit !== undefined && args.episode !== args.unit) {
+        return refuse(`pablo pronounce: --episode ${args.episode} and --unit ${args.unit} name different units`);
+      }
+      // Without --output: the work's one performed output when it has exactly one (a nonfiction work's narrated), else radio.
+      const marker = readMarker(work);
+      const performed = AUDIO_OUTPUTS.filter((o) => marker.ok && Object.hasOwn(marker.marker.outputs, o));
+      const implied = args.output === undefined && performed.length === 1 ? { ...args, output: performed[0] } : args;
+      const output = addressedOutput(implied, work, "pronounce");
+      if (typeof output !== "string") return output;
+      return run(["pronounce", ...flag("--episode", args.episode ?? args.unit)], { project: args.project }, ctx, deps, [], output);
+    },
+  };
+
+  return [audition, cast, voices, perform, mix, fix, describeVoice, pronounce] as readonly Verb[];
 }
 
 /**

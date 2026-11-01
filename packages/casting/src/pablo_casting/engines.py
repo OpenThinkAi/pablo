@@ -48,6 +48,15 @@ text is never changed; only the engine input is. Evidence (AGT-1677, Matt
 2026-10-11): Turbo said "Shadow" right in 4 of 12 takes from caps and 12 of 12
 title-cased; ZONOS2 spelled caps letter by letter.
 
+**Acronyms** (AGT-2302): on a nonfiction work (`lexicon.acronym_mode`) an
+acronym of 2-6 capitals reaches the engine as dotted letters (`AI` -> `A.I.`,
+`CEOs` -> `C.E.O.s`), which a probe heard Turbo say right where `Ai` was read
+"eye". Roman numerals, words the work's lexicon respells and shouted lines or
+phrases keep the capitalising above. The pass's `acronyms` param records it,
+set only where it changes the engine input; the AGT-2302 number forms
+(`numerals.py`: ranges, minus signs, leading-dot decimals) add `spoken` the
+same way, so a fiction work's existing take keys stay as they were.
+
 **Numerals and respellings.** Numerals reach every engine spelled out
 (`numerals.py`, AGT-1789): years as said ("1917" -> "nineteen seventeen"),
 other numbers as words; the script keeps its digits. AGT-1798 adds the work's
@@ -73,7 +82,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version as dist_version
 from pathlib import Path
@@ -82,34 +91,113 @@ from typing import Protocol
 import numpy as np
 
 from pablo_casting.directions import NONVERBALS
-from pablo_casting.lexicon import PARAM as LEXICON_PARAM, Entry, apply as apply_lexicon, params_for as lexicon_params
-from pablo_casting.numerals import spell_numbers
+from pablo_casting.lexicon import PARAM as LEXICON_PARAM, Entry, apply as apply_lexicon, params_for as lexicon_params, respelt_for
+from pablo_casting.numerals import Changes, recorded, spell_numbers
 from pablo_casting.pins import pinned
+from pablo_casting.spoken import expand, mask, unmask
 from pablo_casting.takes import EngineId, Synthesis, TakeInputs
 from pablo_casting.wav import Audio
 
 ADAPTER_VERSION = 2  # 2: numerals spelled out for the engine (AGT-1789)
+# AGT-2302 did not bump it: a bump moves every take key, and a fiction work's approved renders would all re-render.
+# Instead `spoken_params` adds `spoken` and `acronyms` only to the passes whose engine input the new rules change.
 
-# --- text: caps and non-verbals -------------------------------------------------
+ACRONYMS_PARAM = "acronyms"
+"""Take-key param: acronyms read as letters (`normalise_caps`); set only on a nonfiction work's passes it changes."""
+SPOKEN_PARAM = "spoken"
+"""Take-key param: the AGT-2302 spoken forms (`spoken.py`, the number forms) changed this pass's engine input (the value is their version)."""
+SPOKEN_VERSION = 1
+
+# --- text: caps, acronyms and non-verbals ---------------------------------------------
 
 _CAPS_WORD = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)*")
+# An acronym token: 2-6 capitals, optionally a plural `s` or `'s` (`CEOs`, `AI's`).
+_ACRONYM = re.compile(r"([A-Z]{2,6})('?s)?")
+_ROMAN = re.compile(r"[IVXLCDM]+")
 
 
-def normalise_caps(text: str) -> str:
+def is_shouted(text: str) -> bool:
+    """A shouted line: at least two ALL-CAPS words and more than two thirds of its letters upper-case.
+
+    Two thirds, not a bare majority, so a short line dense with acronyms ("CEOs at AEI and FRI", "NASA said AI")
+    is not read as a shout; one acronym alone ("AI.") never is.
+    """
+    letters = [c for c in text if c.isalpha()]
+    upper = sum(1 for c in letters if c.isupper())
+    caps_words = sum(1 for w in _CAPS_WORD.findall(text) if len(w) > 1 and all(c.isupper() for c in w if c.isalpha()))
+    return caps_words >= 2 and upper * 3 > len(letters) * 2
+
+
+def dotted(word: str) -> str | None:
+    """`word` as dotted letters when it is an acronym (`AI` -> `A.I.`, `CEOs` -> `C.E.O.s`), else None.
+
+    Roman numerals (`II`, `XIV`, `CD`) are not acronyms.
+    """
+    match = _ACRONYM.fullmatch(word)
+    if match is None or _ROMAN.fullmatch(match.group(1)):
+        return None
+    return "".join(f"{c}." for c in match.group(1)) + (match.group(2) or "")
+
+
+def _is_caps(word: str) -> bool:
+    letters = [c for c in word if c.isalpha()]
+    return len(letters) > 1 and all(c.isupper() for c in letters)
+
+
+def _shouted_phrases(text: str) -> set[int]:
+    """Start offsets of the words in a shouted phrase inside a line (`Good evening from THE HARBOUR LIGHT`): a run of
+    ALL-CAPS words separated only by spaces, of three or more words or holding one too long to be an acronym."""
+    starts: set[int] = set()
+    run: list[re.Match[str]] = []
+
+    def close() -> None:
+        if len(run) >= 3 or (len(run) == 2 and any(dotted(m.group(0)) is None for m in run)):
+            starts.update(m.start() for m in run)
+        run.clear()
+
+    for match in _CAPS_WORD.finditer(text):
+        if not _is_caps(match.group(0)):
+            close()
+            continue
+        if run and text[run[-1].end() : match.start()].strip(" ") != "":
+            close()
+        run.append(match)
+    close()
+    return starts
+
+
+def normalise_caps(text: str, acronyms: bool = False, keep: Collection[str] = (), changes: Changes | None = None, shouted: bool | None = None) -> str:
     """ALL-CAPS words of two or more letters -> capitalised (`THE VALLEY'S` -> `The Valley's`).
 
     A word is a run of letters, with inner apostrophes. Single letters (`I`, `A`)
     and mixed-case words (`McDonald`) are left alone.
+
+    With `acronyms` (AGT-2302, nonfiction works) an acronym of 2-6 capitals is read
+    as letters instead (`AI` -> `A.I.`, `CEOs` -> `C.E.O.s`; `dotted`), except a word
+    in `keep` (lower-case: the words the work's lexicon respells, so `NASA -> nasa`
+    still wins), every word of a shouted line (`is_shouted`, of `shouted` when
+    given, else of `text`) and of a shouted phrase inside one (`_shouted_phrases`:
+    `THE HARBOUR LIGHT`), which are capitalised as before. Off, this is exactly
+    the behaviour before AGT-2302. `changes` gets each `(word, spoken)` replaced.
     """
+    letters_on = acronyms and not (is_shouted(text) if shouted is None else shouted)
+    phrases = _shouted_phrases(text) if letters_on else set()
 
     def fix(match: re.Match[str]) -> str:
         word = match.group(0)
+        if letters_on and match.start() not in phrases and word.lower() not in keep:
+            spoken = dotted(word)
+            if spoken is not None:
+                end = match.end()
+                if end < len(match.string) and match.string[end] == "." and spoken.endswith("."):
+                    spoken = spoken[:-1]  # "AI." reads "A.I.", not "A.I.."
+                return spoken
         letters = [c for c in word if c.isalpha()]
         if len(letters) < 2 or not all(c.isupper() for c in letters):
             return word
         return word[0] + word[1:].lower()
 
-    return _CAPS_WORD.sub(fix, text)
+    return _CAPS_WORD.sub(recorded(fix, changes), text)
 
 
 _PAREN = re.compile(r"\(([^)]*)\)")
@@ -122,12 +210,22 @@ TURBO_TAGS: dict[str, str] = {"laughs": "[laugh]", "coughs": "[cough]", "chuckle
 CHATTERBOX_TAGS: dict[str, str] = {}
 
 
-def read_text(text: str, speaker: str = "", lexicon: object = None) -> str:
-    """Numerals spoken, caps normalised, then the work's respellings (after caps, so `zin-fan-DELL` keeps its capitals)."""
-    return apply_lexicon(lexicon, speaker, normalise_caps(spell_numbers(text)))
+def read_text(text: str, speaker: str = "", lexicon: object = None, acronyms: bool = False, changes: Changes | None = None) -> str:
+    """Written shorthand spoken (`spoken.expand`, links untouched), numerals spoken, caps normalised (acronyms as
+    letters when `acronyms`), then the work's respellings (after caps, so `zin-fan-DELL` keeps its capitals)."""
+    keep = respelt_for(lexicon, speaker)
+    masked, found = mask(text)
+    spoken = spell_numbers(expand(masked, changes, keep), changes=changes)
+    capped = normalise_caps(spoken, acronyms, keep, changes, shouted=is_shouted(text) if acronyms else None)
+    return unmask(apply_lexicon(lexicon, speaker, capped, changes), found)
 
 
-def tagged_text(text: str, tags: Mapping[str, str], speaker: str = "", lexicon: object = None) -> str:
+def legacy_read_text(text: str, speaker: str = "", lexicon: object = None) -> str:
+    """`read_text` as it was before AGT-2302: what a take key without `spoken` was rendered from."""
+    return apply_lexicon(lexicon, speaker, normalise_caps(spell_numbers(text, spoken_forms=False)))
+
+
+def tagged_text(text: str, tags: Mapping[str, str], speaker: str = "", lexicon: object = None, acronyms: bool = False, changes: Changes | None = None) -> str:
     """A script line as a tag-reading engine takes it: numerals spoken, caps normalised, respelt, the non-verbals in `tags` as tags, the others left out."""
 
     def tag(match: re.Match[str]) -> str:
@@ -136,24 +234,24 @@ def tagged_text(text: str, tags: Mapping[str, str], speaker: str = "", lexicon: 
             return tags[inner]
         return "" if inner in NONVERBALS else match.group(0)
 
-    return _SPACE.sub(" ", _PAREN.sub(tag, read_text(text, speaker, lexicon))).strip()
+    return _SPACE.sub(" ", _PAREN.sub(tag, read_text(text, speaker, lexicon, acronyms, changes))).strip()
 
 
-def turbo_text(text: str, speaker: str = "", lexicon: object = None) -> str:
+def turbo_text(text: str, speaker: str = "", lexicon: object = None, acronyms: bool = False, changes: Changes | None = None) -> str:
     """What Turbo reads for a script line: numerals spoken, caps normalised, respelt, its three tags, other non-verbals left out."""
-    return tagged_text(text, TURBO_TAGS, speaker, lexicon)
+    return tagged_text(text, TURBO_TAGS, speaker, lexicon, acronyms, changes)
 
 
-def chatterbox_text(text: str, speaker: str = "", lexicon: object = None) -> str:
+def chatterbox_text(text: str, speaker: str = "", lexicon: object = None, acronyms: bool = False, changes: Changes | None = None) -> str:
     """What the original Chatterbox reads for a script line: as Turbo, with `CHATTERBOX_TAGS`."""
-    return tagged_text(text, CHATTERBOX_TAGS, speaker, lexicon)
+    return tagged_text(text, CHATTERBOX_TAGS, speaker, lexicon, acronyms, changes)
 
 
-def dia_text(turns: Sequence[tuple[str, str]], tags: Mapping[str, str], lexicon: object = None) -> str:
+def dia_text(turns: Sequence[tuple[str, str]], tags: Mapping[str, str], lexicon: object = None, acronyms: bool = False) -> str:
     """Dia's pass text: `[S1] words [S2] words [other] Mm.` (the prototype's throwaway word, trimmed after)."""
     last = turns[-1][0]
     other = "[S2]" if tags[last] == "[S1]" else "[S1]"
-    body = " ".join(f"{tags[speaker]} {read_text(words, speaker, lexicon)}" for speaker, words in turns)
+    body = " ".join(f"{tags[speaker]} {read_text(words, speaker, lexicon, acronyms)}" for speaker, words in turns)
     return f"{body} {other} Mm."
 
 
@@ -362,10 +460,13 @@ def adapt(
     intensity: int | None,
     reasons: Sequence[str] = (),
     lexicon: Sequence[Entry] = (),
+    acronyms: bool = False,
 ) -> dict[str, object]:
     """The params that change a pass's audio (the take key's `params`).
 
     `lexicon` is the work's pronunciation entries: those matching the pass go in as `lexicon`.
+    `acronyms` is the work's acronym mode (on for a nonfiction work); with the AGT-2302 number
+    forms it adds a param only to a pass whose engine input it changes (`spoken_params`).
 
     `reasons` are a flag's normalised reasons (`normalise_reasons`); with none the
     params are exactly what `perform` has always sent, so existing takes keep their keys.
@@ -392,20 +493,38 @@ def adapt(
             break
     if reasons:
         params["retake"] = "+".join(reasons)
-    params.update(lexicon_params(lexicon, [(line.speaker, line.text) for line in take_pass.lines]))
+    params.update(spoken_params([(line.speaker, line.text) for line in take_pass.lines], lexicon, acronyms))
+    return params
+
+
+def spoken_params(lines: Iterable[tuple[str, str]], lexicon: Sequence[Entry] = (), acronyms: bool = False) -> dict[str, object]:
+    """The take-key params for how `(speaker, text)` lines are spoken: the matching lexicon entries (`lexicon`),
+    `spoken` when the AGT-2302 number forms change a line, and `acronyms` when acronym mode changes one.
+
+    A pass the newer rules leave as it was gets neither, so its take key is exactly what it was before them.
+    """
+    rows = list(lines)
+    params: dict[str, object] = dict(lexicon_params(lexicon, rows))
+    respelt = params.get(LEXICON_PARAM)
+    if any(read_text(text, speaker, respelt) != legacy_read_text(text, speaker, respelt) for speaker, text in rows):
+        params[SPOKEN_PARAM] = SPOKEN_VERSION
+    if acronyms and any(read_text(text, speaker, respelt, True) != read_text(text, speaker, respelt) for speaker, text in rows):
+        params[ACRONYMS_PARAM] = True
     return params
 
 
 def engine_text(spec: EngineSpec, inputs: TakeInputs) -> str:
     """The text the engine reads, derived from the take key's own lines."""
+    lexicon = inputs.params.get(LEXICON_PARAM)
+    acronyms = inputs.params.get(ACRONYMS_PARAM) is True
     if spec.name == TURBO.name:
-        return " ".join(turbo_text(line.text, line.speaker, inputs.params.get(LEXICON_PARAM)) for line in inputs.lines)
+        return " ".join(turbo_text(line.text, line.speaker, lexicon, acronyms) for line in inputs.lines)
     if spec.name == CHATTERBOX.name:
-        return " ".join(chatterbox_text(line.text, line.speaker, inputs.params.get(LEXICON_PARAM)) for line in inputs.lines)
+        return " ".join(chatterbox_text(line.text, line.speaker, lexicon, acronyms) for line in inputs.lines)
     if spec.name == DIA.name:
         turns = Pass(tuple(PassLine(k, line.speaker, line.text) for k, line in enumerate(inputs.lines))).turns()
         speakers = list(dict.fromkeys(speaker for speaker, _ in turns))
-        return dia_text(turns, dict(zip(speakers, ("[S1]", "[S2]"))), inputs.params.get(LEXICON_PARAM))
+        return dia_text(turns, dict(zip(speakers, ("[S1]", "[S2]"))), lexicon, acronyms)
     raise KeyError(spec.name)
 
 

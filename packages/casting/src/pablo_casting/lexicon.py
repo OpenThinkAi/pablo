@@ -28,6 +28,7 @@ from pablo_casting.outputs import output_dir
 
 LEXICON_FILE = Path("outputs") / "radio" / "pronounce.md"
 PARAM = "lexicon"
+NONFICTION = "nonfiction"
 
 _ARROW = re.compile(r"\s*(?:->|→)\s*")
 _SCOPE = re.compile(r"^([A-Z][A-Z0-9_ ]*):\s*(.+)$")
@@ -63,10 +64,29 @@ def parse(text: str) -> list[Entry]:
     return entries
 
 
+def lexicon_path(work: Path, output: str | None = None) -> Path:
+    """An output's lexicon file: radio's `outputs/radio/pronounce.md`, narrated's `outputs/narrated/pronounce.md`
+    (AGT-2158); `output` defaults to the running command's (`outputs.current()`)."""
+    return (output_dir(work) if output is None else work / "outputs" / output) / LEXICON_FILE.name
+
+
 def load(work: Path) -> list[Entry]:
-    """The current output's lexicon: radio's `outputs/radio/pronounce.md`, narrated's `outputs/narrated/pronounce.md` (AGT-2158)."""
-    path = output_dir(work) / LEXICON_FILE.name
+    """The current output's lexicon (`lexicon_path`)."""
+    path = lexicon_path(work)
     return parse(path.read_text(encoding="utf-8")) if path.is_file() else []
+
+
+def acronym_mode(work: Path) -> bool:
+    """Whether the work's acronyms are read as letters (AGT-2302): on for a nonfiction work (`pablo.json` `track`).
+
+    A work with no marker, an unreadable one or another track (a fiction work's `track` is absent) keeps it off,
+    so its take keys are unchanged.
+    """
+    try:
+        marker = json.loads((work / "pablo.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(marker, dict) and marker.get("track") == NONFICTION
 
 
 def _applies(entry: Entry, speaker: str) -> bool:
@@ -86,20 +106,38 @@ def params_for(entries: Sequence[Entry], lines: Iterable[tuple[str, str]]) -> Ma
     return {PARAM: json.dumps(sorted(chosen), ensure_ascii=False, separators=(",", ":"))}
 
 
-def apply(param: object, speaker: str, text: str) -> str:
-    """Respells `text` per the take key's `lexicon` param (a no-op when absent or malformed)."""
+def _rows(param: object) -> list[list[str]]:
     if not isinstance(param, str) or not param:
-        return text
+        return []
     try:
         rows = json.loads(param)
     except ValueError:
-        return text
-    for scope, word, respelling in rows:
+        return []
+    return rows if isinstance(rows, list) else []
+
+
+def apply(param: object, speaker: str, text: str, changes: list[tuple[str, str]] | None = None) -> str:
+    """Respells `text` per the take key's `lexicon` param (a no-op when absent or malformed).
+
+    `changes`, when given, gets each `(word, respelling)` replaced (for `pablo pronounce`).
+    """
+    for scope, word, respelling in _rows(param):
         if scope and scope != speaker.upper():
             continue
         pattern = re.compile(r"(?<![A-Za-z0-9'])" + re.escape(word) + r"(?![A-Za-z0-9]|'[A-Za-z0-9])", re.I)
-        text = pattern.sub(lambda _m, r=respelling: r, text)
+
+        def sub(match: re.Match[str], r: str = respelling) -> str:
+            if changes is not None and match.group(0) != r:
+                changes.append((match.group(0), r))
+            return r
+
+        text = pattern.sub(sub, text)
     return text
+
+
+def respelt_for(param: object, speaker: str) -> frozenset[str]:
+    """The lower-case words the `lexicon` param respells for `speaker`: acronym mode leaves these to the lexicon."""
+    return frozenset(word for scope, word, _respelling in _rows(param) if not scope or scope == speaker.upper())
 
 
 def respelt_words(param: object) -> tuple[str, ...]:

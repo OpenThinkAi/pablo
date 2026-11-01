@@ -61,7 +61,7 @@ function parseTextBody(result: unknown): unknown {
 // already an MCP tool before this ticket (AGT-1241); AC1's "five existing
 // tools" are resume/status/write/save/check. AGT-1264 adds `revise`, also
 // project-scoped.
-const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "output_add", "merge", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "save_research", "distill_facts", "record_fact", "plan_research", "add_research_item", "waive_research_item", "link_research_item"]);
+const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "output_add", "merge", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "pronounce", "save_research", "distill_facts", "record_fact", "plan_research", "add_research_item", "waive_research_item", "link_research_item"]);
 
 test("listTools returns the project-scoped verbs, prose, and the five narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
@@ -89,6 +89,7 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "perform", // AGT-1683: performs a radio episode; project required
     "plan_research", // AGT-2111: from the `research` verb
     "promote",
+    "pronounce", // AGT-2302: what the engine will say; read-only, project required
     "prose",
     "publish",
     "read",
