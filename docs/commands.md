@@ -1405,8 +1405,8 @@ against the script's own words.
    three seven six".
 3. **Capitals.** ALL-CAPS words of two or more letters are said as ordinary words
    (`THE HARBOUR LIGHT` -> "The Harbour Light"). On a `nonfiction` work, an
-   acronym of 2 to 6 capitals is said as letters instead: `AI` -> "A.I.", `GDP`
-   -> "G.D.P.", `CEOs` -> "C.E.O.s". Roman numerals (`II`, `XIV`), words the
+   acronym of 2 to 6 capitals is said as spaced letters instead: `AI` -> "A I", `GDP`
+   -> "G D P", `CEOs` -> "C E Os" (spaced, not dotted: the engine read "A.I." as a sentence break). Roman numerals (`II`, `XIV`), words the
    lexicon respells, a shouted line (two or more ALL-CAPS words and more than two
    thirds of its letters capitals) and a shouted phrase inside a line (three
    ALL-CAPS words in a row, or two with one longer than six letters) keep the
