@@ -136,6 +136,30 @@ def test_utmos_loads_torch_hub_at_the_pinned_commit(monkeypatch: pytest.MonkeyPa
     assert loads == [f"tarepan/SpeechMOS:{pinned('tarepan/SpeechMOS')}"]
 
 
+def test_utmos_loads_with_the_pip_speechmos_already_imported_and_restores_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A voice design scores DNSMOS (pip `speechmos`) before UTMOS; the hub's own `speechmos`
+    # must not resolve to it, and the pip package must be back afterwards.
+    pip = types.ModuleType("speechmos")
+    monkeypatch.setitem(sys.modules, "speechmos", pip)
+    seen: list[object] = []
+
+    class Model:
+        def eval(self) -> Model:
+            return self
+
+    def load(ref: str, *args: object, **kwargs: object) -> Model:
+        seen.append(sys.modules.get("speechmos"))
+        sys.modules["speechmos"] = types.ModuleType("speechmos")  # the hub repo's package
+        sys.modules["speechmos.utmos22"] = types.ModuleType("speechmos.utmos22")
+        return Model()
+
+    fake_torch(monkeypatch)
+    sys.modules["torch"].hub = types.SimpleNamespace(load=load)  # type: ignore[attr-defined]
+    scorers.UtmosScorer().model()
+    assert seen == [None]  # the hub load did not see the pip package
+    assert sys.modules["speechmos"] is pip and "speechmos.utmos22" not in sys.modules
+
+
 def test_audiobox_loads_the_pinned_revision(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
 
