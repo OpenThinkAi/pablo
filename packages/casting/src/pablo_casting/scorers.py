@@ -363,13 +363,21 @@ class UtmosScorer(_Lazy):
         # hang under pablo's non-interactive subprocess; the SHA is the integrity check.
         import sys
 
-        before = {name for name in sys.modules if name == "speechmos" or name.startswith("speechmos.")}
-        model = torch.hub.load(f"tarepan/SpeechMOS:{self.info.revision}", "utmos22_strong", trust_repo=True).eval()
-        # The hub repo's own package is also named `speechmos` and stays in sys.modules after the
-        # load, shadowing the pip `speechmos` DNSMOS imports (`cannot import name 'dnsmos'`), so
-        # forget it once the model is built. AGT-1683 found this on the first real perform.
-        for name in [n for n in sys.modules if (n == "speechmos" or n.startswith("speechmos.")) and n not in before]:
-            del sys.modules[name]
+        # The hub repo's own package is also named `speechmos`, like the pip package DNSMOS imports.
+        # Each must not see the other: set aside any pip `speechmos` already imported (a voice design
+        # scores DNSMOS first, so `import speechmos.utmos22` inside the hub found the pip package:
+        # "No module named 'speechmos.utmos22'"), load, then drop the hub's copy and put the pip one
+        # back (AGT-1683 found the reverse shadowing on the first real perform).
+        def _ours(name: str) -> bool:
+            return name == "speechmos" or name.startswith("speechmos.")
+
+        aside = {name: sys.modules.pop(name) for name in [n for n in sys.modules if _ours(n)]}
+        try:
+            model = torch.hub.load(f"tarepan/SpeechMOS:{self.info.revision}", "utmos22_strong", trust_repo=True).eval()
+        finally:
+            for name in [n for n in sys.modules if _ours(n)]:
+                del sys.modules[name]
+            sys.modules.update(aside)
         return model
 
     def score(self, take: Take) -> Mapping[str, object]:
