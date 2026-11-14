@@ -14,6 +14,8 @@
  * directions.py` (`EMOTIONS`); `test/radio-rules.test.ts` fails if they drift.
  */
 
+import { RADIO_DEFAULT_STYLE, type RadioStyle } from "./style";
+
 /** The delivery words (volume and breath), in `directions.py` `DELIVERIES` order (AGT-2319). */
 export const RADIO_DELIVERIES = ["whisper", "hushed"] as const;
 
@@ -36,28 +38,46 @@ export const RADIO_EMOTIONS = [
 /** The non-verbals an actor may make inside a line. */
 export const RADIO_NONVERBALS = ["laughs", "sighs", "gasps", "clears throat", "coughs"] as const;
 
-export const RADIO_RULES_TEMPLATE = `# Radio rules
+/**
+ * The rules for a style (AGT-2318): the old-time-radio conventions (announcer,
+ * narrator, music) are the template's defaults, and a premise or request that
+ * switches one off ("no narrator") gets rules that say so. Nothing is dropped
+ * on its own: with no word on it, the template keeps its narrator.
+ */
+export function radioRules(style: RadioStyle = RADIO_DEFAULT_STYLE): string {
+  const { announcer, narrator, music } = style;
+  const off = [!announcer && "announcer", !narrator && "narrator", !music && "music"].filter((x): x is string => x !== false);
+  const voices = [announcer && "the announcer", narrator && "the narrator"].filter((x): x is string => x !== false);
+  const placing = narrator ? "a narrator line or a bed and a sound" : "a bed and a sound";
+  const lines = [
+    "    CAST: NAME=m \"description\", NAME=f \"description\", ...",
+    ...(music ? ["    [MUSIC: short description]       an organ or band cue: theme, bridge, sting, swell"] : []),
+    ...(announcer ? ["    ANNOUNCER: words                 opens and closes the episode, in the period's style"] : []),
+    ...(narrator ? ["    NARRATOR: words                  sparing, past tense, sets place and time, bridges scenes"] : []),
+    "    NAME: words                      a character speaks under their first name in capitals",
+    "    [SFX: short description]         a one-shot sound made by the effects person",
+    "    [BED: short description]         ambience that runs under the lines that follow",
+    "    [BED: off]                       stops the ambience",
+    "    [DRAMA]                          the lines that follow are a dramatic scene",
+    "    [DRAMA: off]                     ends the scene",
+  ].join("\n");
+  return `# Radio rules
 
 Rules for the radio output only, layered after the work's voice and before an
 episode's own slices. Each episode is a script for a cast of voices: heard once,
 read aloud, never seen. These rules replace the prose conventions where they
-conflict (point of view, narration, scene breaks).
+conflict (point of view, narration, scene breaks).${off.length === 0 ? "" : `
+
+## Style
+
+This work's premise switches off: ${off.join(", ")}. The script has no ${off.map((o) => (o === "music" ? "[MUSIC] cues" : `${o.toUpperCase()} lines`)).join(" and no ")}${narrator ? "" : "; place, time and what just happened are heard in the dialogue and the sounds"}.`}
 
 ## The script
 
 One item per line and nothing else: no markdown, no stage directions, no
 em-dashes.
 
-    CAST: NAME=m "description", NAME=f "description", ...
-    [MUSIC: short description]       an organ or band cue: theme, bridge, sting, swell
-    ANNOUNCER: words                 opens and closes the episode, in the period's style
-    NARRATOR: words                  sparing, past tense, sets place and time, bridges scenes
-    NAME: words                      a character speaks under their first name in capitals
-    [SFX: short description]         a one-shot sound made by the effects person
-    [BED: short description]         ambience that runs under the lines that follow
-    [BED: off]                       stops the ambience
-    [DRAMA]                          the lines that follow are a dramatic scene
-    [DRAMA: off]                     ends the scene
+${lines}
 
 A speech that runs long may continue on the next lines; it belongs to the
 speaker above.
@@ -70,15 +90,14 @@ the episode), and never open one inside another.
 
 ## The shape of an episode
 
-- Theme music, then the announcer opens with the title and episode number, then a
-  line or two placing the listener.
-- Three to five scenes. Each opens with a narrator line or a bed and a sound that
-  tells the ear where we are. Music bridges between scenes.
+- ${[music && "Theme music", announcer && (music ? "then the announcer" : "The announcer") + " opens with the title and episode number, then a\n  line or two placing the listener"].filter((x): x is string => x !== false && x !== undefined).join(", ") || "Open on the first scene, with no theme and no announcer"}.
+- Three to five scenes. Each opens with ${placing} that
+  tells the ear where we are.${music ? " Music bridges between scenes." : ""}
 - The story is carried by dialogue. A listener cannot see: who is in the room,
   what they are holding and what just happened must be heard, in what people say
   and in the sounds. Never have a character describe what both of them can see.
 - 8 to 16 sound cues, each concrete and under ten words.
-- End on a sting or a held moment, then the announcer closes and the theme plays.
+- End on ${music ? "a sting or " : ""}a held moment${announcer || music ? `, then ${[announcer && "the announcer closes", music && "the theme plays"].filter((x): x is string => x !== false).join(" and ")}` : ""}.
 - Length: what fits a twelve-minute broadcast, about 1,800 spoken words.
 - The same voice as the work's other outputs: the same people, the same facts, the
   same register.
@@ -91,7 +110,7 @@ sheet in the core: age, then how the voice sounds, then anything that marks it.
 
     CAST: MAE=f "fifties, dry, unhurried", TOBY=m "twenties, quick, nervous"
 
-- Describe every role, the announcer and the narrator included. A role with no
+- Describe every role${voices.length > 0 ? `, ${voices.join(" and ")} included` : ""}. A role with no
   description cannot be cast and \`pablo check\` reports it.
 - A speaker who is not on the \`CAST:\` line is an undescribed role too: declare
   every voice before it speaks.
@@ -124,3 +143,7 @@ parenthesis, before the words:
 one, a role with no description, a \`[DRAMA: off]\` with no open scene and a
 \`[DRAMA]\` inside one, each with its line number.
 `;
+}
+
+/** The template with every convention on: what a premise that says nothing gets. */
+export const RADIO_RULES_TEMPLATE = radioRules();

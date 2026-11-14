@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { BEATS_FILE, beatsFile, parseBeatRows } from "@openthink/pablo-core";
 import { frontmatterField } from "../novel/plan";
 import type { PlanRow } from "../types";
+import { groupBeats, radioEpisodeCue } from "./style";
 import { RADIO_DIR, RADIO_UNIT_FILE } from "./units";
 
 /** The work's episode files in the radio output's directory, by number, absolute. */
@@ -35,10 +36,35 @@ export function radioUnitStatus(file: string | undefined): string {
   }
 }
 
-/** `OUTPUTS.radio.plan`: one episode per beat row of the work's beats file. */
-export function radioDefaultPlan(workDir: string): PlanRow[] {
+/**
+ * How the default plan is dealt (AGT-2318): one episode per beat, unless the
+ * request or the premise asks for a single episode, a count or a total length,
+ * in which case the beats are dealt into that many contiguous episodes. `reason`
+ * says which was chosen and why; `plan.md` and the story run both print it.
+ */
+export function radioPlanChoice(workDir: string): { episodes: number; reason: string } {
+  const beats = radioBeatRows(workDir);
+  const cue = radioEpisodeCue(workDir);
+  if (cue === undefined || beats.length === 0) return { episodes: beats.length, reason: "one episode per beat (the request and the premise name no episode count or length)" };
+  const episodes = Math.min(cue.episodes, beats.length);
+  return { episodes, reason: `${episodes} episode${episodes === 1 ? "" : "s"} over ${beats.length} beat${beats.length === 1 ? "" : "s"}: ${cue.reason}` };
+}
+
+function radioBeatRows(workDir: string) {
   const path = join(workDir, beatsFile(workDir));
-  const files = radioUnitFiles(workDir);
   const text = existsSync(path) ? readFileSync(path, "utf8") : "";
-  return parseBeatRows(text, BEATS_FILE).map((b) => ({ unit: b.chapter, title: b.title, beats: [b.chapter], status: radioUnitStatus(files.get(b.chapter)) }));
+  return parseBeatRows(text, BEATS_FILE);
+}
+
+/** `OUTPUTS.radio.plan`: one episode per beat row of the work's beats file, or as many as the request or premise implies. */
+export function radioDefaultPlan(workDir: string): PlanRow[] {
+  const files = radioUnitFiles(workDir);
+  const rows = radioBeatRows(workDir);
+  const { episodes } = radioPlanChoice(workDir);
+  if (episodes === rows.length) return rows.map((b) => ({ unit: b.chapter, title: b.title, beats: [b.chapter], status: radioUnitStatus(files.get(b.chapter)) }));
+  const byNumber = new Map(rows.map((b) => [b.chapter, b]));
+  return groupBeats(rows.map((b) => b.chapter), episodes).map((beats, i) => {
+    const first = byNumber.get(beats[0] as number);
+    return { unit: i + 1, title: episodes === 1 ? (first?.title ?? "Episode 1") : (first?.title ?? `Episode ${i + 1}`), beats, status: radioUnitStatus(files.get(i + 1)) };
+  });
 }

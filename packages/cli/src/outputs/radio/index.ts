@@ -26,10 +26,11 @@ import type { OutputDefinition, OutputReport, OutputUnit, UnitStatusReport } fro
 import { castingReadiness, ensureRadio } from "./casting-side";
 import type { CastingReadiness } from "./casting-side";
 import { buildRadioPack, radioPreconditions } from "./pack";
-import { radioDefaultPlan, radioUnitFiles, radioUnitStatus } from "./plan";
+import { radioDefaultPlan, radioPlanChoice, radioUnitFiles, radioUnitStatus } from "./plan";
 import { publishRadio } from "./publish";
 import { RADIO_RITUALS } from "./rituals";
-import { RADIO_RULES_TEMPLATE } from "./rules";
+import { RADIO_RULES_TEMPLATE, radioRules } from "./rules";
+import { radioStyleOf } from "./style";
 import { episodeState, RADIO_STAGES } from "./state";
 import type { EpisodeState, RadioStage } from "./state";
 import {
@@ -156,6 +157,8 @@ export const RADIO: OutputDefinition = {
   plural: "episodes",
   artifactDir: RADIO_DIR,
   rulesTemplate: RADIO_RULES_TEMPLATE,
+  rulesFor: (workDir) => radioRules(radioStyleOf(workDir)),
+  planChoice: (workDir) => radioPlanChoice(workDir).reason,
   tracks: ["fiction", "historical-fiction"],
   stages: RADIO_STAGES,
   plan: radioDefaultPlan,

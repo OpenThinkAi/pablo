@@ -90,6 +90,8 @@ export type OutputChangeResult =
       readonly committed: boolean;
       /** `remove`: where `outputs/<type>/` went, work-relative, when it existed. */
       readonly archived?: string;
+      /** `add`: which plan the type chose and why (the radio type: how many episodes), when it says. */
+      readonly planned?: string;
       readonly notice?: string;
     }
   | OutputRefusal;
@@ -137,7 +139,7 @@ export function rulesFile(type: string): string {
 const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 
 /** `outputs/<type>/plan.md`'s text for `rows`: the novel's own form for the novel, the same table for any other type. */
-export function renderPlan(def: OutputDefinition, rows: readonly PlanRow[]): string {
+export function renderPlan(def: OutputDefinition, rows: readonly PlanRow[], choice?: string): string {
   if (def.id === OUTPUTS.novel.id) return renderNovelPlan(rows);
   return [
     `# Plan: ${def.id}`,
@@ -146,6 +148,7 @@ export function renderPlan(def: OutputDefinition, rows: readonly PlanRow[]): str
       ? `The ${def.id} output's units: ${def.planNote}.`
       : `The ${def.id} output's units (${def.plural}) mapped onto the core beats in \`${BEATS_FILE}\`.`,
     `A unit whose ${def.noun} exists carries its status.`,
+    ...(choice !== undefined ? ["", `Planned: ${choice}.`] : []),
     "",
     "| unit | title | beats | status |",
     "|---|---|---|---|",
@@ -275,8 +278,8 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   // The plan's content is read after pablo.json is rewritten: a derived output's plan is its source's (`outputs.<id>.from`).
   const writes: { rel: string; content: () => string }[] = [];
   for (const file of scaffold.files) if (!existsSync(join(workDir, file.rel))) writes.push({ rel: file.rel, content: () => file.content });
-  if (!existsSync(join(workDir, plan))) writes.push({ rel: plan, content: () => renderPlan(def.def, def.def.plan(workDir)) });
-  if (!existsSync(join(workDir, rules))) writes.push({ rel: rules, content: () => def.def.rulesTemplate });
+  if (!existsSync(join(workDir, plan))) writes.push({ rel: plan, content: () => renderPlan(def.def, def.def.plan(workDir), def.def.planChoice?.(workDir)) });
+  if (!existsSync(join(workDir, rules))) writes.push({ rel: rules, content: () => def.def.rulesFor?.(workDir) ?? def.def.rulesTemplate });
   // The novel's ledger (AGT-1705): continuity extraction skips a work with none, so a novel added to a work gets one now.
   // A work that already has its ledger, at either name, keeps it.
   if (id === OUTPUTS.novel.id && !existsSync(join(workDir, NOVEL_CONTINUITY_FILE)) && !existsSync(join(workDir, LEGACY_CONTINUITY_FILE))) {
@@ -297,7 +300,8 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   }
 
   const { committed, notice } = gitCommit(vaultRoot, `${found.marker.slug}: add the ${id} output`, paths.map((rel) => join(workDir, rel)));
-  return { ok: true, action: "add", type: id, paths, committed, ...(notice ? { notice } : {}) };
+  const planned = def.def.planChoice?.(workDir);
+  return { ok: true, action: "add", type: id, paths, committed, ...(planned !== undefined ? { planned } : {}), ...(notice ? { notice } : {}) };
 }
 
 /** The first free `outputs/_removed/<type>-<date>[-K]`. */

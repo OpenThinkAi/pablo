@@ -198,6 +198,10 @@ export interface OutputDefinition {
   readonly artifactDir: string;
   /** The `outputs/<id>/RULES.md` scaffold: the type's own rules, layered after the work's voice. */
   readonly rulesTemplate: string;
+  /** The rules scaffolded for this work (AGT-2318): the template adjusted by the work's premise; absent, `rulesTemplate`. */
+  readonly rulesFor?: (workDir: string) => string;
+  /** Which plan the default plan chose and why, written under `plan.md`'s heading and printed by a story run. */
+  readonly planChoice?: (workDir: string) => string | undefined;
   /** The tracks this output may be added to (AGT-2105, D-7); `pablo output add` refuses a work on any other. At least one. */
   readonly tracks: readonly TrackId[];
   /** For an output with exactly one unit (the story), its number: `write` needs no `--unit`. Absent for multi-unit outputs. */

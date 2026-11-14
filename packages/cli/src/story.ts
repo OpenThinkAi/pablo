@@ -1052,6 +1052,7 @@ async function advance(run: Run): Promise<VerbResult> {
           added = addOutput(run.vault, run.work, id, { ...(run.deps.now ? { now: run.deps.now } : {}), thesis });
         }
         if (!added.ok) return { body: added, exitCode: added.code };
+        if (added.planned !== undefined) progress(run, `${id}: planned ${added.planned}`);
       }
       markDone(run, addStep);
     }
