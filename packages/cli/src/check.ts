@@ -28,7 +28,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { branchExists, ensureWorktree, repoRoot, waitingBranches } from "./branch";
 import type { TextSource } from "@openthink/pablo-core";
 import { FACTS_FILE, PERIOD_FACTS_FILE, joinSentences } from "@openthink/pablo-core";
@@ -40,6 +40,7 @@ import { coreCheck } from "./core-check";
 import type { Ask } from "./critique";
 import { factAccuracyAsk, runFactAccuracy, savedFactHits } from "./fact-accuracy";
 import { narratedDrift } from "./outputs/narrated";
+import { narratedUnitOfPath } from "./outputs/narrated/units";
 import { outputDefinition, resolveOutput } from "./outputs/registry";
 import type { OutputDefinition } from "./outputs/types";
 import { radioCheck, radioCheckLines, realCastingDeps } from "./radio";
@@ -480,7 +481,10 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     const text = read(filePath);
     const label = relative(workDir, filePath);
     hits.push(...checkFile(text, label, rules));
-    if (claimSources !== undefined && filePath.endsWith(".md")) hits.push(...checkClaimSupport(text, label, claimSources));
+    // A narrated reading is made with its citations stripped (AGT-2163), so every claim in it reads as uncited:
+    // claim support is checked on the source essay, and the reading gets narration-drift below (AGT-2301).
+    const reading = narratedUnitOfPath(filePath.split(sep).join("/")) !== undefined;
+    if (claimSources !== undefined && !reading && filePath.endsWith(".md")) hits.push(...checkClaimSupport(text, label, claimSources));
     if (isUnprovenanced(text)) unprovenanced.push(label);
     // A narrated reading (AGT-2137) is the source unit's prose word for word: flag the first place it is not.
     const drift = narratedDrift(workDir, filePath);
