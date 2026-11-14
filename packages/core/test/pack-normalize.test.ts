@@ -101,3 +101,12 @@ test("normalizeCandidate leaves genuine dialogue and plain text alone", () => {
   expect(normalizeCandidate("He left.")).toBe("He left.");
   expect(normalizeCandidate('"')).toBe('"');
 });
+
+test("AGT-2296: the space before a leading-dot decimal survives, including at a sentence end", () => {
+  expect(normalizeOutput("Opponents shot .376 from three, above the league's .346.")).toBe(
+    "Opponents shot .376 from three, above the league's .346.",
+  );
+  expect(normalizeOutput("a rate of .415 , and .5 .")).toBe("a rate of .415, and .5.");
+  // Real seams still close.
+  expect(normalizeOutput("He left . She stayed .")).toBe("He left. She stayed.");
+});
