@@ -26,7 +26,8 @@
  * - `pronounce --project W --output radio|narrated [--unit N | --episode N]` (AGT-2302) is read-only and loads no
  *   model: per script line whose engine input differs from its text, the tokens the normalisers changed (numbers,
  *   ranges, acronyms on a nonfiction work, lexicon respellings) and the engine text, plus the capitalised words no
- *   rule or `pronounce.md` entry decided (`pronounce.py`).
+ *   rule or `pronounce.md` entry decided (`pronounce.py`); AGT-2304: common words, months, first names and words also
+ *   written in lower case are left out and the rest ranked (mixed-case, then unusual letter patterns), `--all` lists all.
  * - `voices list|show|retire` reads the library; `retire` marks a voice
  *   unmatchable without changing its card hash.
  * - `perform --project W --episode N [--engine chatterbox-turbo|dia]
@@ -254,6 +255,11 @@ const PRONOUNCE_ARGS = z.object({
   output: outputArg,
   unit: unitArg,
   episode: z.number().int().positive().optional().describe("Only this unit (a radio episode, or with output a narrated unit); default every unit."),
+  all: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("List every undecided word. By default words also written in lower case elsewhere, month and weekday names, common English words and common first names are left out, and the rest ranks mixed-case tokens (ChatGPT) and unusual letter patterns first."),
 });
 
 const VOICES_ARGS = z.object({
@@ -786,7 +792,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
   const pronounce: Verb<typeof PRONOUNCE_ARGS.shape> = {
     name: "pronounce",
     description:
-      "Show what the voice engine will say for a performed output's script lines, before any render: for each line whose engine input differs from its text, the line number, the speaker, each changed token (\"10-20%\" -> \"ten to twenty percent\", \"AI\" -> \"A.I.\" on a nonfiction work, shorthand such as \"Gov.\", \"3:00 p.m.\", \"$7T\" or \"1/3\", a pronounce.md respelling) and the full engine text; then the capitalised or all-caps words no rule or lexicon entry decided, which the author may want to add to the output's pronounce.md, and the links, abbreviation-like words and unknown units it left as written. Read-only; loads no model and writes nothing.",
+      "Show what the voice engine will say for a performed output's script lines, before any render: for each line whose engine input differs from its text, the line number, the speaker, each changed token (\"10-20%\" -> \"ten to twenty percent\", \"AI\" -> \"A.I.\" on a nonfiction work, shorthand such as \"Gov.\", \"3:00 p.m.\", \"$7T\" or \"1/3\", a pronounce.md respelling) and the full engine text; then the capitalised or all-caps words no rule or lexicon entry decided, which the author may want to add to the output's pronounce.md, and the links, abbreviation-like words and unknown units it left as written. The word list leaves out month and weekday names, common English words, common first names and words also written in lower case elsewhere, and ranks mixed-case tokens (ChatGPT) and unusual letter patterns first; `all` lists every word. Read-only; loads no model and writes nothing.",
     args: PRONOUNCE_ARGS,
     run: async (args, ctx) => {
       const where = locate(ctx, args.project);
@@ -804,7 +810,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const implied = args.output === undefined && performed.length === 1 ? { ...args, output: performed[0] } : args;
       const output = addressedOutput(implied, work, "pronounce");
       if (typeof output !== "string") return output;
-      return run(["pronounce", ...flag("--episode", args.episode ?? args.unit)], { project: args.project }, ctx, deps, [], output);
+      return run(["pronounce", ...flag("--episode", args.episode ?? args.unit), ...(args.all ? ["--all"] : [])], { project: args.project }, ctx, deps, [], output);
     },
   };
 

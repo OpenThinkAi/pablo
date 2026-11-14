@@ -135,3 +135,15 @@ test("pronounce's plain text lists each changed line, its tokens and engine text
   expect(text).toContain("      A I at ten to twenty percent");
   expect(text).toContain("  Okafor  capitalised, 2x, first unit 1 line 7");
 });
+
+test("pronounce says how many words it left out, and --all reaches the Python side", async () => {
+  const text = castingText("pronounce", { ok: true, output: "narrated", acronyms: false, lexicon: "x", lexiconEntries: 0, changedLines: 0, units: [], unresolved: [], unresolvedHidden: 12 });
+  expect(text).toContain("12 more left out");
+  expect(text).toContain("--all lists them");
+  const { vault } = narratedWork();
+  const { deps, calls } = fakeMachine();
+  expect((await verb(deps).run({ project: "ice-house", all: true } as never, ctxIn(vault))).exitCode).toBe(0);
+  expect(calls.at(-1)!.argv).toContain("--all");
+  expect((await verb(deps).run({ project: "ice-house" } as never, ctxIn(vault))).exitCode).toBe(0);
+  expect(calls.at(-1)!.argv).not.toContain("--all");
+});

@@ -378,3 +378,42 @@ def test_a_full_month_name_before_a_day_says_the_day_as_an_ordinal() -> None:
     assert say("on July 5th", False) == "on July fifth"
     # a month before a year, or a bare month, is left alone
     assert say("In May 2026 and in June", False) == "In May twenty twenty-six and in June"
+
+
+NOISY = """CAST: NARRATOR="n"
+
+NARRATOR: Dan spoke in May at the Federal Center, and Amodei said ChatGPT beat the iPhone.
+
+NARRATOR: The Reading sign, Suh met Mei on Tuesday. The center was open, and Khrushchev left.
+
+NARRATOR: Amodei again, and Amodei once more, said Dan.
+"""
+
+
+def test_pronounce_drops_noise_and_ranks_mixed_case_then_unusual_first(tmp_path: Path) -> None:
+    work = make_work(tmp_path, "nonfiction", NOISY)
+    (body, code), _ = run(["pronounce", "--work", str(work), "--output", "narrated", "--json"], env={})
+    assert code == 0, body
+    tokens = [row["token"] for row in body["unresolved"]]  # type: ignore[union-attr]
+    # Months, weekdays, common words and names ("May", "Federal", "Center" also lower case, "Reading", "Dan", "Tuesday") are left out.
+    assert tokens == ["ChatGPT", "iPhone", "Khrushchev", "Amodei", "Mei", "Suh"], tokens
+    assert body["unresolvedHidden"] == 6  # type: ignore[index]
+
+
+def test_pronounce_all_lists_every_word_in_count_order(tmp_path: Path) -> None:
+    work = make_work(tmp_path, "nonfiction", NOISY)
+    (body, code), _ = run(["pronounce", "--work", str(work), "--output", "narrated", "--all", "--json"], env={})
+    assert code == 0, body
+    rows = {row["token"]: row["count"] for row in body["unresolved"]}  # type: ignore[union-attr]
+    assert {"May", "Federal", "Center", "Dan", "Reading", "Tuesday", "Amodei", "ChatGPT"} <= set(rows)
+    assert body["unresolved"][0]["token"] == "Amodei" and body["unresolvedHidden"] == 0  # type: ignore[index]
+
+
+def test_noise_helpers() -> None:
+    from pablo_casting.noise import is_common, is_mixed_case, is_unusual, rank
+
+    assert all(is_common(w) for w in ("May", "Tuesday", "Bureau", "Jim", "Times"))
+    assert not any(is_common(w) for w in ("Amodei", "Shimer", "Chandar"))
+    assert is_mixed_case("ChatGPT") and is_mixed_case("iPhone") and not is_mixed_case("NASA") and not is_mixed_case("Dan")
+    assert is_unusual("Khrushchev") and is_unusual("Qatar") and not is_unusual("Garden")
+    assert [rank(w) for w in ("ChatGPT", "Khrushchev", "Garden")] == [0, 1, 2]

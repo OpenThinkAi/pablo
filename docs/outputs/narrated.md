@@ -49,7 +49,8 @@ pablo mix --project ice-house --output narrated --unit 1
 
 `pronounce` shows, before any render, every line the engine will say differently from the text
 (numbers, ranges, dates, abbreviations, and on a nonfiction work acronyms as spaced letters) and
-the words no rule decided, for `outputs/narrated/pronounce.md`. `fix` and `mixer` take the same flags. See
+the words no rule decided, for `outputs/narrated/pronounce.md` (common words, months, first names and words
+also written in lower case are left out, the likeliest misreads come first, `--all` lists every word). `fix` and `mixer` take the same flags. See
 [Performing a narrated output](../commands.md#performing-a-narrated-output).
 
 ## Publish

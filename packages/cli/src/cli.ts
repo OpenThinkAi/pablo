@@ -550,11 +550,15 @@ export function castingText(verb: string, body: Record<string, unknown>): string
     }
     const unresolved = (body["unresolved"] as Array<Record<string, unknown>> | undefined) ?? [];
     if (unresolved.length > 0) {
-      lines.push("left as written (a word or unit the engine says wrong goes in pronounce.md; rewrite a link by hand):");
+      lines.push("left as written, likeliest misreads first (a word or unit the engine says wrong goes in pronounce.md; rewrite a link by hand):");
       for (const u of unresolved) {
         const first = u["first"] as { unit?: unknown; line?: unknown } | undefined;
         lines.push(`  ${String(u["token"])}  ${String(u["kind"])}, ${String(u["count"])}x, first unit ${String(first?.unit)} line ${String(first?.line)}`);
       }
+    }
+    const hidden = body["unresolvedHidden"];
+    if (typeof hidden === "number" && hidden > 0) {
+      lines.push(`  (${hidden} more left out: common words, months, first names and words also written in lower case; --all lists them)`);
     }
   }
   if (verb === "perform" && typeof body["manifest"] === "string") {

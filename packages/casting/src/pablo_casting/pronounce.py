@@ -18,6 +18,11 @@ rules (`spoken.py`) saw but could not decide: links (URLs and email addresses,
 read as written, to rewrite by hand), abbreviation-like words ending in a full
 stop that is not a sentence's end, and letters stuck to a number that are no
 known unit. Nothing is written.
+
+By default (AGT-2304) the capitalised and ALL-CAPS words that also appear in lower case elsewhere in the output, month
+and weekday names, common English words and common first names (`noise.py`) are left out and counted in
+`unresolvedHidden`; the rest is ranked mixed-case tokens (`ChatGPT`), then words with unusual letter patterns, then the
+others. `--all` lists every word in the order of count, as before.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from pablo_casting import outputs
 from pablo_casting.binding import episode_files
 from pablo_casting.engines import ACRONYMS_PARAM, ACRONYMS_VERSION, LEXICON_PARAM, as_letters, chatterbox_text, is_shouted, spoken_params, turbo_text
 from pablo_casting.lexicon import Entry, acronym_mode, lexicon_path, load
+from pablo_casting.noise import is_common, rank
 from pablo_casting.script import parse_script
 from pablo_casting.spoken import mask, undecided
 
@@ -93,7 +99,19 @@ def _unresolved(text: str, speaker: str, entries: Sequence[Entry], acronyms: boo
     return [(w, k) for w, k in found if w not in abbreviations] + shorthand
 
 
-def cmd_pronounce(work: Path, episode: int | None) -> Result:
+_WORD_KINDS = ("caps", "capitalised")
+
+
+def _lower_case_words(work: Path) -> set[str]:
+    """Every word the output's scripts spell all in lower case somewhere (all units, not only the one asked for)."""
+    seen: set[str] = set()
+    for _n, path in episode_files(work):
+        for spoken in parse_script(path.read_text(encoding="utf-8")).lines:
+            seen.update(w for w in _WORD.findall(mask(spoken.text)[0]) if w == w.lower())
+    return seen
+
+
+def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> Result:
     output = outputs.current()
     entries = load(work)
     acronyms = acronym_mode(work)
@@ -127,6 +145,21 @@ def cmd_pronounce(work: Path, episode: int | None) -> Result:
             lines.append({"line": spoken.line, "speaker": spoken.speaker, "text": spoken.text, "engine": engine, "changes": _in_order(spoken.text, _collapse(changes))})
         units.append({"unit": number, "file": str(path.relative_to(work)), "lines": lines})
     lexicon = lexicon_path(work)
+    # A word also written in lower case elsewhere, a month or weekday, a common English word or first name is noise: left
+    # out unless `everything`. The rest ranks mixed-case tokens, then unusual letter patterns, then the others.
+    lower = set() if everything else _lower_case_words(work)
+    rows: list[tuple[str, int]] = []
+    hidden = 0
+    for token in counts:
+        kind = first[token][0]
+        if not everything and kind in _WORD_KINDS and (token.lower() in lower or is_common(token)):
+            hidden += 1
+            continue
+        rows.append((token, rank(token) if kind in _WORD_KINDS else 1))
+    if everything:
+        ordered = sorted(counts, key=lambda t: (-counts[t], t))
+    else:
+        ordered = [t for t, r in sorted(rows, key=lambda item: (item[1], -counts[item[0]], item[0]))]
     return {
         "ok": True,
         "output": output,
@@ -136,7 +169,8 @@ def cmd_pronounce(work: Path, episode: int | None) -> Result:
         "units": units,
         "changedLines": changed,
         "unresolved": [
-            {"token": token, "kind": first[token][0], "count": count, "first": {"unit": first[token][1], "line": first[token][2]}}
-            for token, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            {"token": token, "kind": first[token][0], "count": counts[token], "first": {"unit": first[token][1], "line": first[token][2]}}
+            for token in ordered
         ],
+        "unresolvedHidden": hidden,
     }, 0

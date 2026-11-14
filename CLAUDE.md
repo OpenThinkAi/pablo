@@ -541,7 +541,11 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `spoken`/`acronyms` take-key params only to passes those
                 rules change (no ADAPTER_VERSION bump, so fiction keys
                 stay); `pronounce.py` (`pablo pronounce`) shows the
-                engine text per line, read-only. `perform.py` runs the
+                engine text per line, read-only (AGT-2304: its undecided
+                -word list drops lower-case-elsewhere words, months,
+                common words and first names and ranks mixed-case then
+                unusual letter patterns first, per `noise.py`; `--all`
+                lists all). `perform.py` runs the
                 retake loop (4 derived seeds, first pass kept, else best-of
                 with an auto flag in `flags.json`), the pace policy (role
                 `pace.wps` x 0.85/1.15 for slow/quick; stretch measured and
