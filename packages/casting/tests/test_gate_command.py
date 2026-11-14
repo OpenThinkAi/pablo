@@ -18,6 +18,7 @@ from pablo_casting.scorers import (
     DNSMOS,
     ECAPA,
     EMOTION,
+    PHONEMES,
     SCORERS,
     UTMOS,
     WHISPER,
@@ -92,6 +93,7 @@ def good_stack(**over: Mapping[str, object]) -> list[Fake]:
         "audiobox": {"pq": 7.1},
         "dnsmos": {"bak": 4.15, "ovrl": 3.62},
         "emotion": {"emotion_top2": ["neutral", "sad"]},
+        "phonemes": {},  # a single take given by --line has nothing for the pronounce gate to check
     }
     answers.update(over)
     return [Fake(info, answers[info.name]) for info in SCORERS]
@@ -119,7 +121,7 @@ def test_gate_returns_every_score_in_the_gate_table_plus_pass_and_failing(env: d
         assert key in scores, key
     assert scores["seconds"] == pytest.approx(4.5)
     assert scores["wps"] == pytest.approx(11 / 3.8, abs=1e-3)
-    assert set(body["gates"]) == {"words", "tail", "identity", "consistency", "naturalness", "artefacts", "pace", "emotion", "duration"}  # type: ignore[arg-type]
+    assert set(body["gates"]) == {"words", "tail", "pronounce", "identity", "consistency", "naturalness", "artefacts", "pace", "emotion", "duration"}  # type: ignore[arg-type]
     assert body["thresholds"]["sim_min"] == 0.62  # type: ignore[index]  # the card's own
     assert body["thresholds"]["utmos_min"] == 3.8  # type: ignore[index]  # the package default
     assert [s["name"] for s in body["scorers"]] == [info.name for info in SCORERS]  # type: ignore[union-attr]
@@ -356,7 +358,7 @@ def test_doctor_lists_every_scorer_with_weights_license_and_version(env: dict[st
     assert code == 0
     scorers = body["scorers"]
     assert isinstance(scorers, list)
-    assert [s["name"] for s in scorers] == ["whisper", "aligner", "ecapa", "utmos", "audiobox", "dnsmos", "emotion"]
+    assert [s["name"] for s in scorers] == ["whisper", "phonemes", "aligner", "ecapa", "utmos", "audiobox", "dnsmos", "emotion"]
     for scorer in scorers:
         assert scorer["weights"]
         assert scorer["license"]["code"] and scorer["license"]["weights"]
@@ -371,7 +373,7 @@ def test_doctor_lists_every_scorer_with_weights_license_and_version(env: dict[st
 
 
 def test_the_stack_order_is_the_design_order() -> None:
-    assert SCORERS == (WHISPER, ALIGNER, ECAPA, UTMOS, AUDIOBOX, DNSMOS, EMOTION)
+    assert SCORERS == (WHISPER, PHONEMES, ALIGNER, ECAPA, UTMOS, AUDIOBOX, DNSMOS, EMOTION)
     assert [info.name for info in SCORERS if info.soft] == ["emotion"]
     assert replace(EMOTION, soft=False).soft is False
 

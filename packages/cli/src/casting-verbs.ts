@@ -30,7 +30,9 @@
  *   model: per script line whose engine input differs from its text, the tokens the normalisers changed (numbers,
  *   ranges, acronyms on a nonfiction work, lexicon respellings) and the engine text, plus the capitalised words no
  *   rule or `pronounce.md` entry decided (`pronounce.py`); AGT-2304: common words, months, first names and words also
- *   written in lower case are left out and the rest ranked (mixed-case, then unusual letter patterns), `--all` lists all.
+ *   written in lower case are left out and the rest ranked (mixed-case, then unusual letter patterns), `--all` lists all. With `--check` (AGT-2307) it runs the pronounce
+ *   gate over the output's rendered takes instead (the phoneme scorer, so it provisions the `scorers` extra) and lists
+ *   the acronyms and respellings not heard; nothing is re-rendered.
  * - `voices list|show|retire` reads the library; `retire` marks a voice
  *   unmatchable without changing its card hash.
  * - `perform --project W --episode N [--engine chatterbox-turbo|dia]
@@ -313,6 +315,11 @@ const PRONOUNCE_ARGS = z.object({
     .describe(
       "Ask the model the `plan` intent routes to for a respelling of every token pronounce flagged (and every heteronym such as read, lead, live, close), with a one-line reason each, and keep them as additions to the output's pronounce.md on a new plan/ branch for review. Nothing is applied; hear a suggestion before keeping it. Tokens the lexicon already decides are not sent. Refused with no model configured.",
     ),
+  check: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Run the pronounce gate over the rendered takes instead: list each take whose acronyms (read as letters) or IPA'd respellings were not heard. Loads the phoneme model; re-renders nothing."),
 });
 
 const VOICES_ARGS = z.object({
@@ -905,7 +912,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
   const pronounce: Verb<typeof PRONOUNCE_ARGS.shape> = {
     name: "pronounce",
     description:
-      "Show what the voice engine will say for a performed output's script lines, before any render: for each line whose engine input differs from its text, the line number, the speaker, each changed token (\"10-20%\" -> \"ten to twenty percent\", \"AI\" -> \"A.I.\" on a nonfiction work, shorthand such as \"Gov.\", \"3:00 p.m.\", \"$7T\" or \"1/3\", a pronounce.md respelling) and the full engine text; then the capitalised or all-caps words no rule or lexicon entry decided, which the author may want to add to the output's pronounce.md, and the links, abbreviation-like words and unknown units it left as written. The word list leaves out month and weekday names, common English words, common first names and words also written in lower case elsewhere, and ranks mixed-case tokens (ChatGPT) and unusual letter patterns first; `all` lists every word. Read-only; loads no model and writes nothing. With suggest: sends each flagged token and heteronym, with its sentence, to the plan intent's model for a respelling and a reason, and writes the proposals into the output's pronounce.md on a new plan/ branch for the author to review (never applied; hear each before keeping it); refused with no model configured.",
+      "Show what the voice engine will say for a performed output's script lines, before any render: for each line whose engine input differs from its text, the line number, the speaker, each changed token (\"10-20%\" -> \"ten to twenty percent\", \"AI\" -> \"A.I.\" on a nonfiction work, shorthand such as \"Gov.\", \"3:00 p.m.\", \"$7T\" or \"1/3\", a pronounce.md respelling) and the full engine text; then the capitalised or all-caps words no rule or lexicon entry decided, which the author may want to add to the output's pronounce.md, and the links, abbreviation-like words and unknown units it left as written. The word list leaves out month and weekday names, common English words, common first names and words also written in lower case elsewhere, and ranks mixed-case tokens (ChatGPT) and unusual letter patterns first; `all` lists every word. Read-only; loads no model and writes nothing. With suggest: sends each flagged token and heteronym, with its sentence, to the plan intent's model for a respelling and a reason, and writes the proposals into the output's pronounce.md on a new plan/ branch for the author to review (never applied; hear each before keeping it); refused with no model configured. With check: runs the pronounce gate over the output's rendered takes (a phoneme model hears whether each acronym was said as its letters, \"ay eye\" not \"eye\", and each respelling with an IPA field in pronounce.md as written) and lists the misses to re-take with fix; re-renders and writes nothing.",
     args: PRONOUNCE_ARGS,
     run: async (args, ctx) => {
       const where = locate(ctx, args.project);
@@ -923,6 +930,9 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const implied = args.output === undefined && performed.length === 1 ? { ...args, output: performed[0] } : args;
       const output = addressedOutput(implied, work, "pronounce");
       if (typeof output !== "string") return output;
+      if (args.check === true) {
+        return run(["pronounce", ...flag("--episode", args.episode ?? args.unit), "--check"], { project: args.project }, ctx, deps, [SCORERS_EXTRA], output);
+      }
       const pronounceNow = () => run(["pronounce", ...flag("--episode", args.episode ?? args.unit), ...(args.all ? ["--all"] : [])], { project: args.project }, ctx, deps, [], output);
       if (!args.suggest) return pronounceNow();
       return suggestRespellings(work, output, ctx, pronounceNow);

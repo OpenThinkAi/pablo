@@ -28,6 +28,13 @@ For `pronounce --suggest` (AGT-2303) each unresolved token also carries the spea
 occurrence, and `heteronyms` lists, per line, the words of `HETERONYMS` (common English words whose sound depends on
 the sense: read, lead, live, close, tear, wind ...) the lexicon does not already decide for that speaker, each with its
 sentence. The pablo CLI sends those to the `plan` model; nothing here does.
+
+`pronounce --check` (AGT-2307) runs the pronounce gate over what is already
+rendered instead: for each unit's newest manifest, every take whose inputs gave
+the engine an acronym as letters or an IPA'd respelling (`phonemes.expectations`,
+exactly as perform judges it) is transcribed by the phoneme scorer and its misses
+listed. Nothing is re-rendered or written, and casting.json's `pronounce.gate`
+does not apply: the check was asked for.
 """
 
 from __future__ import annotations
@@ -41,8 +48,9 @@ from pablo_casting import outputs
 from pablo_casting.binding import episode_files
 from pablo_casting.engines import ACRONYMS_PARAM, ACRONYMS_VERSION, LEXICON_PARAM, as_letters, chatterbox_text, is_shouted, spoken_params, turbo_text
 from pablo_casting.lexicon import Entry, acronym_mode, lexicon_path, load
-from pablo_casting.manifest import read_version, versions
+from pablo_casting.manifest import episode_dir, latest, read_version, versions
 from pablo_casting.noise import is_common, rank
+from pablo_casting.phonemes import expectations, ipa_map
 from pablo_casting.script import parse_script
 from pablo_casting.spoken import mask, undecided
 from pablo_casting.stale import stale_lines
@@ -232,3 +240,78 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
         "unresolvedHidden": hidden,
         "heteronyms": heteronyms,
     }, 0
+
+
+def _rendered_units(work: Path) -> list[int]:
+    renders = episode_dir(work, 1).parent
+    if not renders.is_dir():
+        return []
+    found = []
+    for entry in renders.iterdir():
+        if entry.is_dir() and entry.name.startswith("ep") and entry.name[2:].isdigit() and versions(work, int(entry.name[2:])):
+            found.append(int(entry.name[2:]))
+    return sorted(found)
+
+
+def cmd_pronounce_check(work: Path, episode: int | None, scorers: Sequence[object]) -> Result:
+    """The pronounce gate over each rendered unit's newest takes; misses listed, nothing re-rendered."""
+    from pablo_casting.scorers import PHONEMES, ScorerUnavailable
+    from pablo_casting.scorers import Take as ScoredTake
+    from pablo_casting.takes import TakeInputError, TakeInputs, read_take
+
+    output = outputs.current()
+    rendered = _rendered_units(work)
+    units_wanted = [n for n in rendered if episode is None or n == episode]
+    if not units_wanted:
+        missing = f"render of {output} unit {episode}" if episode is not None else f"rendered {output} unit"
+        hint = f"; rendered units are {', '.join(str(n) for n in rendered)}" if rendered else "; perform it first"
+        return {"ok": False, "code": 2, "message": f"pronounce --check: no {missing} in {work}{hint}", "missing": [missing], "units": rendered}, 2
+    scorer = next((s for s in scorers if getattr(s, "info", None) is PHONEMES), None)
+    if scorer is None:
+        return {"ok": False, "code": 1, "message": "pronounce --check: the phoneme scorer is not in the scorer stack"}, 1
+    ipa = ipa_map(load(work))
+    units: list[dict[str, object]] = []
+    checked = misses = 0
+    for number in units_wanted:
+        manifest = latest(work, number) or {}
+        version = versions(work, number)[-1]
+        lines = [line for line in manifest.get("lines", []) if isinstance(line, dict)]  # type: ignore[union-attr]
+        by_take: dict[str, list[dict[str, object]]] = {}
+        for line in lines:
+            if isinstance(line.get("take"), str):
+                by_take.setdefault(str(line["take"]), []).append(line)
+        found: list[dict[str, object]] = []
+        unit_checked = 0
+        for key, take_lines in by_take.items():
+            take = read_take(work, key)
+            if take is None:
+                found.append({"lines": [line.get("line") for line in take_lines], "take": key, "error": "the take is not in the store"})
+                continue
+            try:
+                inputs = TakeInputs.from_body(take.record.get("inputs") or {})  # type: ignore[arg-type]
+            except TakeInputError as bad:
+                found.append({"lines": [line.get("line") for line in take_lines], "take": key, "error": str(bad)})
+                continue
+            expect = tuple(expectations(((line.speaker, line.text) for line in inputs.lines), inputs.params, ipa))
+            if not expect:
+                continue
+            unit_checked += 1
+            try:
+                measured = scorer.score(ScoredTake(audio=take.path / "take.wav", line=" ".join(l.text for l in inputs.lines), seconds=0.0, expect=expect))  # type: ignore[attr-defined]
+            except ScorerUnavailable as missing:
+                return {"ok": False, "code": 2, "message": f"pronounce --check: {missing}", "missing": [f"the `{missing.info.extra}` extra"]}, 2
+            missed = list(measured.get("pronounce_missed") or [])
+            if missed:
+                found.append({
+                    "lines": [line.get("line") for line in take_lines],
+                    "speaker": take_lines[0].get("speaker"),
+                    "text": " ".join(str(line.get("text", "")) for line in take_lines),
+                    "take": key,
+                    "missed": missed,
+                    "checked": measured.get("pronounce"),
+                    "phonemes": measured.get("phonemes"),
+                })
+        checked += unit_checked
+        misses += sum(1 for item in found if "missed" in item)
+        units.append({"unit": number, "version": version, "checked": unit_checked, "misses": found})
+    return {"ok": True, "output": output, "check": True, "units": units, "checked": checked, "misses": misses}, 0

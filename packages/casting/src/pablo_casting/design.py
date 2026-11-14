@@ -294,6 +294,8 @@ def trial(
             err=machine.err,
             out=None,
             scratch=scratch,
+            # A trial judges the voice; whether an acronym was read as letters is the performance's gate, not the voice's.
+            pronounce=False,
         )
         for candidate in candidates:
             speaker = speakers[candidate.number]

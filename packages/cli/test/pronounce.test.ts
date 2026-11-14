@@ -147,3 +147,28 @@ test("pronounce says how many words it left out, and --all reaches the Python si
   expect((await verb(deps).run({ project: "ice-house" } as never, ctxIn(vault))).exitCode).toBe(0);
   expect(calls.at(-1)!.argv).not.toContain("--all");
 });
+
+test("pronounce --check runs the pronounce gate over the rendered takes, provisioning the scorers extra", async () => {
+  const { vault, work } = narratedWork();
+  const { deps, calls } = fakeMachine();
+  const result = await verb(deps).run({ project: "ice-house", output: "narrated", unit: 1, check: true } as never, ctxIn(vault));
+  expect(result.exitCode).toBe(0);
+  const last = calls.at(-1)!;
+  expect(last.output).toBe("narrated");
+  expect(last.argv).toEqual(["pronounce", "--episode=1", "--check", `--vault=${vault}`, "--work", work, "--json"]);
+  expect(calls.some((c) => c.argv.includes("scorers"))).toBe(true); // `uv sync --extra scorers` before the check
+});
+
+test("pronounce --check's plain text lists each miss with what was heard", () => {
+  const text = castingText("pronounce", {
+    ok: true,
+    output: "narrated",
+    check: true,
+    checked: 3,
+    misses: 1,
+    units: [{ unit: 1, version: 2, checked: 3, misses: [{ lines: [4], speaker: "NARRATOR", text: "That AI could", take: "ab", missed: ["AI"], phonemes: "ð æ t aɪ k ə d" }] }],
+  });
+  expect(text).toContain("3 take(s) with acronyms or respellings checked, 1 not heard as written");
+  expect(text).toContain("  unit 1 v2 line 4 NARRATOR: missed AI");
+  expect(text).toContain("      heard: ð æ t aɪ k ə d");
+});

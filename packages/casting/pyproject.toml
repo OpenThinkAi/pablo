@@ -23,6 +23,8 @@ dependencies = [
 # MLX scorers (Whisper, the forced aligner) exist only on Apple Silicon.
 # emotion2vec (funasr) is its own extra: its gate is soft and its weights'
 # license is unverified (design, "Research: quality gates on Apple Silicon").
+# transformers runs the pronounce gate's phoneme recogniser (AGT-2307,
+# wav2vec2 CTC, decoded from its own vocab.json, so `phonemizer` is not needed).
 [project.optional-dependencies]
 scorers = [
     "numpy>=2.0",
@@ -36,6 +38,7 @@ scorers = [
     "speechmos>=0.0.1.1",
     "onnxruntime>=1.20",
     "librosa>=0.10",
+    "transformers>=4.50",
 ]
 # The mix's SFX and BED cues (AGT-1684): Stable Audio Open 1.0 through diffusers
 # on MPS, imported only when a cue is not already in the content-addressed cue
