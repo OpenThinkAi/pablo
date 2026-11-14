@@ -42,11 +42,14 @@ Narrated readings use the same audio verbs as radio, addressed with `--output na
 
 ```
 pablo cast --auto --project ice-house --output narrated [--unit N]
+pablo pronounce --project ice-house --output narrated [--unit N]
 pablo perform --project ice-house --output narrated --unit 1
 pablo mix --project ice-house --output narrated --unit 1
 ```
 
-`fix` and `mixer` take the same flags. See
+`pronounce` shows, before any render, every line the engine will say differently from the text
+(numbers, ranges, dates, abbreviations, and on a nonfiction work acronyms as spaced letters) and
+the words no rule decided, for `outputs/narrated/pronounce.md`. `fix` and `mixer` take the same flags. See
 [Performing a narrated output](../commands.md#performing-a-narrated-output).
 
 ## Publish
