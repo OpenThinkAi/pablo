@@ -13,6 +13,11 @@ Commands:
              Hugging Face cache. Never downloads anything.
 - `pull`     download the configured weights into the HF cache (progress on
              stderr), with a receipt when `--work` is given.
+- `audition --preview [--role R | --slug S] [--candidate n] [--voice SLUG] [--episode N] [--lines a-b]
+             [--passage work|expository|fixed]` (AGT-2298, `audition_preview.py`)  each of a voice's
+             audition candidates (and/or a library voice) cloned by the performance engine reading the
+             unit's own lines (`--output narrated --episode N`) or the neutral expository passage; writes
+             `auditions/previews/*.wav`, no card or candidate is touched.
 - `audition --dry-run`  a no-model command: proves the side is provisioned and
              runnable.
 - `audition --role R --describe "..." [--designer qwen3|voxcpm2] [--language en|es] [-n 6]
@@ -236,6 +241,9 @@ def _parser() -> _Parser:
     parser.add_argument("--from-wav", dest="from_wav")
     # gate / gate calibrate
     parser.add_argument("--line")
+    parser.add_argument("--lines", help="audition --preview: the spoken lines to read, a-b (inclusive)")
+    parser.add_argument("--preview", action="store_true", help="audition: read the work's own text in the candidates instead of rendering new ones")
+    parser.add_argument("--passage", help="audition --preview: work (default with a unit), expository or fixed")
     parser.add_argument("--card")
     parser.add_argument("--centroid")
     parser.add_argument("--emotion")
@@ -363,6 +371,32 @@ def _slug_for(args: argparse.Namespace) -> str:
 
 def _author(env: Mapping[str, str], given: str | None) -> str:
     return given or env.get("PABLO_AUTHOR") or env.get("USER") or "author"
+
+
+def cmd_audition_preview(env: Mapping[str, str], args: argparse.Namespace, work: Path | None, engines: EngineFactory) -> Result:
+    """`audition --preview` (AGT-2298): candidates and/or a library voice reading the work's own text (`audition_preview.py`)."""
+    from pablo_casting.audition_preview import PreviewRefusal, PreviewRequest, preview
+    from pablo_casting.passage import DEFAULT_LANGUAGE, PASSAGES
+
+    language = args.language or DEFAULT_LANGUAGE
+    if language not in PASSAGES:
+        return refused(f'unknown language "{language}": one of {", ".join(PASSAGES)}')
+    config = load_config(env)
+    library = _library(config, args)
+    request = PreviewRequest(
+        slug=_slug_for(args) if (args.slug or args.role) else None,
+        candidate=args.candidate,
+        voice=args.voice,
+        role=args.role,
+        unit=_episode_number(args.episode),
+        lines=args.lines,
+        passage=args.passage,
+        language=language,
+    )
+    try:
+        return preview(library, request, work, env, engines), EXIT_OK
+    except PreviewRefusal as refusal:
+        return refused(str(refusal), **({"missing": refusal.missing} if refusal.missing else {}))
 
 
 def cmd_audition(env: Mapping[str, str], args: argparse.Namespace, work: Path | None, toolkits: ToolkitFactory) -> Result:
@@ -967,6 +1001,8 @@ def _dispatch(
         ), args.json
     toolkit_factory = toolkits or _default_toolkit
     try:
+        if args.command == "audition" and args.preview:
+            return cmd_audition_preview(env, args, work, engines or real_engine), args.json
         if args.command == "audition":
             return cmd_audition(env, args, work, toolkit_factory), args.json
         if args.command == "cast" and args.auto:

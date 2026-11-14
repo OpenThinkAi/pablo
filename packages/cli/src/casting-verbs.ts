@@ -7,6 +7,9 @@
  *   renders candidates of the shared audition passage into the library's
  *   `voices/<slug>/auditions/` (untracked), scored and with near duplicates
  *   marked. `--dry-run` only checks the casting side (AGT-1678).
+ * - `audition --preview --role R [--output narrated --unit N [--lines a-b]] [--voice S]` (AGT-2298) clones each
+ *   candidate (and a library voice) through the performance engine reading the unit's own lines, or the neutral
+ *   expository passage, into `auditions/previews/`; it loads no designer and casts nothing (`audition_preview.py`).
  * - `cast --role R --candidate n [--recast]` freezes a candidate into the
  *   voice's card (`card.json`, `reference.flac`/`.txt`, `embedding.ecapa.npy`)
  *   and returns the card hash. There is no `--from-wav`: voices are synthetic
@@ -134,6 +137,23 @@ const AUDITION_ARGS = z.object({
   seed: z.number().int().nonnegative().optional().describe("The first candidate's seed; candidate k uses seed + k - 1 (default random)."),
   traits: traitsField,
   slug: slugField,
+  preview: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Hear voices on the work's own text instead of rendering candidates (AGT-2298): each of the role's audition candidates (and the library voice in `voice`) is cloned by the performance engine reading real lines of `output`/`unit` (or the neutral expository passage), one WAV each under the voice's auditions/previews/; the paths come back. Nothing is cast or changed: the card's reference stays the fixed audition passage.",
+    ),
+  voice: z.string().optional().describe("With preview: also read it in this library voice (a cast card's slug)."),
+  candidate: z.number().int().positive().optional().describe("With preview: only this audition candidate (default every candidate of the role's voice)."),
+  passage: z
+    .enum(["work", "expository", "fixed"])
+    .optional()
+    .describe("With preview: what is read. work (the default with a unit) is the unit's own lines; expository is a neutral nonfiction passage (the default for role NARRATOR without a unit); fixed is the audition passage."),
+  lines: z.string().optional().describe('With preview and a unit: the spoken lines to read, "a-b" inclusive, numbered as `perform` and the Cast panel number them (default: from the start, about 60 words). With `role`, only that role\'s lines in the range.'),
+  output: outputArg,
+  unit: unitArg,
+  episode: z.number().int().positive().optional().describe("With preview: the unit number, as `unit` (radio's spelling)."),
   "dry-run": z.boolean().optional().default(false).describe("Only check that the casting side is provisioned and runnable; no model is loaded."),
 });
 
@@ -580,8 +600,38 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     args: AUDITION_ARGS,
     run: async (args, ctx) => {
       if (args["dry-run"]) return run(["audition", "--dry-run"], args, ctx, deps);
+      if (args.preview) return previewAudition(args, ctx);
       return run(auditionArgv(args), args, ctx, deps, [SCORERS_EXTRA]);
     },
+  };
+
+  /** `audition --preview` (AGT-2298): the candidates read the unit's own text; the engine is `perform`'s, so no scorers. */
+  const previewAudition = (args: z.infer<typeof AUDITION_ARGS>, ctx: VerbContext): VerbResult => {
+    const addressed = args.output !== undefined || args.unit !== undefined || args.episode !== undefined;
+    let output: AudioOutput = RADIO_ID;
+    let unit: number | undefined;
+    if (addressed) {
+      const where = locate(ctx, args.project);
+      if ("exitCode" in where) return where;
+      const found = addressedEpisode(args, where.work as string, "audition --preview");
+      if ("exitCode" in found) return found;
+      ({ output, episode: unit } = found);
+    } else if (args.lines !== undefined || args.passage === "work") {
+      return refuseWith("pablo audition --preview: the work's own text needs --output <output> --unit N", ["--unit N"]);
+    }
+    const argv = [
+      "audition",
+      "--preview",
+      ...flag("--role", args.role),
+      ...flag("--slug", args.slug),
+      ...flag("--voice", args.voice),
+      ...flag("--candidate", args.candidate),
+      ...flag("--passage", args.passage),
+      ...flag("--lines", args.lines),
+      ...flag("--language", args.language),
+      ...flag("--episode", unit),
+    ];
+    return run(argv, args, ctx, deps, [], output);
   };
 
   const cast: Verb<typeof CAST_ARGS.shape> = {

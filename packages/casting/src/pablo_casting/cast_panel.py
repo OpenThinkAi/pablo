@@ -25,7 +25,7 @@ from pathlib import Path
 from pablo_casting.binding import BindingRefusal, pin_state, read_cast, read_episode
 from pablo_casting.engines import DEFAULT_ENGINE, DRAMA_ENGINE, ENGINE_SPECS, EngineFactory, EngineUnavailable, Pass, PassLine, VoiceRef, adapt
 from pablo_casting.fix import recast_lines
-from pablo_casting.gates import GateRefusal, load_card
+from pablo_casting.gates import Card, GateRefusal, load_card
 from pablo_casting.lexicon import acronym_mode, load as load_lexicon
 from pablo_casting.library import card_hash
 from pablo_casting.manifest import read_version, versions
@@ -111,6 +111,20 @@ def cmd_roles(work: Path, episode: int, voices_dir: Path | None) -> Result:
     }, EXIT_OK
 
 
+def voice_ref(card: Card, slug: str) -> VoiceRef:
+    """A cast card as an engine clones it (a library voice read through the performance engine)."""
+    assert card.reference is not None
+    reference = card.data.get("reference")
+    seconds = reference.get("seconds") if isinstance(reference, dict) else None
+    return VoiceRef(
+        card_hash=card_hash(card.data),
+        slug=slug,
+        reference=card.reference,
+        transcript=card_transcript(card),
+        seconds=float(seconds) if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) else 0.0,
+    )
+
+
 def cmd_preview(env: Mapping[str, str], work: Path, episode: int, line: str | None, slug: str | None, voices_dir: Path | None, engines: EngineFactory) -> Result:
     if line is None or slug is None:
         missing = [name for name, value in (("--line", line), ("--voice", slug)) if value is None]
@@ -136,16 +150,8 @@ def cmd_preview(env: Mapping[str, str], work: Path, episode: int, line: str | No
         return _refused(f'voice "{slug}" is retired and is never bound to a role again; audition another')
     if card.reference is None:
         return _refused(f"voice {slug!r} has no reference clip beside its card ({card.dir})", missing=[str(card.dir / "reference.flac")])
-    reference = card.data.get("reference")
-    seconds = reference.get("seconds") if isinstance(reference, dict) else None
     digest = card_hash(card.data)
-    voice = VoiceRef(
-        card_hash=digest,
-        slug=slug,
-        reference=card.reference,
-        transcript=card_transcript(card),
-        seconds=float(seconds) if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) else 0.0,
-    )
+    voice = voice_ref(card, slug)
     spec = DRAMA_ENGINE if said.drama else ENGINE_SPECS[DEFAULT_ENGINE]
     take_pass = Pass((PassLine(0, said.speaker, said.text, said.drama),))
     voices = {said.speaker: voice}
