@@ -723,6 +723,10 @@ to a `core/claims.md` row or a note under `research/`:
 - `claim-uncited`: the claim traces to a source but the text does not cite it.
   `detail` names the source and the citation to add.
 
+A narrated reading of an essay is read without its citations, so it gets neither claim
+check (every sentence would read as uncited): they run on the source essay, and the
+reading gets `narration-drift`.
+
 A citation is a bracket of research note ids (`@<id>`) and/or claims row numbers
 (`#<n>`): `[@ice-harvest]`, `[#2]`, `[@ice-harvest; #3]`. A claim whose citation
 resolves is never a hit; a citation that resolves to nothing is named in the hit.

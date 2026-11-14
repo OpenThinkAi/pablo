@@ -369,6 +369,25 @@ test("narrated reads an essay section aloud without its citations", () => {
   expect(NARRATED.preconditions(work, 3).ready).toBe(false);
 });
 
+test("AGT-2301: check on a narrated essay reading skips the claim checks and still reports narration-drift", () => {
+  const { vault, work } = nonfiction({ essay: true });
+  const outline = essayDefaultPlan(work).map((r) => ({ number: r.unit, title: r.title, covers: "" }));
+  const fm = "---\nstatus: draft\nmodel: x\nprompt_hash: y\n---";
+  const claim = "Gutenberg's press was working in Mainz by 1455.";
+  writeFileSync(join(work, "outputs", "essay", "essay.md"), putSection(outline, undefined, 1, `${claim} [#1]`, fm));
+  const marker = JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")) as { outputs: Record<string, unknown> };
+  marker.outputs["narrated"] = { added: "2026-10-26", from: "essay" };
+  writeFileSync(join(work, "pablo.json"), JSON.stringify(marker));
+  mkdirSync(join(work, "outputs", "narrated", "readings"), { recursive: true });
+  writeFileSync(join(work, "outputs", "narrated", "readings", "01-gutenberg.md"), `---\nmodel: pablo-derived\n---\n\nGutenberg's press was running in Mainz by 1455.\n`);
+  const narrated = checkWork(vault, work, undefined, "narrated");
+  if (!narrated.ok) throw new Error(narrated.message);
+  const rules = narrated.hits.map((h) => h.rule);
+  expect(rules).not.toContain("claim-uncited");
+  expect(rules).not.toContain("claim-unsupported");
+  expect(rules).toContain("narration-drift");
+});
+
 test("check scans the essay file only, never its RULES.md or plan.md, and flags an uncited claim", () => {
   const { vault, work } = nonfiction({ essay: true });
   const outline = essayDefaultPlan(work).map((r) => ({ number: r.unit, title: r.title, covers: "" }));
