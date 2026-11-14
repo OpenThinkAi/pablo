@@ -444,7 +444,15 @@ re-draft with `--force`). A `story` over more than four beats is drafted beat by
 beat: one request per beat, each given its share of `--words` and the end of the
 text so far, stitched into the one unit, with one receipt line per request and
 the totals on the result (`--dry-run` shows the whole outline and notes it, and
-`beatByBeat` in JSON). While it streams, stderr shows `~N tokens`, estimated from
+`beatByBeat` in JSON). A `radio` episode whose plan row tells several beats is drafted
+the same way (`--output radio --unit N`): one request per beat, each given its share
+of `--words` (default 1,800), the end of the script so far, the title and opening of
+the next beat, and the instruction to stop before it. Only the first request opens
+the episode (announcer, title) and only the last closes it; the others are told not
+to recap or sign off, and an answer that ran past its beat (an early announcer
+sign-off) is trimmed at the boundary. The parts are stitched into one episode file
+with a single `CAST:` line, the union of every part's roles. `--dry-run` lists the
+per-beat plan, one line a request (`beatPlan` in JSON). While it streams, stderr shows `~N tokens`, estimated from
 the text so far, not the number of stream chunks. `--chapter N` is
 short for `--output novel --unit N`. A work with several outputs needs `--output`.
 The `story` output has a single unit, so `write --output story` needs no `--unit`.

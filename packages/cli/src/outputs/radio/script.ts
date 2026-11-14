@@ -77,3 +77,21 @@ export function scriptRoles(text: string): string[] {
   }
   return [...declared, ...speakers.filter((s) => !declared.includes(s))];
 }
+
+/** The `CAST:` entries of a script's `CAST:` lines, `NAME=m "description"` each, in order, first of a name winning. */
+export function castEntries(text: string): string[] {
+  const seen = new Set<string>();
+  const entries: string[] = [];
+  for (const rawLine of text.split("\n")) {
+    const raw = rawLine.trim().replace(/\*/g, "");
+    if (!raw.toUpperCase().startsWith("CAST:")) continue;
+    for (const part of splitUnquoted(raw.slice(5), ",")) {
+      if (!part.includes("=")) continue;
+      const name = (part.split("=", 1)[0] ?? "").trim().toUpperCase();
+      if (name === "" || seen.has(name)) continue;
+      seen.add(name);
+      entries.push(part.trim());
+    }
+  }
+  return entries;
+}

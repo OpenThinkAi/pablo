@@ -74,6 +74,12 @@ export interface UnitParts {
   readonly count: number;
   /** Part `index` (1-based) of the unit's pack; `soFar` is the stitched text of the parts before it. */
   readonly pack: (index: number, soFar: string) => UnitPackOutcome;
+  /** One line per part for `--dry-run` (which beat, how many words, where it stops); absent: only the count is shown. */
+  readonly plan?: readonly string[];
+  /** Trims a part's answer before it is kept (AGT-2322): text that ran past the part's boundary. Absent: kept as is. */
+  readonly finish?: (piece: string, index: number) => string;
+  /** Joins the kept parts into the one unit's text. Absent: a blank line between parts. */
+  readonly stitch?: (pieces: readonly string[]) => string;
 }
 
 export interface UnitPackOptions {

@@ -25,7 +25,7 @@ import type { CoreState } from "../../core/machine";
 import type { OutputDefinition, OutputReport, OutputUnit, UnitStatusReport } from "../types";
 import { castingReadiness, ensureRadio } from "./casting-side";
 import type { CastingReadiness } from "./casting-side";
-import { buildRadioPack, radioPreconditions } from "./pack";
+import { buildRadioPack, radioParts, radioPreconditions } from "./pack";
 import { radioDefaultPlan, radioPlanChoice, radioUnitFiles, radioUnitStatus } from "./plan";
 import { publishRadio } from "./publish";
 import { RADIO_RITUALS } from "./rituals";
@@ -164,6 +164,7 @@ export const RADIO: OutputDefinition = {
   plan: radioDefaultPlan,
   preconditions: radioPreconditions,
   pack: buildRadioPack,
+  parts: radioParts,
   rituals: RADIO_RITUALS,
   publish: { targets: RADIO_PUBLISH_TARGETS, run: publishRadio },
   report: radioReport,

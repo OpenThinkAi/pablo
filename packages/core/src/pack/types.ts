@@ -234,7 +234,16 @@ export interface DraftingInputs {
    * The unit is drafted in parts, one request per beat, and stitched (AGT-2286): this request is part
    * `number` of `of`. The brief asks for that part alone, not the whole piece; the last part closes it.
    */
-  readonly part?: { readonly number: number; readonly of: number } | undefined;
+  readonly part?:
+    | {
+        readonly number: number;
+        readonly of: number;
+        /** A script drafted beat by beat (AGT-2322): the wording is a script's (cast line, announcer), not prose's. */
+        readonly script?: boolean | undefined;
+        /** The beat after this one, named so the request knows where to stop; absent on the last part. */
+        readonly next?: { readonly title: string; readonly beat: string } | undefined;
+      }
+    | undefined;
   /**
    * The unit is one scene of a script (AGT-2189): the brief drops the chapter wording and the
    * prose point-of-view line, and asks for one scene instead of a scene count.

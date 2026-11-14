@@ -473,6 +473,7 @@ export async function runWrite(
     const notReadyMessage = `${output.noun} ${chapter} is not ready to draft`;
     const dryParts = output.parts?.(vaultRoot, projectPath, chapter, { words, scenes, marker: markerResult.marker, direction, output: output.id, ...(deps.env === undefined ? {} : { env: deps.env }) });
     if (dryParts !== undefined && !args.json) console.log(`note: a real run drafts this beat by beat (${dryParts.count} requests, stitched); the pack below is the whole outline`);
+    if (dryParts?.plan !== undefined && !args.json) for (const line of dryParts.plan) console.log(`  ${line}`);
     if (notReady && !args.json) console.error(`warning: ${notReadyMessage}: ${preconditions.missing.join("; ")}`);
     if (args.json) {
       const actionByName = new Map(pack.adjustments.map((a) => [a.name, a.action]));
@@ -496,7 +497,7 @@ export async function runWrite(
         expectedOutputTokens: pack.expectedOutputTokens,
         prompt_hash: pack.hash,
         adjustments: pack.adjustments,
-        ...(dryParts === undefined ? {} : { beatByBeat: dryParts.count }),
+        ...(dryParts === undefined ? {} : { beatByBeat: dryParts.count, ...(dryParts.plan === undefined ? {} : { beatPlan: dryParts.plan }) }),
         ...(notReady ? { warnings: [{ kind: "preconditions", message: notReadyMessage, missing: preconditions.missing }] } : {}),
         // The layered voice (AGT-2139): every layer used, lowest first, and any voice pablo.json names that was not found.
         ...(pack.voiceLayers === undefined ? {} : { voiceLayers: pack.voiceLayers }),
@@ -701,7 +702,7 @@ export async function runWrite(
         stderr.write(`beat ${index} of ${partsPlan.count}\n`);
         const part = await streamPack(partPack.pack, ` (beat ${index})`);
         stderr.write("\n");
-        const piece = normalizeOutput(part.text);
+        const piece = (partsPlan.finish ?? ((text: string) => text))(normalizeOutput(part.text), index).trim();
         if (piece === "" || part.stats === undefined) {
           discardBranch();
           emitError(`pablo: the model returned an empty answer for beat ${index} of ${partsPlan.count}; nothing written`, undefined, 2, args.json);
@@ -713,7 +714,7 @@ export async function runWrite(
         tokensRead += part.stats.tokensRead ?? partPack.pack.totalTokens;
         tokensWritten += part.stats.tokensWritten;
       }
-      normalized = pieces.join("\n\n");
+      normalized = partsPlan.stitch === undefined ? pieces.join("\n\n") : partsPlan.stitch(pieces);
       stats = { timeToFirstTokenMs: firstMs, elapsedMs, tokensRead, tokensWritten, tokensPerSecond: elapsedMs > 0 ? tokensWritten / (elapsedMs / 1000) : 0 };
     }
   } catch (error) {
