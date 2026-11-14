@@ -153,6 +153,11 @@ export interface VerbContext {
    * adapter so distillation never reaches a model; left `undefined`, the `research` intent's routed provider is used.
    */
   readonly researcher?: Adapter;
+  /**
+   * AGT-2303: the planner `pronounce --suggest` asks for respellings. Tests inject a fake adapter so a suggestion never
+   * reaches a model; left `undefined`, the `plan` intent's routed provider is used.
+   */
+  readonly planner?: Adapter;
   /** AGT-2126: network seams for `web_search` and `web_fetch`. Tests inject fakes so a tool never reaches the network. */
   readonly web?: WebSeams;
   /**

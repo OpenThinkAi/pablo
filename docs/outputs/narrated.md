@@ -50,7 +50,10 @@ pablo mix --project ice-house --output narrated --unit 1
 `pronounce` shows, before any render, every line the engine will say differently from the text
 (numbers, ranges, dates, abbreviations, and on a nonfiction work acronyms as spaced letters) and
 the words no rule decided, for `outputs/narrated/pronounce.md` (common words, months, first names and words
-also written in lower case are left out, the likeliest misreads come first, `--all` lists every word). `fix` and `mixer` take the same flags. See
+also written in lower case are left out, the likeliest misreads come first, `--all` lists every word).
+`pronounce --suggest` asks the `plan` model for a respelling of each of those words and of heteronyms (read,
+lead, live) and proposes them on a `plan/` branch, never applied: hear a suggestion before you keep it
+([Suggested respellings](../commands.md#suggested-respellings)). `fix` and `mixer` take the same flags. See
 [Performing a narrated output](../commands.md#performing-a-narrated-output).
 
 ## Publish

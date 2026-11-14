@@ -1325,7 +1325,7 @@ that each loader passes its pin through, without loading a model.
 | `pablo audition --role R --describe "..." [-n 6] [--designer qwen3\|voxcpm2] [--traits '{...}'] [--seed S]` | renders candidate voices reading a test passage, scored. `audition --dry-run` installs and checks the casting side without loading a model |
 | `pablo cast --role R --candidate n [--recast] [--notes "..."]` | freezes a candidate as a voice card in the shared library. `cast --auto --project <slug> [--episode N\|--all]` matches unbound roles to library voices; add `--design` to design voices for roles with no match. Synthetic voices only |
 | `pablo describe_voice --describe "..." [--gender f\|m\|x] [--role R]` | normalises a `CAST:` description into the voice traits vocabulary with the deterministic mapper: the traits found, the phrases it could not normalise, and the designer instruct. Loads no model and writes nothing; the same function as the MCP tool |
-| `pablo pronounce --project <slug> [--output radio\|narrated] [--unit N \| --episode N] [--all] [--json]` | shows what the engine will say before any render: for each script line whose engine input differs from its text, the line number, the speaker, each changed token (`"10-20%" -> "ten to twenty percent"`, `"AI" -> "A I"`) and the full engine text; then the capitalised or ALL-CAPS words no rule or lexicon entry decided, to consider for `pronounce.md` (words also written in lower case elsewhere in the output, month and weekday names, common English words and common first names are left out and counted; mixed-case tokens such as `ChatGPT` rank first, then words with unusual letter patterns; `--all` lists every word by count), and what the shorthand rules could not decide: links, abbreviation-like words ending in a full stop, and letters stuck to a number that are no known unit. Without `--output`, the work's one performed output (else radio); without a unit, every script of the output, and a unit with no script is refused naming the units there are. Read-only, loads no model; the same function as the MCP tool. See *What the engine reads* below |
+| `pablo pronounce --project <slug> [--output radio\|narrated] [--unit N \| --episode N] [--all] [--suggest] [--json]` | shows what the engine will say before any render: for each script line whose engine input differs from its text, the line number, the speaker, each changed token (`"10-20%" -> "ten to twenty percent"`, `"AI" -> "A I"`) and the full engine text; then the capitalised or ALL-CAPS words no rule or lexicon entry decided, to consider for `pronounce.md` (words also written in lower case elsewhere in the output, month and weekday names, common English words and common first names are left out and counted; mixed-case tokens such as `ChatGPT` rank first, then words with unusual letter patterns; `--all` lists every word by count), and what the shorthand rules could not decide: links, abbreviation-like words ending in a full stop, and letters stuck to a number that are no known unit. Without `--output`, the work's one performed output (else radio); without a unit, every script of the output, and a unit with no script is refused naming the units there are. Read-only, loads no model; the same function as the MCP tool. `--suggest` is the one exception: see *Suggested respellings* below. See *What the engine reads* below |
 | `pablo voices list [--auto-admitted] \| show <slug> \| retire <slug> [--reason "..."]` | the shared voice library; a retired voice still plays for stories already pinned to it |
 | `pablo bind --project <slug> --role <NAME> --voice <slug> [--output radio\|narrated]` | pins a script role to a library voice in the output's `cast.json` (radio's by default; `--output narrated` writes `outputs/narrated/casting/cast.json`, the file `cast --auto --output narrated` and `perform --output narrated` read; the binding covers every unit of the output, so there is no `--unit`). Any other flag is refused, not ignored |
 | `pablo perform --project <slug> --episode N [--engine chatterbox-turbo\|dia] [--json-lines]` | renders an episode's lines in their bound voices, retrying lines that fail the quality gates; refused while a role is uncast. `--stream` (with `--episode N` or `--all`) mixes and publishes as it goes, and never replaces a human mix: one that still fits is the one rendered, one that no longer fits is rebased onto the new take set (as `mix` does) |
@@ -1443,3 +1443,34 @@ was made from a different spoken form than these rules and the lexicon give now.
 0-based line numbers, as `fix --line` and `flag --line` take them), and
 `pablo fix --stale` re-records exactly those lines, with no flags to set first.
 To re-record other lines, flag them with `pablo flag`.
+
+### Suggested respellings
+
+Rules cannot decide the long tail: an unusual name (Acemoglu, Brynjolfsson), a
+heteronym whose sound depends on the sense (read/read, lead/lead, live, close, tear,
+wind), an abbreviation no rule knows. `pablo pronounce --suggest --project <slug>
+--output narrated|radio [--unit N]` asks for a respelling of each.
+
+- It runs `pronounce`, then sends every token `pronounce` flagged (capitalised and
+  ALL-CAPS words, abbreviations, unknown units; links are not sent, a respelling only
+  ever matches a word) and every word of a built-in list of common English heteronyms
+  (`bass bow close content converse desert does dove entrance invalid lead live
+  minute moderate object permit polish present produce project read record refuse
+  resume row separate sewer sow subject tear wind wound`), each with its sentence and
+  speaker, to the provider the `plan` intent routes to. It asks for a `word ->
+  respelling` entry and a one-line reason.
+- A token the lexicon already decides for that speaker is never sent. With no model
+  configured the verb is refused before it runs anything.
+- pablo checks every proposal (it must name a token that was sent, with a one-line
+  respelling that differs from the word) and drops the rest, reporting them.
+- A heteronym is judged in its sentence and proposed only when the sentence means the
+  unlikely reading. The lexicon has no per-line scope, so a heteronym entry is always
+  `SPEAKER: word -> respelling`: it applies to all that speaker's lines, and its
+  comment says which unit and line it was judged on. Check the speaker's other lines
+  for the same word.
+- **Suggestions are never applied.** They are appended to the output's `pronounce.md`
+  (after a comment saying who proposed them) on a new `plan/` branch, as research
+  is, for you to review, edit and accept with `pablo merge`. Hand-written respellings
+  have made the engine worse as often as better (`ah-moh-DAY-ee` was read as
+  "Amo-day-eye"), and a model's are no different: hear each one (`pablo perform`,
+  or render the one line) before you keep it, and delete any that sounds worse.

@@ -227,6 +227,34 @@ def test_pronounce_on_a_fiction_work_keeps_caps_and_lists_them(tmp_path: Path) -
     assert {row["token"]: row["kind"] for row in body["unresolved"]} == {"AI": "caps", "GDP": "caps"}  # type: ignore[union-attr]
 
 
+HETERONYM_READING = """CAST: NARRATOR="n", HOST="h"
+
+NARRATOR: She read the letter twice, said Acemoglu.
+
+HOST: They read it aloud; we live near the sea.
+
+NARRATOR: Close the door.
+"""
+
+
+def test_pronounce_lists_heteronyms_with_their_sentence_and_the_unresolved_speaker(tmp_path: Path) -> None:
+    work = make_work(tmp_path, None, HETERONYM_READING, "NARRATOR: close -> kloze\nlive -> liv\n")
+    (body, code), _ = run(["pronounce", "--work", str(work), "--output", "narrated", "--json"], env={})
+    assert code == 0, body
+    het = [(h["word"], h["unit"], h["line"], h["speaker"], h["sentence"]) for h in body["heteronyms"]]  # type: ignore[union-attr]
+    # `live` (unscoped) is decided for everyone; `close` only for NARRATOR; so `read` is the one left, once per line.
+    assert [(h[0], h[3], h[4]) for h in het] == [("read", "NARRATOR", "She read the letter twice, said Acemoglu."), ("read", "HOST", "They read it aloud; we live near the sea.")]
+    (acemoglu,) = [row for row in body["unresolved"] if row["token"] == "Acemoglu"]  # type: ignore[union-attr]
+    assert acemoglu["speaker"] == "NARRATOR" and acemoglu["sentence"] == "She read the letter twice, said Acemoglu."
+
+
+def test_a_heteronym_a_speaker_scoped_entry_decides_is_still_listed_for_other_speakers(tmp_path: Path) -> None:
+    work = make_work(tmp_path, None, HETERONYM_READING, "HOST: read -> red\n")
+    (body, _), _ = run(["pronounce", "--work", str(work), "--output", "narrated", "--json"], env={})
+    het = [(h["word"], h["speaker"]) for h in body["heteronyms"]]  # type: ignore[union-attr]
+    assert ("read", "HOST") not in het and ("read", "NARRATOR") in het
+
+
 def test_pronounce_refuses_a_missing_unit(tmp_path: Path) -> None:
     work = make_work(tmp_path, "nonfiction", READING)
     (body, code), _ = run(["pronounce", "--work", str(work), "--output", "narrated", "--episode", "4", "--json"], env={})

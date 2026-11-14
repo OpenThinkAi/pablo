@@ -43,7 +43,7 @@ import type { VerbResult } from "./verbs";
 const REFUSED = 2;
 
 /** The plan session and the work's directory relative to the repo root, or a refusal result. */
-function planSessionFor(
+export function planSessionFor(
   projectPath: string,
   env: NodeJS.ProcessEnv,
 ): { ok: true; session: PlanSession; dir: string } | { ok: false; result: VerbResult } {

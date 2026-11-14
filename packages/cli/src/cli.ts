@@ -573,6 +573,18 @@ export function castingText(verb: string, body: Record<string, unknown>): string
       lines.push(`  (${hidden} more left out: common words, months, first names and words also written in lower case; --all lists them)`);
     }
   }
+  if (verb === "pronounce" && Array.isArray(body["suggestions"])) {
+    const suggestions = body["suggestions"] as Array<Record<string, unknown>>;
+    lines.push(`pablo: ${String(body["output"])}: sent ${String(body["sent"])} token(s) to ${String(body["provider"] ?? "no model")}; ${suggestions.length} respelling(s) proposed`);
+    for (const s of suggestions) {
+      const scope = typeof s["speaker"] === "string" ? `${s["speaker"]}: ` : "";
+      lines.push(`  ${scope}${String(s["word"])} -> ${String(s["respelling"])}   (unit ${String(s["unit"])} line ${String(s["line"])}) ${String(s["reason"] ?? "")}`);
+    }
+    for (const r of (body["rejected"] as Array<Record<string, unknown>> | undefined) ?? []) lines.push(`  dropped ${String(r["word"])}: ${String(r["reason"])}`);
+    if (typeof body["branch"] === "string") {
+      lines.push(`  written to ${String(body["path"])} on ${body["branch"]}; nothing is applied. Hear each respelling before keeping it (hand-written respellings have made the engine worse), then pablo merge ${body["branch"]}`);
+    } else if (typeof body["message"] === "string") lines.push(`  ${body["message"]}`);
+  }
   if (verb === "perform" && typeof body["manifest"] === "string") {
     lines.push(`  manifest: ${body["manifest"]}`);
     lines.push(`  wall ${String(body["wall"])} s for ${String(body["audioSeconds"])} s of audio; rtf_total ${String(body["rtfTotal"])}, engine ${String(body["rtfEngine"])}`);
