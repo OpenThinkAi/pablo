@@ -41,7 +41,7 @@ function workDir(session: PlanSession, workPath: string): string {
 }
 
 /** `workPath` is the work's directory inside the session's repo; notes land under its `research/`. */
-export function saveResearchTool(session: PlanSession, workPath: string): McpToolSpec {
+export function saveResearchTool(session: PlanSession, workPath: string, opts: { readonly requireItems?: boolean } = {}): McpToolSpec {
   const dir = workDir(session, workPath);
   return {
     name: SAVE_RESEARCH_TOOL,
@@ -50,6 +50,13 @@ export function saveResearchTool(session: PlanSession, workPath: string): McpToo
     args: ARGS,
     async run(raw) {
       const args = ARGS.parse(raw);
+      // The research stage of a checklist run keeps every note against the checklist (AGT-2291).
+      if (opts.requireItems === true && (args.items ?? []).length === 0) {
+        return {
+          body: { ok: false, code: 2, message: "save_research: name the checklist item(s) this note sources with items (the numbers in the open list); nothing was saved. A note outside the checklist goes through `research add` (add_research_item) first, which gives it an item number." },
+          exitCode: 2,
+        };
+      }
       // An unknown item refuses before anything is written (AGT-2184).
       const checked = checkSaveItems(sessionWork(session, workPath), args.items ?? []);
       if (!checked.ok) return checked.result;

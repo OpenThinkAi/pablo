@@ -51,7 +51,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { PLAN_INTENT, WORK_RULES_FILE, createPlanner, createProviders, fileReceiptSink, loadConfig, receiptsPath, workRulesFile } from "@openthink/pablo-core";
-import type { Adapter, Intent, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
+import type { Adapter, ChatMessage, Intent, KeyLookup, LoadConfigOptions } from "@openthink/pablo-core";
 import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
 import { coreStages, readCoreState } from "./core/machine";
 import { itemLabel } from "./core/checklist";
@@ -78,6 +78,7 @@ import { distillFactsInProject, planChecklist } from "./research-verbs";
 import { harnessProvider, LOCAL_FALLBACK_NOTICE, shouldWarnLocal } from "./harness/provider";
 import type { HarnessProvider } from "./harness/provider";
 import { planTools } from "./harness/plan-tools";
+import { sessionWork } from "./harness/save-research";
 import { loadPromptWork } from "./harness/prompt";
 import type { TranscriptEntry } from "./harness/transcript";
 import { loopQuery, runHarness } from "./harness/session";
@@ -463,11 +464,13 @@ const HISTORICAL_TEXT: Readonly<Partial<Record<StoryCoreStage, string>>> = {
  * The research stage's text on historical fiction: the checklist pablo planned from the period brief, and its open
  * items by number, each to be sourced (save_research with items, or link_research_item) or waived with a reason.
  */
-function historicalResearchText(work: string | undefined, web: boolean): string {
-  const items = work === undefined ? [] : (readCoreState(work, "historical-fiction").checklist?.items ?? []).filter((i) => i.status === "open");
-  const list = items.length === 0 ? "" : `\n\nOpen checklist items:\n${items.map((i) => `- ${itemLabel(i)}`).join("\n")}`;
+function historicalResearchText(work: string | undefined, web: boolean, limit?: number): string {
+  const all = work === undefined ? [] : (readCoreState(work, "historical-fiction").checklist?.items ?? []).filter((i) => i.status === "open");
+  // A batch (AGT-2291): the first `limit` open items; the rest come in later sessions on the same branch.
+  const items = limit === undefined ? all : all.slice(0, limit);
+  const list = items.length === 0 ? "" : `\n\nOpen checklist items${items.length < all.length ? ` (${items.length} of ${all.length} open; the rest come after these)` : ""}:\n${items.map((i) => `- ${itemLabel(i)}`).join("\n")}`;
   return (
-    `pablo planned the research checklist (research/checklist.md) from the period brief. Close every open item: keep a finding with save_research, passing items (the numbers it sources). ${web ? "Search the web with web_search and read the promising pages with web_fetch (a search snippet is not a source); cite each page by the url web_fetch returned, with its retrievedAt date, or a book by author, title and year" : "Cite only sources you can name exactly: a book by author, title and year, or a URL with its retrieval date"}; never cite general knowledge or memory, never invent a source or a retrieval date. A note already saved can close an item with link_research_item. An item the story does not need is waived with waive_research_item and a reason (items closes several at once). Propose nothing yet.` +
+    `pablo planned the research checklist (research/checklist.md) from the period brief. Close ${limit === undefined ? "every open item" : "the items listed below"}: keep a finding with save_research, always passing items (the numbers it sources); a save_research with no items is refused. ${web ? "Search the web with web_search and read the promising pages with web_fetch (a search snippet is not a source); cite each page by the url web_fetch returned, with its retrievedAt date, or a book by author, title and year" : "Cite only sources you can name exactly: a book by author, title and year, or a URL with its retrieval date"}; never cite general knowledge or memory, never invent a source or a retrieval date. A note already saved can close an item with link_research_item. An item the story does not need is waived with waive_research_item and a reason (items closes several at once). Propose nothing yet.` +
     list
   );
 }
@@ -480,13 +483,13 @@ const REVIEW_MODE = "This is a review run: the author reviews this stage's plan 
  * The harness message for one core stage. `web` is whether the run has a web search backend (`webConfigured`);
  * `work` (the work's directory) lists a historical run's open checklist items (AGT-2184).
  */
-export function stageMessage(stage: StoryCoreStage, state: Pick<StoryState, "prompt" | "outputs" | "review" | "track">, title: string, slug: string, web = false, work?: string): string {
+export function stageMessage(stage: StoryCoreStage, state: Pick<StoryState, "prompt" | "outputs" | "review" | "track">, title: string, slug: string, web = false, work?: string, batch?: number): string {
   const track = state.track?.track;
   const harnessStages = storyStages(track).filter((s) => !PABLO_STAGES.includes(s));
   const historical = track === "historical-fiction";
   const text =
     historical && stage === "research"
-      ? historicalResearchText(work, web)
+      ? historicalResearchText(work, web, batch)
       : stage === "research" && web
         ? RESEARCH_WEB
         : ((historical ? HISTORICAL_TEXT[stage] : undefined) ?? STAGE_TEXT[stage as (typeof STORY_CORE_STAGES)[number]] ?? "");
@@ -655,6 +658,17 @@ function agentProviderFor(run: Run, stage: StoryCoreStage): HarnessProvider | Ve
   }
 }
 
+/** Open checklist items the research stage sources in one harness session (AGT-2291); the turn cap applies per batch. */
+export const RESEARCH_BATCH = 5;
+
+/** The follow-up a session stopped at its turn cap is sent once (AGT-2291). */
+const CARRY_ON = "Carry on with the open checklist items: source each with save_research (always passing items) or waive it with a reason, then finish.";
+
+/** The open checklist items of the work as the stage's plan branch sees it. */
+function openChecklist(work: string): number {
+  return (readCoreState(work, "historical-fiction").checklist?.items ?? []).filter((i) => i.status === "open").length;
+}
+
 /** One core stage: one harness message, its writes on a fresh `plan/` branch. `branch` is absent when it wrote nothing. */
 async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true; branch?: string; sha?: string } | { ok: false; result: VerbResult }> {
   const marker = readMarker(run.work);
@@ -667,21 +681,52 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
   const session = startPlanSession(run.vault, run.slug, { env: run.ctx.env });
   const ask = run.state.review && run.deps.ask !== undefined ? run.deps.ask : assumingAsk(stage, run.state.assumptions);
   const web = webConfigured(run.ctx, run.deps.readConfig);
+  // The historical research stage keeps every note against the checklist and runs in batches (AGT-2291).
+  const batched = stage === "research" && run.state.track?.track === "historical-fiction";
   const spec = {
     work: prompt.work,
     provider,
     ctx: { ...run.ctx, caller: "mcp" as const },
     tools: harnessTools(ask).filter((tool) => !PABLO_RUN_TOOLS.has(tool.name) && (web || !WEB_TOOLS.has(tool.name))),
-    sessionTools: planTools(session, run.work),
+    sessionTools: planTools(session, run.work, { requireItems: batched }),
     // Every agent-loop turn keeps a receipt in the work's log, under the stage's intent (AGT-2191).
     receipts: { sink: fileReceiptSink(run.work), intent: stageIntent(stage).name },
   };
   const entries: TranscriptEntry[] = [];
-  let finished: { ok: boolean; text: string; errors: readonly string[] } | undefined;
+  let finished: { ok: boolean; text: string; errors: readonly string[]; capped?: boolean } | undefined;
+  const query = run.deps.query ?? loopQuery;
+  /** One message through the harness; its history is returned so a capped session can be continued. */
+  const send = async (message: string, history: readonly ChatMessage[] = []): Promise<readonly ChatMessage[]> => {
+    finished = undefined;
+    const gen = runHarness(message, spec, query, history);
+    for (;;) {
+      const next = await gen.next();
+      if (next.done === true) return next.value ?? [];
+      entries.push(next.value);
+      if (next.value.kind === "result") finished = next.value;
+    }
+  };
+  const sessionWorkDir = () => sessionWork(session, run.work);
   try {
-    for await (const entry of runHarness(stageMessage(stage, run.state, run.title, run.slug, web, run.work), spec, run.deps.query ?? loopQuery)) {
-      entries.push(entry);
-      if (entry.kind === "result") finished = entry;
+    if (!batched) {
+      await send(stageMessage(stage, run.state, run.title, run.slug, web, run.work));
+    } else {
+      // Batches of open items on the one plan branch, until none is open or a batch makes no progress.
+      let open = openChecklist(run.work);
+      for (let round = 0; round === 0 || open > 0; round += 1) {
+        const before = open;
+        if (round > 0 || open > RESEARCH_BATCH) progress(run, `research, batch ${round + 1} (${Math.min(RESEARCH_BATCH, open)} of ${open} open items)`);
+        let history = await send(stageMessage(stage, run.state, run.title, run.slug, web, sessionWorkDir(), RESEARCH_BATCH));
+        // A session that hit its cap is told once to carry on before the run stops.
+        if (finished?.capped === true) history = await send(CARRY_ON, history);
+        open = openChecklist(sessionWorkDir());
+        if (finished?.capped === true) {
+          const sourced = ` The research so far is on ${session.branch}, not merged: \`pablo merge --project ${run.slug} ${session.branch}\` keeps it, then \`pablo story --project ${run.slug}\` carries on with the open items (without the merge, a re-run starts research again from main).`;
+          finished = { ok: false, text: "", errors: [`research stopped at the turn cap twice; ${open} checklist item(s) are still open.${sourced}`] };
+          break;
+        }
+        if (finished?.ok !== true || open >= before) break;
+      }
     }
   } catch (error) {
     saveTranscript(run, stage, entries);

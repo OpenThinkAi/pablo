@@ -289,7 +289,7 @@ export async function* runLoop(
   let turns = 0;
   let cost = 0;
   let unpriced: string | undefined;
-  const result = (ok: boolean, text: string, errors: readonly string[]): ResultEntry => ({
+  const result = (ok: boolean, text: string, errors: readonly string[], capped = false): ResultEntry => ({
     kind: "result",
     ok,
     text,
@@ -298,6 +298,7 @@ export async function* runLoop(
     costUsd: cost,
     ...(unpriced === undefined ? {} : { unpricedModel: unpriced }),
     errors,
+    ...(capped ? { capped: true } : {}),
   });
 
   yield { kind: "session", model, apiKeySource: spec.credential ?? "none", tools: offered };
@@ -391,6 +392,6 @@ export async function* runLoop(
     }
   }
 
-  yield result(false, "", [`the session reached its turn cap (${maxTurns} turns) without a final answer. Send a follow-up message to let it carry on, or narrow the request to one step.`]);
+  yield result(false, "", [`the session reached its turn cap (${maxTurns} turns) without a final answer. Send a follow-up message to let it carry on, or narrow the request to one step.`], true);
   return messages;
 }

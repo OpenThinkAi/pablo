@@ -29,6 +29,8 @@ export type TranscriptEntry =
       /** A model the price table does not know, whose reported usage `costUsd` therefore leaves out. */
       readonly unpricedModel?: string;
       readonly errors: readonly string[];
+      /** The session stopped at its turn cap with no final answer (AGT-2291): a follow-up message can carry it on. */
+      readonly capped?: boolean;
     };
 
 const RESULT_PREVIEW = 400;
