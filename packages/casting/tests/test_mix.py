@@ -529,3 +529,59 @@ def test_stable_audio_makes_a_real_sfx_and_a_second_ask_is_a_hit(tmp_path: Path)
     assert 0.1 < float(np.abs(samples).max()) <= 0.81
     second = CueLibrary(tmp_path / "cues", lambda kind: pytest.fail("a hit must not load a model")).ensure("SFX", "A small bell ringing once")
     assert not second.generated and second.path == first.path
+
+
+# --- whispered lines are mixed, not performed (AGT-2319) -----------------------------------------
+
+
+def _with_delivery(manifest: dict[str, object], i: int, delivery: str) -> dict[str, object]:
+    manifest["lines"][i]["direction"] = {"emotion": None, "intensity": 2, "pace": None, "delivery": delivery}  # type: ignore[index]
+    return manifest
+
+
+def test_a_whispered_line_gets_a_lowered_close_mic_clip_and_the_rest_are_untouched(work: Path, cues_dir: Path) -> None:
+    from pablo_casting.mixdoc import clips, read_mix, validate
+
+    write_version(work, 1, _with_delivery(proposal(work), 1, "whisper"))
+    mixed(work, cues_dir)
+    doc = read_mix(work, 1, 1)
+    assert validate(doc) == []
+    by_line = {c["lines"][0]: c for track, _, _, c in clips(doc) if track == "dialogue"}
+    assert by_line[1]["gain"] < -7.9 and by_line[1]["eq"]["low_cut"] > 0 and by_line[1]["eq"]["presence_db"] > 0
+    assert by_line[0]["gain"] == 0.0 and "eq" not in by_line[0]
+
+
+def test_a_human_edit_of_a_whispered_clips_gain_and_eq_renders(work: Path, cues_dir: Path) -> None:
+    from pablo_casting.mixdoc import clips, read_mix
+
+    write_version(work, 1, _with_delivery(proposal(work), 1, "hushed"))
+    mixed(work, cues_dir)
+    doc = read_mix(work, 1, 1)
+    clip = next(c for track, _, _, c in clips(doc) if track == "dialogue" and c["lines"] == [1])
+    assert -4.5 < clip["gain"] < -3.5 and clip["eq"] == {"low_cut": 120.0, "presence_db": 2.0}
+
+
+def test_a_whisper_renders_quieter_than_the_same_line_spoken(tmp_path: Path, cues_dir: Path) -> None:
+    levels = {}
+    for name, delivery in (("spoken", None), ("whispered", "whisper")):
+        w = tmp_path / name
+        w.mkdir()
+        manifest = proposal(w)
+        if delivery:
+            _with_delivery(manifest, 1, delivery)
+        write_version(w, 1, manifest)
+        body = mixed(w, cues_dir)
+        audio, rate = final_audio(w)
+        line = next(l for l in read_version(w, 1, 1)["lines"] if l["i"] == 1)  # type: ignore[union-attr]
+        levels[name] = rms(audio, line["start"], line["end"], rate)
+    assert levels["whispered"] < levels["spoken"] * 0.6
+
+
+def test_eq_must_be_an_object_with_known_numeric_fields() -> None:
+    from pablo_casting.mixdoc import _Checker
+
+    check = _Checker()
+    check.eq({"low_cut": -1, "presence_db": "x", "q": 1}, "clip.eq")
+    check.eq("close", "clip.eq2")
+    fields = {p.field for p in check.problems}
+    assert fields == {"clip.eq.low_cut", "clip.eq.presence_db", "clip.eq.q", "clip.eq2"}

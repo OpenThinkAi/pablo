@@ -71,6 +71,30 @@ def fade_out_gain(curve: str, length: float, t: float) -> float:
     return fade_curve(curve, 1.0 - t / length)
 
 
+def clip_eq_response(freqs: np.ndarray, low_cut: float, presence_db: float, presence_hz: float = 3500.0) -> np.ndarray:
+    """Magnitude of a clip's close-mic EQ at `freqs` (Hz): a 2nd-order high-pass at `low_cut` Hz (0 = off), times a
+    shelf of `presence_db` dB rising through `presence_hz`. Zero-phase when applied (see `apply_eq`)."""
+    f = np.maximum(np.asarray(freqs, dtype=np.float64), 1e-3)
+    response = np.ones_like(f)
+    if low_cut > 0:
+        response = response / np.sqrt(1.0 + (low_cut / f) ** 4)
+    if presence_db != 0:
+        shelf = 1.0 / (1.0 + (presence_hz / f) ** 4)
+        response = response * 10.0 ** (presence_db * shelf / 20.0)
+    return response
+
+
+def apply_eq(buffer: np.ndarray, rate: int, low_cut: float = 0.0, presence_db: float = 0.0, presence_hz: float = 3500.0) -> np.ndarray:
+    """A copy of `buffer` (frames on axis 0) through the clip close-mic EQ, by FFT (no phase shift)."""
+    if len(buffer) == 0 or (low_cut <= 0 and presence_db == 0):
+        return np.array(buffer, dtype=np.float32, copy=True)
+    spectrum = np.fft.rfft(buffer.astype(np.float64), axis=0)
+    response = clip_eq_response(np.fft.rfftfreq(len(buffer), 1.0 / rate), low_cut, presence_db, presence_hz)
+    if spectrum.ndim > 1:
+        response = response.reshape((-1,) + (1,) * (spectrum.ndim - 1))
+    return np.fft.irfft(spectrum * response, n=len(buffer), axis=0).astype(np.float32)
+
+
 def apply_fade(buffer: np.ndarray, curve: str, length: int, direction: str) -> np.ndarray:
     """A copy of `buffer` (frames on axis 0) with a `length`-sample fade at its start ("in") or end ("out")."""
     if direction not in ("in", "out"):

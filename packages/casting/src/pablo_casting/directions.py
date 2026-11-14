@@ -1,7 +1,10 @@
 """The direction grammar: one leading parenthetical per script line.
 
-    SPEAKER: (<emotion>[, <intensity>][, <pace>]) words (laughs) more words
+    SPEAKER: (<emotion>[, <intensity>][, <pace>][, <delivery>]) words (laughs) more words
 
+`delivery` is how the voice is carried, not what it feels (`whisper`, `hushed`): the
+engines cannot voice it, so the mix does (a lowered, close-mic EQ'd clip, AGT-2319).
+It rides beside an emotion, `(whispering, afraid)`, or stands alone.
 `emotion` is a closed vocabulary of twelve words; a small synonym table maps
 the delivery words the writer model reaches for to the nearest one; sound notes
 like `(reverberating)` are ignored (they describe the mix, not the voice).
@@ -19,6 +22,16 @@ EMOTIONS: tuple[str, ...] = (
     "urgent", "angry", "afraid", "sad", "weary", "boisterous",
 )
 
+# How the voice is carried (volume and breath), a second axis beside the emotion.
+DELIVERIES: tuple[str, ...] = ("whisper", "hushed")
+
+DELIVERY_SYNONYMS: dict[str, str] = {
+    "whispering": "whisper", "whispered": "whisper", "whispers": "whisper", "whisperingly": "whisper",
+    "under breath": "whisper", "under his breath": "whisper", "under her breath": "whisper",
+    "under their breath": "whisper", "murmuring": "whisper", "murmured": "whisper", "murmur": "whisper",
+    "hushing": "hushed", "quietly": "hushed", "low": "hushed", "lowly": "hushed", "muttering": "hushed",
+}
+
 # Delivery words the writer model uses -> the nearest vocabulary word.
 SYNONYMS: dict[str, str] = {
     "dryly": "dry", "dismissive": "dry", "dismissively": "dry", "wry": "dry", "wryly": "dry", "deadpan": "dry",
@@ -33,12 +46,15 @@ SYNONYMS: dict[str, str] = {
     "wearily": "weary", "tired": "weary", "exhausted": "weary",
     "boisterously": "boisterous", "jovial": "boisterous", "jovially": "boisterous", "expansive": "boisterous",
     "flatly": "neutral", "evenly": "neutral", "calmly": "neutral",
+    # breath and manner words with no vocabulary entry of their own: the nearest one, never dropped.
+    "gasping": "urgent", "breathless": "urgent", "breathlessly": "urgent", "panting": "urgent",
+    "courteous": "warm", "courteously": "warm", "polite": "warm", "politely": "warm",
 }
 
 # Sound notes the model puts where a direction goes; they say nothing about the voice.
 IGNORED: frozenset[str] = frozenset({"reverberating", "echoing", "distant", "muffled", "over the phone", "on the phone"})
 
-INTENSITY_WORDS: dict[str, int] = {"a little": 1, "slightly": 1, "very": 3, "really": 3}
+INTENSITY_WORDS: dict[str, int] = {"a little": 1, "slightly": 1, "almost": 1, "very": 3, "really": 3}
 DEFAULT_INTENSITY = 2
 
 PACE_WORDS: dict[str, str] = {"slow": "slow", "slowly": "slow", "quick": "quick", "quickly": "quick", "fast": "quick"}
@@ -60,6 +76,7 @@ class Direction:
     intensity: int
     pace: str | None
     status: str
+    delivery: str | None = None
     mapped: dict[str, str] = field(default_factory=dict)
     ignored: tuple[str, ...] = ()
     unknown: tuple[str, ...] = ()
@@ -70,6 +87,7 @@ class Direction:
             "emotion": self.emotion,
             "intensity": self.intensity,
             "pace": self.pace,
+            "delivery": self.delivery,
             "status": self.status,
             "mapped": self.mapped,
             "ignored": list(self.ignored),
@@ -90,6 +108,7 @@ def parse_direction(inner: str) -> Direction:
     emotion: str | None = None
     intensity = DEFAULT_INTENSITY
     pace: str | None = None
+    delivery: str | None = None
     mapped: dict[str, str] = {}
     ignored: list[str] = []
     unknown: list[str] = []
@@ -109,7 +128,12 @@ def parse_direction(inner: str) -> Direction:
             if word.startswith(prefix + " "):
                 intensity, word = level, word[len(prefix) + 1 :]
                 break
-        if word in EMOTIONS:
+        if word in DELIVERIES:
+            delivery = word
+        elif word in DELIVERY_SYNONYMS:
+            delivery = DELIVERY_SYNONYMS[word]
+            mapped[word] = delivery
+        elif word in EMOTIONS:
             emotion = word
         elif word in SYNONYMS:
             emotion = SYNONYMS[word]
@@ -119,12 +143,13 @@ def parse_direction(inner: str) -> Direction:
         else:
             unknown.append(word)
 
-    status = "unknown" if unknown else "ignored" if ignored and emotion is None else "mapped" if mapped else "ok"
+    status = "unknown" if unknown else "ignored" if ignored and emotion is None and delivery is None else "mapped" if mapped else "ok"
     return Direction(
         raw=inner.strip(),
         emotion=emotion,
         intensity=intensity,
         pace=pace,
+        delivery=delivery,
         status=status,
         mapped=mapped,
         ignored=tuple(ignored),

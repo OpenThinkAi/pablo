@@ -110,7 +110,7 @@ from pablo_casting.mixdoc import (
     validate,
     write_mix,
 )
-from pablo_casting.mixmath import apply_fade, automation_gain_at, db_to_gain, equal_power_crossfade, gain_to_db
+from pablo_casting.mixmath import apply_eq, apply_fade, automation_gain_at, db_to_gain, equal_power_crossfade, gain_to_db
 from pablo_casting.library import LibraryRefusal, resolve_root
 from pablo_casting.organ import SoxUnavailable, require_sox
 from pablo_casting.receipts import append_receipt
@@ -128,6 +128,13 @@ SFX_OVERLAP_SECONDS = 0.4
 CUE_TAIL_SECONDS = 0.2
 END_PAD_SECONDS = 1.0
 CUE_GAIN = {"SFX": 0.75, "MUSIC": 0.9}
+# A whispered or hushed line (AGT-2319) is mixed, not performed: no engine takes a volume direction, so the auto mix
+# lowers the clip and gives it a close-mic EQ (high-pass, presence lift). Both are plain clip fields (`gain`, `eq`),
+# so the mixer can change them like any other.
+DELIVERY_MIX: dict[str, tuple[float, dict[str, float]]] = {
+    "whisper": (-8.0, {"low_cut": 180.0, "presence_db": 4.0}),
+    "hushed": (-4.0, {"low_cut": 120.0, "presence_db": 2.0}),
+}
 BED_GAIN = 0.16
 BED_FADE_SECONDS = 1.5
 BED_XFADE_SECONDS = 1.5
@@ -412,7 +419,11 @@ class _Placed:
 def _shape(p: _Placed) -> np.ndarray:
     """The clip's audio with its gain and fades."""
     clip = p.clip
-    audio = p.audio.astype(np.float32) * np.float32(db_to_gain(float(clip.get("gain", 0.0))))  # type: ignore[arg-type]
+    audio = p.audio.astype(np.float32)
+    eq = clip.get("eq")
+    if isinstance(eq, Mapping):
+        audio = apply_eq(audio, SR, float(eq.get("low_cut", 0.0)), float(eq.get("presence_db", 0.0)))  # type: ignore[arg-type]
+    audio = audio * np.float32(db_to_gain(float(clip.get("gain", 0.0))))  # type: ignore[arg-type]
     for name, direction in (("fade_in", "in"), ("fade_out", "out")):
         fade = clip.get(name)
         if isinstance(fade, Mapping) and float(fade["len"]) > 0:  # type: ignore[arg-type]
@@ -852,7 +863,11 @@ class Timeline:
             raise MixRefusal(f"take(s) not in the store: {key}", missing_takes=[key])
         ids = [int(line["i"]) for line in group]  # type: ignore[call-overload]
         source: dict[str, object] = {"kind": "take", "key": key, "stretch": stretch}
-        clip = _clip(f"line-{ids[0]}", source, len(paced.audio), self._anchor(self.t, self._ref), 1.0, lines=ids)
+        deliveries = [str((line.get("direction") or {}).get("delivery") or "") for line in group if isinstance(line.get("direction"), Mapping)]  # type: ignore[union-attr]
+        delivery = next((d for d in deliveries if d in DELIVERY_MIX), None)
+        gain, eq = DELIVERY_MIX[delivery] if delivery else (0.0, None)
+        extra: dict[str, object] = {"eq": dict(eq)} if eq else {}
+        clip = _clip(f"line-{ids[0]}", source, len(paced.audio), self._anchor(self.t, self._ref), db_to_gain(gain), lines=ids, **extra)
         self._put("dialogue", str(group[0].get("speaker") or "VOICE"), clip, self.t, paced.audio)
         by_id = {int(line["i"]): line for line in group}  # type: ignore[call-overload]
         self.lines.extend(_timed(by_id[i], [entry]) for i, entry in _line_spans(self.placed[-1], by_id, self.sources))
