@@ -50,6 +50,7 @@ const PARITY: Readonly<Record<string, Entry>> = {
   perform: mixer("retake"), // a line is performed again from the punch list (AGT-2155); a first performance is the CLI's
   mix: mixer("renderMix"),
   fix: mixer("retake", "flag", "unflag", "listFlags"),
+  flag: mixer("flag"), // the punch list flags a line (AGT-2155); the CLI flags without a window (AGT-2305)
   takes: mixer("lineTakes", "chooseTake"),
   // ---- not editing or composing
   guide: support("read-only: the path for a track and an output, from the registries"),

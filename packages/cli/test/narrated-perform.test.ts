@@ -193,7 +193,7 @@ test("AC1: perform, mix and fix a narrated unit: each Python call names the outp
   // Fix reads the narrated output's flags.json; with none open it is refused before anything runs.
   const before = calls.length;
   const noFlags = await verb("fix").run({ project: "ice-house", output: "narrated", unit: 1, "json-lines": false }, ctx);
-  expect(noFlags.body).toMatchObject({ ok: false, output: "narrated", missing: ["unit 1 has no open flags (flag lines in pablo mixer)"] });
+  expect(noFlags.body).toMatchObject({ ok: false, output: "narrated", missing: ["unit 1 has no open flags (flag lines with pablo flag, or in pablo mixer)"] });
   expect(calls).toHaveLength(before);
   writeFileSync(join(work, ...NARRATED_CASTING, "flags.json"), JSON.stringify({ flags: [{ id: "f1", episode: 1, line: 0, reason: "flat", by: "matt" }] }));
   const fixed = await verb("fix").run({ project: "ice-house", output: "narrated", unit: 1, "json-lines": false }, ctx);

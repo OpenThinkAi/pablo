@@ -105,7 +105,9 @@ Commands:
              through the "only flagged lines change" invariant, remix it, and move
              the flags to `flags-done.json` with the version they landed in; no open
              flags is exit 2 (AGT-1685, `fix.py`). `--line I` (AGT-2155) applies
-             only the open flags on line I; the rest stay open.
+             only the open flags on line I; the rest stay open. `--stale` (AGT-2305,
+             `stale.py`) re-records instead the lines whose take no longer matches
+             how they are spoken (a `pronounce.md` or spoken-form change).
 - `gate`     score a take with the scorer stack and judge it against a card's
              thresholds; `gate calibrate` fits thresholds from approved takes
              (see `gate_command.py`). Writes nothing but a receipt unless
@@ -139,7 +141,8 @@ from pablo_casting.mix import Seams
 from pablo_casting.gate_command import cmd_calibrate, cmd_gate
 from pablo_casting.hfcache import hub_cache, is_cached
 from pablo_casting.library import Library, LibraryRefusal, card_hash, check_slug, resolve_root, slugify
-from pablo_casting.manifest import ManifestError, referenced_takes, write_version
+from pablo_casting.manifest import ManifestError, read_version, referenced_takes, versions, write_version
+from pablo_casting.stale import stale_lines
 from pablo_casting.pins import is_commit
 from pablo_casting.receipts import append_receipt, now
 from pablo_casting.scorers import ScorerFactory, describe, real_scorers
@@ -256,6 +259,7 @@ def _parser() -> _Parser:
     parser.add_argument("--engine")
     parser.add_argument("--json-lines", action="store_true", dest="json_lines")
     parser.add_argument("--stream", action="store_true")
+    parser.add_argument("--stale", action="store_true", help="fix: re-record the lines whose take no longer matches how they are spoken")
     parser.add_argument("--output", help="the audio output: radio (default) or narrated; else $PABLO_CASTING_OUTPUT")
     return parser
 
@@ -748,7 +752,13 @@ def cmd_status(work: Path, episode: int | None) -> Result:
         return {"ready": False, "missing": [f"episode {episode} has no script"]}, EXIT_REFUSED
     roles = found[1].role_names()
     missing = [f"role {role} is not bound to a voice (pablo bind --role {role} --voice <slug>)" for role in roles if role not in bound]
-    return {"ready": not missing, "missing": missing, "episode": episode, "roles": roles}, EXIT_REFUSED if missing else EXIT_OK
+    body: dict[str, object] = {"ready": not missing, "missing": missing, "episode": episode, "roles": roles}
+    found_versions = versions(work, episode)
+    if found_versions:  # AGT-2305: performed lines whose take no longer matches how they are spoken
+        manifest = read_version(work, episode, found_versions[-1])
+        stale = stale_lines(work, [line for line in manifest.get("lines", []) if isinstance(line, dict)])  # type: ignore[union-attr]
+        body.update({"version": found_versions[-1], "staleLines": len(stale), "stale": stale})
+    return body, EXIT_REFUSED if missing else EXIT_OK
 
 
 def cmd_bind(env: Mapping[str, str], work: Path, args: argparse.Namespace) -> Result:
@@ -1038,7 +1048,7 @@ def _dispatch(
             return cmd_mix(fix_work, args.episode, version, args.cues, args.library or configured, args.vault, fix_seams)
 
         return cmd_fix(
-            env, work, args.episode, args.vault, args.library, configured, args.json_lines, engines or real_engine, scorers or real_scorers, remix, args.line
+            env, work, args.episode, args.vault, args.library, configured, args.json_lines, engines or real_engine, scorers or real_scorers, remix, args.line, args.stale
         ), args.json
     if args.command == "mixer":
         from pablo_casting.mix import cues_dir_for

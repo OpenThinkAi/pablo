@@ -36,9 +36,11 @@ from pablo_casting import outputs
 from pablo_casting.binding import episode_files
 from pablo_casting.engines import ACRONYMS_PARAM, ACRONYMS_VERSION, LEXICON_PARAM, as_letters, chatterbox_text, is_shouted, spoken_params, turbo_text
 from pablo_casting.lexicon import Entry, acronym_mode, lexicon_path, load
+from pablo_casting.manifest import read_version, versions
 from pablo_casting.noise import is_common, rank
 from pablo_casting.script import parse_script
 from pablo_casting.spoken import mask, undecided
+from pablo_casting.stale import stale_lines
 
 Result = tuple[dict[str, object], int]
 
@@ -126,6 +128,7 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
     counts: Counter[str] = Counter()
     first: dict[str, tuple[str, int, int]] = {}  # token -> (kind, unit, line)
     changed = 0
+    stale_total = 0
     for number, path in files:
         script = parse_script(path.read_text(encoding="utf-8"))
         lines: list[dict[str, object]] = []
@@ -143,7 +146,14 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
                 continue
             changed += 1
             lines.append({"line": spoken.line, "speaker": spoken.speaker, "text": spoken.text, "engine": engine, "changes": _in_order(spoken.text, _collapse(changes))})
-        units.append({"unit": number, "file": str(path.relative_to(work)), "lines": lines})
+        unit: dict[str, object] = {"unit": number, "file": str(path.relative_to(work)), "lines": lines}
+        found = versions(work, number)
+        if found:  # AGT-2305: performed lines whose take no longer matches how they are spoken
+            manifest = read_version(work, number, found[-1])
+            stale = stale_lines(work, [line for line in manifest.get("lines", []) if isinstance(line, dict)], entries, acronyms)  # type: ignore[union-attr]
+            unit.update({"version": found[-1], "stale": stale})
+            stale_total += len(stale)
+        units.append(unit)
     lexicon = lexicon_path(work)
     # A word also written in lower case elsewhere, a month or weekday, a common English word or first name is noise: left
     # out unless `everything`. The rest ranks mixed-case tokens, then unusual letter patterns, then the others.
@@ -168,6 +178,7 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
         "lexiconEntries": len(entries),
         "units": units,
         "changedLines": changed,
+        "staleLines": stale_total,
         "unresolved": [
             {"token": token, "kind": first[token][0], "count": counts[token], "first": {"unit": first[token][1], "line": first[token][2]}}
             for token in ordered

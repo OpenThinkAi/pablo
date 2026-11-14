@@ -184,13 +184,13 @@ export function radioStageCheck(work: string, stage: RadioVerbStage, episode: nu
     case "perform":
       return done([
         ...unbound.map((role) => `role ${role} is not cast`),
-        ...(latest === undefined ? [] : [`${noun} ${episode} is already performed (v${latest.version}); re-record flagged lines with pablo fix`]),
+        ...(latest === undefined ? [] : [`${noun} ${episode} is already performed (v${latest.version}); re-record flagged lines with pablo fix, or stale ones with pablo fix --stale`]),
       ]);
     case "mix":
       return done(latest === undefined ? [unperformed] : []);
     case "fix":
       if (latest === undefined) return done([unperformed]);
-      return done(openFlags(work, episode, output) === 0 ? [`${noun} ${episode} has no open flags (flag lines in ${output === "radio" ? "pablo review" : "pablo mixer"})`] : []);
+      return done(openFlags(work, episode, output) === 0 ? [`${noun} ${episode} has no open flags (flag lines with pablo flag, or in ${output === "radio" ? "pablo review" : "pablo mixer"})`] : []);
     case "review":
       return done(versions.some((v) => v.audio !== undefined) ? [] : [`${noun} ${episode} has no mixed audio yet (pablo perform, then pablo mix)`]);
   }
