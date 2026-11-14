@@ -12,8 +12,9 @@
  *
  * The audio side (AGT-2158): `cast --auto`, `perform`, `mix`, `fix` and
  * `mixer` take `--output narrated --unit N` and keep the reading's casting
- * state in `outputs/narrated/casting/` (`../audio.ts`); publishing stays the
- * script, as one file, by `--target script`.
+ * state in `outputs/narrated/casting/` (`../audio.ts`); `publish --target
+ * script` compiles the scripts into one file and `--target audio` (AGT-2306,
+ * `./audio-join.ts`) joins each reading's newest mix into one m4a.
  *
  * Allowed on every track (D-7). Only top-level `NARRATED` is evaluated at
  * import: the registry and marker are read inside functions, as the
@@ -29,6 +30,7 @@ import type { CoreState } from "../../core/machine";
 import { readMarker } from "../../marker";
 import type { Ritual } from "../../novel/rituals";
 import { stripFrontmatter } from "../../publish";
+import { renderVersions } from "../radio/state";
 import { frontmatterField } from "../novel/plan";
 import { outputDefinition } from "../registry";
 import type {
@@ -37,11 +39,14 @@ import type {
   OutputReport,
   OutputUnit,
   PlanRow,
+  PublishOptions,
   PublishOutcome,
   UnitPackOptions,
   UnitPackOutcome,
   UnitPreconditions,
 } from "../types";
+import { DEFAULT_GAP_SECONDS, joinReadings } from "./audio-join";
+import type { JoinReading } from "./audio-join";
 import { characterNames, narrateProse, narrationDrift } from "./narrate";
 import type { Drift } from "./narrate";
 import {
@@ -260,11 +265,47 @@ async function narratedAfterMerge(workDir: string, unit: number, unitPath: strin
   }
 }
 
+/**
+ * `--target audio` (AGT-2306): every reading's newest mix, in unit order, joined into
+ * `.pablo/out/<slug>-narrated.m4a` with `--gap` seconds between readings (default 1.4) and,
+ * with `--chapters`, a chapter marker per reading titled from its source unit. Refused,
+ * naming the readings, while any is unwritten or unmixed.
+ */
+function publishNarratedAudio(workDir: string, slug: string, options: PublishOptions): PublishOutcome {
+  const refuse = (message: string, tried: readonly string[] = []): PublishOutcome => ({ ok: false, code: 2, message, tried });
+  const plan = narratedPlan(workDir);
+  const files = narratedFiles(workDir);
+  const units = [...new Set([...plan.map((row) => row.unit), ...files.keys()])].sort((a, b) => a - b);
+  if (units.length === 0) return refuse(`pablo: publish: no readings to join (${NARRATED_DIR})`, [join(workDir, NARRATED_DIR)]);
+  const readings: JoinReading[] = [];
+  const unperformed: string[] = [];
+  for (const unit of units) {
+    const file = files.get(unit);
+    const title = (file === undefined ? undefined : frontmatterField(readFileSync(file, "utf8"), "title")) ?? plan.find((row) => row.unit === unit)?.title ?? `Reading ${unit}`;
+    const audio = renderVersions(workDir, unit, NARRATED_ID).filter((v) => v.audio !== undefined).at(-1)?.audio;
+    if (file === undefined) unperformed.push(`reading ${unit} (${title}) is not written yet`);
+    else if (audio === undefined) unperformed.push(`reading ${unit} (${title}) has no mixed audio (pablo perform, then pablo mix, --output narrated --unit ${unit})`);
+    else readings.push({ unit, title, audio });
+  }
+  if (unperformed.length > 0) return { ok: false, code: 2, message: `pablo: publish: cannot join the readings while any is unperformed: ${unperformed.join("; ")}`, tried: [] };
+  const gap = options.gap ?? DEFAULT_GAP_SECONDS;
+  if (!Number.isFinite(gap) || gap < 0) return refuse(`pablo: publish: --gap must be a number of seconds, 0 or more (got ${String(options.gap)})`);
+  const outDir = join(workDir, ".pablo", "out");
+  const where = join(outDir, `${slug}-narrated.m4a`);
+  if (!where.startsWith(outDir + sep)) return refuse(`pablo: publish: marker slug "${slug}" would write outside ${outDir}`);
+  mkdirSync(outDir, { recursive: true });
+  const joined = joinReadings(readings, where, gap, options.chapters === true);
+  if (!joined.ok) return refuse(joined.message);
+  const words = readings.reduce((n, r) => n + stripFrontmatter(readFileSync(files.get(r.unit) as string, "utf8")).split(/\s+/).filter((w) => w !== "").length, 0);
+  return { ok: true, code: 0, target: "audio", where, chapters: readings.length, words };
+}
+
 /** `--target script`: every reading's script, in unit order, in one file under `.pablo/out/`. */
-function publishNarrated(workDir: string, slug: string, title: string, target: string | undefined): PublishOutcome {
+function publishNarrated(workDir: string, slug: string, title: string, target: string | undefined, options: PublishOptions = {}): PublishOutcome {
   const refuse = (message: string, tried: readonly string[] = []): PublishOutcome => ({ ok: false, code: 2, message, tried });
   if (target === undefined) return refuse(`pablo: publish requires --target (${NARRATED_PUBLISH_TARGETS.join("|")})`);
   if (!(NARRATED_PUBLISH_TARGETS as readonly string[]).includes(target)) return refuse(`pablo: publish: unknown --target "${target}" (expected ${NARRATED_PUBLISH_TARGETS.join("|")})`);
+  if (target === "audio") return publishNarratedAudio(workDir, slug, options);
   const files = [...narratedFiles(workDir).entries()].sort((a, b) => a[0] - b[0]);
   if (files.length === 0) return refuse(`pablo: publish: no readings to compile (${NARRATED_DIR})`, [join(workDir, NARRATED_DIR)]);
   const parts = [`# ${title}: narrated`];

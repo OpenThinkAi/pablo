@@ -1624,7 +1624,15 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       return EXIT_REFUSED;
     }
     // `--output <type>` (AGT-1669): the addressed output's own publish targets.
-    const result = publishOutput(projectPath, args.target, args.output);
+    // `--gap`/`--chapters` (AGT-2306): the narrated audio target's gap and chapter markers.
+    const gapText = args.values["gap"];
+    const gap = typeof gapText === "string" ? Number(gapText) : undefined;
+    if (gap !== undefined && (gapText === "" || !Number.isFinite(gap) || gap < 0 || gap > 60)) {
+      const message = `pablo: publish: --gap must be a number of seconds from 0 to 60 (got "${String(gapText)}")`;
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    const result = publishOutput(projectPath, args.target, args.output, { ...(gap === undefined ? {} : { gap }), chapters: args.values["chapters"] === true });
     const body = result.body as {
       ok: boolean;
       message?: string;
