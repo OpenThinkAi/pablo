@@ -32,7 +32,7 @@ import {
 } from "@openthink/pablo-core";
 import { OUTPUTS } from "./outputs/registry";
 
-export type ReadableKind = "bible" | "chapter" | "outline" | "continuity" | "research";
+export type ReadableKind = "bible" | "chapter" | "outline" | "continuity" | "research" | "core";
 
 /** Directory name (or file name) at the work root -> what it is. */
 const AREAS: Readonly<Record<string, ReadableKind>> = {
@@ -40,6 +40,7 @@ const AREAS: Readonly<Record<string, ReadableKind>> = {
   [OUTPUTS.novel.artifactDir]: "chapter",
   outline: "outline",
   research: "research",
+  core: "core",
   "continuity.md": "continuity",
 };
 
@@ -109,7 +110,7 @@ function resolveReadable(workDir: string, value: string): Resolved {
   const kind = rel === NOVEL_CONTINUITY_FILE ? "continuity" : AREAS[area];
   if (rel === "" || kind === undefined) {
     return refuse(
-      `pablo: "${value}" is not readable; read bible/, ${OUTPUTS.novel.artifactDir}/, outline/, research/ or continuity.md`,
+      `pablo: "${value}" is not readable; read bible/, ${OUTPUTS.novel.artifactDir}/, outline/, core/, research/ or continuity.md`,
     );
   }
   return { ok: true, abs, rel, kind };

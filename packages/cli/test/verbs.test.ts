@@ -132,6 +132,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     "no-check": { type: "boolean", default: false }, // AGT-2115: write/story --no-check
     stage: { type: "string" },
     file: { type: "string" },
+    content: { type: "string" }, // AGT-2293: save --content
     sub: { type: "string" },
     name: { type: "string" },
     // AGT-2106: research save / fact record

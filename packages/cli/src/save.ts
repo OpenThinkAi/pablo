@@ -71,6 +71,7 @@ export const SAVE_EXIT_ERROR = 1;
 export interface SaveOptions {
   readonly stage: string | undefined;
   readonly file: string | undefined;
+  readonly content?: string | undefined;
   readonly json: boolean;
 }
 
@@ -494,6 +495,8 @@ function emitOk(json: boolean, stage: string, path: string, committed: boolean, 
 export interface SaveCoreOptions {
   readonly stage: string | undefined;
   readonly file: string | undefined;
+  /** The stage content itself (AGT-2293): what a tool call with no stdin and no file to read passes inline. Wins over `file`; the caller refuses both. */
+  readonly content?: string | undefined;
 }
 
 /** A refusal body, the exact shape `--json`/MCP print — `{ok:false, code, message}`, no `tried` (save never resolves a project path itself). */
@@ -528,7 +531,7 @@ export interface SaveOutcome {
  * implementation — the two cannot drift.
  */
 export function saveCore(options: SaveCoreOptions, projectPath: string): SaveOutcome {
-  const { stage, file } = options;
+  const { stage, file, content } = options;
 
   if (stage === undefined) {
     return {
@@ -546,7 +549,7 @@ export function saveCore(options: SaveCoreOptions, projectPath: string): SaveOut
   }
   const target = targetResult.target;
 
-  const inputResult = readSaveInput(file);
+  const inputResult = content !== undefined ? ({ ok: true, text: content } as const) : readSaveInput(file);
   if (!inputResult.ok) {
     return { body: { ok: false, code: inputResult.code, message: inputResult.message }, exitCode: inputResult.code };
   }

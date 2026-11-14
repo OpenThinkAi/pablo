@@ -167,6 +167,8 @@ interface ParsedArgs {
   readonly stage: string | undefined;
   /** `save --file <path>` — stdin is read when omitted. */
   readonly file: string | undefined;
+  /** `save --content`: the stage content inline (AGT-2293). */
+  readonly content: string | undefined;
   /** `write --chapter N`; parsed and validated by `runWrite`, not here. */
   readonly chapter: string | undefined;
   /** `migrate track --track <id>` (AGT-2104): the track to write into pablo.json. */
@@ -286,6 +288,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     role: typeof values["role"] === "string" ? values["role"] : undefined,
     stage: typeof values["stage"] === "string" ? values["stage"] : undefined,
     file: typeof values["file"] === "string" ? values["file"] : undefined,
+    content: typeof values["content"] === "string" ? values["content"] : undefined,
     chapter: typeof values["chapter"] === "string" ? values["chapter"] : undefined,
     track: typeof values["track"] === "string" ? values["track"] : undefined,
     output: typeof values["output"] === "string" ? values["output"] : undefined,
@@ -1446,7 +1449,12 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
-    return runSave({ stage: args.stage, file: args.file, json: args.json }, projectPath);
+    if (args.content !== undefined && args.file !== undefined) {
+      const message = "pablo: save: give --file or --content, not both";
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
+    return runSave({ stage: args.stage, file: args.file, content: args.content, json: args.json }, projectPath);
   }
 
   if (args.verb === "write") {

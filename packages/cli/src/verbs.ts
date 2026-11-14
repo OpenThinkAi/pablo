@@ -639,15 +639,23 @@ export function draftChapterBody(body: unknown): unknown {
 // save
 // ---------------------------------------------------------------------------
 
+const SAVE_LAYOUTS =
+  "Nonfiction rows: a claims row is `| # | Claim | Sources |` (three columns; Sources is one or more research note ids, comma separated, e.g. `ice-harvest, sawdust`: the note's path under research/ without .md); an outline row is `| # | Section | What it covers |` (three columns; name the claims a section makes in its last cell as `#2, #3`, none named means every claim). Table input is a full table or rows only. Thesis is prose.";
+
 const SAVE_ARGS = z.object({
   project: projectField,
   stage: z.string().optional().describe(
-      "acts|beats|premise|bible/<file> — which planning target to replace (a nonfiction work: thesis|claims|outline). An acts row is `| Act | Years | What it accomplishes |`: the act's id (I, II or 1, 2), the story time it spans (years for a long work, dates or days for a short one) and what it does; a beats row is `| # | Story date | Title | Beat | POV | Status |`.",
+      "acts|beats|premise|bible/<file> — which planning target to replace (a nonfiction work: thesis|claims|outline). An acts row is `| Act | Years | What it accomplishes |`: the act's id (I, II or 1, 2), the story time it spans (years for a long work, dates or days for a short one) and what it does; a beats row is `| # | Story date | Title | Beat | POV | Status |`. " +
+        SAVE_LAYOUTS,
     ),
   file: z
     .string()
     .optional()
-    .describe("Path to read the input from. Required over MCP — a tool call has no stdin to read from."),
+    .describe("Path (inside the vault) to read the input from. Give `file` or `content`; a tool call has no stdin to read from."),
+  content: z
+    .string()
+    .optional()
+    .describe("The stage content itself, inline (the thesis text, or the table rows), in place of `file`. Give `content` or `file`, not both."),
 });
 
 async function runSaveVerb(args: z.infer<typeof SAVE_ARGS>, ctx: VerbContext): Promise<VerbResult> {
@@ -656,11 +664,18 @@ async function runSaveVerb(args: z.infer<typeof SAVE_ARGS>, ctx: VerbContext): P
 
   // save.ts's CLI path reads stdin when `--file` is omitted; an MCP tool call
   // has no stdin of its own to read (stdin is the protocol's own transport),
-  // so a missing `file` is refused here rather than risking a read against
-  // the JSON-RPC pipe.
+  // so the input must come inline (`content`) or from `file`, and a call with
+  // neither is refused here rather than risking a read against the JSON-RPC pipe.
+  if (args.file !== undefined && args.content !== undefined) {
+    return { body: { ok: false, code: 2, message: "pablo: save: give file or content, not both" }, exitCode: 2 };
+  }
+  if (args.content !== undefined) {
+    const { body, exitCode } = saveCore({ stage: args.stage, file: undefined, content: args.content }, resolved.projectPath);
+    return { body, exitCode };
+  }
   if (args.file === undefined) {
     return {
-      body: { ok: false, code: 2, message: "pablo: save over MCP requires file (a tool call has no stdin to read)" },
+      body: { ok: false, code: 2, message: "pablo: save over MCP requires content or file (a tool call has no stdin to read)" },
       exitCode: 2,
     };
   }
@@ -1863,7 +1878,7 @@ const READ_ARGS = z.object({
     .describe(
       'A file of the work, relative to it: a bible file ("bible/overview.md"), a chapter ("' +
         OUTPUTS.novel.artifactDir +
-        '/01-….md", returned joined into paragraphs), an outline, "continuity.md", or a research note ("research/…"). A directory lists its entries.',
+        '/01-….md", returned joined into paragraphs), an outline, "continuity.md", a research note ("research/…"), or a core file ("core/thesis.md", "core/claims.md", "core/outline.md" on a nonfiction work). A directory lists its entries.',
     ),
 });
 
@@ -2140,7 +2155,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "save",
-    description: "Save the agent's planning output (acts, beats, bible facts, premise) into the files the novel stage machine reads.",
+    description:
+      "Save the agent's planning output into the files the stage machine reads: acts, beats, bible facts and premise, or on a nonfiction work its thesis, claims and outline. Pass the content inline (`content`) or a vault path (`file`). " +
+      SAVE_LAYOUTS,
     args: SAVE_ARGS,
     run: runSaveVerb,
   },
