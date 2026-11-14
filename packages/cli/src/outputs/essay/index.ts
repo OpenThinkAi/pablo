@@ -26,7 +26,7 @@ import { buildEssayPack, essayDefaultPlan, essayPreconditions } from "./pack";
 import { publishEssay } from "./publish";
 import { ESSAY_RITUALS } from "./rituals";
 import { essayScaffold } from "./scaffold";
-import { ESSAY_PATH, essayOutline, essaySectionText, putSection, readEssayFile, sectionBody, withoutCitations } from "./sections";
+import { ESSAY_PATH, essayOutline, essaySectionText, orphanSections, putSection, readEssayFile, sectionBody, withoutCitations } from "./sections";
 import { ESSAY_DIR, ESSAY_ID, ESSAY_PUBLISH_TARGETS, essayBranch, essayUnitFileName, essayUnitOfBranch, essayUnitOfPath } from "./units";
 
 /** `outputs/essay/RULES.md`'s scaffold: how the essay is written, layered after the work's voice. */
@@ -60,6 +60,7 @@ function essayReport(workDir: string, _core: CoreState): OutputReport {
   });
   const drafted = units.filter((u) => u.file !== undefined).length;
   const next = units.find((u) => u.file === undefined);
+  const orphans = content === undefined ? [] : orphanSections(sections, content);
   return {
     noun: "section",
     plural: "sections",
@@ -67,6 +68,7 @@ function essayReport(workDir: string, _core: CoreState): OutputReport {
     units,
     drafted,
     total: units.length,
+    ...(orphans.length === 0 ? {} : { notes: orphans.map((t) => `${ESSAY_PATH} has a section "${t}" that matches no outline row`) }),
     ...(next === undefined ? {} : { next: `write section ${next.unit} (pablo write --output essay --unit ${next.unit})` }),
   };
 }

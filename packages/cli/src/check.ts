@@ -39,6 +39,7 @@ import { anachronismBody, checkAnachronisms, lexiconHome, markdownUnder } from "
 import { coreCheck } from "./core-check";
 import type { Ask } from "./critique";
 import { factAccuracyAsk, runFactAccuracy, savedFactHits } from "./fact-accuracy";
+import { ESSAY_PATH, essayOutline, orphanSections } from "./outputs/essay/sections";
 import { narratedDrift } from "./outputs/narrated";
 import { narratedUnitOfPath } from "./outputs/narrated/units";
 import { outputDefinition, resolveOutput } from "./outputs/registry";
@@ -489,6 +490,14 @@ export function checkWork(vaultRoot: string, workDir: string, file?: string, out
     // A narrated reading (AGT-2137) is the source unit's prose word for word: flag the first place it is not.
     const drift = narratedDrift(workDir, filePath);
     if (drift !== undefined) hits.push({ path: label, line: drift.line, rule: "narration-drift", excerpt: excerptOf(drift.excerpt), detail: drift.detail });
+    // An essay heading no outline row accounts for (AGT-2294) is reported, not kept silently.
+    if (scanned?.id === "essay" && label.split("\\").join("/") === ESSAY_PATH) {
+      const lines = text.split(/\r?\n/);
+      for (const title of orphanSections(essayOutline(workDir).sections, text)) {
+        const at = lines.findIndex((l) => l.startsWith("## ") && l.includes(title));
+        hits.push({ path: label, line: Math.max(at + 1, 1), rule: "orphan-section", excerpt: excerptOf(`## ${title}`), detail: "matches no outline row" });
+      }
+    }
   }
 
   // The resolved output (named, or the work's one output) adds the core check (AGT-1671, AGT-2197): the units against the bible, the timeline and facts.md.

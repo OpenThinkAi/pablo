@@ -163,6 +163,10 @@ A verb run on a `nonfiction` work that has no output yet is refused naming
 up to you). On a `nonfiction` work its units are **sections**, the rows of the
 core outline (`core/outline.md`), and every section lives in one file,
 `outputs/essay/essay.md`, under a `## <section title>` heading in outline order.
+A section is found by its title, or, when the outline row was renamed after it was
+written, by its place in the outline: `write --force` on that section replaces it and
+rewrites its heading to the row's current title. A heading that matches no outline row
+is reported by `status` and `check` (`orphan-section`) and never touched.
 A section's claims are the `core/claims.md` rows its "What it covers" cell names
 (`#2`, `#3`), or every claim when it names none.
 

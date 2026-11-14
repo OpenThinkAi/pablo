@@ -139,7 +139,10 @@ export function outputLine(type: string, output: OutputReport, detail = false): 
 export function outputLines(outputs: Readonly<Record<string, OutputReport>>, detail = false): string[] {
   const types = Object.keys(outputs);
   if (types.length === 0) return ["outputs: none"];
-  return types.map((type) => outputLine(type, outputs[type] as OutputReport, detail));
+  return types.flatMap((type) => {
+    const output = outputs[type] as OutputReport;
+    return [outputLine(type, output, detail), ...(output.notes ?? []).map((note) => `  ! ${note}`)];
+  });
 }
 
 /** `pablo status`'s whole-work body (no `--for`): the report plus the branches waiting for review. */

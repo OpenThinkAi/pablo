@@ -25,7 +25,12 @@
  *     ## What changed
  *     ...
  *
- * A heading is matched to its section by title (case and spacing ignored).
+ * A heading is matched to its section by title (case and spacing ignored); a heading
+ * whose title no outline row has (the row was renamed after the section was written,
+ * AGT-2294) takes the outline row at its position: between the sections its matched
+ * neighbours name, the unmatched headings pair with the unmatched rows in order, when
+ * there are as many of each (after the last matched one, no more headings than rows). A heading that still matches no row is an orphan,
+ * reported by `status` and `check` and never rewritten.
  * Each section's own receipt is in the receipts log; the file's frontmatter
  * is the last write's, which is what `check` needs for provenance.
  */
@@ -145,16 +150,57 @@ function renderEssayFile(file: EssayFile): string {
   return `${parts.join("\n\n")}\n`;
 }
 
-/** The outline section a heading names, or undefined. */
-function unitOfHeading(outline: readonly EssaySection[], title: string): number | undefined {
-  return outline.find((s) => fold(s.title) === fold(title))?.number;
+/**
+ * Each file section's outline number (by index), or undefined for an orphan. A title match wins; the rest pair by
+ * position (see the header): in each gap between matched headings, the unmatched headings and the unmatched
+ * outline rows pair in order when their counts are equal (after the last match, when there are no more headings
+ * than rows: sections are written in outline order). Pure.
+ */
+export function sectionNumbers(outline: readonly EssaySection[], sections: readonly { readonly title: string }[]): (number | undefined)[] {
+  const result: (number | undefined)[] = sections.map(() => undefined);
+  const taken = new Set<number>();
+  sections.forEach((s, i) => {
+    const row = outline.find((o) => fold(o.title) === fold(s.title) && !taken.has(o.number));
+    if (row !== undefined) {
+      result[i] = row.number;
+      taken.add(row.number);
+    }
+  });
+  const matched = result.map((n) => n !== undefined);
+  let gapStart = 0;
+  let lower = Number.NEGATIVE_INFINITY;
+  const flush = (end: number, upper: number): void => {
+    const heads: number[] = [];
+    for (let i = gapStart; i < end; i++) if (!matched[i]) heads.push(i);
+    const rows = outline.filter((o) => o.number > lower && o.number < upper && !taken.has(o.number)).map((o) => o.number);
+    // Sections are drafted in outline order, so after the last matched heading the file is a prefix of the remaining rows;
+    // between two matched headings every row in the gap has to be accounted for.
+    const fits = upper === Number.POSITIVE_INFINITY ? heads.length <= rows.length : heads.length === rows.length;
+    if (heads.length > 0 && fits) heads.forEach((h, k) => (result[h] = rows[k]));
+  };
+  for (let i = 0; i < sections.length; i++) {
+    if (!matched[i]) continue;
+    flush(i, result[i] as number);
+    gapStart = i + 1;
+    lower = result[i] as number;
+  }
+  flush(sections.length, Number.POSITIVE_INFINITY);
+  return result;
+}
+
+/** The headings of `content` that match no outline row, by title or position, in file order. Pure. */
+export function orphanSections(outline: readonly EssaySection[], content: string): string[] {
+  const sections = parseEssayFile(content).sections;
+  const numbers = sectionNumbers(outline, sections);
+  return sections.filter((_, i) => numbers[i] === undefined).map((s) => s.title);
 }
 
 /** Section `unit`'s body in `content` (frontmatter and heading excluded), or undefined when the file has no text for it. Pure over `outline`. */
 export function sectionBody(outline: readonly EssaySection[], content: string, unit: number): string | undefined {
-  const section = outline.find((s) => s.number === unit);
-  if (section === undefined) return undefined;
-  const found = parseEssayFile(content).sections.find((s) => fold(s.title) === fold(section.title));
+  if (!outline.some((s) => s.number === unit)) return undefined;
+  const sections = parseEssayFile(content).sections;
+  const at = sectionNumbers(outline, sections).indexOf(unit);
+  const found = at === -1 ? undefined : sections[at];
   return found === undefined || found.body === "" ? undefined : found.body;
 }
 
@@ -169,7 +215,7 @@ export function cleanSectionBody(body: string): string {
 }
 
 /**
- * `content` with section `unit` set to `body`: its text replaced when the file has the section, else the section
+ * `content` with section `unit` set to `body`: its text and heading replaced when the file has the section, else the section
  * inserted before the first later outline section (appended when there is none). `frontmatter` replaces the file's.
  * Sections the outline does not name are kept where they are. Pure over `outline`.
  */
@@ -178,14 +224,13 @@ export function putSection(outline: readonly EssaySection[], content: string | u
   const title = outline.find((s) => s.number === unit)?.title ?? `Section ${unit}`;
   const cleaned = cleanSectionBody(body);
   const sections = [...file.sections];
-  const at = sections.findIndex((s) => fold(s.title) === fold(title));
+  const numbers = sectionNumbers(outline, sections);
+  const at = numbers.indexOf(unit);
   if (at !== -1) {
-    sections[at] = { title: (sections[at] as FileSection).title, body: cleaned };
+    // The heading is rewritten to the outline's current title (AGT-2294).
+    sections[at] = { title, body: cleaned };
   } else {
-    const later = sections.findIndex((s) => {
-      const n = unitOfHeading(outline, s.title);
-      return n !== undefined && n > unit;
-    });
+    const later = numbers.findIndex((n) => n !== undefined && n > unit);
     const entry = { title, body: cleaned };
     if (later === -1) sections.push(entry);
     else sections.splice(later, 0, entry);
