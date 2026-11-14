@@ -318,6 +318,17 @@ test("AC3: publish draft|final compile markdown with numbered references and a s
     "## Sources\n\n1. Gutenberg in Mainz. https://example.org/gutenberg (retrieved 2026-10-20)\n2. Luther's pamphlets. https://example.org/luther-pamphlets (retrieved 2026-10-20)\n3. Literacy in print towns. https://example.org/literacy (retrieved 2026-10-20)\n",
   );
 
+  // AGT-2297: sources that carry their own retrieval date do not get the note's appended again.
+  writeFileSync(
+    join(work, "research", "gutenberg.md"),
+    "# Gutenberg in Mainz\n\nRetrieved: 2026-10-20\n\nThe raw note.\n\n## Sources\n\n- https://example.org/gutenberg (A. Writer, 1 Oct 2026; retrieved 2026-10-20)\n",
+  );
+  const dated = publishEssay(work, "the-press", "The Press", "draft");
+  if (!dated.ok) throw new Error(dated.message);
+  const datedOut = readFileSync(dated.where, "utf8");
+  expect(datedOut).toContain("1. Gutenberg in Mainz. https://example.org/gutenberg (A. Writer, 1 Oct 2026; retrieved 2026-10-20)\n");
+  expect(datedOut).not.toContain("retrieved 2026-10-20) (retrieved");
+
   const final = publishEssay(work, "the-press", "The Press", "final");
   if (!final.ok) throw new Error(final.message);
   const clean = readFileSync(final.where, "utf8");
