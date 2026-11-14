@@ -37,7 +37,7 @@ export interface EssaySource {
   readonly retrieved?: string;
 }
 
-/** A research note read for the sources list: its `# ` title, `Retrieved:` date and `## Sources` bullets. Pure. */
+/** A research note read for the sources list: its `# ` title, `Retrieved:` date (dropped when every source names its own) and `## Sources` bullets. Pure. */
 export function noteSource(id: string, text: string): EssaySource {
   const title = /^#\s+(.+?)\s*$/m.exec(text)?.[1] ?? id;
   const retrieved = /^\s*Retrieved:\s*(\S+)/im.exec(text)?.[1];
@@ -50,7 +50,9 @@ export function noteSource(id: string, text: string): EssaySource {
           .split("\n")
           .map((line) => /^\s*[-*]\s+(.+?)\s*$/.exec(line)?.[1])
           .filter((link): link is string => link !== undefined);
-  return { id, title, links, ...(retrieved === undefined ? {} : { retrieved }) };
+  // Sources that already name their own retrieval date make the note's a repeat (AGT-2297): print it once.
+  const named = links.length > 0 && links.every((link) => /\bretrieved\s+\d{4}-\d{2}-\d{2}/i.test(link));
+  return { id, title, links, ...(retrieved === undefined || named ? {} : { retrieved }) };
 }
 
 export interface CompiledEssay {

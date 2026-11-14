@@ -887,7 +887,7 @@ const RECORD_FACT_MCP_ARGS = z.object({
 const SAVE_RESEARCH_MCP: McpToolSpec = {
   name: "save_research",
   description:
-    "Save a research finding with its sources to the work's research/ notes (research/<slug>.md, with the retrieval date), on a new plan/ branch the author reviews. At least one source is required, and each must be an http(s) URL, a DOI or ISBN, or a citation naming the work and its year; general knowledge or memory is refused. The writer model never sees these notes; distilled facts are what reach a draft.",
+    "Save a research finding with its sources to the work's research/ notes (research/<slug>.md, with the retrieval date), on a new plan/ branch the author reviews. At least one source is required, and each must be an http(s) URL, a DOI or ISBN, or a citation naming the work and its year; general knowledge or memory is refused. Do not write retrieval dates into source strings: the note records the date itself. The writer model never sees these notes; distilled facts are what reach a draft.",
   args: SAVE_RESEARCH_MCP_ARGS,
   run: async (raw, ctx) => {
     const args = SAVE_RESEARCH_MCP_ARGS.parse(raw);
