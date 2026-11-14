@@ -158,3 +158,12 @@ test("read and search reach the harness's tools by their plain names", () => {
   expect(names).toContain("read");
   expect(names).toContain("search");
 });
+
+test("read opens a nonfiction work's core files (AGT-2293)", () => {
+  const dir = work();
+  mkdirSync(join(dir, "core"), { recursive: true });
+  writeFileSync(join(dir, "core", "thesis.md"), "Ice made the town.\n");
+  expect(readTool(dir, "core/thesis.md")).toEqual({ ok: true, path: "core/thesis.md", kind: "core", text: "Ice made the town.\n" });
+  expect(readTool(dir, "core")).toMatchObject({ ok: true, kind: "directory", entries: ["thesis.md"] });
+  expect(readTool(dir, "pablo.json")).toMatchObject({ ok: false });
+});

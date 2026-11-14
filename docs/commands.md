@@ -380,11 +380,12 @@ your agent. pablo's part is saving the results where its stage checks can see th
 ### save
 
 ```
-pablo save --project <slug> --stage premise|acts|beats|bible/<file> [--file F]
-pablo save --project <slug> --stage thesis|claims|outline [--file F]     # nonfiction
+pablo save --project <slug> --stage premise|acts|beats|bible/<file> [--file F | --content TEXT]
+pablo save --project <slug> --stage thesis|claims|outline [--file F | --content TEXT]   # nonfiction
 ```
 
-Reads stdin, or `--file`, and writes:
+Reads stdin, `--file`, or `--content` (the text inline), and writes. Over MCP (and the agent's `save` tool) there is
+no stdin: pass the content inline as `content`, or a vault path as `file`, not both.
 
 | Stage | Target |
 |---|---|
@@ -1112,9 +1113,10 @@ pablo search --project <slug> <phrase...>
 pablo read --project <slug> <path>
 ```
 
-`search` finds a phrase across the work's bible, chapters, outline, continuity and
+`search` finds a phrase across the work's bible, chapters, outline, core, continuity and
 research, printing `file:line: sentence` for each match. `read` prints one file of
-the work, with chapters joined back into paragraphs. A path outside the work is
+the work, with chapters joined back into paragraphs; a nonfiction work's core
+(`core/thesis.md`, `core/claims.md`, `core/outline.md`) is readable too. A path outside the work is
 refused. Both are also MCP tools.
 
 ---

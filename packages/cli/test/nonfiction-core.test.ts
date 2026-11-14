@@ -16,7 +16,10 @@ import { buildResume, formatResumeProse } from "../src/resume";
 import { saveCore } from "../src/save";
 import { TRACKS } from "../src/tracks/registry";
 import { formatStatusProse, readWorkStatus } from "../src/work-state";
+import { runAgent } from "../src/harness/agent";
+import { VERBS } from "../src/verbs";
 import { runWrite } from "../src/write";
+import { scriptedAgent } from "./scripted-agent";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/vault", import.meta.url));
 const NO_THINK = { env: { PATH: "/nonexistent-bin-for-nonfiction-test" } };
@@ -205,4 +208,44 @@ test("write names an earlier short stage first", async () => {
   const { vault, work } = nonfictionWork();
   const refused = await writeJson(vault, work);
   expect(refused).toMatchObject({ ok: false, exitCode: 2, message: "pablo: nonfiction: core/thesis.md has no text" });
+});
+
+// AGT-2293: the agent loop reads a nonfiction core and saves it inline (a tool call has no stdin or file to read).
+test("an agent-loop fake reads the thesis and saves the claims and outline inline", async () => {
+  const { vault, work } = nonfictionWork();
+  addNote(work, "ice-harvest");
+  addNote(work, "sawdust");
+  const { provider } = scriptedAgent(() => [
+    ["save", { project: "ice-house", stage: "thesis", content: "Ice made the town." }],
+    ["read", { project: "ice-house", path: "core/thesis.md" }],
+    ["save", { project: "ice-house", stage: "claims", content: "| 1 | Ice was cut on the river | ice-harvest |\n| 2 | Sawdust kept it | ice-harvest, sawdust |\n" }],
+    ["save", { project: "ice-house", stage: "outline", content: "| 1 | The river | #1 |\n| 2 | The house | #2 |\n" }],
+    ["read", { project: "ice-house", path: "core/claims.md" }],
+  ]);
+  const errs: string[] = [];
+  const env = { PABLO_VAULT: vault, PATH: "/usr/bin:/bin", HOME: vault, XDG_CONFIG_HOME: join(vault, "config"), XDG_STATE_HOME: join(vault, "state") };
+  const code = await runAgent({ project: "ice-house", message: "Write the claims and outline", json: false, new: true }, { cwd: vault, env, stdout: { write: (t: string) => void errs.push(t) }, stderr: { write: (t: string) => void errs.push(t) } }, { provider, readConfig: () => undefined });
+  expect(errs.join("")).not.toContain("refused");
+  expect(code).toBe(0);
+  expect(readFileSync(join(work, "core", "thesis.md"), "utf8")).toBe("Ice made the town.\n");
+  expect(parseClaims(readFileSync(join(work, "core", "claims.md"), "utf8")).map((c) => c.sources)).toEqual([["ice-harvest"], ["ice-harvest", "sawdust"]]);
+  expect(parseSections(readFileSync(join(work, "core", "outline.md"), "utf8")).map((r) => r.summary)).toEqual(["#1", "#2"]);
+});
+
+test("save inline refuses bad rows, file plus content, and neither", async () => {
+  const { vault } = nonfictionWork();
+  const save = VERBS.find((v) => v.name === "save")!;
+  const ctx = { cwd: vault, env: { PABLO_VAULT: vault, PATH: NO_THINK.env.PATH }, stderr: { write: () => {} } };
+  const call = async (args: Record<string, unknown>) => (await save.run(save.args.parse({ project: "ice-house", ...args }) as never, ctx)).body;
+  expect(await call({ stage: "claims", content: "| 1 | No source |  |\n" })).toMatchObject({ ok: false, code: 2 });
+  expect(await call({ stage: "claims", content: "x", file: "y.md" })).toMatchObject({ ok: false, message: expect.stringContaining("not both") });
+  expect(await call({ stage: "thesis" })).toMatchObject({ ok: false, message: expect.stringContaining("content or file") });
+});
+
+test("the save tool and guide give the claims and outline row layouts", async () => {
+  const save = VERBS.find((verb) => verb.name === "save")!;
+  expect(save.description).toContain("| # | Claim | Sources |");
+  expect(save.description).toContain("| # | Section | What it covers |");
+  expect(save.description).toContain("#2, #3");
+  expect(save.description).toContain("comma separated");
 });

@@ -141,6 +141,7 @@ function coreStep(stage: CoreStageId, track: TrackId): GuideStep[] {
           gate: true,
           title: `save the claims, each citing a research note (${CLAIMS_FILE})`,
           command: `pablo save ${P} --stage claims`,
+          detail: "rows are `| # | Claim | Sources |` (three columns; Sources is one or more research note ids, comma separated, e.g. `ice-harvest, sawdust`); read core/thesis.md first",
         },
       ];
     case "outline":
@@ -151,7 +152,7 @@ function coreStep(stage: CoreStageId, track: TrackId): GuideStep[] {
           gate: true,
           title: `save the outline sections (${OUTLINE_FILE})`,
           command: `pablo save ${P} --stage outline`,
-          detail: 'name the claims a section makes in its "What it covers" cell as #2, #3 (none named: the section gets every claim); a number the claims table lacks refuses the draft',
+          detail: 'rows are `| # | Section | What it covers |` (three columns); name the claims a section makes in its "What it covers" cell as #2, #3 (none named: the section gets every claim); a number the claims table lacks refuses the draft',
         },
       ];
   }
