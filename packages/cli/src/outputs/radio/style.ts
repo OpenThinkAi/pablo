@@ -19,6 +19,10 @@ export interface RadioStyle {
   readonly announcer: boolean;
   readonly narrator: boolean;
   readonly music: boolean;
+  /** Where a switched-off convention was asked for: "the premise", "the request" or both; absent when none was. */
+  readonly source?: string;
+  /** One episode's length when the words give it ("a 30-minute episode"); absent: the template's twelve-minute broadcast. */
+  readonly minutes?: number;
 }
 
 export const RADIO_DEFAULT_STYLE: RadioStyle = { announcer: true, narrator: true, music: true };
@@ -27,6 +31,8 @@ export const RADIO_DEFAULT_STYLE: RadioStyle = { announcer: true, narrator: true
 export interface EpisodeCue {
   readonly episodes: number;
   readonly reason: string;
+  /** A single episode's length, when the words attach one to "episode". */
+  readonly minutes?: number;
 }
 
 const NUMBER_WORDS: Readonly<Record<string, number>> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12 };
@@ -42,12 +48,20 @@ export function episodeCue(text: string): EpisodeCue | undefined {
   const counted = count?.[1] === undefined ? undefined : numberOf(count[1]);
   if (counted !== undefined && counted >= 1) return { episodes: counted, reason: `the request asks for ${counted} episode${counted === 1 ? "" : "s"}` };
 
-  const single = /\b(?:single|one|1|standalone)\b[^.\n]{0,40}?\bepisode\b(?!s)(?!\s+per\b)/i.exec(text);
-  if (single !== null) return { episodes: 1, reason: "the request asks for a single episode" };
+  // A length is read only beside a format noun, never in story prose ("an hour before the tide", "ten minutes to get out").
+  const noun = "(episode|play|drama|broadcast|programme|program|show|serial)";
+  const lenBefore = new RegExp(`\\b(\\d+(?:\\.\\d+)?|an?|one|two|three)[- ](hours?|minutes?|mins?)\\b(?:[- ]long)?[^.\\n]{0,15}?\\b${noun}\\b`, "i").exec(text);
+  const lenAfter = new RegExp(`\\b${noun}\\b[^.\\n]{0,25}?\\b(\\d+(?:\\.\\d+)?|an?|one|two|three)[- ](hours?|minutes?|mins?)\\b`, "i").exec(text);
+  const len = lenBefore !== null ? { n: lenBefore[1], unit: lenBefore[2], noun: lenBefore[3] } : lenAfter !== null ? { n: lenAfter[2], unit: lenAfter[3], noun: lenAfter[1] } : undefined;
+  const minutes = len === undefined ? undefined : (numberOf(len.n as string) ?? (/^an?$/i.test(len.n as string) ? 1 : Number(len.n))) * (/^h/i.test(len.unit as string) ? 60 : 1);
+  const singular = len !== undefined && /^episode$/i.test(len.noun as string);
 
-  const hours = /\b(\d+(?:\.\d+)?|an?|one|two|three)[- ]hours?\b/i.exec(text);
-  const mins = /\b(\d+)[- ]?(?:minutes?|mins?)\b/i.exec(text);
-  const minutes = mins?.[1] !== undefined ? Number(mins[1]) : hours?.[1] !== undefined ? (numberOf(hours[1]) ?? (/^an?$/i.test(hours[1]) ? 1 : Number(hours[1]))) * 60 : undefined;
+  const single = /\b(?:single|one|1|standalone)\b[^.\n]{0,40}?\bepisode\b(?!s)(?!\s+per\b)/i.exec(text);
+  if (single !== null || singular) {
+    const len1 = minutes !== undefined && Number.isFinite(minutes) && minutes > 0 ? minutes : undefined;
+    return { episodes: 1, reason: `${singular && single === null ? "the request asks for one episode" : "the request asks for a single episode"}${len1 !== undefined ? ` of about ${len1} minutes` : ""}`, ...(len1 !== undefined ? { minutes: len1 } : {}) };
+  }
+
   if (minutes !== undefined && Number.isFinite(minutes) && minutes > 0) {
     const episodes = Math.max(1, Math.round(minutes / RADIO_EPISODE_MINUTES));
     return { episodes, reason: `the request asks for about ${minutes} minutes, ${episodes} episode${episodes === 1 ? "" : "s"} of about ${RADIO_EPISODE_MINUTES}` };
@@ -78,7 +92,7 @@ export function radioEpisodeCue(workDir: string): EpisodeCue | undefined {
 }
 
 const NO_NARRATOR = /\b(?:no|without(?: a| any)?|zero)[ -](?:narrator|narration|voice-?over)\b|\bnarrator-?free\b|\bnever (?:a|any) narrator\b/i;
-const NO_ANNOUNCER = /\b(?:no|without(?: a| any)?)[ -](?:announcer|host)\b|\bannouncer-?free\b/i;
+const NO_ANNOUNCER = /\b(?:no|without(?: a| any)?)[ -]announcer\b|\bannouncer-?free\b/i;
 const NO_MUSIC = /\b(?:no|without(?: any)?)[ -](?:theme |bridge |incidental )?music\b/i;
 
 /** The conventions a text switches off: the tone says "no narrator" and the rules follow. */
@@ -88,9 +102,13 @@ export function styleOf(text: string): RadioStyle {
 
 /** The work's radio style: the premise and the request can each switch a convention off; silence keeps the default. */
 export function radioStyleOf(workDir: string): RadioStyle {
-  const a = styleOf(premiseText(workDir));
-  const b = styleOf(askedFor(workDir));
-  return { announcer: a.announcer && b.announcer, narrator: a.narrator && b.narrator, music: a.music && b.music };
+  const premise = styleOf(premiseText(workDir));
+  const asked = styleOf(askedFor(workDir));
+  const style = { announcer: premise.announcer && asked.announcer, narrator: premise.narrator && asked.narrator, music: premise.music && asked.music };
+  const off = (k: "announcer" | "narrator" | "music"): ("the premise" | "the request")[] => [!premise[k] && "the premise", !asked[k] && "the request"].filter((x): x is "the premise" | "the request" => x !== false);
+  const sources = [...new Set((["announcer", "narrator", "music"] as const).flatMap(off))];
+  const minutes = radioEpisodeCue(workDir)?.minutes;
+  return { ...style, ...(sources.length > 0 ? { source: sources.join(" and ") } : {}), ...(minutes !== undefined ? { minutes } : {}) };
 }
 
 /** `chunks(5, 2)` is `[[1,2,3],[4,5]]`: the beat numbers dealt into `n` contiguous groups, as even as can be. */

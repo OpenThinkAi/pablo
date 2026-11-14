@@ -300,7 +300,7 @@ export function addOutput(vaultRoot: string, workDir: string, type: string | und
   }
 
   const { committed, notice } = gitCommit(vaultRoot, `${found.marker.slug}: add the ${id} output`, paths.map((rel) => join(workDir, rel)));
-  const planned = def.def.planChoice?.(workDir);
+  const planned = writes.some((w) => w.rel === plan) ? def.def.planChoice?.(workDir) : undefined;
   return { ok: true, action: "add", type: id, paths, committed, ...(planned !== undefined ? { planned } : {}), ...(notice ? { notice } : {}) };
 }
 

@@ -70,7 +70,7 @@ conflict (point of view, narration, scene breaks).${off.length === 0 ? "" : `
 
 ## Style
 
-This work's premise switches off: ${off.join(", ")}. The script has no ${off.map((o) => (o === "music" ? "[MUSIC] cues" : `${o.toUpperCase()} lines`)).join(" and no ")}${narrator ? "" : "; place, time and what just happened are heard in the dialogue and the sounds"}.`}
+${style.source === undefined ? "This work's premise" : `This work's ${style.source.replace(/the /g, "")}`} switches off: ${off.join(", ")}. The script has no ${off.map((o) => (o === "music" ? "[MUSIC] cues" : `${o.toUpperCase()} lines`)).join(" and no ")}${narrator ? "" : "; place, time and what just happened are heard in the dialogue and the sounds"}.`}
 
 ## The script
 
@@ -98,7 +98,7 @@ the episode), and never open one inside another.
   and in the sounds. Never have a character describe what both of them can see.
 - 8 to 16 sound cues, each concrete and under ten words.
 - End on ${music ? "a sting or " : ""}a held moment${announcer || music ? `, then ${[announcer && "the announcer closes", music && "the theme plays"].filter((x): x is string => x !== false).join(" and ")}` : ""}.
-- Length: what fits a twelve-minute broadcast, about 1,800 spoken words.
+- Length: what fits a ${style.minutes ?? 12}-minute broadcast, about ${Math.round((style.minutes ?? 12) * 150).toLocaleString("en-US")} spoken words.
 - The same voice as the work's other outputs: the same people, the same facts, the
   same register.
 

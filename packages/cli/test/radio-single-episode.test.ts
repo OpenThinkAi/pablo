@@ -62,10 +62,46 @@ test("episodeCue reads a single episode, a count and a total length, and ignores
   expect(episodeCue("One episode about a flood")?.episodes).toBe(1);
   expect(episodeCue("a three-episode drama")?.episodes).toBe(3);
   expect(episodeCue("a 36 minute radio play")?.episodes).toBe(3);
-  expect(episodeCue("a half-hour of 30 minutes")?.episodes).toBe(3);
+  expect(episodeCue("a 30 minute radio drama")?.episodes).toBe(3);
   expect(episodeCue("a 10-minute play")?.episodes).toBe(1);
   expect(episodeCue("one episode per beat")).toBeUndefined();
   expect(episodeCue("a ghost story in a harbor town")).toBeUndefined();
+});
+
+test("episodeCue: a length in story prose is not a format cue, and a singular episode's length is that episode's", () => {
+  expect(episodeCue("She wakes an hour before the tide turns. He has 10 minutes to get out.")).toBeUndefined();
+  expect(episodeCue("A 30-minute episode")).toMatchObject({ episodes: 1, minutes: 30 });
+  expect(episodeCue("a 25 min episode")).toMatchObject({ episodes: 1, minutes: 25 });
+  expect(episodeCue("a 36 minute radio play")).toMatchObject({ episodes: 3 });
+  expect(episodeCue("a radio drama of about 24 minutes")?.episodes).toBe(2);
+  expect(styleOf("the inn had no host").announcer).toBe(true);
+});
+
+test("a premise that holds only story prose keeps one episode per beat and the default rules", () => {
+  const w = work({ tone: "She wakes an hour before the tide turns; he has 10 minutes to get out. The inn had no host." });
+  expect(radioPlanChoice(w.work).reason).toMatch(/one episode per beat/);
+  expect(radioStyleOf(w.work)).toEqual({ announcer: true, narrator: true, music: true });
+});
+
+test("a single 30-minute episode: one unit, and the rules' length line follows it", () => {
+  const w = work({ asked: "A 30-minute episode about the pond", tone: "No narrator." });
+  expect(radioDefaultPlan(w.work)).toHaveLength(1);
+  addOutput(w.vault, w.work, "radio", NOW);
+  const rules = readFileSync(join(w.work, "outputs", "radio", "RULES.md"), "utf8");
+  expect(rules).toContain("Length: what fits a 30-minute broadcast, about 4,500 spoken words.");
+  expect(rules).toContain("This work's premise switches off: narrator");
+});
+
+test("the Style note names the request when the request switched the convention off", () => {
+  const w = work({ asked: "A radio play with no narrator" });
+  addOutput(w.vault, w.work, "radio", NOW);
+  expect(readFileSync(join(w.work, "outputs", "radio", "RULES.md"), "utf8")).toContain("This work's request switches off: narrator");
+});
+
+test("output add reports `planned` only when it wrote the plan", () => {
+  const w = work({ asked: "A single episode" });
+  expect(addOutput(w.vault, w.work, "radio", NOW)).toMatchObject({ planned: expect.any(String) });
+  expect(addOutput(w.vault, w.work, "radio", NOW)).not.toHaveProperty("planned");
 });
 
 test("groupBeats deals beats into contiguous, even groups and never more groups than beats", () => {
@@ -113,7 +149,7 @@ test("AC1: with no cue the plan is one episode per beat, as before, and says tha
 
 test("AC2: a premise whose tone says no narrator gets rules without NARRATOR, and says why", () => {
   const w = work({ tone: "Dry and close. No narrator explaining the case." });
-  expect(radioStyleOf(w.work)).toEqual({ announcer: true, narrator: false, music: true });
+  expect(radioStyleOf(w.work)).toEqual({ announcer: true, narrator: false, music: true, source: "the premise" });
   addOutput(w.vault, w.work, "radio", NOW);
   const rules = readFileSync(join(w.work, "outputs", "radio", "RULES.md"), "utf8");
   expect(rules).not.toContain("NARRATOR:");
