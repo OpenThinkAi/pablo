@@ -78,11 +78,11 @@ export function recordFactTool(session: PlanSession, workPath: string): McpToolS
 }
 
 /** The plan-branch tools for one session: the research checklist's waive and link land on it too (AGT-2184). */
-export function planTools(session: PlanSession, workPath: string): readonly McpToolSpec[] {
+export function planTools(session: PlanSession, workPath: string, opts: { readonly requireItems?: boolean } = {}): readonly McpToolSpec[] {
   return [
     proposeTool(session, workPath),
     recordFactTool(session, workPath),
-    saveResearchTool(session, workPath),
+    saveResearchTool(session, workPath, opts),
     waiveResearchItemTool(session, workPath),
     linkResearchItemTool(session, workPath),
   ];

@@ -1124,7 +1124,7 @@ pablo story --project <slug> --from <stage> [--output <type>]... [--review] [--n
 Writes a work end to end from a prompt. It:
 
 1. Creates the work, under `stories/` for a story or `novels/` for a novel.
-2. Builds the story core through the agent harness (research, premise, bible, acts, beats), each stage on a `plan/` branch. A `historical-fiction` run builds that track's core instead: premise, the period brief (`bible/period.md`), the research checklist (pablo runs `research plan` on the brief), research (the agent sources each open item with `save_research` or waives it with a reason, every write on the stage's one branch), period facts (pablo runs `research distill`), then bible, acts and beats.
+2. Builds the story core through the agent harness (research, premise, bible, acts, beats), each stage on a `plan/` branch. A `historical-fiction` run builds that track's core instead: premise, the period brief (`bible/period.md`), the research checklist (pablo runs `research plan` on the brief), research (the agent sources each open item with `save_research` or waives it with a reason, every write on the stage's one branch; the open items go to the agent in batches of 5, one session each, until none is open, and a `save_research` that names no item is refused; a session that hits its turn cap is sent one "carry on" follow-up, and if that also stops, the run ends saying how many items are still open), period facts (pablo runs `research distill`), then bible, acts and beats.
 3. Drafts, merges and publishes each requested output.
 
 Without `--title`, one planner call on the prompt names the work (a short title about the story, not a prefix of

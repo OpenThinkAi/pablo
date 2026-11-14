@@ -60,6 +60,8 @@ export interface HarnessSpec {
   readonly sessionTools?: readonly McpToolSpec[];
   /** Where each turn's receipt is appended, and the intent it names (AGT-2191). */
   readonly receipts?: LoopSpec["receipts"];
+  /** Turns a message may take before it is stopped (AGT-2291); absent, the loop's default. */
+  readonly maxTurns?: number;
 }
 
 /** The tools a session offers: `tools` (or every `pablo mcp` tool), then the session's own. */
@@ -81,6 +83,7 @@ export function loopSpec(spec: HarnessSpec): LoopSpec {
     credential: spec.provider.credential,
     forcedToolChoice: spec.provider.forcedToolChoice,
     ...(spec.receipts === undefined ? {} : { receipts: spec.receipts }),
+    ...(spec.maxTurns === undefined ? {} : { maxTurns: spec.maxTurns }),
   };
 }
 

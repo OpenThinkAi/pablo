@@ -11,9 +11,11 @@ import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Adapter, CompletionEvent, CompletionRequest } from "@openthink/pablo-core";
+import type { Adapter, ChatMessage, CompletionEvent, CompletionRequest } from "@openthink/pablo-core";
 import { mergeChanges } from "../src/novel/merge";
 import { acceptBranchInProject } from "../src/review-finish";
+import { loopQuery } from "../src/harness/session";
+import type { HarnessQuery } from "../src/harness/session";
 import { runStory, stageMessage } from "../src/story";
 import type { StoryDeps } from "../src/story";
 import type { VerbContext } from "../src/verbs";
@@ -205,7 +207,8 @@ test("AGT-2184: an unattended historical run goes premise -> period -> research 
   expect(body.track.track).toBe("historical-fiction");
 
   // The harness ran the stages that are its own; pablo planned and distilled in between.
-  expect(harness.stages).toEqual(["premise", "period", "research", "bible", "acts", "beats"]);
+  // The 7-item checklist is researched in two batches (AGT-2291): 5 open items, then 2.
+  expect(harness.stages).toEqual(["premise", "period", "research", "research", "bible", "acts", "beats"]);
   expect(lines.filter((l) => l.includes("core stage")).map((l) => l.trim())).toEqual([
     "pablo story: premise (core stage 1 of 8)",
     "pablo story: period (core stage 2 of 8)",
@@ -271,4 +274,83 @@ test("AGT-2184: the research stage's message lists the open checklist items; a f
   const fiction = { prompt: PROMPT, outputs: ["story"], review: false };
   expect(stageMessage("research", fiction, "T", "t")).toContain("Stage 1 of 5, research. Find what this story needs to be true to");
   expect(stageMessage("premise", fiction, "T", "t")).toContain("Stage 2 of 5, premise. Read the research notes");
+});
+
+// AGT-2291: the research stage runs in item batches, refuses a save with no items, and carries on once after a turn cap.
+
+function sourceItems(message: string): readonly ScriptedCall[] {
+  return openItems(message).map((n): ScriptedCall => ["save_research", { title: `Finding ${n}`, note: `Finding for item ${n}.`, sources: ["https://example.org/liguria-1900"], items: [n] }]);
+}
+
+test("AGT-2291: the 7-item checklist is researched in two batches on one branch (5 then 2)", async () => {
+  const { ctx } = tempVault();
+  const researchMessages: string[] = [];
+  const { provider } = scriptedAgent((message) => {
+    const stage = stageOf(message);
+    if (stage !== "research") return callsFor(stage, message);
+    researchMessages.push(message);
+    return sourceItems(message);
+  });
+  const result = await runStory({ prompt: PROMPT }, ctx, depsFor({ agent: provider }));
+  const body = result.body as Record<string, any>;
+  expect(body.message).toBeUndefined();
+  expect(result.exitCode).toBe(0);
+  expect(researchMessages.map(openItems)).toEqual([[1, 2, 3, 4, 5], [6, 7]]);
+  expect(researchMessages[0]).toContain("5 of 7 open");
+  expect(body.plan.filter((p: { stage: string }) => p.stage === "research")).toHaveLength(1);
+  const checklist = readFileSync(join(body.path as string, "research", "checklist.md"), "utf8");
+  expect(checklist).not.toMatch(/\bopen\b/i);
+});
+
+test("AGT-2291: a save_research with no items is refused in the research stage", async () => {
+  const { ctx } = tempVault();
+  const { provider } = scriptedAgent((message) => {
+    const stage = stageOf(message);
+    if (stage !== "research") return callsFor(stage, message);
+    return [["save_research", { title: "No item", note: "A finding.", sources: ["https://example.org/liguria-1900"] }]];
+  });
+  const result = await runStory({ prompt: PROMPT }, ctx, depsFor({ agent: provider }));
+  expect(result.exitCode).toBe(1);
+  expect((result.body as Record<string, any>).message).toContain("name the checklist item(s)");
+});
+
+/** A harness query that stops the first `capped` research messages at the turn cap, then runs the real loop. */
+function cappedQuery(capped: number, sent: string[]): HarnessQuery {
+  let left = capped;
+  return (params) => {
+    sent.push(params.prompt);
+    if (left > 0 && /Stage \d+ of \d+, research\./.test(params.prompt) || (left > 0 && params.prompt.startsWith("Carry on"))) {
+      left -= 1;
+      return (async function* () {
+        yield { kind: "result", ok: false, text: "", turns: 40, durationMs: 1, costUsd: 0, errors: ["the session reached its turn cap (40 turns) without a final answer."], capped: true } as const;
+        return [] as readonly ChatMessage[];
+      })();
+    }
+    return loopQuery(params);
+  };
+}
+
+test("AGT-2291: a session that hits the turn cap is continued once, then the run goes on", async () => {
+  const { ctx } = tempVault();
+  const sent: string[] = [];
+  const { provider } = scriptedAgent((message) => {
+    const stage = stageOf(message);
+    if (message.startsWith("Carry on")) return [["waive_research_item", { items: [1, 2], reason: "Not needed." }]];
+    return callsFor(stage, message);
+  });
+  // The first research message is capped before it does anything; the carry-on message is the real loop's.
+  const result = await runStory({ prompt: PROMPT }, ctx, depsFor({ agent: provider, query: cappedQuery(1, sent) }));
+  expect((result.body as Record<string, any>).message).toBeUndefined();
+  expect(result.exitCode).toBe(0);
+  expect(sent.filter((m) => m.startsWith("Carry on"))).toHaveLength(1);
+});
+
+test("AGT-2291: a second cap stops the run, naming how many items are still open", async () => {
+  const { ctx } = tempVault();
+  const sent: string[] = [];
+  const { provider } = scriptedAgent((message) => callsFor(stageOf(message), message));
+  const result = await runStory({ prompt: PROMPT }, ctx, depsFor({ agent: provider, query: cappedQuery(2, sent) }));
+  expect(result.exitCode).toBe(1);
+  expect((result.body as Record<string, any>).message).toContain("7 checklist item(s) are still open");
+  expect(sent.filter((m) => m.startsWith("Carry on"))).toHaveLength(1);
 });
