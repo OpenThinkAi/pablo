@@ -11,7 +11,7 @@
  *   bible, the timeline, the beats, `facts.md`, nor this output's own ledger (names and places, against the bible
  *   and `facts.md`). Another output's ledger is not consulted: a name only the novel established is unknown to the
  *   radio show until it is promoted. Also known (AGT-2197): the work's own title, the period facts
- *   (`facts/period.md`), each character file's name (a slug-only file, `clara-vane.md`, still clears Clara and Vane), and on a nonfiction or historical-fiction work the research notes (AGT-2226). Not names either (AGT-2285): kinship terms used as forms of address (Mother, Father, Nonna, Papà), a plural of a known title (Doges, with Doge known), and a demonym or party name whose place or polity is known (Russians, with Russia known). Headings are not scanned, and a word right
+ *   (`facts/period.md`), each character file's name (a slug-only file, `clara-vane.md`, still clears Clara and Vane), and on a nonfiction or historical-fiction work the research notes (AGT-2226), and on a nonfiction work `core/claims.md` (AGT-2295). Not names either (AGT-2285): kinship terms used as forms of address (Mother, Father, Nonna, Papà), a plural of a known title (Doges, with Doge known), and a demonym or party name whose place or polity is known (Russians, with Russia known). Headings are not scanned, and a word right
  *   after an opening quote (a sign's "Please") is not a name.
  *
  * Pure over the work directory: reads, never writes. The hits use `check`'s `Hit` shape, so `check` prints them
@@ -22,6 +22,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { FACTS_FILE, PERIOD_FACTS_FILE, beatsFile, continuityFile, gateTimeline, parseBeatRows, planBeatsFor } from "@openthink/pablo-core";
 import type { Hit } from "./check";
+import { CLAIMS_FILE } from "./core/nonfiction";
 import { readMarker, trackOf } from "./marker";
 import { parseFrontmatter } from "./novel/machine";
 import type { OutputDefinition } from "./outputs/types";
@@ -88,6 +89,8 @@ function knownWords(workDir: string, output: string): Set<string> {
     // Research notes name the work's real people and period objects (AGT-2226: on historical fiction too, as on nonfiction).
     const track = trackOf(marker.marker);
     if (track === "nonfiction" || track === "historical-fiction") texts.push(...markdownUnder(join(workDir, "research")));
+    // A nonfiction work has no cast: the people its claims name are sourced by definition (AGT-2295).
+    if (track === "nonfiction") texts.push(read(join(workDir, CLAIMS_FILE)));
   }
   // A character file's name is a known name even when its text carries no display name (AGT-2226): `clara-vane.md` -> Clara, Vane.
   const charactersDir = join(workDir, "bible", "characters");
