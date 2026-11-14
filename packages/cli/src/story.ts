@@ -715,13 +715,14 @@ async function runCoreStage(run: Run, stage: StoryCoreStage): Promise<{ ok: true
       let open = openChecklist(run.work);
       for (let round = 0; round === 0 || open > 0; round += 1) {
         const before = open;
+        if (round > 0 || open > RESEARCH_BATCH) progress(run, `research, batch ${round + 1} (${Math.min(RESEARCH_BATCH, open)} of ${open} open items)`);
         let history = await send(stageMessage(stage, run.state, run.title, run.slug, web, sessionWorkDir(), RESEARCH_BATCH));
         // A session that hit its cap is told once to carry on before the run stops.
         if (finished?.capped === true) history = await send(CARRY_ON, history);
         open = openChecklist(sessionWorkDir());
         if (finished?.capped === true) {
-          const note = `${open} checklist item(s) are still open; run \`pablo story --project ${run.slug}\` to continue`;
-          finished = { ok: false, text: "", errors: [`${finished.errors.join("; ")} ${note}.`] };
+          const sourced = ` The research so far is on ${session.branch}, not merged: \`pablo merge --project ${run.slug} ${session.branch}\` keeps it, then \`pablo story --project ${run.slug}\` carries on with the open items (without the merge, a re-run starts research again from main).`;
+          finished = { ok: false, text: "", errors: [`research stopped at the turn cap twice; ${open} checklist item(s) are still open.${sourced}`] };
           break;
         }
         if (finished?.ok !== true || open >= before) break;

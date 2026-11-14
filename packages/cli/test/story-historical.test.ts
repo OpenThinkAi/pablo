@@ -319,7 +319,7 @@ function cappedQuery(capped: number, sent: string[]): HarnessQuery {
   let left = capped;
   return (params) => {
     sent.push(params.prompt);
-    if (left > 0 && /Stage \d+ of \d+, research\./.test(params.prompt) || (left > 0 && params.prompt.startsWith("Carry on"))) {
+    if (left > 0 && (/Stage \d+ of \d+, research\./.test(params.prompt) || params.prompt.startsWith("Carry on"))) {
       left -= 1;
       return (async function* () {
         yield { kind: "result", ok: false, text: "", turns: 40, durationMs: 1, costUsd: 0, errors: ["the session reached its turn cap (40 turns) without a final answer."], capped: true } as const;
@@ -352,5 +352,6 @@ test("AGT-2291: a second cap stops the run, naming how many items are still open
   const result = await runStory({ prompt: PROMPT }, ctx, depsFor({ agent: provider, query: cappedQuery(2, sent) }));
   expect(result.exitCode).toBe(1);
   expect((result.body as Record<string, any>).message).toContain("7 checklist item(s) are still open");
+  expect((result.body as Record<string, any>).message).toContain("not merged");
   expect(sent.filter((m) => m.startsWith("Carry on"))).toHaveLength(1);
 });
