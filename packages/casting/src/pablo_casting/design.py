@@ -381,7 +381,7 @@ def _rank(candidate: Candidate) -> tuple[float, float, int]:
 
 def _trial_failing(result: Mapping[str, object]) -> tuple[list[str], dict[str, list[dict[str, object]]]]:
     """The gates a trial's last (failing) line missed, and by how much."""
-    lines = result.get("lines") or [{}]
+    lines = result.get("lines")
     last = lines[-1] if isinstance(lines, list) and lines else {}
     failing = [str(n) for n in last.get("failing", [])] if isinstance(last, dict) else []
     found = last.get("misses") if isinstance(last, dict) and isinstance(last.get("misses"), dict) else {}
@@ -518,7 +518,6 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
         round_no, instruct, of, best, result = max(trialled, key=lambda row: _best_of_key(row[3], row[4]))
         failing, found = _trial_failing(result)
         admission = {
-            "by": "best-of",
             "gates": "fail",
             "round": round_no,
             "candidate": best.number,
@@ -537,8 +536,8 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
             + (f", which missed {describe_misses(found)}" if found else "")
             + f"{closest}. Listen to it and recast by ear if it will not do (pablo cast --role {role.role} --slug {slug} --candidate N --recast)"
         )
-        admitted = _admit(work, library, role, slug, best, round_no, of, instruct, admission, rounds, machine, notes=f"best of {tried} candidates for {role.role} (none passed every gate): round {round_no}, candidate {best.number} of {of}")
-        return {**admitted, "admittedBy": "best-of", "failing": failing, "misses": found, "failures": failed, "nearestMisses": nearest, "notice": notice}
+        admitted = _admit(work, library, role, slug, best, round_no, of, instruct, admission, rounds, machine, by="best-of", notes=f"best of {tried} candidates for {role.role} (none passed every gate): round {round_no}, candidate {best.number} of {of}")
+        return {**admitted, "failing": failing, "misses": found, "failures": failed, "nearestMisses": nearest, "notice": notice}
 
     raise DesignRefusal(
         f"no voice could be cast for {role.role}: {tried} candidates over {len(rounds)} rounds (the second re-phrased), "
@@ -566,9 +565,10 @@ def _admit(
     rounds: list[dict[str, object]],
     machine: Machine,
     *,
+    by: str = "auto",
     notes: str | None = None,
 ) -> dict[str, object]:
-    """Freezes `chosen` as the role's card through `cards.cast` (`admitted.by: auto`, or the admission's own `by`)."""
+    """Freezes `chosen` as the role's card through `cards.cast`; `by` is its `admitted.by` (`auto`, or `best-of`)."""
     written = cast(
         library,
         CastRequest(
@@ -578,7 +578,7 @@ def _admit(
             by="auto",
             traits=role.traits,
             notes=notes or f"designed on demand for {role.role}: round {round_no}, candidate {chosen.number} of {of}",
-            admission=admission,
+            admission={**admission, "by": by},
         ),
         machine.toolkit,
         machine.engines_config,
@@ -594,7 +594,7 @@ def _admit(
         "candidate": chosen.number,
         "instruct": instruct,
         "traitsFrom": role.traits_from,
-        "admittedBy": "auto",
+        "admittedBy": by,
         "rounds": rounds,
     }
 
@@ -648,6 +648,7 @@ def design_needed(
                 missing=[missing.info.package],
             ) from missing
         roles = read_cast(work)
+        best_of = {"admitted": "best-of"} if result.get("admittedBy") == "best-of" else {}
         roles[role.role] = {
             "slug": result["slug"],
             "card_hash": result["hash"],
@@ -655,7 +656,7 @@ def design_needed(
             "at": machine.now(),
             "round": result["round"],
             "candidate": result["candidate"],
-            **({"admitted": "best-of"} if result.get("admittedBy") == "best-of" else {}),
+            **best_of,
         }
         write_cast(work, roles)
         designed.append(result)

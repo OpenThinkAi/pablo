@@ -328,7 +328,7 @@ def _composite(scores: Mapping[str, object], thresholds: Mapping[str, object]) -
 
 def _stretch_ok(scores: Mapping[str, object], thresholds: Mapping[str, object]) -> bool:
     stretch = scores.get("stretch")
-    low, high = thresholds.get("stretch_range") or PACE_RANGE  # type: ignore[misc]
+    low, high = thresholds["stretch_range"]  # type: ignore[misc]
     return isinstance(stretch, (int, float)) and float(low) <= stretch <= float(high)
 
 
