@@ -84,6 +84,25 @@ def test_a_retake_keeps_every_edit_and_drops_the_new_take_into_the_same_slot(wor
     assert read_mix(work, 1, 2) == human  # never rewritten
 
 
+def test_a_retaken_whispered_line_keeps_its_close_mic_eq_and_edited_gain(work: Path, cues_dir: Path) -> None:
+    manifest = proposal(work, cues=CUES)
+    manifest["lines"][1]["direction"] = {"emotion": None, "intensity": 2, "pace": None, "delivery": "whisper"}  # type: ignore[index]
+    write_version(work, 1, manifest)
+    mixed(work, cues_dir)
+    human = copy.deepcopy(read_mix(work, 1, 1))
+    assert clip(human, "line-1")["eq"]["low_cut"] > 0
+    clip(human, "line-1")["gain"] = -11.0
+    clip(human, "line-1")["eq"] = {"low_cut": 220.0, "presence_db": 1.0}
+    write_mix(work, 1, human, by="human")
+    key = longer_take(work, 1, "The fog is in and thick tonight.")
+    retake(work, 1, key)
+
+    mixed(work, cues_dir)
+    now = clip(read_mix(work, 1, 3), "line-1")
+    assert now["source"]["key"] == key  # type: ignore[index]
+    assert (now["gain"], now["eq"]) == (-11.0, {"low_cut": 220.0, "presence_db": 1.0})
+
+
 def test_a_second_plain_mix_keeps_the_rebased_document(work: Path, cues_dir: Path) -> None:
     human_mix(work, cues_dir)
     retake(work, 1, take_for(work, 1, attempt=1))

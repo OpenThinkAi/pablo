@@ -15,6 +15,10 @@ Spec
 - Buffer fades: a fade of n samples puts sample j (0-based within the fade) at
   progress `j/n` (in), or `1 - j/n` (out; the fade occupies the last n samples).
 - Equal-power crossfade at progress x: `(out, in) = (cos(x*pi/2), sin(x*pi/2))`.
+- Clip EQ (`apply_eq`, AGT-2319) is Python-only: the export applies it, the mixer's
+  Web Audio preview plays it flat, so it is not in the golden file or the TS twin.
+  `low_cut` Hz is a 2nd-order high-pass magnitude `1/sqrt(1+(fc/f)^4)`, `presence_db` a
+  shelf `10^(db*s/20)` with `s = 1/(1+(3500/f)^4)`, applied zero-phase by FFT.
 - Automation: breakpoints `{t, db, curve}` (seconds, dB, curve of the segment
   that STARTS at the point, default linear). Before the first point the value is
   the first point's dB; after the last it holds the last dB. Inside a segment the

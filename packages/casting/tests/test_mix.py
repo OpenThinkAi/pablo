@@ -551,7 +551,7 @@ def test_a_whispered_line_gets_a_lowered_close_mic_clip_and_the_rest_are_untouch
     assert by_line[0]["gain"] == 0.0 and "eq" not in by_line[0]
 
 
-def test_a_human_edit_of_a_whispered_clips_gain_and_eq_renders(work: Path, cues_dir: Path) -> None:
+def test_a_hushed_line_gets_the_milder_gain_and_eq(work: Path, cues_dir: Path) -> None:
     from pablo_casting.mixdoc import clips, read_mix
 
     write_version(work, 1, _with_delivery(proposal(work), 1, "hushed"))

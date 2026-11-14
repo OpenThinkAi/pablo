@@ -29,7 +29,7 @@ DELIVERY_SYNONYMS: dict[str, str] = {
     "whispering": "whisper", "whispered": "whisper", "whispers": "whisper", "whisperingly": "whisper",
     "under breath": "whisper", "under his breath": "whisper", "under her breath": "whisper",
     "under their breath": "whisper", "murmuring": "whisper", "murmured": "whisper", "murmur": "whisper",
-    "hushing": "hushed", "quietly": "hushed", "low": "hushed", "lowly": "hushed", "muttering": "hushed",
+    "hushing": "hushed", "quietly": "hushed", "muttering": "hushed",
 }
 
 # Delivery words the writer model uses -> the nearest vocabulary word.

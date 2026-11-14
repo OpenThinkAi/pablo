@@ -1168,7 +1168,7 @@ def rebase(doc: Mapping[str, object], old_manifest: Mapping[str, object], new_ma
                         # The auto mix's clips for these lines, each with this clip's gain and fades; the first one
                         # keeps its id and anchor, the rest ride the auto anchors (the previous line's end).
                         replacements: list[dict[str, object]] = []
-                        dressing = {f: kept[f] for f in ("gain", "fade_in", "fade_out") if f in kept}
+                        dressing = {f: kept[f] for f in ("gain", "eq", "fade_in", "fade_out") if f in kept}
                         for i in lines:
                             source = auto_for[i]
                             if any(r["source"] == source["source"] for r in replacements):
