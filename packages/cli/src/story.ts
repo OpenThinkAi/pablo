@@ -940,7 +940,7 @@ function radioApproval(run: Run, step: string, kind: "binding" | "render", unit:
 /** Listens to one drafted episode (AGT-2323): its result, or a notice when the check could not run. */
 async function listenToDraft(run: Run, unit: number, drafted: { readonly path: string; readonly file: string }, ask: Ask): Promise<ListenerRecord> {
   try {
-    const heard = await listenToEpisode(readFileSync(drafted.file, "utf8"), drafted.path, episodeBeats(run.work, unit), ask, unit);
+    const heard = await listenToEpisode(readFileSync(drafted.file, "utf8"), drafted.path, episodeBeats(run.work, unit), ask, unit, (line) => progress(run, `radio: ${line}`));
     return { verdict: heard.verdict, passed: heard.passed, retelling: heard.retelling, hits: heard.hits };
   } catch (error) {
     return { passed: false, hits: [], notice: `listener stopped at ${drafted.path}: ${(error as Error).message}` };
@@ -1000,7 +1000,11 @@ function listenerHeld(run: Run, step: string, unit: number, branch: string, list
     body: {
       ...body,
       waiting: { ...(body["waiting"] as object), review: "listener", output: RADIO_ID, unit, listener },
-      missing: [`episode ${unit} cannot be followed by ear (listener verdict ${listener.verdict ?? "unknown"}, ${listener.hits.length} point(s))`],
+      missing: [
+        listener.notice !== undefined
+          ? `episode ${unit}'s redraft could not be checked by ear (${listener.notice}); its first draft could not be followed`
+          : `episode ${unit} cannot be followed by ear (listener verdict ${listener.verdict}, ${listener.hits.length} point(s))`,
+      ],
       next: `episode ${unit} failed the listener check after one redraft: read the listener's points, fix the script on ${branch} (or redraft it), accept it with \`pablo merge ${branch} --project ${run.slug}\`, then run \`pablo story --project ${run.slug}\``,
     },
   };

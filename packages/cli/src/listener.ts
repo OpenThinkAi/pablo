@@ -36,6 +36,8 @@ import { readCoreState } from "./core/machine";
 import { DATA_RULE, adapterAsk, fence, jsonIn } from "./critique";
 import type { Ask } from "./critique";
 import { radioBeats } from "./outputs/radio/pack";
+// `script.py`'s grammar, through its TS mirror (held to it by the role-names parity fixture), never redeclared.
+import { CUE, LINE, frontmatterLines } from "./outputs/radio/script";
 
 export const LISTENER_RULE = "listener";
 
@@ -88,9 +90,6 @@ export interface HeardLine {
   readonly text: string;
 }
 
-/** `script.py`'s `LINE` and `CUE`, as `outputs/radio/script.ts` reads them. */
-const LINE = /^([A-Z][A-Z .'\-]{0,30}):\s*(.+)$/;
-const CUE = /^\[(SFX|BED|MUSIC):\s*(.+?)\]\s*$/i;
 const PAREN = /\([^)]*\)/g;
 
 /**
@@ -100,11 +99,7 @@ const PAREN = /\([^)]*\)/g;
  */
 export function heardLines(text: string): HeardLine[] {
   const lines = text.split("\n");
-  let start = 0;
-  if ((lines[0] ?? "").trim() === "---") {
-    const close = lines.findIndex((line, i) => i > 0 && line.trim() === "---");
-    if (close > 0) start = close + 1;
-  }
+  const start = frontmatterLines(lines);
   const out: HeardLine[] = [];
   for (let i = start; i < lines.length; i++) {
     const raw = (lines[i] ?? "").trim().replace(/\*/g, "");
@@ -265,7 +260,14 @@ export function episodeBeats(coreDir: string, unit: number): EpisodeBeat[] {
  * heard lines: a `no` verdict with nothing asked. No beats: only the listener call. Throws when the model fails or a
  * reply is still unreadable after the retry.
  */
-export async function listenToEpisode(text: string, path: string, beats: readonly EpisodeBeat[], ask: Ask, unit?: number): Promise<ListenerUnit> {
+export async function listenToEpisode(
+  text: string,
+  path: string,
+  beats: readonly EpisodeBeat[],
+  ask: Ask,
+  unit?: number,
+  progress?: (line: string) => void,
+): Promise<ListenerUnit> {
   const heard = heardLines(text);
   const base = { path, ...(unit !== undefined ? { unit } : {}) };
   if (heard.length === 0) {
@@ -273,6 +275,7 @@ export async function listenToEpisode(text: string, path: string, beats: readonl
     return { ...base, verdict: "no", passed: false, retelling: "", hits: [hit] };
   }
   const listened = await askParsed(ask, listenerPrompt(path, heard), (reply) => parseListenerReply(reply, heard.length));
+  if (beats.length > 0) progress?.(`listener: ${path}: comparing the retelling to ${beats.length} beat${beats.length === 1 ? "" : "s"}…`);
   const missed = beats.length === 0 ? [] : await askParsed(ask, beatsPrompt(path, beats, listened.retelling, heard), (reply) => parseMissedBeats(reply, beats, heard.length));
 
   // A point with no shown line is kept, on the first heard line, so a confusion is never dropped.
@@ -358,7 +361,7 @@ export async function runListener(opts: ListenerOptions): Promise<ListenerRun> {
     const beats = unit === undefined ? [] : episodeBeats(opts.coreDir ?? opts.workDir, unit);
     opts.progress?.(`listener: ${label} (${i + 1}/${episodes.length}), asking the check model to follow it by ear…`);
     try {
-      units.push(await listenToEpisode(readFileSync(file, "utf8"), label, beats, ask, unit));
+      units.push(await listenToEpisode(readFileSync(file, "utf8"), label, beats, ask, unit, opts.progress));
     } catch (error) {
       notice = `listener stopped at ${label}: ${(error as Error).message}${error instanceof UnreadableReply ? " (after one retry)" : ""} (${episodes.length - i} episode${episodes.length - i === 1 ? "" : "s"} not run)`;
       break;
