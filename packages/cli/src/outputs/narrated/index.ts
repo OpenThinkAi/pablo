@@ -287,9 +287,9 @@ function publishNarratedAudio(workDir: string, slug: string, options: PublishOpt
     else if (audio === undefined) unperformed.push(`reading ${unit} (${title}) has no mixed audio (pablo perform, then pablo mix, --output narrated --unit ${unit})`);
     else readings.push({ unit, title, audio });
   }
-  if (unperformed.length > 0) return { ok: false, code: 2, message: `pablo: publish: cannot join the readings while any is unperformed: ${unperformed.join("; ")}`, tried: [] };
+  if (unperformed.length > 0) return refuse(`pablo: publish: cannot join the readings while any is unperformed: ${unperformed.join("; ")}`);
   const gap = options.gap ?? DEFAULT_GAP_SECONDS;
-  if (!Number.isFinite(gap) || gap < 0) return refuse(`pablo: publish: --gap must be a number of seconds, 0 or more (got ${String(options.gap)})`);
+  if (!Number.isFinite(gap) || gap < 0 || gap > 60) return refuse(`pablo: publish: --gap must be a number of seconds from 0 to 60 (got ${String(options.gap)})`);
   const outDir = join(workDir, ".pablo", "out");
   const where = join(outDir, `${slug}-narrated.m4a`);
   if (!where.startsWith(outDir + sep)) return refuse(`pablo: publish: marker slug "${slug}" would write outside ${outDir}`);
@@ -297,7 +297,7 @@ function publishNarratedAudio(workDir: string, slug: string, options: PublishOpt
   const joined = joinReadings(readings, where, gap, options.chapters === true);
   if (!joined.ok) return refuse(joined.message);
   const words = readings.reduce((n, r) => n + stripFrontmatter(readFileSync(files.get(r.unit) as string, "utf8")).split(/\s+/).filter((w) => w !== "").length, 0);
-  return { ok: true, code: 0, target: "audio", where, chapters: readings.length, words };
+  return { ok: true, code: 0, target: "audio", where, chapters: readings.length, words, notes: [`chapter markers: ${joined.chapters ? "yes" : "no"}; gap ${gap}s`] };
 }
 
 /** `--target script`: every reading's script, in unit order, in one file under `.pablo/out/`. */

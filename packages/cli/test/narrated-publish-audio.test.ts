@@ -113,8 +113,14 @@ test("--chapters writes one chapter per reading titled from its unit", () => {
 test("a failing ffmpeg is a refusal, not a throw", () => {
   const dir = work(UNITS);
   fakeTools(true);
+  const out = join(dir, ".pablo", "out", "ice-house-narrated.m4a");
+  mkdirSync(join(dir, ".pablo", "out"), { recursive: true });
+  writeFileSync(out, "last good");
   const result = publishOutput(dir, "audio", "narrated");
   expect(result.exitCode).toBe(2);
+  // The last good file is untouched and no partial is left behind.
+  expect(readFileSync(out, "utf8")).toBe("last good");
+  expect(existsSync(`${out}.partial.m4a`)).toBe(false);
   expect((result.body as { message: string }).message).toContain("boom");
 });
 

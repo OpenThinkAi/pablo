@@ -14,7 +14,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -87,9 +87,13 @@ export function joinReadings(readings: readonly JoinReading[], output: string, g
       metadata = join(scratch, "chapters.ffmetadata");
       writeFileSync(metadata, chapterMetadata(readings, durations, gap), "utf8");
     }
-    const run = spawnSync("ffmpeg", joinArgs(readings, output, gap, metadata), { encoding: "utf8", env: process.env });
+    // Encode beside the destination and rename on success, so a failed run never replaces the last good file.
+    const partial = `${output}.partial.m4a`;
+    const run = spawnSync("ffmpeg", joinArgs(readings, partial, gap, metadata), { encoding: "utf8", env: process.env });
+    if (run.error !== undefined || run.status !== 0) rmSync(partial, { force: true });
     if (run.error !== undefined) return { ok: false, message: "pablo: publish: ffmpeg is needed to join the readings (brew install ffmpeg)" };
     if (run.status !== 0) return { ok: false, message: `pablo: publish: ffmpeg failed joining the readings: ${(run.stderr ?? "").trim().split("\n").slice(-3).join(" ")}` };
+    renameSync(partial, output);
     return { ok: true, chapters: metadata !== undefined };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
