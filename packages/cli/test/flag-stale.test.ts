@@ -153,7 +153,7 @@ test("AC1: fix --stale reaches the Python side with --stale and no open flag; pl
   const { deps, calls } = fakeMachine();
   const ctx = ctxFor(vault, deps);
   const plain = await verb("fix").run({ project: "ice-house", output: "narrated", unit: 1, "json-lines": false, stale: false }, ctx);
-  expect(plain.body).toMatchObject({ ok: false, missing: ["unit 1 has no open flags (flag lines in pablo mixer)"] });
+  expect(plain.body).toMatchObject({ ok: false, missing: ["unit 1 has no open flags (flag lines with pablo flag, or in pablo mixer)"] });
   expect(calls).toHaveLength(0);
   const stale = await verb("fix").run({ project: "ice-house", output: "narrated", unit: 1, "json-lines": false, stale: true }, ctx);
   expect(stale.exitCode).toBe(0);

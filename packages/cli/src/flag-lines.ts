@@ -53,7 +53,7 @@ export function parseLines(spec: string, known: readonly number[]): { readonly l
   for (const part of parts) {
     if (!/^\d+$/.test(part)) return { error: `--line must be a line number, a comma-separated list or all (got "${spec}")` };
     const n = Number(part);
-    if (!known.includes(n)) return { error: `there is no line ${n} (lines 0-${known.length - 1})` };
+    if (!known.includes(n)) return { error: `there is no line ${n} (lines ${Math.min(...known)}-${Math.max(...known)})` };
     if (!lines.includes(n)) lines.push(n);
   }
   return { lines: lines.sort((a, b) => a - b) };
@@ -66,6 +66,7 @@ export function flagLines(run: FlagRun): FlagOutcome {
   if (reason === "") return { ok: false, message: `pablo flag needs a reason: pablo flag --line ${run.line} "<reason>"` };
   const performed = performedLines(work, unit, output);
   if (performed === undefined) return { ok: false, message: `${noun} is not performed, so there is no line to flag (pablo perform first)` };
+  if (performed.lines.length === 0) return { ok: false, message: `${noun} v${performed.version} has no lines to flag` };
   const parsed = parseLines(run.line, performed.lines);
   if ("error" in parsed) return { ok: false, message: `${noun} v${performed.version}: ${parsed.error}` };
   const file = readFlagsFile(work, output);

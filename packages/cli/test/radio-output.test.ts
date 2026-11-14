@@ -401,11 +401,11 @@ test("the casting verbs' other stage refusals: no script, already performed, mix
     missing: ["episode 2 has no script (pablo write --output radio --unit 2)"],
   });
   expect((await run("perform", { project: "ice-house", episode: 1, "json-lines": false })).body).toMatchObject({
-    missing: ["episode 1 is already performed (v1); re-record flagged lines with pablo fix"],
+    missing: ["episode 1 is already performed (v1); re-record flagged lines with pablo fix, or stale ones with pablo fix --stale"],
   });
   expect((await run("mix", { project: "ice-house", output: "radio", unit: 2 })).exitCode).toBe(2);
   expect((await run("fix", { project: "ice-house", output: "radio", unit: 1, "json-lines": false })).body).toMatchObject({
-    missing: ["episode 1 has no open flags (flag lines in pablo review)"],
+    missing: ["episode 1 has no open flags (flag lines with pablo flag, or in pablo review)"],
   });
   expect((await run("cast", { project: "ice-house", auto: true, all: false, recast: false, output: "radio", unit: 2 })).exitCode).toBe(2);
   // Addressing: another output, a bare --unit, and two different episodes are refused by name.

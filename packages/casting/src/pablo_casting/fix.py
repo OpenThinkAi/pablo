@@ -216,7 +216,7 @@ def fix(
         open_flags += synthetic
     if not open_flags:
         return _refused(
-            f"episode {episode} has no open flags in {flags_path(work)}; flag the lines to re-record in the player first (nothing to fix)",
+            f"episode {episode} has no open flags in {flags_path(work)}; flag the lines to re-record in the player or with `pablo flag` first (nothing to fix)",
             episode=episode,
             version=parent_version,
         )
@@ -384,7 +384,9 @@ def fix(
         if synthetic:
             # The manifest invariant names its flags in flags.json, so the stale lines' flags are written there now (the
             # engines have run; a refusal before this point leaves the file alone) and moved to flags-done.json below.
-            _write_atomic(flags_path(work), {**raw, "flags": [*raw.get("flags", []), *synthetic]})  # type: ignore[misc]
+            # Re-read it: the engines ran for minutes, and the player, the mixer or `pablo flag` may have added flags since.
+            fresh = _read_flags(flags_path(work))
+            _write_atomic(flags_path(work), {**fresh, "flags": [*fresh.get("flags", []), *synthetic]})  # type: ignore[misc]
         written = write_version(
             work,
             episode,
@@ -401,8 +403,16 @@ def fix(
             },
             flags_applied=applied,
         )
-    except ManifestError as failure:
-        # The invariant's refusal (or a store fault): nothing was written, the flags stay open.
+    except (ManifestError, FlagsRefusal, OSError) as failure:
+        # The invariant's refusal (or a store fault): no version was written and the flags stay open. The stale lines'
+        # own flags are taken back out, so a later plain `fix` does not retake lines nobody flagged.
+        if synthetic:
+            gone = {flag["id"] for flag in synthetic}
+            try:
+                current = _read_flags(flags_path(work))
+                _write_atomic(flags_path(work), {**current, "flags": [f for f in current.get("flags", []) if not (isinstance(f, dict) and f.get("id") in gone)]})  # type: ignore[union-attr]
+            except (FlagsRefusal, OSError):
+                pass
         return _error(f"writing episode {episode}'s fixed manifest failed: {failure}")
     version = int(written.manifest["version"])  # type: ignore[call-overload]
 

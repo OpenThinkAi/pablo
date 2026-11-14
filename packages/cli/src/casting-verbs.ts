@@ -81,6 +81,7 @@ import { RADIO_ID } from "./outputs/radio/units";
 import { resolveOutput } from "./outputs/registry";
 import { runProgressive } from "./progressive";
 import { flagLines } from "./flag-lines";
+import type { FlagOutcome } from "./flag-lines";
 import { findVault, resolveProject } from "./project";
 import { radioEpisodes } from "./radio";
 import { isPerformed, publishStream } from "./radio-stream";
@@ -469,7 +470,8 @@ export interface FixRun {
 export async function runFix(r: FixRun): Promise<VerbResult> {
   const { work, episode } = r;
   const output = r.output ?? RADIO_ID;
-  // `--stale` needs a performed unit, not an open flag: its lines come from the takes, not flags.json.
+  // `--stale` needs a performed unit, not an open flag (its lines come from the takes, not flags.json): the "mix"
+  // stage's check is exactly "a performed version".
   const notReady = stageRefusal(work, r.stale === true ? "mix" : "fix", episode, "fix", output);
   if (notReady !== undefined) return notReady;
   const casting = { env: audioEnv(r.env, output), stderr: r.stderr };
@@ -816,11 +818,12 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const work = where.work as string;
       const addressed = addressedEpisode(args, work, "flag");
       if ("exitCode" in addressed) return addressed;
-      let outcome;
+      let outcome: FlagOutcome;
       try {
         outcome = flagLines({ work, output: addressed.output, unit: addressed.episode, line: args.line, reason: args.reason });
       } catch (error) {
-        return refuse(`pablo flag: ${(error as Error).message}`);
+        // flags.json unreadable or unwritable: a fault, not an unmet precondition.
+        return { body: { ok: false, code: 1, message: `pablo flag: ${(error as Error).message}` }, exitCode: 1 };
       }
       if (!outcome.ok) return refuse(`pablo flag: ${outcome.message}`);
       return { body: { ok: true, output: addressed.output, unit: addressed.episode, version: outcome.version, lines: outcome.lines, flags: outcome.flags, message: outcome.message }, exitCode: 0 };
