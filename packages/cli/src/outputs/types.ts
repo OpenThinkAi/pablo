@@ -49,6 +49,8 @@ export interface OutputReport {
   readonly total: number;
   /** The output's next action, absent when every unit is drafted. */
   readonly next?: string;
+  /** Things the output's files hold that no unit accounts for (an essay heading matching no outline row, AGT-2294). */
+  readonly notes?: readonly string[];
 }
 
 /** One row of an output's plan: a unit mapped onto the core beats it tells. */

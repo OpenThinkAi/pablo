@@ -21,11 +21,12 @@ import { ESSAY } from "../src/outputs/essay";
 import { buildEssayPack, essayDefaultPlan, essayPreconditions } from "../src/outputs/essay/pack";
 import { compileEssay, noteSource, publishEssay } from "../src/outputs/essay/publish";
 import { assumedThesis, fictionEssaySections } from "../src/outputs/essay/scaffold";
-import { claimRefs, cleanSectionBody, parseEssayFile, putSection, sectionBody, withoutCitations } from "../src/outputs/essay/sections";
+import { claimRefs, cleanSectionBody, orphanSections, parseEssayFile, putSection, sectionBody, withoutCitations } from "../src/outputs/essay/sections";
 import { NARRATED } from "../src/outputs/narrated";
 import { OUTPUTS, outputsOnTrack, resolveOutput } from "../src/outputs/registry";
 import { addOutput } from "../src/output-verbs";
 import { TRACKS, trackIds } from "../src/tracks/registry";
+import { readWorkStatus, formatStatusProse } from "../src/work-state";
 import { runWrite } from "../src/write";
 import type { WriteArgs } from "../src/write";
 import { useLocalConfigHome } from "./local-config";
@@ -407,6 +408,56 @@ test("AGT-2301: check on a narrated essay reading skips the claim checks and sti
   expect(rules).not.toContain("claim-uncited");
   expect(rules).not.toContain("claim-unsupported");
   expect(rules).toContain("narration-drift");
+});
+
+test("AGT-2294 AC1: sections are found by outline position, so a renamed row is replaced, not duplicated", () => {
+  const outline = [
+    { number: 1, title: "One", covers: "" },
+    { number: 2, title: "Two renamed", covers: "" },
+    { number: 3, title: "Three", covers: "" },
+  ];
+  const before = "---\nmodel: a\n---\n\n## One\n\nFirst.\n\n## Two (~250 words)\n\nSecond.\n\n## Three\n\nThird.\n";
+  expect(sectionBody(outline, before, 2)).toBe("Second.");
+  const after = putSection(outline, before, 2, "Second, again.", "---\nmodel: b\n---");
+  expect(parseEssayFile(after).sections.map((s) => s.title)).toEqual(["One", "Two renamed", "Three"]);
+  expect(parseEssayFile(after).sections.map((s) => s.body)).toEqual(["First.", "Second, again.", "Third."]);
+  // A gap pairs only when the counts agree: two unknown headings for one row are orphans, never guessed.
+  const crowded = "## One\n\nA.\n\n## X\n\nB.\n\n## Y\n\nC.\n\n## Three\n\nD.\n";
+  expect(orphanSections(outline, crowded)).toEqual(["X", "Y"]);
+  expect(sectionBody(outline, crowded, 2)).toBeUndefined();
+  // After the last matched heading the file is a prefix of the remaining rows: section 1 renamed, 2 and 3 undrafted.
+  const tail = "## One, renamed\n\nA.\n";
+  expect(sectionBody([{ number: 1, title: "One", covers: "" }, ...outline.slice(1)], tail, 1)).toBe("A.");
+  expect(orphanSections(outline, "## One\n\nA.\n\n## Two renamed\n\nB.\n\n## Z\n\nC.\n\n## W\n\nD.\n")).toEqual(["Z", "W"]);
+});
+
+test("AGT-2294 AC3: renaming an outline row then write --force replaces the section under the new heading", async () => {
+  const { vault, work, home } = nonfiction({ essay: true });
+  expect((await write(vault, work, home, "1")).code).toBe(0);
+  const merged = await mergeDraft(work, "draft/essay-01", { slug: "the-press", env: { PATH: NO_THINK_PATH }, now: NOW });
+  expect(merged.ok).toBe(true);
+  writeFileSync(join(work, "core", "outline.md"), OUTLINE.replace("| 1 | The press arrives |", "| 1 | The press arrives, renamed |"));
+  const redo = await write(vault, work, home, "1", { force: true }, fakeEssayWriter("A second draft of section one [#1]."));
+  expect(redo.code).toBe(0);
+  const onBranch = git(vault, "show", `${String(redo.body["branch"])}:essays/the-press/outputs/essay/essay.md`);
+  const file = parseEssayFile(onBranch);
+  expect(file.sections.map((s) => s.title)).toEqual(["The press arrives, renamed"]);
+  expect(file.sections[0]!.body).toBe("A second draft of section one [#1].");
+});
+
+test("AGT-2294 AC2: status and check report an essay heading that matches no outline row", () => {
+  const { vault, work } = nonfiction({ essay: true });
+  const outline = essayDefaultPlan(work).map((r) => ({ number: r.unit, title: r.title, covers: "" }));
+  let text = putSection(outline, undefined, 1, "Gutenberg's press was working in Mainz by 1455 [#1].", "---\nmodel: x\nprompt_hash: y\n---");
+  text = putSection(outline, text, 2, "Pamphlets spread fast [#2].", "---\nmodel: x\nprompt_hash: y\n---");
+  text = putSection(outline, text, 3, "Readers changed [#3].", "---\nmodel: x\nprompt_hash: y\n---");
+  writeFileSync(join(work, "outputs", "essay", "essay.md"), `${text}\n## Cut section\n\nStale text.\n`);
+  const status = readWorkStatus(work);
+  expect(formatStatusProse(status)).toContain('has a section "Cut section" that matches no outline row');
+  const checked = checkWork(vault, work);
+  if (!checked.ok) throw new Error(checked.message);
+  const hit = checked.hits.find((h) => h.rule === "orphan-section");
+  expect(hit?.excerpt).toContain("Cut section");
 });
 
 test("check scans the essay file only, never its RULES.md or plan.md, and flags an uncited claim", () => {
