@@ -19,6 +19,7 @@ import { parseArgs } from "node:util";
 import { workBookStages } from "./book";
 import { configSet, configShow, configTest, realConfigTestDeps } from "./config-verb";
 import { doctorText, gateText, lineTakesText, realCastingDeps, runDoctor, runGate, runTakes, takeShowText, takesGcText } from "./casting";
+import { addressedOutput } from "./casting-verbs";
 import { parseForEpisode, radioBind, radioStatus } from "./radio";
 import { branchDiff, fileAt, repoRoot, waitingBranches } from "./branch";
 import { runCheck, screenChecks } from "./check";
@@ -62,7 +63,7 @@ import { screenVoicer } from "./screen-voice";
 import { screenPlanner } from "./screen-planning";
 import { screenWriter } from "./screen-write";
 import { screenRefresh } from "./screen-refresh";
-import { deriveCliOptions, publishOutput, runVoiceEdit, runVoiceList, runVoiceRemove, runVoiceRule, runVoiceUse, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
+import { BIND_FLAGS, deriveCliOptions, publishOutput, runVoiceEdit, runVoiceList, runVoiceRemove, runVoiceRule, runVoiceUse, unitStatus, VERBS, verbArgsFromCli } from "./verbs";
 import { guideText } from "./guide";
 import { USAGE_LINES, verbHelp } from "./help";
 import { openReview } from "./review-host";
@@ -1398,14 +1399,28 @@ export async function main(argv: readonly string[], cwd: string = process.cwd())
       emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
       return EXIT_REFUSED;
     }
+    // AGT-2300: an unknown flag is refused, never silently ignored (`--output` once was, and the binding went to radio).
+    const unknown = Object.keys(args.values).filter((key) => args.values[key] !== false && args.values[key] !== undefined && !BIND_FLAGS.includes(key));
+    if (unknown.length > 0) {
+      const hint = unknown.includes("unit") ? "; a binding covers every unit of its output, so there is no --unit" : "";
+      const message = `pablo: bind: unknown flag ${unknown.map((k) => `--${k}`).join(", ")} (bind takes ${BIND_FLAGS.filter((f) => f !== "help").map((f) => `--${f}`).join(", ")})${hint}`;
+      emit({ ok: false, code: EXIT_REFUSED, message }, args.json);
+      return EXIT_REFUSED;
+    }
     const vaultResult = findVault(cwd);
     if (!vaultResult.ok) {
       emit(refusalResult(vaultResult), args.json);
       return vaultResult.code;
     }
+    const output = addressedOutput({ output: args.output }, projectPath, "bind");
+    if (typeof output !== "string") {
+      emit({ ok: false, code: output.exitCode, message: String((output.body as { message?: unknown }).message ?? "pablo: bind refused") }, args.json);
+      return output.exitCode;
+    }
     const result = radioBind({ env: process.env, stderr: process.stderr }, realCastingDeps(process.env), vaultResult.path, projectPath, {
       role: args.role,
       voice: args.voice,
+      output,
     });
     const body = result.body as { ok?: boolean; message?: string; role?: string; slug?: string; cardHash?: string };
     if (args.json) console.log(JSON.stringify(result.body));

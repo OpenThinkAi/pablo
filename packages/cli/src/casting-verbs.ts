@@ -313,7 +313,7 @@ interface Addressed {
  * have that output, else radio (the default, with or without a radio output: a sandbox drama's scripts are
  * chapters). Anything else is a refusal naming the outputs that are performed.
  */
-function addressedOutput(args: Addressed, work: string, verb: string): AudioOutput | VerbResult {
+export function addressedOutput(args: Addressed, work: string, verb: string): AudioOutput | VerbResult {
   if (args.output === undefined) return RADIO_ID;
   if (!isAudioOutput(args.output)) {
     return refuseWith(`pablo ${verb}: only the ${AUDIO_OUTPUTS.join(" and ")} outputs are performed; got --output ${args.output}`, AUDIO_OUTPUTS.map((o) => `--output ${o}`));

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { venvPython } from "../src/casting";
 import type { CastingDeps, CastingLayout, CastingRun } from "../src/casting";
 import { hasRadioScripts, parseForEpisode, radioCheckLines, radioScriptDir } from "../src/radio";
+import { CASTING_OUTPUT_ENV } from "../src/outputs/audio";
 import { VERBS } from "../src/verbs";
 import type { VerbContext } from "../src/verbs";
 
@@ -217,6 +218,41 @@ describe("bind", () => {
     expect(result.exitCode).toBe(2);
   });
 
+  test("--output narrated binds in the narrated output's casting state (AGT-2300)", async () => {
+    const vault = vaultCopy();
+    const work = radioWork(vault);
+    const marker = join(work, "pablo.json");
+    const config = JSON.parse(readFileSync(marker, "utf8"));
+    delete config.format;
+    config.outputs = { novel: { added: "2026-10-01" }, narrated: { added: "2026-11-01", from: "novel" } };
+    writeFileSync(marker, JSON.stringify(config), "utf8");
+    const envs: Array<string | undefined> = [];
+    const deps = fakeDeps(vault, { bind: json({ ok: true, role: "NARRATOR", slug: "explainer-f" }) });
+    const inner = deps.run;
+    deps.run = (argv, options) => {
+      if (argv[3] === "bind") envs.push(options.env[CASTING_OUTPUT_ENV]);
+      return inner(argv, options);
+    };
+    const result = await verb("bind").run({ project: "show", role: "NARRATOR", voice: "explainer-f", output: "narrated" }, ctx(vault, deps, vault));
+    expect(result.exitCode).toBe(0);
+    expect(envs).toEqual(["narrated"]);
+    // Without --output the Python side is left on radio.
+    await verb("bind").run({ project: "show", role: "CORA", voice: "cora" }, ctx(vault, deps, vault));
+    expect(envs).toEqual(["narrated", undefined]);
+  });
+
+  test("--output narrated on a work without that output is a refusal, and nothing runs (AGT-2300)", async () => {
+    const vault = vaultCopy();
+    radioWork(vault);
+    const deps = fakeDeps(vault);
+    const result = await verb("bind").run({ project: "show", role: "NARRATOR", voice: "x", output: "narrated" }, ctx(vault, deps, vault));
+    expect(result.exitCode).toBe(2);
+    expect(deps.calls).toEqual([]);
+    const bad = await verb("bind").run({ project: "show", role: "NARRATOR", voice: "x", output: "essay" }, ctx(vault, deps, vault));
+    expect(bad.exitCode).toBe(2);
+    expect(String((bad.body as { message: string }).message)).toContain("only the radio and narrated outputs");
+  });
+
   test("an unresolvable project is a refusal before anything runs", async () => {
     const vault = vaultCopy();
     const deps = fakeDeps(vault);
@@ -239,6 +275,25 @@ describe("the built CLI", () => {
     const run = runCli(["bind", "--project", "ice-house", "--json"], { PABLO_VAULT: vault });
     expect(run.exitCode).toBe(2);
     expect(JSON.parse(run.stdout).ok).toBe(false);
+  });
+
+  test("bind refuses an unknown flag instead of ignoring it (AGT-2300)", () => {
+    const vault = vaultCopy();
+    const run = runCli(["bind", "--project", "ice-house", "--role", "NARRATOR", "--voice", "x", "--ouptut", "narrated", "--json"], { PABLO_VAULT: vault });
+    expect(run.exitCode).toBe(2);
+    const body = JSON.parse(run.stdout);
+    expect(body.ok).toBe(false);
+    expect(body.message).toContain("unknown flag --ouptut");
+    const unit = runCli(["bind", "--project", "ice-house", "--role", "N", "--voice", "x", "--unit", "1", "--json"], { PABLO_VAULT: vault });
+    expect(unit.exitCode).toBe(2);
+    expect(JSON.parse(unit.stdout).message).toContain("no --unit");
+  });
+
+  test("bind --output essay is refused by name, not written to radio (AGT-2300)", () => {
+    const vault = vaultCopy();
+    const run = runCli(["bind", "--project", "ice-house", "--role", "N", "--voice", "x", "--output", "essay", "--json"], { PABLO_VAULT: vault });
+    expect(run.exitCode).toBe(2);
+    expect(JSON.parse(run.stdout).message).toContain("only the radio and narrated outputs");
   });
 
   test("status --for episode on a work with no radio scripts is exit 2 and provisions nothing", () => {
