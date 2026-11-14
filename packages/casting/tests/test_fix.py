@@ -437,3 +437,109 @@ def test_the_adapter_changes_nothing_without_reasons_and_documents_what_each_rea
     assert normalise_reasons(["Flat", "wrong  VOICE", "best of 4 failed: wer", None, "flat"]) == ("flat", "wrong voice")
     assert [retake_pace(p, ("rushed",)) for p in (None, "quick", "slow")] == ["slow", None, "slow"]
     assert retake_pace("quick", ("flat",)) == "quick"
+
+
+# stale takes (AGT-2305) ------------------------------------------------------------
+
+
+def lexicon(work: Path, text: str) -> None:
+    path = work / "outputs" / "radio" / "pronounce.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def do_stale_fix(work: Path, library: Path, cues: Path, factory: Factory | None = None, *, lines: tuple[int, ...] = ()):
+    from pablo_casting.mix import cmd_mix
+
+    s, _ = seams()
+    return fix(
+        FixRequest(work=work, episode=1, voices_dir=library / "voices", stale=True, lines=lines),
+        env={},
+        engine_factory=factory or Factory(wps=(3.0,)),
+        scorer_factory=lambda: fake_scorers(),
+        mixer=lambda version: cmd_mix(work, "1", version, str(cues), None, None, s),
+        err=io.StringIO(),
+    )
+
+
+def test_a_lexicon_change_makes_exactly_the_lines_it_touches_stale(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    from pablo_casting.stale import stale_lines
+
+    work, library = episode
+    performed_and_mixed(work, library, tmp_path / "cues")
+    lines = read_version(work, 1, 1)["lines"]
+    assert stale_lines(work, lines) == []
+    lexicon(work, "7 -> sev-en\n41 -> for-tee-one\n")
+    assert stale_lines(work, lines) == [7, 41]
+    lexicon(work, "")
+    assert stale_lines(work, lines) == []
+
+
+def test_fix_stale_re_records_exactly_the_stale_lines_and_says_so(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    work, library = episode
+    cues = tmp_path / "cues"
+    performed_and_mixed(work, library, cues)
+    v1 = read_version(work, 1, 1)
+    other = flag(work, (3, "clipped"))  # an open flag on a line that is not stale stays open and is not touched
+    lexicon(work, "7 -> sev-en\n41 -> for-tee-one\n")
+    factory = Factory(wps=(3.0,))
+    body, code = do_stale_fix(work, library, cues, factory)
+    assert code == 0, body
+    assert body["changedLines"] == [7, 41] and body["stale"] == [7, 41] and body["version"] == 2
+    assert str(body["message"]).startswith("2 lines re-recorded: pronunciation changed")
+    assert len(factory.engine.calls) == 2  # type: ignore[union-attr]
+    assert "sev-en" in factory.engine.calls[0]["inputs"].params["lexicon"]  # type: ignore[union-attr]
+    v2 = read_version(work, 1, 2)
+    assert [(f["line"], f["reason"], f["by"]) for f in v2["flags_applied"]] == [(7, "pronunciation changed", "stale"), (41, "pronunciation changed", "stale")]
+    old = {line["i"]: line["take"] for line in v1["lines"]}
+    assert [line["i"] for line in v2["lines"] if line["take"] != old[line["i"]]] == [7, 41]
+    open_ids = [f["id"] for f in json.loads(flags_path(work).read_text(encoding="utf-8"))["flags"]]
+    assert open_ids == other
+    # The unit is whole again: nothing is stale, and a second run refuses.
+    body, code = do_stale_fix(work, library, cues)
+    assert code == 2 and "no stale lines" in str(body["message"]) and versions(work, 1) == [1, 2]
+
+
+def test_fix_stale_with_one_line_and_with_nothing_stale(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    work, library = episode
+    cues = tmp_path / "cues"
+    performed_and_mixed(work, library, cues)
+    body, code = do_stale_fix(work, library, cues)
+    assert code == 2 and "no stale lines" in str(body["message"]) and versions(work, 1) == [1]
+    lexicon(work, "7 -> sev-en\n41 -> for-tee-one\n")
+    body, code = do_stale_fix(work, library, cues, lines=(41,))
+    assert code == 0 and body["stale"] == [41] and str(body["message"]).startswith("1 line re-recorded: pronunciation changed")
+
+
+def test_a_stale_line_with_an_open_flag_is_one_retake_with_the_flags_reason(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    work, library = episode
+    cues = tmp_path / "cues"
+    performed_and_mixed(work, library, cues)
+    ids = flag(work, (7, "flat"))
+    lexicon(work, "7 -> sev-en\n")
+    body, code = do_stale_fix(work, library, cues)
+    assert code == 0, body
+    v2 = read_version(work, 1, 2)
+    assert [(f["id"], f["reason"]) for f in v2["flags_applied"]] == [(ids[0], "flat")]
+    assert json.loads(flags_path(work).read_text(encoding="utf-8"))["flags"] == []
+
+
+def test_status_and_pronounce_count_the_stale_lines(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    work, library = episode
+    performed_and_mixed(work, library, tmp_path / "cues")
+    (status, code), _ = run(["status", "--work", str(work), "--episode", "1", "--json"], {})
+    assert code == 0 and status["staleLines"] == 0 and status["stale"] == []
+    lexicon(work, "7 -> sev-en\n41 -> for-tee-one\n")
+    (status, code), _ = run(["status", "--work", str(work), "--episode", "1", "--json"], {})
+    assert code == 0 and status["staleLines"] == 2 and status["stale"] == [7, 41]
+    (said, code), _ = run(["pronounce", "--work", str(work), "--json"], {})
+    assert code == 0 and said["staleLines"] == 2 and said["units"][0]["stale"] == [7, 41]  # type: ignore[index]
+
+
+def test_the_command_line_takes_stale(episode: tuple[Path, Path], tmp_path: Path) -> None:
+    work, library = episode
+    cues = tmp_path / "cues"
+    performed_and_mixed(work, library, cues)
+    lexicon(work, "41 -> for-tee-one\n")
+    (body, code), _ = run(["fix", "--work", str(work), "--episode", "1", "--stale", "--library", str(library), "--cues", str(cues), "--json"], {}, scorers=fake_scorers, engines=Factory(wps=(3.0,)), mixer=seams()[0])
+    assert code == 0 and body["stale"] == [41], body

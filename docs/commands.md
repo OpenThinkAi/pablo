@@ -1238,7 +1238,7 @@ It serves:
 | Setup and publishing | `output` (list, remove, plan), `migrate`, `publish` |
 | Voice | `voice_list`, `voice_show`, `voice_flag`, `voice_exemplar`, `voice_rule`, `voice_edit`, `voice_remove`, `voice_use` |
 | Reading | `read`, `search`, `web_search`, `web_fetch` |
-| Radio | `bind`, `audition`, `cast`, `voices`, `describe_voice`, `pronounce`, `perform`, `mix`, `fix` |
+| Radio | `bind`, `audition`, `cast`, `voices`, `describe_voice`, `pronounce`, `perform`, `mix`, `flag`, `fix` |
 
 `init`, `story`, `output_add` and `merge` take the same arguments as the verbs and
 refuse the same way. `merge` accepts a change branch of any kind (or with `reject`
@@ -1331,6 +1331,8 @@ that each loader passes its pin through, without loading a model.
 | `pablo perform --project <slug> --episode N [--engine chatterbox-turbo\|dia] [--json-lines]` | renders an episode's lines in their bound voices, retrying lines that fail the quality gates; refused while a role is uncast. `--stream` (with `--episode N` or `--all`) mixes and publishes as it goes, and never replaces a human mix: one that still fits is the one rendered, one that no longer fits is rebased onto the new take set (as `mix` does) |
 | `pablo mix --project <slug> --episode N [--version k]` | mixes a performed episode with its sound cues into `epNN.m4a`; a mix saved in the mixer is kept, and after `fix` it is rebased onto the new takes (unchanged lines keep every edit; whatever could not be carried over is listed for review in the mixer, never dropped) |
 | `pablo fix --project <slug> --episode N [--line I]` | re-records only the flagged lines, then remixes (a mix saved in the mixer keeps its edits: see `mix`). `--line I` re-records just that line (it needs an open flag); the episode's other flags stay open. After a role is rebound to another voice, `fix` runs only when every line of that role is flagged, and re-records them in the new voice |
+| `pablo fix --project <slug> --episode N --stale [--line I]` | re-records exactly the lines whose take was made from an older pronunciation: a `pronounce.md` edit or a change to the spoken-form rules since the unit was performed, found by recomputing each stored take's lexicon, spoken-form and acronym params and comparing them with the ones the take was made with (a flag's retake params are not compared). It needs no open flag, leaves the other flags open (an open flag on a stale line joins its retake), writes the next version like any `fix` and says so ("3 lines re-recorded: pronunciation changed"); `--line I` limits it to that line. Nothing stale is a refusal. The applied lines are recorded in the manifest's `flags_applied` with reason `pronunciation changed` and `by: "stale"`. `pronounce` and the casting side's `status` count the stale lines (see below) |
+| `pablo flag --project <slug> --output radio\|narrated --unit N --line I[,J\|all] "<reason>"` | flags performed lines for `fix` without the review player or the mixer, writing the same `flags.json` entry the player does (`by: "cli"`); `--line` is one 0-based line number (the manifest's `i`, as in `fix --line`), a comma-separated list, or `all`. A reason of `clipped`, `wrong voice`, `flat` or `rushed` also steers the retake; any other text is recorded as written. Flagging a line again replaces your earlier flag on it and keeps the performer's automatic one. A unit that is not performed, or a line it lacks, is refused and nothing is written. Reads the newest manifest and writes only `flags.json`; loads no model; also an MCP tool |
 | `pablo gate <take.wav> --line "..." --card <slug>` | scores one take against a card's quality gates; `gate calibrate` fits the thresholds |
 | `pablo takes show <key> \| gc [--yes] --project <slug>` | inspects one take, or archives the takes no manifest uses (moved, never deleted) |
 | `pablo takes line --project <slug> --episode N --line I` | every take a line has had across its versions (the one in use starred), to compare after a `fix` |
@@ -1432,3 +1434,12 @@ against the script's own words.
 
 Only takes whose engine text these rules change get a new take key, so a work's
 other takes are reused as they are. Run `pablo pronounce` to see the result.
+
+**Stale takes.** A performed unit is not performed again, so a `pronounce.md` edit or
+a change to these rules does not reach lines already recorded: `perform` refuses the
+unit, and `fix` re-records only flagged lines. A line is *stale* when its stored take
+was made from a different spoken form than these rules and the lexicon give now.
+`pablo pronounce` says how many performed lines are stale (per unit, with their
+0-based line numbers, as `fix --line` and `flag --line` take them), and
+`pablo fix --stale` re-records exactly those lines, with no flags to set first.
+To re-record other lines, flag them with `pablo flag`.

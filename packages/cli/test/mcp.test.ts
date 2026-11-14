@@ -61,7 +61,7 @@ function parseTextBody(result: unknown): unknown {
 // already an MCP tool before this ticket (AGT-1241); AC1's "five existing
 // tools" are resume/status/write/save/check. AGT-1264 adds `revise`, also
 // project-scoped.
-const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "output_add", "merge", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "pronounce", "save_research", "distill_facts", "record_fact", "plan_research", "add_research_item", "waive_research_item", "link_research_item"]);
+const PROJECT_SCOPED_TOOLS = new Set(["resume", "status", "timeline", "critique", "write", "draft_chapter", "draft_unit", "output", "output_add", "merge", "promote", "save", "check", "bind", "revise", "revise_passage", "migrate", "publish", "read", "search", "perform", "mix", "fix", "flag", "pronounce", "save_research", "distill_facts", "record_fact", "plan_research", "add_research_item", "waive_research_item", "link_research_item"]);
 
 test("listTools returns the project-scoped verbs, prose, and the five narrow voice_* tools", async () => {
   const { tools } = await client.listTools();
@@ -78,6 +78,7 @@ test("listTools returns the project-scoped verbs, prose, and the five narrow voi
     "draft_chapter",
     "draft_unit",
     "fix", // AGT-1685: fixes a performed radio episode from its flags; project required
+    "flag", // AGT-2305: flags performed lines for fix; project required
     "guide", // AGT-2142: the path for a track x output; no project
     "init", // AGT-2143: starts a work; MCP only, never the harness's
     "link_research_item", // AGT-2111: from the `research` verb

@@ -113,6 +113,7 @@ const P0_VERBS = [
   "review",
   "mixer",
   "fix",
+  "flag",
   "config",
 ] as const;
 
@@ -476,7 +477,7 @@ async function runVerbEntry(name: string, args: ParsedArgs, cwd: string, text: (
 }
 
 /** The verbs `cli.ts` dispatches straight off their `VERBS` entry (AGT-1679). */
-const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix", "fix", "describe_voice", "pronounce"]);
+const CASTING_VERBS: ReadonlySet<string> = new Set(["audition", "cast", "voices", "perform", "mix", "fix", "flag", "describe_voice", "pronounce"]);
 
 /** Plain-text output for a casting verb's body. */
 export function castingText(verb: string, body: Record<string, unknown>): string {
@@ -542,6 +543,13 @@ export function castingText(verb: string, body: Record<string, unknown>): string
   }
   if (verb === "pronounce" && Array.isArray(body["units"])) {
     lines.push(`pablo: ${String(body["output"])}: ${String(body["changedLines"])} line(s) said differently from the text${body["acronyms"] === true ? " (acronyms read as letters)" : ""}; lexicon ${String(body["lexicon"])} (${String(body["lexiconEntries"])} entries)`);
+    if (typeof body["staleLines"] === "number" && body["staleLines"] > 0) {
+      const where = (body["units"] as Array<Record<string, unknown>>)
+        .filter((u) => Array.isArray(u["stale"]) && u["stale"].length > 0)
+        .map((u) => `unit ${String(u["unit"])} line(s) ${(u["stale"] as unknown[]).join(",")}`)
+        .join("; ");
+      lines.push(`pablo: ${String(body["staleLines"])} performed line(s) stale (taken from an older pronunciation): ${where}; re-record them with pablo fix --stale`);
+    }
     for (const unit of body["units"] as Array<Record<string, unknown>>) {
       const rows = (unit["lines"] as Array<Record<string, unknown>> | undefined) ?? [];
       if (rows.length === 0) continue;

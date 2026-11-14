@@ -268,7 +268,7 @@ function outputStageSteps(def: OutputDefinition, stage: string, writer?: string)
           optional: true,
           title: "re-record flagged lines",
           command: `pablo fix ${P} ${audioUnit(def)}`,
-          detail: `flag lines in pablo review ${P} or the mixer's punch list`,
+          detail: `flag lines with pablo flag ${P} ${audioUnit(def)} --line I "<reason>", in pablo review ${P} or the mixer's punch list; pablo fix --stale re-records lines whose pronunciation changed`,
         },
       ];
     default:

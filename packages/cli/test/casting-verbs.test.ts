@@ -681,13 +681,13 @@ describe("fix (AGT-1685)", () => {
     expect(result.exitCode).toBe(0);
     expect(lastPython(calls)).toEqual(["fix", "--episode=2", "--line=4", `--vault=${vault}`, "--work", work(vault), "--json"]);
     const parsed = parseCliArgs(["fix", "--project", "ice-house", "--episode", "2", "--line", "4"]);
-    expect(verbArgsFromCli(VERBS.find((v) => v.name === "fix")!, parsed.values, parsed.rest)).toEqual({ ok: true, args: { project: "ice-house", episode: 2, line: 4, "json-lines": false } });
+    expect(verbArgsFromCli(VERBS.find((v) => v.name === "fix")!, parsed.values, parsed.rest)).toEqual({ ok: true, args: { project: "ice-house", episode: 2, line: 4, "json-lines": false, stale: false } });
   });
 
   test("the CLI parses --episode and --json-lines for fix", () => {
     const parsed = parseCliArgs(["fix", "--project", "ice-house", "--episode", "3", "--json-lines"]);
     const built = verbArgsFromCli(VERBS.find((v) => v.name === "fix")!, parsed.values, parsed.rest);
-    expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, "json-lines": true } });
+    expect(built).toEqual({ ok: true, args: { project: "ice-house", episode: 3, "json-lines": true, stale: false } });
   });
 
   test("castingText summarises a fix body", () => {

@@ -80,6 +80,7 @@ import type { RadioVerbStage } from "./outputs/radio/state";
 import { RADIO_ID } from "./outputs/radio/units";
 import { resolveOutput } from "./outputs/registry";
 import { runProgressive } from "./progressive";
+import { flagLines } from "./flag-lines";
 import { findVault, resolveProject } from "./project";
 import { radioEpisodes } from "./radio";
 import { isPerformed, publishStream } from "./radio-stream";
@@ -241,7 +242,25 @@ const FIX_ARGS = z.object({
     .int()
     .nonnegative()
     .optional()
-    .describe("Re-record only this line (its open flags); the episode's other flags stay open. The line must have an open flag."),
+    .describe("Re-record only this line (its open flags); the episode's other flags stay open. The line must have an open flag. With `stale`, only this line if it is stale."),
+  stale: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Instead of the open flags, re-record exactly the lines whose take was made from an older pronunciation (the work's pronounce.md, or the spoken-form rules, changed since it was performed). No open flag is needed; the other flags stay open. `pronounce` and `status` count them.",
+    ),
+});
+
+const FLAG_ARGS = z.object({
+  project: z.string().describe("The work whose performed radio episode (or narrated unit) to flag lines of."),
+  episode: z.number().int().positive().optional().describe("The episode number (or output: radio with unit); it must have been performed."),
+  output: outputArg,
+  unit: unitArg,
+  line: z.string().describe('The line(s) to flag, 0-based as in the manifest and `fix --line`: one number, a comma-separated list ("2,5"), or "all".'),
+  reason: z
+    .string()
+    .describe('Why the line(s) need re-recording, as a word or a sentence. The review player\'s reasons (clipped, wrong voice, flat, rushed, other) also steer the retake; any other text is recorded as written.'),
 });
 
 const DESCRIBE_ARGS = z.object({
@@ -431,6 +450,8 @@ export interface FixRun {
   readonly output?: AudioOutput;
   /** Only this line's open flags (`--line`); the rest stay open. */
   readonly line?: number;
+  /** Re-record the stale lines instead of the open flags (`--stale`, AGT-2305). */
+  readonly stale?: boolean;
   readonly vault?: string;
   readonly library?: string;
   /** Where each line's progress event is also written as a JSON line (`--json-lines`). */
@@ -448,7 +469,8 @@ export interface FixRun {
 export async function runFix(r: FixRun): Promise<VerbResult> {
   const { work, episode } = r;
   const output = r.output ?? RADIO_ID;
-  const notReady = stageRefusal(work, "fix", episode, "fix", output);
+  // `--stale` needs a performed unit, not an open flag: its lines come from the takes, not flags.json.
+  const notReady = stageRefusal(work, r.stale === true ? "mix" : "fix", episode, "fix", output);
   if (notReady !== undefined) return notReady;
   const casting = { env: audioEnv(r.env, output), stderr: r.stderr };
   const ready = ensureProvisioned(casting, r.casting, work, [SCORERS_EXTRA, MIX_EXTRA]);
@@ -458,6 +480,7 @@ export async function runFix(r: FixRun): Promise<VerbResult> {
     "fix",
     ...flag("--episode", episode),
     ...flag("--line", r.line),
+    ...(r.stale === true ? ["--stale"] : []),
     ...(relay !== undefined ? ["--json-lines"] : []),
     ...flag("--vault", r.vault),
     ...flag("--library", r.library),
@@ -758,7 +781,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
   const fix: Verb<typeof FIX_ARGS.shape> = {
     name: "fix",
     description:
-      "Fix a performed radio episode from its flags: re-records only the flagged lines (flags.json: the player's, with a reason of clipped, wrong voice, flat, rushed or other, and perform's automatic ones for takes that never passed the gates), with new attempt numbers and, by reason, an adjusted engine temperature (wrong voice: colder, flat: hotter) or a slower pace (rushed); writes the next manifest version through the invariant that no unflagged line's take changes (a violation writes nothing), remixes it into epNN.v<k+1>.m4a with the epNN.m4a link moved, and moves the flags to flags-done.json with the version they landed in. The flags and their reasons are recorded in the manifest's flags_applied. Refuses an episode with no open flags (naming it), an unperformed episode, a script whose unflagged lines changed, or a role bound to a different voice since the version. Loads models and uses the GPU.",
+      "Fix a performed radio episode from its flags: re-records only the flagged lines (flags.json: the player's, with a reason of clipped, wrong voice, flat, rushed or other, and perform's automatic ones for takes that never passed the gates), with new attempt numbers and, by reason, an adjusted engine temperature (wrong voice: colder, flat: hotter) or a slower pace (rushed); writes the next manifest version through the invariant that no unflagged line's take changes (a violation writes nothing), remixes it into epNN.v<k+1>.m4a with the epNN.m4a link moved, and moves the flags to flags-done.json with the version they landed in. The flags and their reasons are recorded in the manifest's flags_applied. With stale, re-records instead exactly the lines whose take was made from an older pronunciation (pronounce.md or the spoken-form rules changed since the unit was performed), saying N lines re-recorded for a pronunciation change. Refuses an episode with no open flags (naming it; with stale, one with no stale lines), an unperformed episode, a script whose unflagged lines changed, or a role bound to a different voice since the version. Loads models and uses the GPU.",
     args: FIX_ARGS,
     run: async (args, ctx) => {
       const where = locate(ctx, args.project);
@@ -771,12 +794,36 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
         episode: addressed.episode,
         output: addressed.output,
         ...(args.line === undefined ? {} : { line: args.line }),
+        ...(args.stale ? { stale: true } : {}),
         ...(where.vault === undefined ? {} : { vault: where.vault }),
         ...(args["json-lines"] ? { relay: ctx.stdout } : {}),
         env: ctx.env,
         stderr: ctx.stderr,
         casting: ctx.casting ?? deps(ctx.env),
       });
+    },
+  };
+
+  const flagVerb: Verb<typeof FLAG_ARGS.shape> = {
+    name: "flag",
+    description:
+      "Flag performed lines for `fix` without the review player or the mixer: writes the lines (one number, a comma-separated list, or all; 0-based) with a reason to the output's flags.json, exactly as the player's flag does (flagging a line again replaces the listener's earlier flag on it). Refuses a unit that is not performed and a line it does not have. Reads and writes only flags.json; loads no model.",
+    args: FLAG_ARGS,
+    positionalArgs: ["reason"],
+    run: async (args, ctx) => {
+      const where = locate(ctx, args.project);
+      if ("exitCode" in where) return where;
+      const work = where.work as string;
+      const addressed = addressedEpisode(args, work, "flag");
+      if ("exitCode" in addressed) return addressed;
+      let outcome;
+      try {
+        outcome = flagLines({ work, output: addressed.output, unit: addressed.episode, line: args.line, reason: args.reason });
+      } catch (error) {
+        return refuse(`pablo flag: ${(error as Error).message}`);
+      }
+      if (!outcome.ok) return refuse(`pablo flag: ${outcome.message}`);
+      return { body: { ok: true, output: addressed.output, unit: addressed.episode, version: outcome.version, lines: outcome.lines, flags: outcome.flags, message: outcome.message }, exitCode: 0 };
     },
   };
 
@@ -814,7 +861,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     },
   };
 
-  return [audition, cast, voices, perform, mix, fix, describeVoice, pronounce] as readonly Verb[];
+  return [audition, cast, voices, perform, mix, fix, flagVerb, describeVoice, pronounce] as readonly Verb[];
 }
 
 /**

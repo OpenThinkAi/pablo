@@ -25,6 +25,12 @@ automatic flag's free text) are recorded in the manifest's `flags_applied`
 (`{id, line, reason, by}`) and on the line (`fix`). Several flags on one line
 are one retake, with all their reasons.
 
+**Stale lines** (`--stale`, AGT-2305, `stale.py`): instead of the open flags, re-records exactly the lines whose
+stored take was made from a different spoken form than the work's `pronounce.md` and the spoken-form rules give now
+(the take key's `lexicon`, `spoken` and `acronyms` params). Each is a retake with no reason (so its key is what a fresh
+`perform` would make), recorded in `flags_applied` as `{reason: "pronunciation changed", by: "stale"}`; an open flag on
+a stale line joins its retake and the other flags stay open. No stale lines is a refusal. The result's `stale` lists them.
+
 **Moving the flags**: `flags-done.json` gains each applied flag with
 `fixed_in` (the version) and `fixed_at`, then `flags.json` loses them (both
 atomic, the copy first, so a crash duplicates a flag and never loses one). A
@@ -86,6 +92,7 @@ from pablo_casting.perform import (
     runs_between_cues,
 )
 from pablo_casting.receipts import append_receipt, now
+from pablo_casting.stale import STALE_REASON, stale_lines
 from pablo_casting.scorers import Scorer, ScorerUnavailable
 from pablo_casting.takes import KEY_RE, read_take, take_path
 
@@ -100,6 +107,8 @@ class FixRequest:
     json_lines: bool = False
     lines: tuple[int, ...] = ()
     """Only the open flags on these lines (AGT-2155, the mixer's re-take of one line); empty = every open flag."""
+    stale: bool = False
+    """AGT-2305: re-record the lines whose take no longer matches how they are spoken (`stale.py`) instead of the open flags."""
 
 
 def flags_done_path(work: Path) -> Path:
@@ -187,13 +196,31 @@ def fix(
     except FlagsRefusal as refusal:
         return _refused(str(refusal))
     open_flags = [flag for flag in raw.get("flags", []) if isinstance(flag, dict) and flag.get("episode") == episode]  # type: ignore[union-attr]
+    stale_found: list[int] = []
+    synthetic: list[dict[str, object]] = []
+    if request.stale:
+        stale_found = stale_lines(work, parent_lines)
+        if request.lines:
+            stale_found = [i for i in stale_found if i in set(request.lines)]
+        if not stale_found:
+            return _refused(f"episode {episode} v{parent_version} has no stale lines: every take matches how its line is spoken now (nothing to re-record)", episode=episode, version=parent_version)
+        # Only the stale lines: an open flag on one of them joins its retake, the other flags stay open.
+        flagged_now = {flag.get("line") for flag in open_flags}
+        open_flags = [flag for flag in open_flags if flag.get("line") in stale_found]
+        stamp = now()
+        synthetic = [
+            {"id": f"stale-{uuid.uuid4().hex[:8]}", "episode": episode, "line": i, "reason": STALE_REASON, "by": "stale", "at": stamp}
+            for i in stale_found
+            if i not in flagged_now
+        ]
+        open_flags += synthetic
     if not open_flags:
         return _refused(
             f"episode {episode} has no open flags in {flags_path(work)}; flag the lines to re-record in the player first (nothing to fix)",
             episode=episode,
             version=parent_version,
         )
-    if request.lines:
+    if request.lines and not request.stale:
         wanted = set(request.lines)
         open_flags = [flag for flag in open_flags if flag.get("line") in wanted]
         if not open_flags:
@@ -354,6 +381,10 @@ def fix(
         for flag in by_line[i]
     ]
     try:
+        if synthetic:
+            # The manifest invariant names its flags in flags.json, so the stale lines' flags are written there now (the
+            # engines have run; a refusal before this point leaves the file alone) and moved to flags-done.json below.
+            _write_atomic(flags_path(work), {**raw, "flags": [*raw.get("flags", []), *synthetic]})  # type: ignore[misc]
         written = write_version(
             work,
             episode,
@@ -410,6 +441,7 @@ def fix(
         "pass": summary["pass"],
         "bestOfFailed": summary["best_of_failed"],
         "flags": refreshed,
+        **({"stale": stale_found} if request.stale else {}),
         "takesRendered": totals.rendered,
         "takesReused": totals.reused,
         "wall": wall,
@@ -421,6 +453,8 @@ def fix(
     if refreshed:
         message += f", {len(refreshed)} flagged again"
     message += ")"
+    if request.stale:
+        message = f"{len(stale_found)} line{'s' if len(stale_found) != 1 else ''} re-recorded: {STALE_REASON}; {message}"
     if mixer is None:
         body["message"] = message
         return body, EXIT_OK
@@ -451,6 +485,7 @@ def cmd_fix(
     scorer_factory: Callable[[], Sequence[Scorer]],
     mixer: Callable[[int], Result] | None,
     line: str | None = None,
+    stale: bool = False,
 ) -> Result:
     from pablo_casting.binding import library_dir
 
@@ -476,7 +511,7 @@ def cmd_fix(
     if voices_dir is None:
         return _refused("no voice library: pass --vault or --library, or set `library` in the casting config", missing=["library"])
     return fix(
-        FixRequest(work=work, episode=number, voices_dir=voices_dir, json_lines=json_lines, lines=only),
+        FixRequest(work=work, episode=number, voices_dir=voices_dir, json_lines=json_lines, lines=only, stale=stale),
         env=env,
         engine_factory=engine_factory,
         scorer_factory=scorer_factory,

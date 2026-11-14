@@ -184,7 +184,7 @@ export function radioStageCheck(work: string, stage: RadioVerbStage, episode: nu
     case "perform":
       return done([
         ...unbound.map((role) => `role ${role} is not cast`),
-        ...(latest === undefined ? [] : [`${noun} ${episode} is already performed (v${latest.version}); re-record flagged lines with pablo fix`]),
+        ...(latest === undefined ? [] : [`${noun} ${episode} is already performed (v${latest.version}); re-record flagged lines with pablo fix, or stale ones with pablo fix --stale`]),
       ]);
     case "mix":
       return done(latest === undefined ? [unperformed] : []);

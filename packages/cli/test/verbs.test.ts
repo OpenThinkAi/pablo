@@ -36,7 +36,7 @@ function voiceMcpTool(name: string) {
   return found;
 }
 
-test("VERBS exposes exactly the thirty-six verbs, each project-required verb requiring project", () => {
+test("VERBS exposes exactly the thirty-seven verbs, each project-required verb requiring project", () => {
   expect(VERBS.map((v) => v.name).sort()).toEqual([
     "audition",
     "bind",
@@ -48,6 +48,7 @@ test("VERBS exposes exactly the thirty-six verbs, each project-required verb req
     "draft_unit",
     "fact", // AGT-2106
     "fix", // AGT-1685
+    "flag", // AGT-2305
     "guide", // AGT-2142
     "init", // AGT-2143
     "merge",
@@ -204,6 +205,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     version: { type: "string" }, // AGT-1684: mix --version k (cli.ts reads it as --mix-version; elsewhere --version prints the version)
     stream: { type: "boolean", default: false }, // AGT-1697: perform --stream (perform --all reuses `all`)
     design: { type: "boolean", default: false }, // AGT-1699: cast --auto --design
+    stale: { type: "boolean", default: false }, // AGT-2305: fix --stale
     "role-traits": { type: "string" }, // AGT-1699: cast --auto --design --role-traits
     gender: { type: "string" }, // AGT-1699: describe_voice --gender
     sounds: { type: "string" }, // AGT-1799: mix --sounds (mix --auto reuses `auto`)

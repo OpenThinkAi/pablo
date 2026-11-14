@@ -3,6 +3,18 @@
 Notable changes per release of `@openthink/pablo`, `@openthink/pablo-core` and
 `@openthink/pablo-tui` (they release together at one version). The newest is first.
 
+## Unreleased
+
+### Added
+
+- **`pablo fix --stale`** re-records the performed lines whose take was made from an older
+  pronunciation (a `pronounce.md` edit or a spoken-form change since the unit was performed), and
+  says so ("3 lines re-recorded: pronunciation changed"). `pablo pronounce` reports how many
+  performed lines are stale, per unit.
+- **`pablo flag`** flags performed lines for `pablo fix` from the command line
+  (`--line I[,J|all] "<reason>"`), the same entry the review player writes, so re-recording a line
+  no longer needs a window or a hand-edited `flags.json`. Also an MCP tool.
+
 ## 0.5.0
 
 ### Fixed
