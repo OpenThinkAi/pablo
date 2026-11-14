@@ -140,11 +140,19 @@ export type PublishOutcome =
     }
   | { readonly ok: false; readonly code: 2; readonly message: string; readonly tried: readonly string[] };
 
+/** Options a publish target may take (AGT-2306: the narrated audio target's gap and chapter markers); others ignore them. */
+export interface PublishOptions {
+  /** Seconds of silence between readings (`--gap`). */
+  readonly gap?: number;
+  /** Write a chapter marker per reading (`--chapters`). */
+  readonly chapters?: boolean;
+}
+
 export interface OutputPublish {
   /** Every `--target` the type names, built or not. */
   readonly targets: readonly string[];
   /** Publishes the work's units to `target`; an unknown or unbuilt target is a refusal. */
-  readonly run: (workDir: string, slug: string, title: string, target: string | undefined) => PublishOutcome;
+  readonly run: (workDir: string, slug: string, title: string, target: string | undefined, options?: PublishOptions) => PublishOutcome;
 }
 
 /**

@@ -96,6 +96,7 @@ import { proseCore } from "./prose";
 import { parseForEpisode, radioBind, radioCheck, radioStatus, realCastingDeps } from "./radio";
 import type { CastingDeps } from "./radio";
 import { isOutputId, OUTPUTS, outputIds, resolveOutput } from "./outputs/registry";
+import type { PublishOptions } from "./outputs/types";
 import { revisePassage } from "./screen-revise";
 import { reviseCore } from "./revise";
 import type { ReviseCoreArgs } from "./revise";
@@ -1121,9 +1122,11 @@ const PUBLISH_ARGS = z.object({
   target: z
     .string()
     .describe(
-      "The publish target, by output: novel and story draft|review|final (one compiled markdown file under .pablo/out/; the novel's review numbers each source line, and its final also writes an .epub); radio bundle|player|stream (bundle: every episode's script plus its newest mixed audio and manifest in one directory, .pablo/out/<slug>-radio-bundle/; player is `pablo review`; stream: each episode's newest mixed audio and manifest, with its time to first audio, in the listening directory .pablo/out/stream/ where the review player finds it).",
+      "The publish target, by output: novel and story draft|review|final (one compiled markdown file under .pablo/out/; the novel's review numbers each source line, and its final also writes an .epub); narrated script|audio (script: every reading's script in one markdown file; audio: every reading's newest mix joined in unit order into .pablo/out/<slug>-narrated.m4a with `gap` seconds between readings and, with `chapters`, a chapter per reading; refused while a reading is unperformed); radio bundle|player|stream (bundle: every episode's script plus its newest mixed audio and manifest in one directory, .pablo/out/<slug>-radio-bundle/; player is `pablo review`; stream: each episode's newest mixed audio and manifest, with its time to first audio, in the listening directory .pablo/out/stream/ where the review player finds it).",
     ),
   output: outputField.optional(),
+  gap: z.number().min(0).max(60).optional().describe("narrated --target audio: seconds of silence between readings (default 1.4)."),
+  chapters: z.boolean().optional().describe("narrated --target audio: write a chapter marker per reading, titled from its source unit."),
 });
 
 /**
@@ -1132,12 +1135,12 @@ const PUBLISH_ARGS = z.object({
  * output, target, where, chapters, words}`; an output that does not resolve
  * is a refusal naming the work's outputs.
  */
-export function publishOutput(projectPath: string, target: string | undefined, output: string | undefined): VerbResult {
+export function publishOutput(projectPath: string, target: string | undefined, output: string | undefined, options?: PublishOptions): VerbResult {
   const marker = readMarker(projectPath);
   if (!marker.ok) return { body: refusalBody(marker), exitCode: marker.code };
   const resolved = resolveOutput(marker.marker.outputs, output, "publish", trackOf(marker.marker));
   if (!resolved.ok) return outputRefusalBody(resolved);
-  const outcome = resolved.output.publish.run(projectPath, marker.marker.slug, marker.marker.title, target);
+  const outcome = resolved.output.publish.run(projectPath, marker.marker.slug, marker.marker.title, target, options);
   if (!outcome.ok) return { body: refusalBody(outcome), exitCode: outcome.code };
   return {
     body: {
@@ -1157,7 +1160,7 @@ export function publishOutput(projectPath: string, target: string | undefined, o
 async function runPublishVerb(args: z.infer<typeof PUBLISH_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
-  return publishOutput(resolved.projectPath, args.target, args.output);
+  return publishOutput(resolved.projectPath, args.target, args.output, { gap: args.gap, chapters: args.chapters });
 }
 
 // ---------------------------------------------------------------------------

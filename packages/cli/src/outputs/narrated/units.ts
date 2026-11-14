@@ -15,8 +15,8 @@ export const NARRATED_ID = "narrated";
 /** Where the readings land, work-relative. */
 export const NARRATED_DIR = "outputs/narrated/readings";
 
-/** The narrated output's publish targets. `script` compiles every reading's script into one file; the audio targets come with the mixer (W8). */
-export const NARRATED_PUBLISH_TARGETS = ["script"] as const;
+/** The narrated output's publish targets. `script` compiles every reading's script into one file; `audio` joins every reading's newest mix into one m4a (AGT-2306). */
+export const NARRATED_PUBLISH_TARGETS = ["script", "audio"] as const;
 
 /** What `--voices` takes: one narrator for everything (the default), or speaker lines for quoted dialogue too. */
 export const NARRATED_VOICES = ["narrator", "characters"] as const;

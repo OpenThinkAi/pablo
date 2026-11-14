@@ -56,7 +56,11 @@ the words no rule decided, for `outputs/narrated/pronounce.md`. `fix` and `mixer
 
 ```
 pablo publish --project ice-house --output narrated --target script
+pablo publish --project ice-house --output narrated --target audio [--gap 1.4] [--chapters]
 ```
 
-Writes `.pablo/out/<slug>-narrated-script.md`: every reading's script in unit order under
-`## Reading N: <title>`. `script` is the only target; the audio comes from `mix`.
+`script` writes `.pablo/out/<slug>-narrated-script.md`: every reading's script in unit order under
+`## Reading N: <title>`. `audio` joins every reading's newest mix, in unit order, into
+`.pablo/out/<slug>-narrated.m4a` (AAC 96k) with `--gap` seconds of silence between readings (default 1.4)
+and, with `--chapters`, a chapter marker per reading titled from its source unit. It is refused, naming
+the readings, while any is unwritten or unmixed. It needs `ffmpeg` and `ffprobe` on PATH.
