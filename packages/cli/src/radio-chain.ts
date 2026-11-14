@@ -20,9 +20,11 @@
  */
 
 import { readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { createProviders, loadConfig } from "@openthink/pablo-core";
 import type { Adapter, Intent } from "@openthink/pablo-core";
 import type { CastingDeps } from "./radio";
+import { repoRoot } from "./branch";
 import { castingVerbs } from "./casting-verbs";
 import { readCoreState } from "./core/machine";
 import { mergeDraft } from "./novel/merge";
@@ -85,8 +87,15 @@ export async function writeUnit(
   work: string,
   output: string,
   unit: number,
-  options: { readonly env: Record<string, string | undefined>; readonly writer?: Adapter | undefined; readonly now?: (() => Date) | undefined; readonly words?: number | undefined },
-): Promise<{ ok: true; branch: string; path: string } | { ok: false; result: VerbResult }> {
+  options: {
+    readonly env: Record<string, string | undefined>;
+    readonly writer?: Adapter | undefined;
+    readonly now?: (() => Date) | undefined;
+    readonly words?: number | undefined;
+    /** `write --direction` (AGT-2323: the listener check's confusions on a redraft). */
+    readonly direction?: string | undefined;
+  },
+): Promise<{ ok: true; branch: string; path: string; file: string } | { ok: false; result: VerbResult }> {
   const { exitCode, text } = await withWriteLock(() =>
     captureConsoleLog(() =>
       runWrite(
@@ -99,6 +108,7 @@ export async function writeUnit(
           dryRun: false,
           json: true,
           force: false,
+          ...(options.direction !== undefined ? { direction: options.direction } : {}),
         },
         vault,
         work,
@@ -116,13 +126,28 @@ export async function writeUnit(
   if (exitCode !== 0 || body["ok"] !== true) {
     return { ok: false, result: { body: { ...body, output, unit }, exitCode: exitCode === 0 ? 1 : exitCode } };
   }
-  return { ok: true, branch: body["branch"] as string, path: body["path"] as string };
+  const path = body["path"] as string;
+  // The draft as it sits in its branch's worktree, for a check before it is accepted (the listener, AGT-2323).
+  const repo = repoRoot(work);
+  const worktree = typeof body["worktree"] === "string" ? body["worktree"] : undefined;
+  const file = worktree !== undefined && repo !== undefined ? join(worktree, relative(repo, work), path) : join(work, path);
+  return { ok: true, branch: body["branch"] as string, path, file };
 }
 
 /** Writes episode `unit`'s script and accepts it (merge with the after-write rituals), as an on-demand run does. */
 export async function writeAndAcceptEpisode(chain: RadioChain, unit: number, deps: WriteDeps): Promise<StepOutcome & { readonly branch?: string; readonly path?: string; readonly merged?: string }> {
   const drafted = await writeUnit(chain.vault, chain.work, RADIO_ID, unit, { env: chain.ctx.env, writer: deps.writer, now: deps.now });
   if (!drafted.ok) return outcome(drafted.result);
+  return acceptEpisode(chain, unit, drafted, deps);
+}
+
+/** Accepts episode `unit`'s draft branch (merge with the after-write rituals), as an on-demand run does. */
+export async function acceptEpisode(
+  chain: RadioChain,
+  unit: number,
+  drafted: { readonly branch: string; readonly path: string },
+  deps: WriteDeps,
+): Promise<StepOutcome & { readonly branch?: string; readonly path?: string; readonly merged?: string }> {
   const merged = await mergeDraft(chain.work, drafted.branch, {
     slug: chain.slug,
     env: chain.ctx.env,

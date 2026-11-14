@@ -366,8 +366,23 @@ function ensureSeam(uv: boolean): { looks: () => number; restore: () => void } {
   };
 }
 
+/** A listener that follows every episode (AGT-2323): the run goes on to casting. Never a real model. */
+const FOLLOWED = '{"retelling": "A family hears from a cousin.", "confusions": [], "repeats": [], "verdict": "yes"}';
+const LOST = '{"retelling": "Someone speaks.", "confusions": [{"line": 2, "what": "who is speaking, and where are we?"}], "repeats": [{"line": 3, "what": "sounds like a second introduction"}], "verdict": "mostly"}';
+
+/** A fake listener: `lost(n)` says whether its n-th listening (beat comparisons not counted) could not follow the episode. */
+function fakeListener(lost: (n: number) => boolean = () => false): ((prompt: string) => Promise<string>) & { listened: string[] } {
+  const listened: string[] = [];
+  const ask = async (prompt: string): Promise<string> => {
+    if (prompt.includes("Compare the retelling to the beats")) return '{"missed": []}';
+    listened.push(prompt);
+    return lost(listened.length) ? LOST : FOLLOWED;
+  };
+  return Object.assign(ask, { listened });
+}
+
 function depsFor(agent: HarnessProvider, writer: Adapter, extra: Partial<StoryDeps> = {}): StoryDeps {
-  return { agent, writer, planner: fakeTrackPlanner(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
+  return { agent, writer, planner: fakeTrackPlanner(), listener: fakeListener(), now: () => new Date("2026-10-11T12:00:00Z"), ...extra };
 }
 
 function streamIndex(work: string): { episode: number; audio: string }[] {
@@ -714,6 +729,99 @@ test("AC5: --output radio on a machine that cannot provision the Python side (no
     expect((result.body as { missing: string[] }).missing).toEqual(["uv (brew install uv)"]);
     expect(existsSync(join(vault, "stories"))).toBe(false);
     expect(machine.calls).toEqual([]);
+  } finally {
+    seam.restore();
+  }
+}, SLOW);
+
+// ---------------------------------------------------------------------------
+// AGT-2323: the listener check before casting
+// ---------------------------------------------------------------------------
+
+test("AGT-2323: an episode a first-time listener cannot follow is redrafted once with the confusions as direction, then cast", async () => {
+  const { vault, ctx } = tempVault();
+  const seam = ensureSeam(true);
+  const machine = fakeMachine();
+  const writer = scriptWriter();
+  // Episode 1's first draft is lost on the listener; everything after is followed.
+  const listener = fakeListener((n) => n === 1);
+  try {
+    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, depsFor(fakeHarness().agent, writer, { casting: machine.deps, listener }));
+    const body = result.body as Record<string, any>;
+    expect(body.message).toBeUndefined();
+    expect(result.exitCode).toBe(0);
+    const work = join(vault, "stories", body.project);
+    // The listener heard only spoken lines and sounds: never the CAST line or a cue's description.
+    expect(listener.listened[0]).toContain("NARRATOR: Episode 1, and narrator speaks.");
+    expect(listener.listened[0]).toContain("(music)");
+    expect(listener.listened[0]).not.toContain("organ swell");
+    expect(listener.listened[0]).not.toContain("CAST:");
+    // One redraft of episode 1, steered by what the listener could not follow.
+    expect(writer.calls).toBe(5);
+    expect(writer.prompts[1]).toContain("first-time listener");
+    expect(writer.prompts[1]).toContain("who is speaking, and where are we?");
+    expect(writer.prompts[0]).not.toContain("first-time listener");
+    // The first draft's branch is gone; the redraft was accepted and the episode cast.
+    expect(git(vault, "branch", "--list", "draft/radio-ep01")).toBe("");
+    const ep1 = body.drafts.radio.find((d: { unit: number }) => d.unit === 1);
+    expect(ep1.branch).toBe("draft/radio-ep01-v2");
+    expect(ep1.listener).toMatchObject({ verdict: "yes", passed: true, redrafted: { from: "draft/radio-ep01", verdict: "mostly", hits: 2 } });
+    expect(streamIndex(work).map((c) => c.episode)).toEqual([1, 2, 3, 4]);
+  } finally {
+    seam.restore();
+  }
+}, SLOW);
+
+test("AGT-2323: an episode still not followed after one redraft stops the run for review before casting; accepted and resumed, it goes on", async () => {
+  const { vault, env, ctx } = tempVault();
+  const seam = ensureSeam(true);
+  const machine = fakeMachine();
+  const writer = scriptWriter();
+  let lost = true;
+  const listener = fakeListener(() => lost);
+  const deps = depsFor(fakeHarness().agent, writer, { casting: machine.deps, listener });
+  try {
+    const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, deps);
+    const body = result.body as Record<string, any>;
+    expect(result.exitCode).toBe(0);
+    expect(body.waiting).toMatchObject({ step: "draft:radio:1", branch: "draft/radio-ep01-v2", review: "listener", output: "radio", unit: 1 });
+    expect(body.waiting.listener).toMatchObject({ verdict: "mostly", passed: false, redrafted: { from: "draft/radio-ep01" } });
+    expect(body.waiting.listener.hits.map((h: { kind: string }) => h.kind)).toEqual(["confusion", "repeat"]);
+    expect(body.missing[0]).toContain("episode 1 cannot be followed by ear");
+    expect(body.next).toContain("pablo merge draft/radio-ep01-v2");
+    // Nothing was cast, performed or merged; only the two drafts were written.
+    expect(machine.calls).toEqual([]);
+    expect(writer.calls).toBe(2);
+    expect(git(vault, "branch", "--list", "draft/radio-ep01")).toBe("");
+    const work = join(vault, "stories", body.project);
+    expect(existsSync(join(work, "outputs", "radio", "episodes"))).toBe(false);
+
+    // Resumed without accepting: still waiting, nothing runs.
+    const still = await runStory({ project: body.project }, ctx, deps);
+    expect((still.body as Record<string, any>).waiting).toMatchObject({ step: "draft:radio:1" });
+    expect(writer.calls).toBe(2);
+
+    // The author fixes and accepts it; the run goes on from there.
+    expect((await acceptBranchInProject(work, "draft/radio-ep01-v2", env, writer)).exitCode).toBe(0);
+    lost = false;
+    const resumed = await runStory({ project: body.project }, ctx, deps);
+    expect((resumed.body as Record<string, any>).message).toBeUndefined();
+    expect(resumed.exitCode).toBe(0);
+    expect(writer.calls).toBe(5);
+    expect(streamIndex(work).map((c) => c.episode)).toEqual([1, 2, 3, 4]);
+  } finally {
+    seam.restore();
+  }
+}, SLOW);
+
+test("AGT-2323: --no-check never asks the listener", async () => {
+  const { ctx } = tempVault();
+  const seam = ensureSeam(true);
+  const listener = fakeListener(() => true);
+  try {
+    const result = await runStory({ prompt: SPEC, output: ["radio"], noCheck: true }, ctx, depsFor(fakeHarness().agent, scriptWriter(), { casting: fakeMachine().deps, listener }));
+    expect(result.exitCode).toBe(0);
+    expect(listener.listened).toEqual([]);
   } finally {
     seam.restore();
   }
