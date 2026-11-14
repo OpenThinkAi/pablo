@@ -22,7 +22,19 @@ const QUOTES = new Set(['"', "“", "”"]);
 
 /** Whether the text has a `CAST:` line (`script.py`'s `has_cast_line`). */
 export function hasCastLine(text: string): boolean {
-  return text.split(/\r?\n/).some((raw) => raw.trim().replace(/\*/g, "").toUpperCase().startsWith("CAST:"));
+  return text.split(/\r?\n/).some(isCastLine);
+}
+
+/** Whether one line is a `CAST:` line. */
+export function isCastLine(line: string): boolean {
+  return line.trim().replace(/\*/g, "").toUpperCase().startsWith("CAST:");
+}
+
+/** The speaker of a spoken line (`ANNOUNCER`, `ODILE`), or undefined for a cue, a `CAST:` line or anything else. */
+export function speakerOf(line: string): string | undefined {
+  const raw = line.trim().replace(/\*/g, "");
+  if (isCastLine(raw) || CUE.test(raw)) return undefined;
+  return LINE.exec(raw)?.[1]?.trim();
 }
 
 /** How many lines the frontmatter takes (0 when there is none, or the fence is unclosed). */

@@ -705,7 +705,8 @@ export async function runWrite(
         const piece = (partsPlan.finish ?? ((text: string) => text))(normalizeOutput(part.text), index).trim();
         if (piece === "" || part.stats === undefined) {
           discardBranch();
-          emitError(`pablo: the model returned an empty answer for beat ${index} of ${partsPlan.count}; nothing written`, undefined, 2, args.json);
+          const trimmed = part.text.trim() !== "" && part.stats !== undefined;
+          emitError(`pablo: ${trimmed ? `beat ${index} of ${partsPlan.count} was entirely past its boundary, so nothing was left after trimming` : `the model returned an empty answer for beat ${index} of ${partsPlan.count}`}; nothing written`, undefined, 2, args.json);
           return 2;
         }
         pieces.push(piece);

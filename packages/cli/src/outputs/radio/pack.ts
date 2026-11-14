@@ -19,7 +19,7 @@ import { CAST_ENDS_AT, packFromInputs } from "../../novel/pack";
 import { frontmatterField } from "../novel/plan";
 import type { UnitPackOptions, UnitPackOutcome, UnitParts, UnitPreconditions } from "../types";
 import { radioUnitFiles } from "./plan";
-import { castEntries } from "./script";
+import { castEntries, isCastLine, speakerOf } from "./script";
 import { radioEpisodeWords, radioStyleOf } from "./style";
 import { RADIO_ID } from "./units";
 
@@ -141,9 +141,8 @@ const PART_TAIL_LINES = 24;
 /** Characters of the next beat named to a part as the place to stop before. */
 const NEXT_BEAT_CHARS = 400;
 
-const SPEECH = /^([A-Z][A-Z .'\-]{0,30}):\s*\S/;
-const isCast = (line: string): boolean => line.replace(/\*/g, "").trim().toUpperCase().startsWith("CAST:");
-const speaker = (line: string): string | undefined => (isCast(line) ? undefined : SPEECH.exec(line.replace(/\*/g, "").trim())?.[1]?.trim());
+const isCast = isCastLine;
+const speaker = speakerOf;
 const isMusic = (line: string): boolean => /^\[MUSIC:/i.test(line.trim());
 
 /**
@@ -156,24 +155,23 @@ const isMusic = (line: string): boolean => /^\[MUSIC:/i.test(line.trim());
  */
 export function trimRadioPart(piece: string, index: number, count: number): string {
   let lines = piece.split(/\r?\n/);
-  const firstVoice = lines.findIndex((l) => {
-    const who = speaker(l);
-    return who !== undefined && who !== "ANNOUNCER" && who !== "NARRATOR";
-  });
-  const zoneEnd = firstVoice === -1 ? lines.length : firstVoice;
+  // The opening: the leading cast line, theme cues and announcer lines, ended by the first line that is anything else.
+  const opening = (all: readonly string[]): number => {
+    const at = all.findIndex((l) => l.trim() !== "" && !isCast(l) && !isMusic(l) && speaker(l) !== "ANNOUNCER");
+    return at === -1 ? all.length : at;
+  };
   if (index > 1) {
-    const lastAnnouncer = lines.slice(0, zoneEnd).reduce((at, l, i) => (speaker(l) === "ANNOUNCER" ? i : at), -1);
+    const zone = lines.slice(0, opening(lines));
+    const lastAnnouncer = zone.reduce((at, l, i) => (speaker(l) === "ANNOUNCER" ? i : at), -1);
     if (lastAnnouncer !== -1) {
-      const from = lines.slice(0, lastAnnouncer + 1).findIndex((l) => speaker(l) === "ANNOUNCER" || isMusic(l));
+      const from = zone.findIndex((l) => speaker(l) === "ANNOUNCER" || isMusic(l));
       lines = lines.filter((_, i) => i < from || i > lastAnnouncer);
     }
   }
   if (index < count) {
-    const open = index === 1 ? Math.max(0, lines.findIndex((l) => {
-      const who = speaker(l);
-      return who !== undefined && who !== "ANNOUNCER" && who !== "NARRATOR";
-    })) : 0;
-    const cut = lines.findIndex((l, i) => i >= open && speaker(l) === "ANNOUNCER");
+    // The first part's opening announcer stays; any announcer line after it is the sign-off.
+    const start = index === 1 ? opening(lines) : 0;
+    const cut = lines.findIndex((l, i) => i >= start && speaker(l) === "ANNOUNCER");
     if (cut !== -1) {
       let end = cut;
       while (end > 0 && (isMusic(lines[end - 1] as string) || (lines[end - 1] as string).trim() === "")) end -= 1;
@@ -208,7 +206,9 @@ export function radioParts(vaultRoot: string, workDir: string, episode: number, 
     plan: numbers.map((n, i) => {
       const row = rows.find((b) => b.chapter === n);
       const title = row === undefined ? `beat ${n}` : `beat ${n}, "${row.title}"`;
-      return `request ${i + 1} of ${count}: ${title}, about ${share} words; ${i === 0 ? "opens the episode (announcer, title); " : "no opening, no recap; "}${i === count - 1 ? "closes it" : "stops before the next beat"}`;
+      const opens = i === 0 ? "opens the episode (announcer, title)" : "no opening, no recap";
+      const closes = i === count - 1 ? "closes it" : "stops before the next beat";
+      return `request ${i + 1} of ${count}: ${title}, about ${share} words; ${opens}; ${closes}`;
     }),
     finish: (piece, index) => trimRadioPart(piece, index, count),
     stitch: stitchRadioParts,

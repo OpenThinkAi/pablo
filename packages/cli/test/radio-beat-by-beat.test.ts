@@ -215,6 +215,17 @@ test("trimRadioPart: a later part loses a repeated opening, a non-last part lose
   expect(trimRadioPart(scene, 3, 3)).toBe(scene);
 });
 
+test("trimRadioPart: a part with no character voice (announcer and narrator only) keeps its text", () => {
+  const first = ['CAST: ANNOUNCER=m "x", NARRATOR=f "y"', "[MUSIC: theme]", "ANNOUNCER: Title.", "NARRATOR: Only narration."].join("\n");
+  expect(trimRadioPart(first, 1, 3)).toBe(first);
+  const last = ["NARRATOR: Closing narration.", "ANNOUNCER: Good night.", "[MUSIC: theme out]"].join("\n");
+  expect(trimRadioPart(last, 3, 3)).toBe(last);
+  const lastWithOpening = ["[MUSIC: theme]", "ANNOUNCER: Again.", "NARRATOR: Closing narration.", "ANNOUNCER: Good night.", "[MUSIC: theme out]"].join("\n");
+  expect(trimRadioPart(lastWithOpening, 3, 3)).toBe(["NARRATOR: Closing narration.", "ANNOUNCER: Good night.", "[MUSIC: theme out]"].join("\n"));
+  const middleNarrator = ["NARRATOR: Bridge.", "ANNOUNCER: Early.", "[MUSIC: out]"].join("\n");
+  expect(trimRadioPart(middleNarrator, 2, 3)).toBe("NARRATOR: Bridge.");
+});
+
 test("stitchRadioParts: one CAST line, the union of roles, first description kept", () => {
   const out = stitchRadioParts([MIDDLE, OPEN]);
   expect(out.split("\n")[0]).toBe('CAST: WILFRED=m "thirties, quick", ODILE=f "thirties, other words", ANNOUNCER=m "fifties, formal", NARRATOR=f "forties, plain"');
