@@ -169,3 +169,21 @@ test("checkWork on a fiction work runs no claim-support check", () => {
   if (!outcome.ok) throw new Error(outcome.message);
   expect(outcome.hits.filter((hit) => hit.rule.startsWith("claim-"))).toEqual([]);
 });
+
+test("AGT-2295: on nonfiction a name in core/claims.md or research/ is known to the name check; a name in neither is still reported", () => {
+  const unit = "---\ntitle: The river\n---\n\nThe crews met Dončić at the ice house and Hartwell at the dock, then Grenfell came.\n";
+  const { vault, work: dir } = work("nonfiction", unit);
+  writeFileSync(join(dir, "core", "claims.md"), `${CLAIMS_MD}| 3 | Dončić ran the ice house | ice-harvest |\n`);
+  writeFileSync(join(dir, "research", "ice-harvest.md"), `${NOTE_ICE}\nHartwell kept the dock ledgers.\n`);
+  const names = (): string[] => {
+    const outcome = checkWork(vault, dir);
+    if (!outcome.ok) throw new Error(outcome.message);
+    return (outcome.core ?? []).filter((h) => h.rule === "unknown-name").map((h) => h.detail ?? "");
+  };
+  expect(names()).toEqual(["Grenfell"]);
+  // The claims file is a nonfiction rule only: on fiction the same name is unknown.
+  const markerPath = join(dir, "pablo.json");
+  const data = JSON.parse(readFileSync(markerPath, "utf8")) as Record<string, unknown>;
+  writeFileSync(markerPath, JSON.stringify({ ...data, track: "fiction" }));
+  expect(names()).toContain("Dončić");
+});

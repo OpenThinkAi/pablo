@@ -45,6 +45,10 @@ The stages, in order: `thesis`, `research`, `claims`, `outline`.
 
 ## Checks
 
+A work's `unknown-name` check (see [check](../commands.md#check)) treats every capitalised
+name in `core/claims.md` and the notes under `research/` as known, since the people a claim
+names are sourced; a name in the draft that appears in neither is still reported.
+
 Each `*.md` unit gets **claim support**. Every sentence that states a fact (a number, a
 name past its first word, or a cue such as "according to") is traced by shared words to a
 `core/claims.md` row or a note under `research/`:
