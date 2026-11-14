@@ -101,7 +101,7 @@ import { reviseCore } from "./revise";
 import type { ReviseCoreArgs } from "./revise";
 import { buildResume } from "./resume";
 import { readWorkStatus } from "./work-state";
-import { castingVerbs } from "./casting-verbs";
+import { addressedOutput, castingVerbs } from "./casting-verbs";
 import { saveCore } from "./save";
 import { addExemplar, addRule, flagLine, isVoicePathArgument, listVoices, readVoice, resolveVoice, scaffoldVoice } from "./voice";
 import type { VoiceLocation } from "./voice";
@@ -1023,7 +1023,14 @@ const BIND_ARGS = z.object({
   project: projectField,
   role: z.string().describe('A role from a script\'s `CAST:` line, e.g. "CORA".'),
   voice: z.string().describe("A voice slug in the shared library (<vault>/casting/voices/<slug>/card.json). Refused when absent or retired."),
+  output: z
+    .string()
+    .optional()
+    .describe('The performed output whose cast.json is written: "radio" (the default) or "narrated" (its narrator and character roles; one binding covers every reading).'),
 });
+
+/** Every flag `pablo bind` takes (AGT-2300); the CLI refuses any other rather than ignoring it. */
+export const BIND_FLAGS: readonly string[] = [...Object.keys(BIND_ARGS.shape), "json", "help"];
 
 /**
  * AGT-1680: bind a role to a library voice. `cast.json` pins the card's hash and records `by: "manual"`, so a
@@ -1032,7 +1039,9 @@ const BIND_ARGS = z.object({
 async function runBindVerb(args: z.infer<typeof BIND_ARGS>, ctx: VerbContext): Promise<VerbResult> {
   const resolved = resolveVerbProject(ctx, args.project);
   if (!resolved.ok) return resolved.result;
-  return radioBind({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.vaultRoot, resolved.projectPath, args);
+  const output = addressedOutput({ output: args.output }, resolved.projectPath, "bind");
+  if (typeof output !== "string") return output;
+  return radioBind({ env: ctx.env, stderr: ctx.stderr }, ctx.casting ?? realCastingDeps(ctx.env), resolved.vaultRoot, resolved.projectPath, { role: args.role, voice: args.voice, output });
 }
 
 // ---------------------------------------------------------------------------

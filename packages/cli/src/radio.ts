@@ -17,6 +17,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { castingState, ensureProvisioned, realCastingDeps, runPython, UV_INSTALL } from "./casting";
+import { audioEnv } from "./outputs/audio";
+import type { AudioOutput } from "./outputs/audio";
 import { OUTPUTS } from "./outputs/registry";
 import type { CastingContext, CastingDeps } from "./casting";
 import type { VerbResult } from "./verbs";
@@ -100,9 +102,11 @@ export function radioBind(
   deps: CastingDeps,
   vaultRoot: string,
   work: string,
-  args: { readonly role: string; readonly voice: string },
+  args: { readonly role: string; readonly voice: string; readonly output?: AudioOutput },
 ): VerbResult {
-  return python(ctx, deps, work, ["bind", "--role", args.role, "--voice", args.voice, ...vaultArgs(vaultRoot)]);
+  // AGT-2300: the output whose `cast.json` is written (narrated's lives in `outputs/narrated/casting/`); radio by default.
+  const casting = args.output === undefined ? ctx : { ...ctx, env: audioEnv(ctx.env, args.output) };
+  return python(casting, deps, work, ["bind", "--role", args.role, "--voice", args.voice, ...vaultArgs(vaultRoot)]);
 }
 
 /** Plain-text lines for the radio part of a `check` body. */

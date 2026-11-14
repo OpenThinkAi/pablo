@@ -203,7 +203,7 @@ export const USAGE_LINES: readonly string[] = [
     "                                            each failure says how to fix it, exit 1 on one",
     "  pablo status --project <slug> --for \"episode N\"",
     "                                            radio: exit 2 while a role is unbound",
-    "  pablo bind --project <slug> --role <NAME> --voice <slug>",
+    "  pablo bind --project <slug> --role <NAME> --voice <slug> [--output radio|narrated]",
     "                                            pin a script role to a voice in the library",
     "  pablo audition --dry-run [--project <slug>]",
     "                                            provision the casting side (uv sync --frozen,",
