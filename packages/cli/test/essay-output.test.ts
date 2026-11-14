@@ -213,6 +213,16 @@ test("AC1: write --output essay --unit N puts section N into essay.md on draft/e
   expect(String(again.body["message"])).toContain("section 1 already has text in outputs/essay/essay.md");
 });
 
+test("AGT-2296: a leading-dot decimal keeps its space through write --output essay", async () => {
+  const { vault, work, home } = nonfiction({ essay: true });
+  const reply = "Opponents shot .376 from three, above the league's .346.";
+  const result = await write(vault, work, home, "1", {}, fakeEssayWriter(reply));
+  expect(result.code).toBe(0);
+  const onBranch = git(vault, "show", "draft/essay-01:essays/the-press/outputs/essay/essay.md");
+  expect(onBranch).toContain("shot .376 from three");
+  expect(onBranch).toContain("league's .346.");
+});
+
 test("a nonfiction work with no output is refused naming `pablo output add essay`, never a beat", async () => {
   const { vault, work, home } = nonfiction();
   const lines: string[] = [];

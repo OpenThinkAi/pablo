@@ -41,7 +41,8 @@ export function normalizeOutput(text: string): string {
       .replace(/[‘’‚‛]/g, "'")
       // A dash that stood where punctuation already was leaves a seam; close it.
       .replace(/,\s*,/g, ",")
-      .replace(/[ \t]+([,.;:!?])/g, "$1")
+      // A space before a leading-dot decimal (`shot .376`, AGT-2296) is the writer's, not a seam: keep it.
+      .replace(/[ \t]+([,.;:!?])(?!(?<=\.)\d)/g, "$1")
       .replace(/,([.;:!?])/g, "$1")
       .replace(/[ \t]+$/gm, "")
       .trim()
