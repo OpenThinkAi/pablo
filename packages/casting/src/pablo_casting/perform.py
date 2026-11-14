@@ -32,11 +32,14 @@ stretch that brings it into the band (a sox WSOLA `tempo -s` factor; the mix
 applies it, C12) is measured from the aligner's timings. A line already inside
 the band is not stretched (1.0); an out-of-band one goes to the nearest band
 edge, not the exact target (`target_wps` is kept in the manifest for
-reference). A reused take is re-measured under this policy. The stretch must sit
-inside `PACE_RANGE` [0.75, 1.05]: the pace gate's `stretch_range` is held to it,
-so a take that would need more is a failed take and the line is retaken. A
-best-of take that still needs more is stretched only to the range's edge and
-says so (`stretch_needed`, and its auto flag). Takes themselves are never
+reference). A reused take is re-measured under this policy. The mix applies
+at most `PACE_RANGE` [0.75, 1.05]; the pace gate's own `stretch_range` (the
+card's, else the calibrated default [0.75, 1.2], AGT-2321) decides whether a
+take passes, so a take that needs more than the gate allows is a failed take
+and the line is retaken. A take that needs more than the mix applies (a
+passing one up to the gate's edge, or a best-of one) is stretched only to
+`PACE_RANGE`'s edge and says so (`stretch_needed`; a best-of take's auto flag
+too): the author heard and used takes like that (AGT-2321). Takes themselves are never
 paced: `take.wav` is the engine's audio, finished by `ending.py` (AGT-1789):
 cut at the end of its voice (never before the last word's end) plus the air
 (`casting.json` `ending.air`, 0.18 s by default), faded inside the air, and
@@ -323,17 +326,18 @@ def _composite(scores: Mapping[str, object], thresholds: Mapping[str, object]) -
     return wer_ok + num("sim_card") + num("utmos") / 5.0
 
 
-def _stretch_ok(scores: Mapping[str, object]) -> bool:
+def _stretch_ok(scores: Mapping[str, object], thresholds: Mapping[str, object]) -> bool:
     stretch = scores.get("stretch")
-    return isinstance(stretch, (int, float)) and PACE_RANGE[0] <= stretch <= PACE_RANGE[1]
+    low, high = thresholds.get("stretch_range") or PACE_RANGE  # type: ignore[misc]
+    return isinstance(stretch, (int, float)) and float(low) <= stretch <= float(high)
 
 
 def choose(attempts: Sequence[Attempt], thresholds: Mapping[str, object]) -> Attempt:
-    """The first passing attempt; else the best: stretch inside the pace range first, then the composite."""
+    """The first passing attempt; else the best: stretch inside the gate's pace range first, then the composite."""
     for attempt in attempts:
         if attempt.passed:
             return attempt
-    return max(attempts, key=lambda a: (_stretch_ok(a.scores), _composite(a.scores, thresholds), -a.attempt))
+    return max(attempts, key=lambda a: (_stretch_ok(a.scores, thresholds), _composite(a.scores, thresholds), -a.attempt))
 
 
 def _emit(event: Mapping[str, object], err: TextIO, out: TextIO | None) -> None:
@@ -402,8 +406,8 @@ class Performer:
         return self.drama.spec, self.drama
 
     def thresholds(self, card: Card) -> dict[str, object]:
-        # The pace policy holds the stretch the gate allows to [0.75, 1.05], whatever a card calibrated.
-        return {**thresholds_for(card), "stretch_range": [PACE_RANGE[0], PACE_RANGE[1]], **({} if self.pronounce else PRONOUNCE_OFF)}
+        # The gate's stretch range is the card's (else the calibrated default); the mix still applies at most PACE_RANGE.
+        return {**thresholds_for(card), **({} if self.pronounce else PRONOUNCE_OFF)}
 
     def base_inputs(self, take_pass: Pass, spoken: Sequence[SpokenLine], reasons: Sequence[str] = ()) -> TakeInputs:
         first = spoken[take_pass.lines[0].i]

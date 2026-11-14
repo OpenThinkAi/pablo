@@ -37,7 +37,10 @@ Commands:
              could not fill gets a voice auditioned unattended, screened,
              trialled through the engine and the full gate stack, admitted with
              `admitted.by: auto` and bound `by: design`; one retry with a
-             re-phrased instruct, then a refusal (exit 2) naming the role.
+             re-phrased instruct, then the best trialled candidate is admitted
+             anyway (`admitted.by: best-of`, binding marked review, how far it
+             missed each gate reported; AGT-2321); a refusal (exit 2) naming the
+             role only when no candidate got past the screen.
 - `describe --describe "..." [--role R] [--gender f|m|x]`  the `CAST:`
              mapper's traits for a description, the phrases it could not
              normalise, the traits vocabulary and the designer instruct it
@@ -607,7 +610,7 @@ def cmd_voices(env: Mapping[str, str], args: argparse.Namespace) -> Result:
     if sub == "list":
         rows = [library.summary(slug) for slug in library.slugs()]
         if args.auto_admitted:
-            rows = [row for row in rows if row.get("admitted_by") == "auto"]
+            rows = [row for row in rows if row.get("admitted_by") in ("auto", "best-of")]
         return {"ok": True, "library": str(library.root), "voices": rows}, EXIT_OK
     if len(args.rest) < 2:
         return refused(f"voices {sub} needs a voice slug", missing=["slug"])

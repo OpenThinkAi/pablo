@@ -15,6 +15,11 @@ median is not on the worse side of the approved median (the two are not
 separated on that score, as WER usually is not between voices), the midpoint
 says nothing and the percentile stands; the fit records why.
 
+The pace gate's `stretch_range` is two-sided (a take can need slowing down or
+speeding up), so it is fitted as `[p5, p95]` of the approved takes' needed
+stretch, widened to hold 1.0 (a take already in its band). `others` say nothing
+about it: a rejected take is not rejected for its pace in one direction.
+
 `others` are the takes Matt did not approve: other voices scored against this
 card (for the similarity gates) and rejected takes. Records are score sets,
 not audio, so calibrating never loads a model: a directory of JSON files (a
@@ -46,6 +51,9 @@ FITTED: tuple[tuple[str, str, str], ...] = (
     ("ovrl_min", "ovrl", "min"),
 )
 
+RANGES: tuple[tuple[str, str], ...] = (("stretch_range", "stretch"),)
+"""Two-sided thresholds, fitted as [p5, p95] of the approved takes (AGT-2321)."""
+
 PERCENTILE = 5.0
 # Fewer approved takes than this and a fit is reported with a warning (the
 # design's C17 calibrates from at least 30 per role).
@@ -74,19 +82,19 @@ class Fit:
     direction: str
     n_approved: int
     n_others: int
-    percentile: float
+    percentile: float | list[float]
     midpoint: float | None
     chose: str
-    value: float | int
+    value: float | int | list[float]
     note: str | None
 
     def as_body(self) -> dict[str, object]:
         body: dict[str, object] = {
             "score": self.score,
-            "direction": "higher is better" if self.direction == "min" else "lower is better",
+            "direction": {"min": "higher is better", "max": "lower is better"}.get(self.direction, "inside a range"),
             "approved": self.n_approved,
             "others": self.n_others,
-            "percentile": round(self.percentile, 4),
+            "percentile": [round(v, 4) for v in self.percentile] if isinstance(self.percentile, list) else round(self.percentile, 4),
             "midpoint": None if self.midpoint is None else round(self.midpoint, 4),
             "chose": self.chose,
             "value": self.value,
@@ -118,6 +126,16 @@ def fit_threshold(key: str, score: str, direction: str, approved: Sequence[float
     return Fit(key, score, direction, len(approved), len(others), p, midpoint, chose, rounded, note)
 
 
+def fit_range(key: str, score: str, approved: Sequence[float], n_others: int = 0) -> Fit:
+    """A two-sided threshold: [p5, p95] of `approved`, widened to hold 1.0. `approved` must be non-empty."""
+    low, high = percentile(approved, PERCENTILE), percentile(approved, 100.0 - PERCENTILE)
+    value = [round(min(low, 1.0), 3), round(max(high, 1.0), 3)]
+    note = None
+    if len(approved) < FEW:
+        note = f"only {len(approved)} approved takes (calibrate from at least {FEW})"
+    return Fit(key, score, "range", len(approved), n_others, [low, high], None, f"p{PERCENTILE:g}-p{100.0 - PERCENTILE:g}", value, note)
+
+
 def calibrate(approved: Sequence[Mapping[str, object]], others: Sequence[Mapping[str, object]]) -> dict[str, Fit]:
     """Fits every threshold whose score the approved records carry."""
     fits: dict[str, Fit] = {}
@@ -126,6 +144,10 @@ def calibrate(approved: Sequence[Mapping[str, object]], others: Sequence[Mapping
         if not a:
             continue
         fits[key] = fit_threshold(key, score, direction, a, _column(others, score))
+    for key, score in RANGES:
+        a = _column(approved, score)
+        if a:
+            fits[key] = fit_range(key, score, a, len(_column(others, score)))
     return fits
 
 
