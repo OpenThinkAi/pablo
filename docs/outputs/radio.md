@@ -22,6 +22,7 @@ Scaffolds `outputs/radio/` (`plan.md`, `RULES.md`); scripts live in
 |---|---|
 | Script episode N | `pablo write --project ice-house --output radio --unit 1` |
 | Cast the roles | `pablo cast --auto --project ice-house --episode 1`, or the mixer's Cast panel |
+| Preview what the engine says | `pablo pronounce --project ice-house --episode 1` (respellings go in `outputs/radio/pronounce.md`) |
 | Perform | `pablo perform --project ice-house --episode 1` |
 | Mix | `pablo mix --project ice-house --episode 1`, then edit in `pablo mixer --project ice-house --episode 1` |
 | Re-record flagged lines | `pablo fix --project ice-house --episode 1` (flag lines in `pablo review` or the mixer's punch list) |

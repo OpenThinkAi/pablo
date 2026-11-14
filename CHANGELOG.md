@@ -3,6 +3,32 @@
 Notable changes per release of `@openthink/pablo`, `@openthink/pablo-core` and
 `@openthink/pablo-tui` (they release together at one version). The newest is first.
 
+## 0.5.0
+
+### Fixed
+
+- **Audio renders work again.** Every `pablo perform` on 0.4.0 failed on its first gate score
+  (`'PinnedPredictor' object has no attribute 'target_transform'`): the pinned audiobox loader
+  dropped the last step of the setup it copies. Radio and narrated outputs render again.
+- **`pablo cast --auto --design` no longer stops after the first role** with
+  `No module named 'speechmos.utmos22'`: the voice-quality scorer and the DNSMOS package share
+  the name `speechmos`, and design loads them in the other order from `perform`.
+
+### Added
+
+- **`pablo pronounce`** shows what the voice engine will say before any render: for each script
+  line whose spoken form differs from its text, the changed words and the full engine text, then
+  the words no rule or lexicon entry decided. Read-only, loads no model; also an MCP tool. See
+  *What the engine reads* in `docs/commands.md`.
+- **Spoken forms for the engine** (the script itself is unchanged, and the words gate still
+  compares against it): number ranges ("10-20%" is "ten to twenty percent"), scores ("120-119"),
+  minus signs, leading-dot decimals (".376"), dates with full or abbreviated month names ("April
+  23" is "April twenty-third"), times, fractions, magnitudes ("$7T"), units, decades, Q and FY,
+  common abbreviations (Gov., Dr., vs., e.g.) and symbols. On a `nonfiction` work, acronyms are
+  read as spaced letters ("AI" is "A I"): dotted letters were heard read as a break, and "Ai" as
+  "eye". Take keys move only for lines whose spoken form changed, so fiction takes already
+  rendered are kept.
+
 ## 0.4.0
 
 ### Breaking
