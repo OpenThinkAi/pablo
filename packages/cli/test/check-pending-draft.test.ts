@@ -130,7 +130,7 @@ test("check --unit N checks section N's pending draft, and main alone still refu
   const picked = checkWorkOrPending(vault, work, undefined, "essay", 1, undefined, env);
   expect(picked.outcome.ok).toBe(true);
   if (!picked.outcome.ok) return;
-  expect(picked.outcome.branch).toBe("draft/essay-01");
+  expect(picked.outcome.branch).toBe("draft/the-press/essay-01");
   expect(picked.workDir).not.toBe(work);
   expect(picked.outcome.hits.some((h) => h.rule === "foreshadow" && h.path === "outputs/essay/essay.md")).toBe(true);
   // A unit with no draft anywhere is still the old refusal.
@@ -143,8 +143,8 @@ test("check --branch checks that draft branch's units", async () => {
   const { vault, work, home } = nonfiction({ essay: true });
   await write(vault, work, home, "1", {}, fakeEssayWriter(DASHED));
   const env = { PATH: NO_THINK_PATH, PABLO_HOME: home };
-  const picked = checkWorkOrPending(vault, work, undefined, "essay", undefined, "draft/essay-01", env);
-  expect(picked.outcome.ok && picked.outcome.branch).toBe("draft/essay-01");
+  const picked = checkWorkOrPending(vault, work, undefined, "essay", undefined, "draft/the-press/essay-01", env);
+  expect(picked.outcome.ok && picked.outcome.branch).toBe("draft/the-press/essay-01");
   const missing = checkWorkOrPending(vault, work, undefined, "essay", undefined, "draft/nope", env);
   expect(missing.outcome.ok).toBe(false);
   if (!missing.outcome.ok) expect(missing.outcome.message).toContain("no such branch");
@@ -153,7 +153,7 @@ test("check --branch checks that draft branch's units", async () => {
 test("the post-write check runs for every essay section, not only the first", async () => {
   const { vault, work, home } = nonfiction({ essay: true });
   await write(vault, work, home, "1");
-  const merged = await mergeDraft(work, "draft/essay-01", { slug: "the-press", env: { PATH: NO_THINK_PATH }, now: NOW });
+  const merged = await mergeDraft(work, "draft/the-press/essay-01", { slug: "the-press", env: { PATH: NO_THINK_PATH }, now: NOW });
   expect(merged.ok).toBe(true);
   const second = await write(vault, work, home, "2", {}, fakeEssayWriter("Luther's theses were in print within weeks [#2]. Little did he know what came next."));
   expect(second.code).toBe(0);
@@ -188,7 +188,7 @@ test("check --strict exits 1 when a hit is reported, 0 otherwise", async () => {
     expect(loose).toBe(0);
     expect(strict).toBe(1);
     const body = JSON.parse(out.lines[0] as string) as { branch?: string };
-    expect(body.branch).toBe("draft/essay-01");
+    expect(body.branch).toBe("draft/the-press/essay-01");
   } finally {
     out.restore();
     if (prev === undefined) delete process.env["PABLO_HOME"];

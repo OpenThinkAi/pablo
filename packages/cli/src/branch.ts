@@ -16,10 +16,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, realpathSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { branchBelongsTo } from "./branch-names";
+import { readMarker } from "./marker";
 
 type Env = Record<string, string | undefined>;
 
-/** The kinds of change branch, by prefix. `plan/` is a compose session's planning writes (AGT-1557). */
+/**
+ * The kinds of change branch, by prefix. `plan/` is a compose session's planning writes (AGT-1557). New branches are
+ * per work (`draft/<slug>/story`, AGT-2292, `branch-names.ts`); the older unscoped names still read as the same kinds.
+ */
 export const BRANCH_KINDS = ["draft", "revise", "edit", "reader", "plan"] as const;
 export type BranchKind = (typeof BRANCH_KINDS)[number];
 
@@ -158,8 +163,12 @@ export function commitAs(worktree: string, opts: CommitOptions): BranchResult {
 
 export type BranchList = Record<BranchKind, string[]>;
 
-/** Change branches grouped by kind, sorted by name. Branches of no kind (`main`) are omitted. */
-export function listBranches(repo: string): { ok: true; branches: BranchList } | { ok: false; notice: string } {
+/**
+ * Change branches grouped by kind, sorted by name. Branches of no kind (`main`) are omitted. With `slug`, only the
+ * work's own branches are listed (AGT-2292): those scoped to it (`draft/<slug>/...`) and the older unscoped names,
+ * never another work's scoped branch.
+ */
+export function listBranches(repo: string, slug?: string): { ok: true; branches: BranchList } | { ok: false; notice: string } {
   let out: string;
   try {
     out = git(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]);
@@ -169,7 +178,7 @@ export function listBranches(repo: string): { ok: true; branches: BranchList } |
   const branches: BranchList = { draft: [], revise: [], edit: [], reader: [], plan: [] };
   for (const name of out.split("\n").filter(Boolean).sort()) {
     const kind = branchKind(name);
-    if (kind) branches[kind].push(name);
+    if (kind && (slug === undefined || branchBelongsTo(name, slug))) branches[kind].push(name);
   }
   return { ok: true, branches };
 }
@@ -202,11 +211,13 @@ function changesUnder(repo: string, name: string, rel: string): boolean {
 /**
  * The branches waiting for review: review branches (draft/, revise/, edit/, plan/; `reader/` is a retired kind, D-20,
  * and never waits) whose merge into `main` would change something. With `workDir`, only a change under that work's
- * own directory counts, so another work's branch in the same vault repository is not waiting here (AGT-2283).
+ * own directory counts, so another work's branch in the same vault repository is not waiting here (AGT-2283), and a branch
+ * scoped to another work's slug is never listed (AGT-2292).
  * Sorted by name; a git failure is a notice.
  */
 export function waitingBranches(repo: string, workDir?: string): { ok: true; branches: string[] } | { ok: false; notice: string } {
-  const listed = listBranches(repo);
+  const marker = workDir === undefined ? undefined : readMarker(workDir);
+  const listed = listBranches(repo, marker?.ok ? marker.marker.slug : undefined);
   if (!listed.ok) return listed;
   let rel = ".";
   if (workDir !== undefined) {

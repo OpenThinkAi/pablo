@@ -12,6 +12,8 @@
  * without an import cycle.
  */
 
+import { unscopedBranch } from "../../branch-names";
+
 /** The radio output's id in `pablo.json`'s `outputs` and in the registry. */
 export const RADIO_ID = "radio";
 
@@ -64,6 +66,7 @@ export function radioBranch(episode: number): string {
 
 /** `draft/radio-ep05` or `draft/radio-ep05-v2` -> 5; undefined for any other branch. */
 export function radioUnitOfBranch(branch: string): number | undefined {
+  branch = unscopedBranch(branch); // a per-work name (`draft/<slug>/...`, AGT-2292) reads as its base
   const m = /^draft\/radio-ep(\d+)(?:-v\d+)?$/.exec(branch);
   return m ? Number(m[1]) : undefined;
 }

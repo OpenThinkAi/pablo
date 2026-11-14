@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import type { TargetStore } from "@openthink/pablo-tui";
+import { scopedBranch } from "./branch-names";
 import { branchExists, branchIsEmpty, branchKind, createBranch, deleteBranch, ensureWorktree, listBranches, repoRoot, worktreePath } from "./branch";
 import type { Author } from "./branch";
 import { commitAs } from "./branch";
@@ -89,7 +90,7 @@ function unmergedCount(repo: string, branch: string): number {
  * session left with commits main does not have yet (autosaves never merged with `v s`), its worktree added back.
  */
 function openEditBranch(repo: string, slug: string, env: Env): string | undefined {
-  const listed = listBranches(repo);
+  const listed = listBranches(repo, slug);
   if (!listed.ok) return undefined;
   const live = listed.branches.edit.find((b) => existsSync(worktreePath(slug, b, env)));
   if (live !== undefined) return live;
@@ -110,7 +111,7 @@ function editTree(projectPath: string, repo: string, slug: string, file: string,
   let made = false;
   if (branch === undefined) {
     const id = (deps.shortId ?? defaultShortId)();
-    branch = `edit/${id}`;
+    branch = scopedBranch("edit", slug, id);
     if (branchExists(repo, branch)) return { ok: false, message: `pablo: edit: ${branch} already exists without a worktree; finish or delete it first` };
     const created = createBranch(repo, slug, branch, env);
     if (!created.ok) return { ok: false, message: created.notice };
@@ -306,7 +307,7 @@ export async function closePane(projectPath: string, branch: string, deps: EditD
 export async function revisionsForPane(projectPath: string, file: string): Promise<PaneRevision[]> {
   const at = paneRepo(projectPath);
   if (!at.ok || insideDir(projectPath, file) === undefined) return [];
-  const listed = listBranches(at.repo);
+  const listed = listBranches(at.repo, at.slug);
   if (!listed.ok) return [];
   const path = relative(at.repo, resolve(realpathSync(projectPath), file));
   const out: PaneRevision[] = [];

@@ -56,7 +56,7 @@ test("acts and beats write the same file content pablo save would, on the plan b
   expect(a.ok && b.ok).toBe(true);
   if (!a.ok) return;
   expect(a.path).toBe("novels/ice-house/outline/chapters.md");
-  expect(a.branch).toBe("plan/2026-10-01-ab12");
+  expect(a.branch).toBe("plan/ice-house/2026-10-01-ab12");
 
   // Expected shape: save's own pure builders applied in sequence.
   const t = resolveStageTarget(work, "acts");
@@ -69,7 +69,7 @@ test("acts and beats write the same file content pablo save would, on the plan b
   expect(readFileSync(join(session.worktree as string, a.path), "utf8")).toBe(afterBeats.content);
 
   expect(readFileSync(join(work, "outline/chapters.md"), "utf8")).toBe(before);
-  expect(sh(repo, "log", "--format=%an|%s", "main..plan/2026-10-01-ab12").trim().split("\n")).toEqual([
+  expect(sh(repo, "log", "--format=%an|%s", "main..plan/ice-house/2026-10-01-ab12").trim().split("\n")).toEqual([
     "pablo|propose beats",
     "pablo|propose acts",
   ]);

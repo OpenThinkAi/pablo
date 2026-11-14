@@ -48,7 +48,7 @@ test("running it on the fixture vault leaves no untagged fact on the plan branch
   const code = await runTagFacts("ice-house", { cwd: repo, env, stdout: out, stderr: sink() }, { classify: invented, session: startPlanSession(repo, "ice-house", { env, date: "2026-10-01", id: "t1" }) });
   expect(code).toBe(0);
 
-  const branch = "plan/2026-10-01-t1";
+  const branch = "plan/ice-house/2026-10-01-t1";
   const changed = sh(repo, "diff", "--name-only", `main..${branch}`).trim().split("\n");
   expect(changed.length).toBeGreaterThan(1);
   expect(changed.every((f) => f.startsWith("novels/ice-house/bible/") || f === "novels/ice-house/continuity.md")).toBe(true);

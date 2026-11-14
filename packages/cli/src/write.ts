@@ -30,6 +30,7 @@ import {
   withReceipts,
 } from "@openthink/pablo-core";
 import type { Adapter, CompletionStats, Intent, PabloConfig, Providers } from "@openthink/pablo-core";
+import { scopeBase } from "./branch-names";
 import { branchExists, commitAs, createBranch, deleteBranch, repoRoot } from "./branch";
 import { checkDraft, checkFile, loadCheckRules } from "./check";
 import type { Hit } from "./check";
@@ -238,11 +239,16 @@ interface DraftBranch {
   readonly sha: string;
 }
 
-/** The output's draft branch (`draft/chNN`), or the first free `<branch>-vK` when that branch already exists (a re-draft). */
-function draftBranchName(repo: string, base: string): string {
-  if (!branchExists(repo, base)) return base;
+/**
+ * The work's draft branch for an output unit: `draft/<slug>/chNN` (AGT-2292: per work, so two works in one vault each
+ * start at `draft/<slug>/story`), or the first free `<branch>-vK` when that branch already exists (a re-draft numbers
+ * within the work). `base` is the output's unscoped `draft/chNN`.
+ */
+function draftBranchName(repo: string, slug: string, base: string): string {
+  const scoped = scopeBase(base, slug);
+  if (!branchExists(repo, scoped)) return scoped;
   for (let v = 2; ; v += 1) {
-    if (!branchExists(repo, `${base}-v${v}`)) return `${base}-v${v}`;
+    if (!branchExists(repo, `${scoped}-v${v}`)) return `${scoped}-v${v}`;
   }
 }
 
@@ -554,11 +560,11 @@ export async function runWrite(
   // is not a git repository refuses up front rather than after the draw.
   const repo = repoRoot(projectPath);
   if (repo === undefined) {
-    emitError(`pablo: write needs ${projectPath} inside a git repository (the draft is committed on ${output.branch(chapter)})`, undefined, 2, args.json);
+    emitError(`pablo: write needs ${projectPath} inside a git repository (the draft is committed on ${scopeBase(output.branch(chapter), markerResult.marker.slug)})`, undefined, 2, args.json);
     return 2;
   }
   const env = deps.env ?? process.env;
-  const branchName = draftBranchName(repo, output.branch(chapter));
+  const branchName = draftBranchName(repo, markerResult.marker.slug, output.branch(chapter));
   const created = createBranch(repo, markerResult.marker.slug, branchName, env);
   if (!created.ok) {
     emitError(created.notice, undefined, 1, args.json);

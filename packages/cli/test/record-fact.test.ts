@@ -40,14 +40,14 @@ test("a researched fact with a source is appended to continuity on the plan bran
   expect(r.ok).toBe(true);
   if (!r.ok) return;
   expect(r.path).toBe("novels/ice-house/continuity.md");
-  expect(r.branch).toBe("plan/2026-10-01-ab12");
+  expect(r.branch).toBe("plan/ice-house/2026-10-01-ab12");
   const text = readFileSync(join(session.worktree as string, r.path), "utf8");
   expect(text).toContain("- Ice sold at $4 a ton in 1929. [researched: Smith, Ice Trade, p. 12]\n");
   expect(parseFactLine(r.line)?.provenance).toEqual({ kind: "researched", source: "Smith, Ice Trade, p. 12" });
   // Filed under its section, not at the end.
   expect(text.indexOf("Ice sold")).toBeLessThan(text.indexOf("## Objects and places"));
   expect(readFileSync(join(work, "continuity.md"), "utf8")).toBe(before);
-  expect(sh(repo, "log", "--format=%an|%s", "main..plan/2026-10-01-ab12").trim()).toStartWith("pablo|record fact:");
+  expect(sh(repo, "log", "--format=%an|%s", "main..plan/ice-house/2026-10-01-ab12").trim()).toStartWith("pablo|record fact:");
 });
 
 test("a researched fact without a source is refused with a message, and nothing is created", () => {

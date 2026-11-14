@@ -56,8 +56,8 @@ test("writes the chapter on a draft branch, streams progress lines, and returns 
   const result = await screenWriter(vault, project, { adapter, env })(2, (l) => progress.push(l));
   expect(result.ok).toBe(true);
   if (!result.ok) return;
-  expect(result.branch).toBe("draft/ch02");
-  expect(result.lines[0]).toContain("on branch draft/ch02");
+  expect(result.branch).toBe("draft/ice-house/ch02");
+  expect(result.lines[0]).toContain("on branch draft/ice-house/ch02");
   expect(result.lines.join("\n")).toContain("read 1200 tokens");
   expect(progress[0]).toBe("waiting for first token…");
   expect(progress.some((l) => l.startsWith("first token after"))).toBe(true);

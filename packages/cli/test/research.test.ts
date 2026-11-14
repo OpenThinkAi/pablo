@@ -46,7 +46,7 @@ test("writes research/<slug>.md with sources and retrieval date on the plan bran
   expect(body).toContain("- https://example.test/grapes");
   expect(body).toContain("- Almanac 1920, p. 12");
 
-  expect(sh(repo, "log", "--format=%an|%s", "main..plan/2026-10-01-ab12").trim()).toBe("pablo|research: Grape Prices, 1919");
+  expect(sh(repo, "log", "--format=%an|%s", "main..plan/valley/2026-10-01-ab12").trim()).toBe("pablo|research: Grape Prices, 1919");
   expect(existsSync(join(repo, "research"))).toBe(false);
 });
 
@@ -106,7 +106,7 @@ test("a dir that escapes the repo is refused, and a multi-line title stays one c
   expect(sh(repo, "branch", "--list", "plan/*").trim()).toBe("");
   const r = saveResearch(session, { title: "Two\nLines", note: "n", sources: ["https://example.test/s"] });
   expect(r.ok).toBe(true);
-  expect(sh(repo, "log", "-1", "--format=%B", "plan/2026-10-01-ab12").trim()).toBe("research: Two Lines");
+  expect(sh(repo, "log", "-1", "--format=%B", "plan/valley/2026-10-01-ab12").trim()).toBe("research: Two Lines");
 });
 
 test("harness: planTools carries save_research, writing under the work's research/", async () => {
@@ -115,7 +115,7 @@ test("harness: planTools carries save_research, writing under the work's researc
   const tool = planTools(session, join(repo, "novels", "valley")).find((t) => t.name === "save_research")!;
   expect(tool).toBeDefined();
   const out = await tool.run({ title: "Wells", note: "Hand-dug.", sources: ["https://example.test/w"] }, {} as never);
-  expect(out.body).toEqual({ ok: true, path: "novels/valley/research/wells.md", branch: "plan/2026-10-01-ab12" });
+  expect(out.body).toEqual({ ok: true, path: "novels/valley/research/wells.md", branch: "plan/valley/2026-10-01-ab12" });
   const bad = await tool.run({ title: "Wells", note: "x", sources: [] }, {} as never);
   expect(bad.exitCode).toBe(2);
 });

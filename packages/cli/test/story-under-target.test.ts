@@ -165,9 +165,9 @@ test("AC2: a story over more than four beats is drafted one request per beat and
   expect(prompts[1]).toContain("Do not close the piece");
   expect(prompts[5]).toContain("close the piece");
   // One unit: one file, one commit, parts in order; the receipt sums every request.
-  expect(git(v.vault, "show", "--name-only", "--format=", "draft/story")).toBe("novels/ice-house/outputs/story/story.md");
-  expect(git(v.vault, "rev-list", "--count", "main..draft/story")).toBe("1");
-  const text = git(v.vault, "show", "draft/story:novels/ice-house/outputs/story/story.md");
+  expect(git(v.vault, "show", "--name-only", "--format=", "draft/ice-house/story")).toBe("novels/ice-house/outputs/story/story.md");
+  expect(git(v.vault, "rev-list", "--count", "main..draft/ice-house/story")).toBe("1");
+  const text = git(v.vault, "show", "draft/ice-house/story:novels/ice-house/outputs/story/story.md");
   for (let n = 1; n < 6; n += 1) expect(text.indexOf(`Part ${n} opens`)).toBeLessThan(text.indexOf(`Part ${n + 1} opens`));
   const receipt = out.body["receipt"] as { tokensWritten: number; tokensRead: number; wallMs: number; words: number };
   expect(receipt.tokensWritten).toBe(72);

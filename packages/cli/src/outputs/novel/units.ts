@@ -15,6 +15,7 @@
  */
 
 import { join } from "node:path";
+import { unscopedBranch } from "../../branch-names";
 
 /** The novel output's id in `pablo.json`'s `outputs` and in the registry. */
 export const NOVEL_ID = "novel";
@@ -66,6 +67,7 @@ export function novelBranch(chapter: number): string {
 
 /** `draft/ch05` or `draft/ch05-v2` -> 5; undefined for any other branch. */
 export function novelUnitOfBranch(branch: string): number | undefined {
+  branch = unscopedBranch(branch); // a per-work name (`draft/<slug>/...`, AGT-2292) reads as its base
   const m = branch.match(/^draft\/ch(\d+)(?:-v\d+)?$/);
   return m ? Number(m[1]) : undefined;
 }

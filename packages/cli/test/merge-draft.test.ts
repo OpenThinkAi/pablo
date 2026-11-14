@@ -107,14 +107,14 @@ test("write runs no after-write step; merging the draft runs them all on main (A
 
   // Nothing but the draft branch moved: main, its tree, the outline, notes, README, think.
   expect(git(vault, "log", "--format=%s", "main")).toBe("base");
-  expect(git(vault, "log", "--format=%s", "main..draft/ch02")).toBe("ice-house: draft chapter 2");
+  expect(git(vault, "log", "--format=%s", "main..draft/ice-house/ch02")).toBe("ice-house: draft chapter 2");
   expect(outlineRow(project)).toBe(outlineBefore);
   expect(git(vault, "ls-files", "novels/ice-house/notes").split("\n").filter((f) => f.includes("chapter-02"))).toEqual([]);
   expect(existsSync(join(project, "notes", "2026-09-06-chapter-02.md"))).toBe(false);
   expect(existsSync(marker)).toBe(false);
   expect(existsSync(join(project, "chapters", "02-black-ice.md"))).toBe(false);
 
-  const merged = await mergeDraft(project, "draft/ch02", { slug: "ice-house", env, now: () => new Date("2026-09-06T12:00:00.000Z"), extractor: adapter });
+  const merged = await mergeDraft(project, "draft/ice-house/ch02", { slug: "ice-house", env, now: () => new Date("2026-09-06T12:00:00.000Z"), extractor: adapter });
   expect(merged.ok).toBe(true);
   if (!merged.ok) return;
   expect(merged.rituals.map((r) => [r.name, r.status])).toEqual([
@@ -145,12 +145,12 @@ test("a conflicting merge runs no after-write step and leaves main as it was", a
   git(vault, "commit", "-q", "-m", "main edit");
   const head = git(vault, "rev-parse", "HEAD");
 
-  const merged = await mergeDraft(project, "draft/ch02", { slug: "ice-house", env });
+  const merged = await mergeDraft(project, "draft/ice-house/ch02", { slug: "ice-house", env });
   expect(merged.ok).toBe(false);
   expect(git(vault, "rev-parse", "HEAD")).toBe(head);
   expect(git(vault, "status", "--porcelain", "-uno")).toBe("");
   expect(outlineRow(project)).not.toContain("draft");
-  expect(git(vault, "branch", "--list", "draft/ch02")).toContain("draft/ch02");
+  expect(git(vault, "branch", "--list", "draft/ice-house/ch02")).toContain("draft/ice-house/ch02");
 });
 
 test("mergeDraft refuses a branch that is not a draft", async () => {
@@ -173,8 +173,8 @@ test("pablo merge: a non-draft branch is refused (exit 2) by the CLI verb; the v
   expect(JSON.parse(refused.stdout.toString())).toMatchObject({ ok: false, code: 2 });
 
   // The CLI's success path routes a real extraction adapter; the verb's entry takes a fake instead.
-  const outcome = await acceptBranchInProject(project, "draft/ch02", env, adapter);
+  const outcome = await acceptBranchInProject(project, "draft/ice-house/ch02", env, adapter);
   expect(outcome.exitCode).toBe(0);
-  expect(outcome.body).toMatchObject({ ok: true, branch: "draft/ch02", chapter: 2 });
+  expect(outcome.body).toMatchObject({ ok: true, branch: "draft/ice-house/ch02", chapter: 2 });
   expect(existsSync(join(project, "chapters", "02-black-ice.md"))).toBe(true);
 });

@@ -114,7 +114,7 @@ test("write puts the track's check hits in the receipt and leaves the draft as w
   // Never a rewrite: the committed text is the model's, whole.
   const file = join(body["worktree"], "novels", "ice-house", "chapters", "02-black-ice.md");
   expect(readFileSync(file, "utf8")).toContain("The storm came up from the coast.");
-  expect(git(t.vault, "log", "-1", "--format=%s", "draft/ch02")).toBe("ice-house: draft chapter 2");
+  expect(git(t.vault, "log", "-1", "--format=%s", "draft/ice-house/ch02")).toBe("ice-house: draft chapter 2");
 });
 
 test("--no-check skips the track's checks: no model is asked and no notice appears", async () => {

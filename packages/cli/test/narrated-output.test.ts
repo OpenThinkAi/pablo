@@ -194,7 +194,7 @@ test("write --output narrated --unit 1 makes the reading from chapter 1 with no 
   const v = narratedWork();
   const { code, body } = await write(v, { output: "narrated", unit: "1" });
   expect(code).toBe(0);
-  expect(body).toMatchObject({ ok: true, path: "outputs/narrated/readings/01-the-last-full-cut.md", branch: "draft/narrated-01", from: CHAPTER_ONE, receipt: { output: "narrated", unit: 1, model: "pablo-derived" } });
+  expect(body).toMatchObject({ ok: true, path: "outputs/narrated/readings/01-the-last-full-cut.md", branch: "draft/ice-house/narrated-01", from: CHAPTER_ONE, receipt: { output: "narrated", unit: 1, model: "pablo-derived" } });
   const file = join(body["worktree"] as string, "novels", "ice-house", "outputs", "narrated", "readings", "01-the-last-full-cut.md");
   const text = readFileSync(file, "utf8");
   expect(text).toContain("model: pablo-derived");

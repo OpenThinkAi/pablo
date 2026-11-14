@@ -147,8 +147,8 @@ test("AC1: essay is registered on every track, and every track lists it", () => 
   expect(ESSAY.unitOfPath("essays/the-press/outputs/essay/essay.md")).toBe(1);
   expect(ESSAY.unitOfPath("outputs/story/story.md")).toBeUndefined();
   expect(ESSAY.branch(2)).toBe("draft/essay-02");
-  expect(ESSAY.unitOfBranch("draft/essay-02-v3")).toBe(2);
-  expect(ESSAY.unitOfBranch("draft/story")).toBeUndefined();
+  expect(ESSAY.unitOfBranch("draft/the-press/essay-02-v3")).toBe(2);
+  expect(ESSAY.unitOfBranch("draft/the-press/story")).toBeUndefined();
 });
 
 test("AC1: on nonfiction the units are the outline's sections; output add scaffolds the plan from them", () => {
@@ -186,22 +186,22 @@ test("AC1: sections live in one file, in outline order; putting one keeps the ot
   expect(cleanSectionBody("## Title\n\nBody.")).toBe("Body.");
 });
 
-test("AC1: write --output essay --unit N puts section N into essay.md on draft/essay-NN; a written section refuses without --force", async () => {
+test("AC1: write --output essay --unit N puts section N into essay.md on draft/the-press/essay-NN; a written section refuses without --force", async () => {
   const { vault, work, home } = nonfiction({ essay: true });
   const first = await write(vault, work, home, "1");
   expect(first.code).toBe(0);
-  expect(first.body).toMatchObject({ ok: true, branch: "draft/essay-01", path: "outputs/essay/essay.md" });
+  expect(first.body).toMatchObject({ ok: true, branch: "draft/the-press/essay-01", path: "outputs/essay/essay.md" });
   // Section 2 waits for section 1 to be accepted: two unmerged branches would conflict on the one file.
   const early = await write(vault, work, home, "2");
   expect(early.code).toBe(2);
   expect((early.body["missing"] as string[])[0]).toContain("section 1 is not written and accepted yet");
-  const merged = await mergeDraft(work, "draft/essay-01", { slug: "the-press", env: { PATH: NO_THINK_PATH }, now: NOW });
+  const merged = await mergeDraft(work, "draft/the-press/essay-01", { slug: "the-press", env: { PATH: NO_THINK_PATH }, now: NOW });
   expect(merged.ok).toBe(true);
   if (merged.ok) expect(merged.rituals.filter((r) => r.status === "failed")).toEqual([]);
 
   const second = await write(vault, work, home, "2", {}, fakeEssayWriter("Luther's theses were in print within weeks [#2]."));
   expect(second.code).toBe(0);
-  const onBranch = git(vault, "show", "draft/essay-02:essays/the-press/outputs/essay/essay.md");
+  const onBranch = git(vault, "show", "draft/the-press/essay-02:essays/the-press/outputs/essay/essay.md");
   const file = parseEssayFile(onBranch);
   expect(file.sections.map((s) => s.title)).toEqual(["The press arrives", "The pamphlet war"]);
   expect(file.sections[0]!.body).toBe("Mainz had a working press by 1455 [#1].\nIt changed what a town could read.");
@@ -600,8 +600,8 @@ test("AGT-2135 AC3: write --output essay drafts a fiction essay's first section 
   if (!added.ok) throw new Error(added.message);
   const first = await write(vault, work, home, "1", {}, fakeEssayWriter("Ines keeps the lamp the winter it is to run itself. The story mourns the hand on the wick."));
   expect(first.code).toBe(0);
-  expect(first.body).toMatchObject({ ok: true, branch: "draft/essay-01", path: "outputs/essay/essay.md" });
-  const onBranch = git(vault, "show", "draft/essay-01:novels/four-beats/outputs/essay/essay.md");
+  expect(first.body).toMatchObject({ ok: true, branch: "draft/four-beats/essay-01", path: "outputs/essay/essay.md" });
+  const onBranch = git(vault, "show", "draft/four-beats/essay-01:novels/four-beats/outputs/essay/essay.md");
   const file = parseEssayFile(onBranch);
   expect(file.sections.map((s) => s.title)).toEqual(["The story"]);
   expect(file.sections[0]!.body).toContain("Ines keeps the lamp the winter it is to run itself.");

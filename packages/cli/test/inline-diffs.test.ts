@@ -60,7 +60,7 @@ async function setup() {
 }
 
 const fileOf = (t: EditText) => saveText(t.raw, t.buffer.text(), t.storage);
-const onEdit = (vault: string) => git(vault, "show", `edit/ab12cd:novels/ice-house/${CH1}`) + "\n";
+const onEdit = (vault: string) => git(vault, "show", `edit/ice-house/ab12cd:novels/ice-house/${CH1}`) + "\n";
 
 test("the unit's pending revise branch comes over as its diff, each edit shown inline under its paragraph", async () => {
   const { pane, revs, project } = await setup();
@@ -85,7 +85,7 @@ test("accepted edits land on the edit branch through the save path; the rejected
   t = acceptHunk(t); // ... and a sledge
   expect(pendingCount(t)).toBe(0);
   expect(t.buffer.dirty).toBe(true);
-  const saved = await session.save(CH1, "edit/ab12cd", fileOf(t));
+  const saved = await session.save(CH1, "edit/ice-house/ab12cd", fileOf(t));
   expect(saved.ok).toBe(true);
   expect(onEdit(vault)).toBe(BASE.replace("rang", "boomed").replace("long saws.", "long saws and a sledge."));
   expect(git(vault, "rev-parse", "main")).toBe(mainHead);
@@ -98,20 +98,20 @@ test("accepting every edit makes the edit branch's file the revise branch's", as
   let t = pane;
   while (pendingCount(t) > 0) t = acceptHunk(t);
   expect(fileOf(t)).toBe(REVISED);
-  expect((await session.save(CH1, "edit/ab12cd", fileOf(t))).ok).toBe(true);
+  expect((await session.save(CH1, "edit/ice-house/ab12cd", fileOf(t))).ok).toBe(true);
   expect(onEdit(vault)).toBe(REVISED);
 });
 
 test("rejecting every edit leaves the text clean and the edit branch unchanged", async () => {
   const { vault, session, pane } = await setup();
-  const before = git(vault, "rev-parse", "edit/ab12cd");
+  const before = git(vault, "rev-parse", "edit/ice-house/ab12cd");
   let t = pane;
   while (pendingCount(t) > 0) t = rejectHunk(t);
   expect(t.buffer.dirty).toBe(false);
   expect(t.buffer.text()).toBe(pane.buffer.text());
-  const saved = await session.save(CH1, "edit/ab12cd", fileOf(t));
-  expect(saved).toEqual({ ok: true, branch: "edit/ab12cd", lines: [`no change to ${CH1}`] });
-  expect(git(vault, "rev-parse", "edit/ab12cd")).toBe(before);
+  const saved = await session.save(CH1, "edit/ice-house/ab12cd", fileOf(t));
+  expect(saved).toEqual({ ok: true, branch: "edit/ice-house/ab12cd", lines: [`no change to ${CH1}`] });
+  expect(git(vault, "rev-parse", "edit/ice-house/ab12cd")).toBe(before);
   expect(onEdit(vault)).toBe(BASE);
 });
 
@@ -134,7 +134,7 @@ test("an edit whose text the author has since changed no longer matches: accept 
 test("an edit accepted and saved in an earlier session is not offered again", async () => {
   const { session, pane, revs } = await setup();
   const t = acceptHunk(pane);
-  expect((await session.save(CH1, "edit/ab12cd", fileOf(t))).ok).toBe(true);
+  expect((await session.save(CH1, "edit/ice-house/ab12cd", fileOf(t))).ok).toBe(true);
   const reopened = await session.open(CH1);
   if (!reopened.ok) throw new Error(reopened.message);
   const again = withRevisions(openText(reopened.text, "sentences", 1), revs);

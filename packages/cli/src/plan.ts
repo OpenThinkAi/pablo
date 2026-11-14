@@ -13,6 +13,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
+import { scopedBranch } from "./branch-names";
 import { type Author, type BranchResult, commitAs, createBranch } from "./branch";
 
 type Env = Record<string, string | undefined>;
@@ -24,7 +25,7 @@ export interface PlanSession {
   readonly repo: string;
   readonly slug: string;
   readonly env: Env;
-  /** `plan/<date>-<short-id>`, fixed at session start; the branch exists only after the first write. */
+  /** `plan/<slug>/<date>-<short-id>`, fixed at session start; the branch exists only after the first write. */
   readonly branch: string;
   /** Set by the first planning write. */
   worktree?: string;
@@ -42,7 +43,7 @@ export interface PlanSessionOptions {
 export function startPlanSession(repo: string, slug: string, opts: PlanSessionOptions = {}): PlanSession {
   const date = opts.date ?? new Date().toISOString().slice(0, 10);
   const id = opts.id ?? randomBytes(3).toString("hex");
-  return { repo, slug, env: opts.env ?? process.env, branch: `plan/${date}-${id}` };
+  return { repo, slug, env: opts.env ?? process.env, branch: scopedBranch("plan", slug, `${date}-${id}`) };
 }
 
 export interface PlanWrite {

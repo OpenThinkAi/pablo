@@ -45,7 +45,7 @@ function ritualEnv(vault: string): Record<string, string> {
 }
 
 /** Where `write --chapter 2` put its chapter file: inside the draft branch's worktree. */
-function draftChapterFile(vault: string, branch = "draft/ch02"): string {
+function draftChapterFile(vault: string, branch = "draft/ice-house/ch02"): string {
   const home = ritualEnv(vault)["PABLO_HOME"];
   return join(worktreePath("ice-house", branch, { PABLO_HOME: home }), "novels", "ice-house", "chapters", "02-black-ice.md");
 }
@@ -198,16 +198,16 @@ test("runWrite sends, normalizes, and writes the chapter file with a fake adapte
   expect(body.path).toBe("chapters/02-black-ice.md");
 
   // AGT-1536: the chapter is committed on draft/ch02 in a worktree; main has no chapter 2.
-  expect(body.branch).toBe("draft/ch02");
+  expect(body.branch).toBe("draft/ice-house/ch02");
   const filePath = draftChapterFile(vault);
-  expect(body.worktree).toBe(join(vault, "..", "pablo-home", "worktrees", "ice-house", "draft", "ch02"));
+  expect(body.worktree).toBe(join(vault, "..", "pablo-home", "worktrees", "ice-house", "draft", "ice-house", "ch02"));
   expect(existsSync(filePath)).toBe(true);
   expect(existsSync(join(project, "chapters", "02-black-ice.md"))).toBe(false);
   expect(git(vault, "branch", "--show-current")).toBe("main");
   expect(git(vault, "log", "-1", "--format=%s", "main")).toBe("base");
-  expect(git(vault, "log", "-1", "--format=%an|%B", "draft/ch02")).toContain("test-writer-model|ice-house: draft chapter 2");
-  expect(git(vault, "log", "-1", "--format=%B", "draft/ch02")).toContain(`Receipt: ${dryRunBody.prompt_hash}`);
-  expect(git(vault, "show", "--name-only", "--format=", "draft/ch02")).toBe("novels/ice-house/chapters/02-black-ice.md");
+  expect(git(vault, "log", "-1", "--format=%an|%B", "draft/ice-house/ch02")).toContain("test-writer-model|ice-house: draft chapter 2");
+  expect(git(vault, "log", "-1", "--format=%B", "draft/ice-house/ch02")).toContain(`Receipt: ${dryRunBody.prompt_hash}`);
+  expect(git(vault, "show", "--name-only", "--format=", "draft/ice-house/ch02")).toBe("novels/ice-house/chapters/02-black-ice.md");
   // The after-write steps wait for the merge: none of them touched main's tree.
   expect(git(vault, "status", "--porcelain", "-uno")).toBe("");
   // No review queue (AGT-1541): the branch is the thing waiting for review, and the body says no more than that.
@@ -256,19 +256,19 @@ test("the human receipt names the branch (AGT-1536 AC3)", async () => {
   const deps: RunWriteDeps = { adapter: fakeAdapter({ chunks: RAW_CHUNKS }), env: ritualEnv(vault) };
   const sent = await captureStdout(() => runWrite(baseArgs({ json: false }), vault, project, deps));
   expect(sent.result).toBe(0);
-  expect(sent.lines[0]).toBe("wrote chapters/02-black-ice.md (" + sent.lines[0]?.match(/\((\d+) words\)/)?.[1] + " words) on branch draft/ch02");
+  expect(sent.lines[0]).toBe("wrote chapters/02-black-ice.md (" + sent.lines[0]?.match(/\((\d+) words\)/)?.[1] + " words) on branch draft/ice-house/ch02");
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("a second draft of the same chapter goes to draft/ch02-v2 and leaves the first alone (AGT-1536)", async () => {
+test("a second draft of the same chapter goes to draft/ice-house/ch02-v2 and leaves the first alone (AGT-1536)", async () => {
   const { vault, project } = tempVault();
   await captureStdout(() => runWrite(baseArgs(), vault, project, { adapter: fakeAdapter({ chunks: RAW_CHUNKS }), env: ritualEnv(vault) }));
   const second = await captureStdout(() =>
     runWrite(baseArgs(), vault, project, { adapter: fakeAdapter({ chunks: ["A second, different draft."] }), env: ritualEnv(vault) }),
   );
   expect(second.result).toBe(0);
-  expect(JSON.parse(second.lines[0] as string).branch).toBe("draft/ch02-v2");
-  expect(readFileSync(draftChapterFile(vault, "draft/ch02-v2"), "utf8")).toContain("A second, different draft.");
+  expect(JSON.parse(second.lines[0] as string).branch).toBe("draft/ice-house/ch02-v2");
+  expect(readFileSync(draftChapterFile(vault, "draft/ice-house/ch02-v2"), "utf8")).toContain("A second, different draft.");
   expect(readFileSync(draftChapterFile(vault), "utf8")).toContain("sharp and sudden");
   rmSync(vault, { recursive: true, force: true });
 });
@@ -290,7 +290,7 @@ test("once merged, a second run without --force refuses (exit 2) and leaves main
   const deps: RunWriteDeps = { adapter: fakeAdapter({ chunks: RAW_CHUNKS }), env: ritualEnv(vault) };
 
   await captureStdout(() => runWrite(baseArgs(), vault, project, deps));
-  const merged = await mergeDraft(project, "draft/ch02", { slug: "ice-house", env: ritualEnv(vault) });
+  const merged = await mergeDraft(project, "draft/ice-house/ch02", { slug: "ice-house", env: ritualEnv(vault) });
   expect(merged.ok).toBe(true);
 
   const filePath = join(project, "chapters", "02-black-ice.md");
@@ -310,10 +310,10 @@ test("once merged, a second run without --force refuses (exit 2) and leaves main
   rmSync(vault, { recursive: true, force: true });
 });
 
-test("write --force over a merged chapter drafts on a fresh draft/ch02; main's file is untouched until that merges", async () => {
+test("write --force over a merged chapter drafts on a fresh draft/ice-house/ch02; main's file is untouched until that merges", async () => {
   const { vault, project } = tempVault();
   await captureStdout(() => runWrite(baseArgs(), vault, project, { adapter: fakeAdapter({ chunks: RAW_CHUNKS }), env: ritualEnv(vault) }));
-  await mergeDraft(project, "draft/ch02", { slug: "ice-house", env: ritualEnv(vault) });
+  await mergeDraft(project, "draft/ice-house/ch02", { slug: "ice-house", env: ritualEnv(vault) });
 
   const filePath = join(project, "chapters", "02-black-ice.md");
   const before = readFileSync(filePath, "utf8");
@@ -485,7 +485,7 @@ test("write --direction puts a direction slice in the pack and records direction
   const written = readFileSync(draftChapterFile(vault), "utf8");
   expect(written).toContain(`direction: "${direction}"`);
   // On the draft branch, not main.
-  expect(git(vault, "branch", "--list", "draft/ch02")).toContain("draft/ch02");
+  expect(git(vault, "branch", "--list", "draft/ice-house/ch02")).toContain("draft/ice-house/ch02");
 });
 
 test("write without a direction adds no slice and no frontmatter key (AGT-1562)", async () => {

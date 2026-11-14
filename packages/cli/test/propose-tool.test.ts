@@ -53,9 +53,9 @@ test("propose is among the session's tools and callable; it lands on the session
   try {
     expect(offered).toContain("propose");
     const r = await client.callTool({ name: "propose", arguments: { stage: "premise", content: "A logline." } });
-    expect(textOf(r)).toMatchObject({ ok: true, stage: "premise", branch: "plan/2026-10-01-cd34" });
+    expect(textOf(r)).toMatchObject({ ok: true, stage: "premise", branch: "plan/ice-house/2026-10-01-cd34" });
     expect(readFileSync(join(session.worktree as string, "novels/ice-house/bible/overview.md"), "utf8")).toBe("A logline.\n");
-    expect(sh("log", "--format=%an|%s", "main..plan/2026-10-01-cd34").trim()).toBe("pablo|propose premise");
+    expect(sh("log", "--format=%an|%s", "main..plan/ice-house/2026-10-01-cd34").trim()).toBe("pablo|propose premise");
   } finally {
     await client.close();
   }
@@ -81,9 +81,9 @@ test("record_fact shares the session's plan branch with propose; a researched fa
     expect(bad.ok).toBe(false);
     await client.callTool({ name: "propose", arguments: { stage: "premise", content: "A logline." } });
     const ok = textOf(await client.callTool({ name: "record_fact", arguments: { fact: "Cora is left-handed.", where: "continuity", kind: "invented" } }));
-    expect(ok).toMatchObject({ ok: true, branch: "plan/2026-10-01-ef56" });
+    expect(ok).toMatchObject({ ok: true, branch: "plan/ice-house/2026-10-01-ef56" });
     expect(session.worktree).toBeDefined();
-    expect(sh("log", "--format=%an", "main..plan/2026-10-01-ef56").trim().split("\n")).toEqual(["pablo", "pablo"]);
+    expect(sh("log", "--format=%an", "main..plan/ice-house/2026-10-01-ef56").trim().split("\n")).toEqual(["pablo", "pablo"]);
   } finally {
     await client.close();
   }

@@ -10,6 +10,8 @@
  * cli, so the registry and the check can use it without an import cycle.
  */
 
+import { unscopedBranch } from "../../branch-names";
+
 /** The screenplay output's id in `pablo.json`'s `outputs` and in the registry. */
 export const SCREENPLAY_ID = "screenplay";
 
@@ -60,6 +62,7 @@ export function screenplayBranch(scene: number): string {
 
 /** `draft/screenplay-sc05` or `draft/screenplay-sc05-v2` -> 5; undefined for any other branch. */
 export function screenplayUnitOfBranch(branch: string): number | undefined {
+  branch = unscopedBranch(branch); // a per-work name (`draft/<slug>/...`, AGT-2292) reads as its base
   const m = /^draft\/screenplay-sc(\d+)(?:-v\d+)?$/.exec(branch);
   return m ? Number(m[1]) : undefined;
 }
