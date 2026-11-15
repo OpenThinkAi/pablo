@@ -14,9 +14,9 @@
  */
 
 /** `script.py`'s `LINE`: a speaker in capitals, a colon, the words. */
-const LINE = /^([A-Z][A-Z .'\-]{0,30}):\s*(.+)$/;
+export const LINE = /^([A-Z][A-Z .'\-]{0,30}):\s*(.+)$/;
 /** `script.py`'s `CUE`. */
-const CUE = /^\[(SFX|BED|MUSIC):\s*(.+?)\]\s*$/i;
+export const CUE = /^\[(SFX|BED|MUSIC):\s*(.+?)\]\s*$/i;
 const PAREN = /\(([^)]*)\)/g;
 const QUOTES = new Set(['"', "“", "”"]);
 
@@ -38,7 +38,7 @@ export function speakerOf(line: string): string | undefined {
 }
 
 /** How many lines the frontmatter takes (0 when there is none, or the fence is unclosed). */
-function frontmatterLines(lines: readonly string[]): number {
+export function frontmatterLines(lines: readonly string[]): number {
   if ((lines[0] ?? "").trim() !== "---") return 0;
   for (let i = 1; i < lines.length; i += 1) if ((lines[i] ?? "").trim() === "---") return i + 1;
   return 0;

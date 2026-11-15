@@ -39,6 +39,7 @@ import { anachronismBody, checkAnachronisms, lexiconHome, markdownUnder } from "
 import { coreCheck } from "./core-check";
 import type { Ask } from "./critique";
 import { factAccuracyAsk, runFactAccuracy, savedFactHits } from "./fact-accuracy";
+import { listenerAsk, listenerBody, runListener } from "./listener";
 import { ESSAY_PATH, essayOutline, orphanSections } from "./outputs/essay/sections";
 import { narratedDrift } from "./outputs/narrated";
 import { narratedUnitOfPath } from "./outputs/narrated/units";
@@ -626,6 +627,8 @@ export interface ModelChecked {
   readonly hits: readonly Hit[];
   readonly anachronism?: { asked: number; model?: string; cached?: number; new?: number; notice?: string; failed?: true };
   readonly factAccuracy?: FactAccuracySummary;
+  /** `check --output radio`'s listener check (AGT-2323): each episode's verdict, pass and retelling; its hits are in `hits`. */
+  readonly listener?: ReturnType<typeof listenerBody>;
   /** Core files that differ between a draft branch and main (the checks read main's), work-relative (AGT-2288). */
   readonly coreFromMain?: readonly string[];
   /** Each check's notice when it stopped short, for the prose form's stderr. */
@@ -641,23 +644,47 @@ export async function runModelChecks(
   outcome: CheckSuccess,
   workDir: string,
   output: string | undefined,
-  options: { readonly env: NodeJS.ProcessEnv; readonly progress?: (line: string) => void; readonly factAsk?: () => Ask | string; readonly fresh?: boolean },
+  options: {
+    readonly env: NodeJS.ProcessEnv;
+    readonly progress?: (line: string) => void;
+    readonly factAsk?: () => Ask | string;
+    readonly fresh?: boolean;
+    /**
+     * Run the listener check (AGT-2323) when `output` is radio: `check` asks for it; a draft's own checks
+     * (`checkDraft`) do not, `story` runs it itself before casting. `listenerAsk` is its model seam.
+     */
+    readonly listener?: boolean;
+    readonly listenerAsk?: () => Ask | string;
+  },
 ): Promise<ModelChecked> {
   const progress = options.progress;
   // On a draft branch's worktree the core is main's, only the unit text is the branch's (AGT-2288).
   const core = mainCore(workDir);
   const anachronism = await checkAnachronisms(workDir, outcome.scanned, { env: options.env, ...(options.fresh ? { fresh: true } : {}), ...(core ? { coreDir: core.dir } : {}), ...(progress ? { progress } : {}) });
   const fact = await withFactAccuracy(outcome, workDir, output, options.factAsk ?? (() => factAccuracyAsk(options.env, workDir)), progress, core?.dir);
+  // Can the radio script be followed by ear (AGT-2323)? Its beats are main's on a draft branch, like the other core reads.
+  const radioDef = options.listener === true && output === "radio" ? outputDefinition(output) : undefined;
+  const listened =
+    radioDef === undefined ? undefined
+    : await runListener({
+        workDir,
+        ...(core ? { coreDir: core.dir } : {}),
+        files: outcome.scanned,
+        unitOf: (label) => radioDef.unitOfPath(label),
+        ask: options.listenerAsk ?? (() => listenerAsk(options.env, workDir)),
+        ...(progress ? { progress } : {}),
+      });
   // An anachronism run that left terms unjudged is a check error, never a silent pass (AGT-2187).
   const anachronismNotice = anachronism?.notice === undefined ? undefined : anachronism.failed ? `pablo: check error: ${anachronism.notice}` : anachronism.notice;
   // Said only when a model check read main's core (the core check in `checkWork` still reads the branch's own).
   const usedMain = core !== undefined && core.differs.length > 0 && (anachronism !== undefined || fact.factAccuracy !== undefined);
   const coreNotice = usedMain ? `pablo: this branch's core differs from main (${core.differs.join(", ")}); the anachronism and fact-accuracy checks used main's` : undefined;
-  const notices = [coreNotice, anachronismNotice, fact.factAccuracy?.notice].filter((n): n is string => n !== undefined);
+  const notices = [coreNotice, anachronismNotice, fact.factAccuracy?.notice, listened?.notice].filter((n): n is string => n !== undefined);
   return {
     ...(usedMain ? { coreFromMain: core.differs } : {}),
-    hits: [...fact.outcome.hits, ...(anachronism?.hits ?? [])],
+    hits: [...fact.outcome.hits, ...(anachronism?.hits ?? []), ...(listened?.hits ?? [])],
     notices,
+    ...(listened !== undefined ? { listener: listenerBody(listened) } : {}),
     ...(anachronism !== undefined ? { anachronism: anachronismBody(anachronism) } : {}),
     ...(fact.factAccuracy !== undefined ? { factAccuracy: fact.factAccuracy } : {}),
   };
@@ -753,7 +780,7 @@ export function radioScriptsChecked(file: string | undefined, output: string | u
  * one `file:line unknown direction` / `unbound role` line each. A `--file`
  * scan skips it. `casting` is injectable so tests never reach `uv`.
  */
-export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, casting?: CastingDeps, factAsk?: () => Ask | string): Promise<number> {
+export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: string, casting?: CastingDeps, factAsk?: () => Ask | string, listenAsk?: () => Ask | string): Promise<number> {
   const badUnit =
     args.unit === undefined ? undefined
     : !/^[1-9]\d*$/.test(args.unit) ? `pablo: check --unit must be a positive whole number (got "${args.unit}")`
@@ -780,7 +807,7 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   }
 
   // A historical-fiction work also gets the model-backed checks: anachronism (AGT-2113) and fact accuracy (AGT-2112).
-  const model = await runModelChecks(outcome, scanDir, args.output, { env: process.env, ...(args.fresh ? { fresh: true } : {}), progress: (line) => process.stderr.write(`${line}\n`), ...(factAsk ? { factAsk } : {}) });
+  const model = await runModelChecks(outcome, scanDir, args.output, { env: process.env, ...(args.fresh ? { fresh: true } : {}), progress: (line) => process.stderr.write(`${line}\n`), ...(factAsk ? { factAsk } : {}), listener: true, ...(listenAsk ? { listenerAsk: listenAsk } : {}) });
   const hits = model.hits;
   if (!args.json) for (const notice of model.notices) console.error(notice);
   if (!args.json && outcome.branch !== undefined) console.error(`pablo: checked the pending draft on ${outcome.branch}`);
@@ -797,11 +824,13 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
   const { ok: _ok, ...radioBody } = (radio?.body ?? {}) as Record<string, unknown>;
   const hasRadio = radio !== undefined;
   const radioLines = hasRadio ? radioCheckLines(radioBody) : [];
+  const listenerLines = listenerVerdictLines(model.listener);
 
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(model.anachronism !== undefined ? { anachronism: model.anachronism } : {}), ...(model.factAccuracy !== undefined ? { factAccuracy: model.factAccuracy } : {}), ...(model.coreFromMain !== undefined ? { coreFromMain: model.coreFromMain } : {}), ...(outcome.branch !== undefined ? { branch: outcome.branch } : {}), ...(nothing !== undefined && !hasRadio ? { notice: nothing } : {}) }));
+    console.log(JSON.stringify({ ok: true, hits, unprovenanced: outcome.unprovenanced, ...(outcome.core ? { core: outcome.core } : {}), ...(hasRadio ? { radio: radioBody } : {}), ...(model.anachronism !== undefined ? { anachronism: model.anachronism } : {}), ...(model.factAccuracy !== undefined ? { factAccuracy: model.factAccuracy } : {}), ...(model.listener !== undefined ? { listener: model.listener } : {}), ...(model.coreFromMain !== undefined ? { coreFromMain: model.coreFromMain } : {}), ...(outcome.branch !== undefined ? { branch: outcome.branch } : {}), ...(nothing !== undefined && !hasRadio ? { notice: nothing } : {}) }));
   } else if (hits.length === 0 && outcome.unprovenanced.length === 0 && (outcome.core ?? []).length === 0 && radioLines.length === 0) {
     console.log(nothing ?? "no hits");
+    for (const line of listenerLines) console.log(line);
   } else {
     for (const hit of hits) {
       const detail = hit.detail !== undefined ? ` (${hit.detail})` : "";
@@ -814,11 +843,17 @@ export async function runCheck(args: CheckArgs, vaultRoot: string, workDir: stri
       console.log(`unprovenanced: ${path}`);
     }
     for (const line of radioLines) console.log(line);
+    for (const line of listenerLines) console.log(line);
   }
 
   // Terms the anachronism check could not judge fail the check (exit 1, AGT-2187); the hits it did find are reported above.
   if (model.anachronism?.failed) return 1;
   return args.strict === true && strictFails(hits, outcome.core) ? 1 : outcome.code;
+}
+
+/** One line per episode the listener check heard (AGT-2323): `listener: <path> <verdict> (passed|failed)`. */
+export function listenerVerdictLines(listener: ModelChecked["listener"]): string[] {
+  return (listener?.units ?? []).map((u) => `listener: ${u.path} ${u.verdict} (${u.passed ? "passed" : "failed"})`);
 }
 
 /** `check --strict` (AGT-2188): any reported hit (the scan's, the model checks' or the core check's) fails the run. */

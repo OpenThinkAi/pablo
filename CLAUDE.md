@@ -322,6 +322,14 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 waiting), and publishes only once resumed. `pablo perform
                 --output radio --all` is the same chain on a work whose
                 radio output was added later (the novel's files untouched).
+                Before casting, each episode's draft gets the listener
+                check (`src/listener.ts`, AGT-2323, also `check --output
+                radio`): a fresh `check`-intent model hears only the spoken
+                lines (cues as "a sound"), retells and lists confusions,
+                repeats and a verdict; a second call compares the retelling
+                to the beats. A failed check redrafts once with the points as
+                `--direction`, then stops for review (`review: "listener"`).
+                Tests pass `StoryDeps.listener` (or `listenerModel.ask`).
                 Tests: `test/story-radio.test.ts` (fake casting machine).
                 Addressing (AGT-1669): `write`, `status --for "<type> N"`,
                 `check` and `publish` take `--output <type>`

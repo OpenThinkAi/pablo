@@ -816,6 +816,27 @@ stderr, and the JSON has `branch`. A section of the essay is found in its shared
 drafted units, `check` prints `nothing to check: no drafted <units> in <dir>/ (<output>
 output)` (JSON: `notice`) instead of `no hits`.
 
+With `--output radio`, each episode also gets the **listener** check: can it be followed by
+ear? A fresh model on the provider the `check` intent routes to is given only what a
+listener hears, numbered: each speaker line with its delivery notes in parentheses
+removed, each `[SFX]`/`[BED]` cue as "(a sound)" and `[MUSIC]` as "(music)", the cue's
+description never shown (the `CAST:` line, headings and any other line are not heard
+either). As a first-time listener it retells the story, lists every point it could not
+follow, lists anything repeated, contradictory or that sounds like a restart (a second
+introduction, a recap, an ending that comes twice), and gives a verdict, `yes`, `mostly`
+or `no`. A second call, which does see the episode's beats (its plan row's, else beat N;
+main's on a draft branch), compares the retelling to them. Each confusion, repeat and
+missed beat is a `listener` hit in `hits[]` on the line it points at, quoting the line as
+heard (`detail`: `confusion: ...`, `repeat: ...`, `missed beat N "<title>": ...`; a point
+the model gave no line for is put on the first heard line and says so). Two calls per
+episode, a line on stderr before each. The prose form adds `listener: <path> <verdict>
+(passed|failed)` per episode; the JSON has `listener: {units: [{path, unit, verdict,
+passed, retelling}], notRun?, notice?}`. An episode passes only on `yes` with no beat
+missed. A reply that is not the JSON asked for is asked once more with a stricter
+instruction; a second unreadable reply, a model error or no model configured stops the
+check with `listener.notice` (it never fails the run). `pablo story --output radio` runs
+the same check before casting (see `story`).
+
 `--strict` makes the run exit `1` when any hit is reported (`hits[]` or `core[]`; provenance
 gaps and radio findings are not counted); without it a hit never changes the exit code. A
 refusal is still `2`. Exit `1` with `ok: true` in the JSON means hits, or (with or without
@@ -842,7 +863,7 @@ Hits are data: without `--strict` exit is `0` either way, except an anachronism 
 that left words unjudged (exit `1`, `anachronism.failed`).
 
 ```
-{ok: true, hits[], unprovenanced[], core?[], radio?, anachronism?{asked, notice?, failed?}, factAccuracy?{checked, notice?}}
+{ok: true, hits[], unprovenanced[], core?[], radio?, anachronism?{asked, notice?, failed?}, factAccuracy?{checked, notice?}, listener?{units[], notRun?, notice?}}
 ```
 
 `--across` compares the continuity of every output instead. It reports facts the
@@ -1221,6 +1242,20 @@ the result, `drafts.<output>[].check[]` and `.checkNotices[]`; the prose form pr
 line per hit. A hit never rewrites the draft and a failed check never stops the run.
 `--no-check` skips the track's checks (and stays on when the run is resumed). The radio
 output's episodes are checked by `write` as usual, but their hits are not summarised here.
+
+Before a radio episode is cast, the run gives its draft the **listener** check (as `check
+--output radio` does; the `check` intent's model). A failed one is treated like a failed
+gate: the episode is redrafted once with the listener's points as `--direction` (the first
+draft's branch is deleted), and the redraft is checked again. If it still cannot be
+followed (or the check could not confirm it), the run stops for review before casting:
+`waiting` has `review: "listener"`, the draft branch and `listener` (verdict, retelling,
+hits, `redrafted`), `missing` says the episode cannot be followed by ear, and both queues
+stop (an episode already being performed finishes). Fix or redraft the episode on its
+branch, accept it with `pablo merge <branch>`, and `pablo story --project <slug>` goes on.
+Under `--review` the check and the one redraft run the same way and the run waits on the
+draft branch as usual, with `waiting.listener`. Each episode's record in `drafts.radio[]`
+carries `listener`. A check that cannot run (no model, a model error) is a notice on the
+record and the episode goes on; `--no-check` skips it.
 
 ---
 

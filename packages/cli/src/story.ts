@@ -56,6 +56,9 @@ import { branchExists, deleteBranch, mergeBranch, repoRoot } from "./branch";
 import { coreStages, readCoreState } from "./core/machine";
 import { itemLabel } from "./core/checklist";
 import { ensureGitignoreEntry, gitCommit, SLUG_PATTERN } from "./init";
+import type { Ask } from "./critique";
+import { episodeBeats, listenToEpisode, listenerAsk, listenerDirection } from "./listener";
+import type { ListenerHit, ListenerVerdict } from "./listener";
 import type { CastingDeps } from "./radio";
 import { DEFAULT_AUTHOR, DEFAULT_NEVER_SEND, DEFAULT_PUBLISH, DEFAULT_VOICE, readMarker, trackOf, writeMarker } from "./marker";
 import { mergeDraft } from "./novel/merge";
@@ -244,6 +247,23 @@ export interface StoryDeps {
    * (`createPlanner`). A fake in tests. Never called when `--track` is given or a run resumes.
    */
   readonly planner?: Adapter;
+  /**
+   * The model the radio output's listener check asks (AGT-2323); absent, `listenerModel.ask`, else the `check`
+   * intent's planner. A fake in tests. Never called with `--no-check` or on a run with no radio output.
+   */
+  readonly listener?: Ask;
+}
+
+/** What the listener check made of a radio episode's draft before casting (AGT-2323). */
+interface ListenerRecord {
+  readonly verdict?: ListenerVerdict;
+  readonly passed: boolean;
+  readonly retelling?: string;
+  readonly hits: readonly ListenerHit[];
+  /** The first draft failed and this is the one redraft, steered by its confusions. */
+  readonly redrafted?: { readonly from: string; readonly verdict: ListenerVerdict; readonly hits: number };
+  /** The check could not run (no model, a model error): the draft goes on unchecked. */
+  readonly notice?: string;
 }
 
 /** A question the harness put to an absent author, answered by assumption. */
@@ -263,6 +283,8 @@ interface DraftRecord {
   /** The track's checks on the draft (AGT-2115): the hits (never a rewrite) and any check that could not run. */
   readonly check?: readonly unknown[];
   readonly checkNotices?: readonly string[];
+  /** A radio episode's listener check (AGT-2323). */
+  readonly listener?: ListenerRecord;
 }
 
 interface StoryState {
@@ -915,6 +937,79 @@ function radioApproval(run: Run, step: string, kind: "binding" | "render", unit:
   };
 }
 
+/** Listens to one drafted episode (AGT-2323): its result, or a notice when the check could not run. */
+async function listenToDraft(run: Run, unit: number, drafted: { readonly path: string; readonly file: string }, ask: Ask): Promise<ListenerRecord> {
+  try {
+    const heard = await listenToEpisode(readFileSync(drafted.file, "utf8"), drafted.path, episodeBeats(run.work, unit), ask, unit, (line) => progress(run, `radio: ${line}`));
+    return { verdict: heard.verdict, passed: heard.passed, retelling: heard.retelling, hits: heard.hits };
+  } catch (error) {
+    return { passed: false, hits: [], notice: `listener stopped at ${drafted.path}: ${(error as Error).message}` };
+  }
+}
+
+/**
+ * Drafts radio episode `unit` and, before it is cast, runs the listener check on the draft (AGT-2323): can a
+ * first-time listener follow it by ear? A failed check is treated like a failed gate: one redraft with the
+ * confusions as direction (the first draft's branch is deleted), and if that fails too the draft is `held` for
+ * the author's review. A check that cannot run is a notice and the draft goes on; `--no-check` skips it.
+ */
+async function draftHeardEpisode(
+  run: Run,
+  mod: RadioChainModule,
+  unit: number,
+): Promise<{ ok: true; branch: string; path: string; listener?: ListenerRecord; held: boolean } | { ok: false; result: VerbResult }> {
+  const write = (direction?: string) =>
+    mod.writeUnit(run.vault, run.work, RADIO_ID, unit, { env: run.ctx.env, writer: run.deps.writer, now: run.deps.now, ...(direction !== undefined ? { direction } : {}) });
+  const first = await write();
+  if (!first.ok) return first;
+  if (run.state.noCheck === true) return { ok: true, branch: first.branch, path: first.path, held: false };
+  const ask = run.deps.listener ?? listenerAsk(run.ctx.env, run.work);
+  if (typeof ask === "string") {
+    const notice = `listener not run: ${ask}`;
+    progress(run, `radio: episode ${unit}: ${notice}`);
+    return { ok: true, branch: first.branch, path: first.path, listener: { passed: false, hits: [], notice }, held: false };
+  }
+  progress(run, `radio: listening to episode ${unit} as a first-time listener`);
+  const heard = await listenToDraft(run, unit, first, ask);
+  if (heard.notice !== undefined) {
+    progress(run, `radio: episode ${unit}: ${heard.notice}`);
+    return { ok: true, branch: first.branch, path: first.path, listener: heard, held: false };
+  }
+  if (heard.passed) return { ok: true, branch: first.branch, path: first.path, listener: heard, held: false };
+
+  const verdict = heard.verdict as ListenerVerdict;
+  progress(run, `radio: episode ${unit} could not be followed by ear (${verdict}, ${heard.hits.length} point(s)); redrafting once with them as direction`);
+  const second = await write(listenerDirection({ path: first.path, verdict, passed: false, retelling: heard.retelling ?? "", hits: heard.hits }));
+  if (!second.ok) return second;
+  // The redraft replaces the first draft, which nobody will review.
+  deleteBranch(run.repo, run.slug, first.branch, { force: true, env: run.ctx.env });
+  const again = await listenToDraft(run, unit, second, ask);
+  const listener: ListenerRecord = { ...again, redrafted: { from: first.branch, verdict, hits: heard.hits.length } };
+  // A redraft the check could not confirm is held too: the first draft is known to have failed.
+  const held = !again.passed;
+  if (held) progress(run, `radio: episode ${unit} still could not be followed by ear after one redraft; stopping for review`);
+  return { ok: true, branch: second.branch, path: second.path, listener, held };
+}
+
+/** A run stopped on a radio episode the listener check failed twice (AGT-2323): its branch waits for the author. */
+function listenerHeld(run: Run, step: string, unit: number, branch: string, listener: ListenerRecord): VerbResult {
+  const waited = waiting(run, step, branch);
+  const body = waited.body as Record<string, unknown>;
+  return {
+    ...waited,
+    body: {
+      ...body,
+      waiting: { ...(body["waiting"] as object), review: "listener", output: RADIO_ID, unit, listener },
+      missing: [
+        listener.notice !== undefined
+          ? `episode ${unit}'s redraft could not be checked by ear (${listener.notice}); its first draft could not be followed`
+          : `episode ${unit} cannot be followed by ear (listener verdict ${listener.verdict}, ${listener.hits.length} point(s))`,
+      ],
+      next: `episode ${unit} failed the listener check after one redraft: read the listener's points, fix the script on ${branch} (or redraft it), accept it with \`pablo merge ${branch} --project ${run.slug}\`, then run \`pablo story --project ${run.slug}\``,
+    },
+  };
+}
+
 /**
  * The radio output after it is added: on demand, the whole chain over every episode not yet made (writer and
  * engine queues overlapping); under `--review`, one stage at a time. Undefined when every episode is made and
@@ -929,19 +1024,33 @@ async function advanceRadio(run: Run): Promise<VerbResult | undefined> {
 
   if (!state.review) {
     const units = all.filter((u) => !state.done.includes(`episode:${RADIO_ID}:${u}`));
+    // An episode the listener check failed twice stops both queues and waits for the author (AGT-2323).
+    let held: VerbResult | undefined;
     const made = await mod.runRadioChain(chain, units, {
       write: async (unit) => {
         progress(run, `radio: writing episode ${unit} of ${total}`);
-        const written = await mod.writeAndAcceptEpisode(chain, unit, writeDeps);
+        const drafted = await draftHeardEpisode(run, mod, unit);
+        if (!drafted.ok) return { ok: false, exitCode: drafted.result.exitCode, body: drafted.result.body };
+        const listener = drafted.listener !== undefined ? { listener: drafted.listener } : {};
+        const step = `draft:${RADIO_ID}:${unit}`;
+        if (drafted.held) {
+          state.pending = { step, branch: drafted.branch, sha: git(run.repo, ["rev-parse", drafted.branch]) };
+          (state.drafts[RADIO_ID] ??= []).push({ unit, branch: drafted.branch, path: drafted.path, ...listener });
+          saveState(run.work, state);
+          held = listenerHeld(run, step, unit, drafted.branch, drafted.listener as ListenerRecord);
+          return { ok: false, exitCode: 0, body: held.body };
+        }
+        const written = await mod.acceptEpisode(chain, unit, drafted, writeDeps);
         if (written.ok) {
-          (state.drafts[RADIO_ID] ??= []).push({ unit, branch: written.branch as string, path: written.path as string, merged: written.merged as string });
-          markDone(run, `draft:${RADIO_ID}:${unit}`);
+          (state.drafts[RADIO_ID] ??= []).push({ unit, branch: written.branch as string, path: written.path as string, merged: written.merged as string, ...listener });
+          markDone(run, step);
         }
         return written;
       },
       onMade: (unit) => markDone(run, `episode:${RADIO_ID}:${unit}`),
     });
     recordRadioPublished(run, made.where, made.published);
+    if (held !== undefined) return held;
     const stopped = made.report.stopped;
     if (stopped !== undefined) return radioStopped(run, stopped.unit, stopped.outcome, stopped.queue);
     markDone(run, `publish:${RADIO_ID}`);
@@ -953,13 +1062,17 @@ async function advanceRadio(run: Run): Promise<VerbResult | undefined> {
     const ep = episodeState(run.work, unit);
     if (!ep.script) {
       progress(run, `radio: writing episode ${unit} of ${total}`);
-      const drafted = await mod.writeUnit(run.vault, run.work, RADIO_ID, unit, { env: run.ctx.env, writer: run.deps.writer, now: run.deps.now });
+      const drafted = await draftHeardEpisode(run, mod, unit);
       if (!drafted.ok) return drafted.result;
       const step = `draft:${RADIO_ID}:${unit}`;
       state.pending = { step, branch: drafted.branch, sha: git(run.repo, ["rev-parse", drafted.branch]) };
-      (state.drafts[RADIO_ID] ??= []).push({ unit, branch: drafted.branch, path: drafted.path });
+      (state.drafts[RADIO_ID] ??= []).push({ unit, branch: drafted.branch, path: drafted.path, ...(drafted.listener !== undefined ? { listener: drafted.listener } : {}) });
       saveState(run.work, state);
-      return waiting(run, step, drafted.branch);
+      if (drafted.held) return listenerHeld(run, step, unit, drafted.branch, drafted.listener as ListenerRecord);
+      const waited = waiting(run, step, drafted.branch);
+      if (drafted.listener === undefined) return waited;
+      const body = waited.body as Record<string, unknown>;
+      return { ...waited, body: { ...body, waiting: { ...(body["waiting"] as object), listener: drafted.listener } } };
     }
     const castStep = `cast:${RADIO_ID}:${unit}`;
     if (!state.done.includes(castStep)) {
