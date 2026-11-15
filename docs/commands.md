@@ -1294,6 +1294,19 @@ run on MLX) and [uv](https://docs.astral.sh/uv/) (`brew install uv`). The Python
 side installs itself on first use, and only verbs that need it ever install it.
 Rendering uses the GPU.
 
+How many episodes, and in what style, follow the request and the premise
+(`pablo output add radio`, and so `pablo story --output radio`). The default plan is
+one episode per beat, unless the request (the quote in `README.md`) or the premise
+(`bible/overview.md`) asks for a single episode, a count ("three episodes") or a
+total length ("a 10-minute episode", about 12 minutes to an episode): then the beats
+are dealt into that many contiguous episodes (never more than there are beats).
+`output add` returns the choice as `planned`, a story run prints it, and `plan.md`
+says `Planned: ...` under its heading. The `RULES.md` scaffolded is the old-time-radio
+template (announcer, narrator, `[MUSIC]` cues) unless the premise or request says "no
+narrator", "no announcer" or "no music", in which case the rules drop that convention and
+say so under `## Style`; a premise that says nothing keeps all three. Both are read once,
+when the output is added; edit `plan.md` and `RULES.md` afterwards.
+
 What that install fetches, and how it is pinned: the Python packages come from the
 committed `packages/casting/uv.lock` (`uv sync --frozen`, every package checked
 against its sha256 there). Every model pablo downloads by default is fetched at a
