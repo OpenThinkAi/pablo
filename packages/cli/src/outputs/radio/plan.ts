@@ -45,7 +45,8 @@ export function radioUnitStatus(file: string | undefined): string {
 export function radioPlanChoice(workDir: string): { episodes: number; reason: string } {
   const beats = radioBeatRows(workDir);
   const cue = radioEpisodeCue(workDir);
-  if (cue === undefined || beats.length === 0) return { episodes: beats.length, reason: "one episode per beat (the request and the premise name no episode count or length)" };
+  if (beats.length === 0) return { episodes: 0, reason: "no beats planned yet" };
+  if (cue === undefined) return { episodes: beats.length, reason: "one episode per beat (the request and the premise name no episode count or length)" };
   const episodes = Math.min(cue.episodes, beats.length);
   return { episodes, reason: `${episodes} episode${episodes === 1 ? "" : "s"} over ${beats.length} beat${beats.length === 1 ? "" : "s"}: ${cue.reason}` };
 }
@@ -65,6 +66,6 @@ export function radioDefaultPlan(workDir: string): PlanRow[] {
   const byNumber = new Map(rows.map((b) => [b.chapter, b]));
   return groupBeats(rows.map((b) => b.chapter), episodes).map((beats, i) => {
     const first = byNumber.get(beats[0] as number);
-    return { unit: i + 1, title: episodes === 1 ? (first?.title ?? "Episode 1") : (first?.title ?? `Episode ${i + 1}`), beats, status: radioUnitStatus(files.get(i + 1)) };
+    return { unit: i + 1, title: first?.title ?? `Episode ${i + 1}`, beats, status: radioUnitStatus(files.get(i + 1)) };
   });
 }

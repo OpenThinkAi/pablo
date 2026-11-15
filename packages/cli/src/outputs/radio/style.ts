@@ -14,13 +14,24 @@ import { join } from "node:path";
 /** About how long one episode runs (the rules template's twelve-minute broadcast). */
 export const RADIO_EPISODE_MINUTES = 12;
 
+/** Spoken words per broadcast minute: the writer's word target and the rules' length line both come from it. */
+export const RADIO_WORDS_PER_MINUTE = 150;
+
+/** About how many spoken words one episode of `minutes` holds (default: the twelve-minute broadcast). */
+export function radioEpisodeWords(minutes: number = RADIO_EPISODE_MINUTES): number {
+  return Math.round(minutes * RADIO_WORDS_PER_MINUTE);
+}
+
+/** Where the work's words asked for something: the request (`README.md`), the premise (`bible/overview.md`), or both. */
+export type RadioCueSource = "request" | "premise" | "premise and request";
+
 /** The conventions an episode follows; the template's defaults are all on. */
 export interface RadioStyle {
   readonly announcer: boolean;
   readonly narrator: boolean;
   readonly music: boolean;
-  /** Where a switched-off convention was asked for: "the premise", "the request" or both; absent when none was. */
-  readonly source?: string;
+  /** Where a switched-off convention was asked for; absent when none was. */
+  readonly source?: RadioCueSource;
   /** One episode's length when the words give it ("a 30-minute episode"); absent: the template's twelve-minute broadcast. */
   readonly minutes?: number;
 }
@@ -42,11 +53,12 @@ function numberOf(word: string): number | undefined {
   return NUMBER_WORDS[w] ?? (/^\d+$/.test(w) ? Number(w) : undefined);
 }
 
-/** The episode count one text asks for: a count, a single episode, or a total length. */
-export function episodeCue(text: string): EpisodeCue | undefined {
+/** The episode count one text asks for: a count, a single episode, or a total length; `source` names the text in the reason. */
+export function episodeCue(text: string, source: "request" | "premise" = "request"): EpisodeCue | undefined {
+  const the = `the ${source}`;
   const count = /\b(\d+|two|three|four|five|six|seven|eight|nine|ten|twelve)[- ]?(?:part\s+)?episodes?\b(?!\s+per\b)/i.exec(text);
   const counted = count?.[1] === undefined ? undefined : numberOf(count[1]);
-  if (counted !== undefined && counted >= 1) return { episodes: counted, reason: `the request asks for ${counted} episode${counted === 1 ? "" : "s"}` };
+  if (counted !== undefined && counted >= 1) return { episodes: counted, reason: `${the} asks for ${counted} episode${counted === 1 ? "" : "s"}` };
 
   // A length is read only beside a format noun, never in story prose ("an hour before the tide", "ten minutes to get out").
   const noun = "(episode|play|drama|broadcast|programme|program|show|serial)";
@@ -59,12 +71,12 @@ export function episodeCue(text: string): EpisodeCue | undefined {
   const single = /\b(?:single|one|1|standalone)\b[^.\n]{0,40}?\bepisode\b(?!s)(?!\s+per\b)/i.exec(text);
   if (single !== null || singular) {
     const len1 = minutes !== undefined && Number.isFinite(minutes) && minutes > 0 ? minutes : undefined;
-    return { episodes: 1, reason: `${singular && single === null ? "the request asks for one episode" : "the request asks for a single episode"}${len1 !== undefined ? ` of about ${len1} minutes` : ""}`, ...(len1 !== undefined ? { minutes: len1 } : {}) };
+    return { episodes: 1, reason: `${the} asks for ${singular && single === null ? "one episode" : "a single episode"}${len1 !== undefined ? ` of about ${len1} minutes` : ""}`, ...(len1 !== undefined ? { minutes: len1 } : {}) };
   }
 
   if (minutes !== undefined && Number.isFinite(minutes) && minutes > 0) {
     const episodes = Math.max(1, Math.round(minutes / RADIO_EPISODE_MINUTES));
-    return { episodes, reason: `the request asks for about ${minutes} minutes, ${episodes} episode${episodes === 1 ? "" : "s"} of about ${RADIO_EPISODE_MINUTES}` };
+    return { episodes, reason: `${the} asks for about ${minutes} minutes, ${episodes} episode${episodes === 1 ? "" : "s"} of about ${RADIO_EPISODE_MINUTES}` };
   }
   return undefined;
 }
@@ -85,10 +97,7 @@ export function premiseText(workDir: string): string {
 
 /** The first source that asks for an episode count: the request, then the premise. */
 export function radioEpisodeCue(workDir: string): EpisodeCue | undefined {
-  const asked = episodeCue(askedFor(workDir));
-  if (asked !== undefined) return asked;
-  const premise = episodeCue(premiseText(workDir));
-  return premise === undefined ? undefined : { ...premise, reason: premise.reason.replace("the request", "the premise") };
+  return episodeCue(askedFor(workDir), "request") ?? episodeCue(premiseText(workDir), "premise");
 }
 
 const NO_NARRATOR = /\b(?:no|without(?: a| any)?|zero)[ -](?:narrator|narration|voice-?over)\b|\bnarrator-?free\b|\bnever (?:a|any) narrator\b/i;
@@ -105,13 +114,15 @@ export function radioStyleOf(workDir: string): RadioStyle {
   const premise = styleOf(premiseText(workDir));
   const asked = styleOf(askedFor(workDir));
   const style = { announcer: premise.announcer && asked.announcer, narrator: premise.narrator && asked.narrator, music: premise.music && asked.music };
-  const off = (k: "announcer" | "narrator" | "music"): ("the premise" | "the request")[] => [!premise[k] && "the premise", !asked[k] && "the request"].filter((x): x is "the premise" | "the request" => x !== false);
-  const sources = [...new Set((["announcer", "narrator", "music"] as const).flatMap(off))];
+  const keys = ["announcer", "narrator", "music"] as const;
+  const byPremise = keys.some((k) => !premise[k]);
+  const byRequest = keys.some((k) => !asked[k]);
+  const source: RadioCueSource | undefined = byPremise && byRequest ? "premise and request" : byPremise ? "premise" : byRequest ? "request" : undefined;
   const minutes = radioEpisodeCue(workDir)?.minutes;
-  return { ...style, ...(sources.length > 0 ? { source: sources.join(" and ") } : {}), ...(minutes !== undefined ? { minutes } : {}) };
+  return { ...style, ...(source !== undefined ? { source } : {}), ...(minutes !== undefined ? { minutes } : {}) };
 }
 
-/** `chunks(5, 2)` is `[[1,2,3],[4,5]]`: the beat numbers dealt into `n` contiguous groups, as even as can be. */
+/** `groupBeats([1, 2, 3, 4, 5], 2)` is `[[1,2,3],[4,5]]`: the beat numbers dealt into `n` contiguous groups, as even as can be. */
 export function groupBeats(beats: readonly number[], n: number): number[][] {
   const groups = Math.max(1, Math.min(n, beats.length));
   const out: number[][] = [];

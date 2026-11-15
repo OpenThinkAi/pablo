@@ -11,7 +11,9 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readMarker } from "../src/marker";
 import { addOutput } from "../src/output-verbs";
+import { buildRadioPack } from "../src/outputs/radio/pack";
 import { radioDefaultPlan, radioPlanChoice } from "../src/outputs/radio/plan";
 import { RADIO_RULES_TEMPLATE, radioRules } from "../src/outputs/radio/rules";
 import { episodeCue, groupBeats, radioStyleOf, styleOf } from "../src/outputs/radio/style";
@@ -89,7 +91,14 @@ test("a single 30-minute episode: one unit, and the rules' length line follows i
   addOutput(w.vault, w.work, "radio", NOW);
   const rules = readFileSync(join(w.work, "outputs", "radio", "RULES.md"), "utf8");
   expect(rules).toContain("Length: what fits a 30-minute broadcast, about 4,500 spoken words.");
-  expect(rules).toContain("This work's premise switches off: narrator");
+  expect(rules).toContain("This work's premise switches off: narrator");  // The writer's brief asks for the same length as the rules, not the twelve-minute default.
+  const m = readMarker(w.work);
+  if (!m.ok) throw new Error(m.message);
+  const built = buildRadioPack(w.vault, w.work, 1, { marker: m.marker });
+  if (!built.ok) throw new Error(built.message);
+  const brief = built.pack.slices.map((sl) => sl.text).join("\n");
+  expect(brief).toContain("about 4500 words");
+  expect(brief).not.toContain("about 1800 words");
 });
 
 test("the Style note names the request when the request switched the convention off", () => {
@@ -149,7 +158,7 @@ test("AC1: with no cue the plan is one episode per beat, as before, and says tha
 
 test("AC2: a premise whose tone says no narrator gets rules without NARRATOR, and says why", () => {
   const w = work({ tone: "Dry and close. No narrator explaining the case." });
-  expect(radioStyleOf(w.work)).toEqual({ announcer: true, narrator: false, music: true, source: "the premise" });
+  expect(radioStyleOf(w.work)).toEqual({ announcer: true, narrator: false, music: true, source: "premise" });
   addOutput(w.vault, w.work, "radio", NOW);
   const rules = readFileSync(join(w.work, "outputs", "radio", "RULES.md"), "utf8");
   expect(rules).not.toContain("NARRATOR:");

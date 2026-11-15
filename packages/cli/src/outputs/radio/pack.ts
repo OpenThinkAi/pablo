@@ -19,10 +19,11 @@ import { CAST_ENDS_AT, packFromInputs } from "../../novel/pack";
 import { frontmatterField } from "../novel/plan";
 import type { UnitPackOptions, UnitPackOutcome, UnitPreconditions } from "../types";
 import { radioUnitFiles } from "./plan";
+import { radioEpisodeWords, radioStyleOf } from "./style";
 import { RADIO_ID } from "./units";
 
 /** What the radio rules ask for: a twelve-minute broadcast, about 1,800 spoken words. */
-export const EPISODE_WORDS = 1800;
+export const EPISODE_WORDS = radioEpisodeWords();
 
 /** Three to five scenes, as the radio rules lay an episode out. */
 export const EPISODE_SCENES = 3;
@@ -110,7 +111,8 @@ export function buildRadioPack(vaultRoot: string, workDir: string, episode: numb
     beats,
     // The radio output's own rules, never the novel's (AGT-1694's carry-over).
     outputRulesPath: join(workDir, outputRulesFile(RADIO_ID)),
-    wordTarget: options.words ?? EPISODE_WORDS,
+    // The same length the rules' length line gives ("a 30-minute episode": about 4,500 words), else the default.
+    wordTarget: options.words ?? radioEpisodeWords(radioStyleOf(workDir).minutes),
     minScenes: options.scenes ?? EPISODE_SCENES,
     castEndsAt: CAST_ENDS_AT,
     work: { description: RADIO_FORM },
