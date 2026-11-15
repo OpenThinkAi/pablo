@@ -164,6 +164,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     target: { type: "string" }, // AGT-1534: publish --target
     gap: { type: "string" }, // AGT-2306: publish --target audio --gap <seconds>
     chapters: { type: "boolean", default: false }, // AGT-2306: publish --target audio --chapters
+    suggest: { type: "boolean", default: false }, // AGT-2303: pronounce --suggest
     reject: { type: "boolean", default: false }, // AGT-2181: merge --reject
     date: { type: "string" }, // AGT-1555: timeline --date
     direction: { type: "string" }, // AGT-1562: write --direction

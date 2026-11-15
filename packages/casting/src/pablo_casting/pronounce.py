@@ -23,6 +23,11 @@ By default (AGT-2304) the capitalised and ALL-CAPS words that also appear in low
 and weekday names, common English words and common first names (`noise.py`) are left out and counted in
 `unresolvedHidden`; the rest is ranked mixed-case tokens (`ChatGPT`), then words with unusual letter patterns, then the
 others. `--all` lists every word in the order of count, as before.
+
+For `pronounce --suggest` (AGT-2303) each unresolved token also carries the speaker and sentence of its first
+occurrence, and `heteronyms` lists, per line, the words of `HETERONYMS` (common English words whose sound depends on
+the sense: read, lead, live, close, tear, wind ...) the lexicon does not already decide for that speaker, each with its
+sentence. The pablo CLI sends those to the `plan` model; nothing here does.
 """
 
 from __future__ import annotations
@@ -45,6 +50,14 @@ from pablo_casting.stale import stale_lines
 Result = tuple[dict[str, object], int]
 
 _WORD = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)*")
+_SENTENCES = re.compile(r"(?<=[.!?])\s+")
+
+# Common English heteronyms: spelled alike, sounded differently by sense. The engine reads one default; whether a line
+# means the other is a judgement for the model and the author (`pronounce --suggest`).
+HETERONYMS = frozenset(
+    "bass bow close content converse desert dove entrance invalid lead live minute moderate object permit "
+    "polish present produce project read record refuse resume row separate sewer sow subject tear wind wound".split()
+)
 _SENTENCE_END = re.compile(r"(?:^|[.!?:])[\s\"'“”‘’()\[\]—–-]*$")
 
 
@@ -66,6 +79,27 @@ def _in_order(text: str, changes: list[dict[str, str]]) -> list[dict[str, str]]:
     at = [text.find(c["from"]) for c in changes]
     order = sorted(range(len(changes)), key=lambda k: (at[k] < 0, at[k], k))
     return [changes[k] for k in order]
+
+
+def _sentence(text: str, token: str) -> str:
+    """The sentence of `text` that holds `token` as a word (the whole text when none does)."""
+    word = re.compile(rf"(?<![A-Za-z0-9']){re.escape(token.rstrip('.'))}(?![A-Za-z0-9'])")
+    for sentence in _SENTENCES.split(text.strip()):
+        if word.search(sentence):
+            return sentence
+    return text.strip()
+
+
+def _heteronyms(text: str, speaker: str, entries: Sequence[Entry]) -> list[str]:
+    """The `HETERONYMS` in a line, once each in order, that no lexicon entry for this speaker decides."""
+    known = _known(entries, speaker)
+    masked, _ = mask(text)
+    found: list[str] = []
+    for match in _WORD.finditer(masked):
+        word = match.group(0).lower()
+        if word in HETERONYMS and word not in known and word not in found:
+            found.append(word)
+    return found
 
 
 def _known(entries: Sequence[Entry], speaker: str) -> set[str]:
@@ -127,6 +161,8 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
     units: list[dict[str, object]] = []
     counts: Counter[str] = Counter()
     first: dict[str, tuple[str, int, int]] = {}  # token -> (kind, unit, line)
+    context: dict[str, tuple[str, str]] = {}  # token -> (speaker, sentence) of its first occurrence
+    heteronyms: list[dict[str, object]] = []
     changed = 0
     stale_total = 0
     for number, path in files:
@@ -142,6 +178,9 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
             for word, kind in _unresolved(spoken.text, spoken.speaker, entries, acronyms, changes):
                 counts[word] += 1
                 first.setdefault(word, (kind, number, spoken.line))
+                context.setdefault(word, (spoken.speaker, _sentence(spoken.text, word)))
+            for word in _heteronyms(spoken.text, spoken.speaker, entries):
+                heteronyms.append({"word": word, "unit": number, "line": spoken.line, "speaker": spoken.speaker, "sentence": _sentence(spoken.text, word)})
             if engine == spoken.text:
                 continue
             changed += 1
@@ -180,8 +219,16 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
         "changedLines": changed,
         "staleLines": stale_total,
         "unresolved": [
-            {"token": token, "kind": first[token][0], "count": counts[token], "first": {"unit": first[token][1], "line": first[token][2]}}
+            {
+                "token": token,
+                "kind": first[token][0],
+                "count": counts[token],
+                "first": {"unit": first[token][1], "line": first[token][2]},
+                "speaker": context[token][0],
+                "sentence": context[token][1],
+            }
             for token in ordered
         ],
         "unresolvedHidden": hidden,
+        "heteronyms": heteronyms,
     }, 0

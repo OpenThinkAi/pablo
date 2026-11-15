@@ -69,9 +69,12 @@
  */
 
 import { resolve } from "node:path";
+import { createPlanner, EndpointHung, loadConfig, PLAN_INTENT, ProviderResponseError } from "@openthink/pablo-core";
+import type { Adapter } from "@openthink/pablo-core";
 import { z } from "zod";
 import { ensureProvisioned, MIX_EXTRA, realCastingDeps, runCasting, runPython, runPythonStreaming, SCORERS_EXTRA } from "./casting";
 import type { CastingDeps } from "./casting";
+import { completeText } from "./distill";
 import { readMarker } from "./marker";
 import { AUDIO_OUTPUTS, audioEnv, isAudioOutput, unitNoun } from "./outputs/audio";
 import type { AudioOutput } from "./outputs/audio";
@@ -79,9 +82,12 @@ import { episodeState, lastReceipt, radioStageCheck } from "./outputs/radio/stat
 import type { RadioVerbStage } from "./outputs/radio/state";
 import { RADIO_ID } from "./outputs/radio/units";
 import { resolveOutput } from "./outputs/registry";
+import { planWrite } from "./plan";
 import { runProgressive } from "./progressive";
 import { flagLines } from "./flag-lines";
 import type { FlagOutcome } from "./flag-lines";
+import { appendSuggestions, parseSuggestions, readLexicon, suggestItems, suggestPrompt } from "./pronounce-suggest";
+import { planSessionFor } from "./research-verbs";
 import { findVault, resolveProject } from "./project";
 import { radioEpisodes } from "./radio";
 import { isPerformed, publishStream } from "./radio-stream";
@@ -280,6 +286,13 @@ const PRONOUNCE_ARGS = z.object({
     .optional()
     .default(false)
     .describe("List every undecided word. By default words also written in lower case elsewhere, month and weekday names, common English words and common first names are left out, and the rest ranks mixed-case tokens (ChatGPT) and unusual letter patterns first."),
+  suggest: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Ask the model the `plan` intent routes to for a respelling of every token pronounce flagged (and every heteronym such as read, lead, live, close), with a one-line reason each, and keep them as additions to the output's pronounce.md on a new plan/ branch for review. Nothing is applied; hear a suggestion before keeping it. Tokens the lexicon already decides are not sent. Refused with no model configured.",
+    ),
 });
 
 const VOICES_ARGS = z.object({
@@ -842,7 +855,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
   const pronounce: Verb<typeof PRONOUNCE_ARGS.shape> = {
     name: "pronounce",
     description:
-      "Show what the voice engine will say for a performed output's script lines, before any render: for each line whose engine input differs from its text, the line number, the speaker, each changed token (\"10-20%\" -> \"ten to twenty percent\", \"AI\" -> \"A.I.\" on a nonfiction work, shorthand such as \"Gov.\", \"3:00 p.m.\", \"$7T\" or \"1/3\", a pronounce.md respelling) and the full engine text; then the capitalised or all-caps words no rule or lexicon entry decided, which the author may want to add to the output's pronounce.md, and the links, abbreviation-like words and unknown units it left as written. The word list leaves out month and weekday names, common English words, common first names and words also written in lower case elsewhere, and ranks mixed-case tokens (ChatGPT) and unusual letter patterns first; `all` lists every word. Read-only; loads no model and writes nothing.",
+      "Show what the voice engine will say for a performed output's script lines, before any render: for each line whose engine input differs from its text, the line number, the speaker, each changed token (\"10-20%\" -> \"ten to twenty percent\", \"AI\" -> \"A.I.\" on a nonfiction work, shorthand such as \"Gov.\", \"3:00 p.m.\", \"$7T\" or \"1/3\", a pronounce.md respelling) and the full engine text; then the capitalised or all-caps words no rule or lexicon entry decided, which the author may want to add to the output's pronounce.md, and the links, abbreviation-like words and unknown units it left as written. The word list leaves out month and weekday names, common English words, common first names and words also written in lower case elsewhere, and ranks mixed-case tokens (ChatGPT) and unusual letter patterns first; `all` lists every word. Read-only; loads no model and writes nothing. With suggest: sends each flagged token and heteronym, with its sentence, to the plan intent's model for a respelling and a reason, and writes the proposals into the output's pronounce.md on a new plan/ branch for the author to review (never applied; hear each before keeping it); refused with no model configured.",
     args: PRONOUNCE_ARGS,
     run: async (args, ctx) => {
       const where = locate(ctx, args.project);
@@ -860,11 +873,67 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
       const implied = args.output === undefined && performed.length === 1 ? { ...args, output: performed[0] } : args;
       const output = addressedOutput(implied, work, "pronounce");
       if (typeof output !== "string") return output;
-      return run(["pronounce", ...flag("--episode", args.episode ?? args.unit), ...(args.all ? ["--all"] : [])], { project: args.project }, ctx, deps, [], output);
+      const pronounceNow = () => run(["pronounce", ...flag("--episode", args.episode ?? args.unit), ...(args.all ? ["--all"] : [])], { project: args.project }, ctx, deps, [], output);
+      if (!args.suggest) return pronounceNow();
+      return suggestRespellings(work, output, ctx, pronounceNow);
     },
   };
 
   return [audition, cast, voices, perform, mix, fix, flagVerb, describeVoice, pronounce] as readonly Verb[];
+}
+
+/**
+ * `pronounce --suggest` (AGT-2303): the planner proposes respellings for what `pronounce` flagged, and pablo writes the
+ * ones that pass its checks into the output's `pronounce.md` on a new `plan/` branch (`pronounce-suggest.ts`). No model
+ * configured is a refusal before anything runs; nothing is sent when nothing is flagged.
+ */
+async function suggestRespellings(work: string, output: AudioOutput, ctx: VerbContext, pronounceNow: () => VerbResult): Promise<VerbResult> {
+  let adapter: Adapter;
+  try {
+    adapter = ctx.planner ?? createPlanner(loadConfig({ env: ctx.env, projectDir: work }), { keys: { env: ctx.env }, intent: PLAN_INTENT }).adapter;
+  } catch (error) {
+    return refuse(`pablo pronounce --suggest: no model to ask (${(error as Error).message}); route the plan intent to a provider (pablo init --config)`);
+  }
+  const pronounced = pronounceNow();
+  if (pronounced.exitCode !== 0) return pronounced;
+  const body = pronounced.body as Record<string, unknown>;
+  const items = suggestItems(body);
+  const lexicon = String(body["lexicon"] ?? `outputs/${output}/pronounce.md`);
+  const nothing = { ok: true, output, lexicon, sent: 0, suggestions: [], rejected: [] };
+  if (items.length === 0) return { body: { ...nothing, message: "nothing flagged: no undecided token or heteronym, so nothing was sent" }, exitCode: 0 };
+
+  ctx.stderr.write(`pablo: pronounce --suggest: asking ${adapter.id} (${adapter.model}) about ${items.length} token${items.length === 1 ? "" : "s"}\n`);
+  let reply: string;
+  try {
+    reply = await completeText(adapter, suggestPrompt(items));
+  } catch (error) {
+    if (error instanceof EndpointHung || error instanceof ProviderResponseError) return { body: { ok: false, code: 1, message: error.message }, exitCode: 1 };
+    throw error;
+  }
+  let checked: ReturnType<typeof parseSuggestions>;
+  try {
+    checked = parseSuggestions(reply, items);
+  } catch {
+    return { body: { ok: false, code: 1, message: `pablo pronounce --suggest: the model (${adapter.id}) did not answer with the suggestions JSON asked for; run it again, or route the plan intent to another provider` }, exitCode: 1 };
+  }
+  const provider = { provider: adapter.id, model: adapter.model };
+  if (checked.suggestions.length === 0) {
+    return { body: { ...nothing, sent: items.length, rejected: checked.rejected, ...provider, message: "the model proposed no respelling that passed the checks; nothing written" }, exitCode: 0 };
+  }
+
+  const planned = planSessionFor(work, ctx.env);
+  if (!planned.ok) return planned.result;
+  const path = `${planned.dir ? `${planned.dir}/` : ""}${lexicon}`;
+  const written = planWrite(planned.session, {
+    path,
+    content: appendSuggestions(readLexicon(work, lexicon), checked.suggestions, { date: new Date().toISOString().slice(0, 10), model: `${adapter.id}/${adapter.model}` }),
+    message: `pronounce: suggest ${checked.suggestions.length} respelling${checked.suggestions.length === 1 ? "" : "s"} for ${output}`,
+  });
+  if (!written.ok) return { body: { ok: false, code: 1, message: written.notice }, exitCode: 1 };
+  return {
+    body: { ok: true, output, lexicon, path, branch: planned.session.branch, ...(written.sha ? { sha: written.sha } : {}), sent: items.length, suggestions: checked.suggestions, rejected: checked.rejected, ...provider },
+    exitCode: 0,
+  };
 }
 
 /**
