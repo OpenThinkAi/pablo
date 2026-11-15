@@ -506,7 +506,12 @@ export function castingText(verb: string, body: Record<string, unknown>): string
       const traits = Object.entries((row["traits"] ?? {}) as Record<string, unknown>)
         .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join("/") : String(v)}`)
         .join(" ");
-      const status = [row["retired"] ? "retired" : "", row["admitted_by"] === "auto" ? "auto-admitted" : ""].filter(Boolean).join(", ");
+      const status = [
+        row["retired"] ? "retired" : "",
+        row["admitted_by"] === "auto" ? "auto-admitted" : row["admitted_by"] === "best-of" ? "auto-admitted, best-of" : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
       lines.push(`${String(row["slug"])}  ${String(row["hash"]).slice(0, 12)}  ${traits}${status ? `  (${status})` : ""}`);
     }
   }
@@ -530,6 +535,8 @@ export function castingText(verb: string, body: Record<string, unknown>): string
     }
     for (const d of (body["designed"] as Array<Record<string, unknown>> | undefined) ?? []) {
       lines.push(`  ${String(d["role"])}: designed ${String(d["slug"])} (round ${String(d["round"])}, candidate ${String(d["candidate"])}), card ${String(d["hash"]).slice(0, 12)}`);
+      // AGT-2321: no candidate passed every gate, so the best was admitted; say so, and how far it missed.
+      if (d["admittedBy"] === "best-of" && typeof d["notice"] === "string") lines.push(`    BEST-OF: ${d["notice"]}`);
     }
   }
   if (verb === "describe_voice" && typeof body["traits"] === "object" && body["traits"] !== null) {

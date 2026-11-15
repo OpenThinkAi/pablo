@@ -263,6 +263,17 @@ def test_a_take_needing_a_stretch_outside_the_range_is_retaken(setup: tuple[Path
     assert statuses == ["fail"] * 4 + ["pass"] * 4
 
 
+def test_a_slow_take_inside_the_gate_range_passes_and_the_mix_applies_at_most_the_pace_range(setup: tuple[Path, Path]) -> None:
+    # AGT-2321: the gate's calibrated stretch range (to 1.2) admits a take the mix still paces only to 1.05.
+    work, library = setup
+    factory = Factory(wps=(2.2,))
+    body, code, _, _ = go(work, library, factory)
+    assert code == 0, body
+    line = read_version(work, 1, 1)["lines"][0]  # band 2.4-3.4: needs 2.4 / 2.2 = 1.091
+    assert line["status"] == "pass" and line["attempts"] == 1 and "flag" not in line
+    assert line["stretch"] == PACE_RANGE[1] and line["stretch_needed"] == round(2.4 / 2.2, 3)
+
+
 def test_no_attempt_in_range_keeps_the_best_clamped_and_flags_the_line(setup: tuple[Path, Path]) -> None:
     work, library = setup
     factory = Factory(wps=(5.0,))

@@ -485,8 +485,11 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 through `perform.py`'s `Performer` and the full gate stack
                 (takes receipted, never stored), and the best pass is cast
                 with `admitted.by: auto` plus its trial evidence and bound
-                `by: design`; one re-phrased retry, then exit 2 naming the
-                role. `describe` (the harness's `describe_voice`) returns
+                `by: design`; one re-phrased retry, then the best trialled
+                candidate is cast anyway with `admitted.by: best-of` and
+                the binding marked review (AGT-2321; `nearestMisses` says
+                how far each gate was missed); exit 2 naming the role only
+                when no candidate got past the screen. `describe` (the harness's `describe_voice`) returns
                 the mapper's traits, the free text it left and the
                 vocabulary; the harness answers with `--role-traits`. The gate's scorers sit behind
                 `scorers.py`'s `Scorer` interface with their heavy imports
@@ -557,8 +560,10 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 lists all). `perform.py` runs the
                 retake loop (4 derived seeds, first pass kept, else best-of
                 with an auto flag in `flags.json`), the pace policy (role
-                `pace.wps` x 0.85/1.15 for slow/quick; stretch measured and
-                held to [0.75, 1.05], applied by the mix), writes takes and
+                `pace.wps` x 0.85/1.15 for slow/quick; the needed stretch
+                is gated by the card's `stretch_range`, default [0.75, 1.2]
+                calibrated in AGT-2321, and the mix applies at most
+                [0.75, 1.05], recording `stretch_needed`), writes takes and
                 `v1.json` (with `rtf_total` and a `render` block), a receipt
                 per engine pass, and one JSON progress line per line on
                 stderr (stdout too with `--json-lines`). It resolves cards

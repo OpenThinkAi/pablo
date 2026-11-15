@@ -151,11 +151,13 @@ def test_a_failing_take_is_an_answer_naming_the_failing_gates(env: dict[str, str
 
 
 def test_the_card_overrides_the_defaults_and_its_pace_band_applies(env: dict[str, str], tmp_path: Path) -> None:
-    make_card(env, gates={"sim_min": 0.80}, pace={"wps": 2.5, "band": [2.0, 2.6]})
+    # 2.89 w/s is beyond what the stretch range can pace into a 1.6-2.0 band (AGT-2321: up to 2.0 / 0.75 = 2.667).
+    make_card(env, gates={"sim_min": 0.80}, pace={"wps": 1.8, "band": [1.6, 2.0]})
     take = make_wav(tmp_path / "take.wav")
     body, _ = gate(env, [str(take), "--line", LINE, "--card", "cora"], good_stack())
     assert body["failing"] == ["identity", "pace"]
-    assert body["thresholds"]["wps_band"] == [2.0, 2.6]  # type: ignore[index]
+    assert body["thresholds"]["wps_band"] == [1.6, 2.0]  # type: ignore[index]
+    assert body["gates"]["pace"]["thresholds"]["wps in"] == [1.333, 2.667]  # type: ignore[index]
 
 
 def test_a_role_centroid_counts_once_it_has_ten_takes(env: dict[str, str], tmp_path: Path) -> None:

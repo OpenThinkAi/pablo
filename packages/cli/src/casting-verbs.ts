@@ -20,8 +20,9 @@
  *   roles with no fit come back as `needsDesign`. With `--design` (AGT-1699,
  *   `design.py`) those roles get a voice designed on demand: auditioned
  *   unattended, screened, trialled through the engine and the gates, admitted
- *   with `admitted.by: auto` and bound `by: design`, or refused (exit 2) by
- *   name after one re-phrased retry. It provisions the `scorers` extra.
+ *   with `admitted.by: auto` (or, when none passed every gate, the best of
+ *   the trial with `admitted.by: best-of`, AGT-2321) and bound `by: design`;
+ *   refused (exit 2) by name only when no candidate got past the screen. It provisions the `scorers` extra.
  * - `describe_voice --describe "..." [--gender f|m|x]` (AGT-1699) is the
  *   harness's tool for a description the `CAST:` mapper cannot normalise: the
  *   mapper's traits, the phrases left over and the traits vocabulary, so the
@@ -177,7 +178,7 @@ const CAST_ARGS = z.object({
     .optional()
     .default(false)
     .describe(
-      "auto: design a voice for every role that needs one (6 candidates auditioned unattended, screened for naturalness, pitch and distinctness from the library, a 3-line trial through the engine scored by every gate); the best passing voice is admitted to the library (admitted.by: auto) and bound by: design. One retry with a re-phrased description; a second miss refuses naming the role. Loads models and uses the GPU.",
+      "auto: design a voice for every role that needs one (6 candidates auditioned unattended, screened for naturalness, pitch and distinctness from the library, a 3-line trial through the engine scored by every gate); the best passing voice is admitted to the library (admitted.by: auto) and bound by: design. One retry with a re-phrased description; after a second miss the best candidate that reached the trial is admitted anyway (admitted.by: best-of, the binding marked review, with how far it and the closest candidate missed each gate) so the run can go on to perform and the author recasts by ear; only a role whose every candidate failed the screen is refused, by name. Loads models and uses the GPU.",
     ),
   "role-traits": z
     .string()
@@ -716,7 +717,7 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
   const perform: Verb<typeof PERFORM_ARGS.shape> = {
     name: "perform",
     description:
-      "Perform a radio episode: every spoken line is rendered through the decided engine (Chatterbox-Turbo; `dia` for A/B only) in its bound voice, scored by the quality gates, and retaken up to 4 times with derived seeds (first passing take kept, else the best kept and flagged automatically); the pace policy stretches each take to its role's pace (slow/quick directions scale it) within 0.75-1.05, retaking lines that would need more. Writes immutable takes and the episode's v1 manifest (with rtf_total) and a receipt per engine pass; each line's take is reported as it lands. Refuses an unbound role, a changed card pin, or an episode that already has a manifest (use fix). With output: narrated and unit, performs that reading of the narrated output instead (its narrator, and character voices only where the reading gives them lines; cast them first with cast auto and output: narrated). With `stream`, a listener can start the episode in the review player before its last line is performed, and the episode is mixed and published to the listening directory as soon as it finishes; with `all`, every episode not yet performed, in order. Loads models and uses the GPU.",
+      "Perform a radio episode: every spoken line is rendered through the decided engine (Chatterbox-Turbo; `dia` for A/B only) in its bound voice, scored by the quality gates, and retaken up to 4 times with derived seeds (first passing take kept, else the best kept and flagged automatically); the pace policy stretches each take to its role's pace (slow/quick directions scale it) within 0.75-1.05, retaking lines that would need more than the pace gate allows (0.75-1.2 by default, calibrated on takes the author used). Writes immutable takes and the episode's v1 manifest (with rtf_total) and a receipt per engine pass; each line's take is reported as it lands. Refuses an unbound role, a changed card pin, or an episode that already has a manifest (use fix). With output: narrated and unit, performs that reading of the narrated output instead (its narrator, and character voices only where the reading gives them lines; cast them first with cast auto and output: narrated). With `stream`, a listener can start the episode in the review player before its last line is performed, and the episode is mixed and published to the listening directory as soon as it finishes; with `all`, every episode not yet performed, in order. Loads models and uses the GPU.",
     args: PERFORM_ARGS,
     run: async (args, ctx) => {
       // `--output radio --all` (AGT-1700) is the radio output's whole chain, not the engine queue alone.

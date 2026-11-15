@@ -14,8 +14,8 @@ every hard gate passes; the emotion gate is soft (a flag, never a failure).
 | identity    | sim_card                    | >= 0.60                      | yes  |
 | consistency | sim_role_centroid           | >= 0.65                      | once >= 10 approved takes |
 | naturalness | utmos (and pq if pq_min)    | utmos >= 3.8                 | yes  |
-| artefacts   | bak, ovrl                   | >= 4.0 / >= 3.5              | yes  |
-| pace        | wps, stretch                | band 2.4-3.4, stretch 0.75-1.05 | yes |
+| artefacts   | bak, ovrl                   | >= 3.7 / >= 2.8              | yes  |
+| pace        | stretch (wps)               | stretch 0.75-1.20            | yes  |
 | emotion     | emotion_top2                | top-2 holds the asked class  | no (flag) |
 | duration    | seconds vs words / wps      | within 60%                   | yes  |
 
@@ -23,6 +23,24 @@ The pronounce gate (AGT-2307, `phonemes.py`) is judged only for a take that had
 an acronym or respelling to check (the phoneme scorer then sets
 `pronounce_missed`); otherwise, and when casting.json turns it off (the
 thresholds carry `pronounce: False`, `PRONOUNCE_OFF`), it is skipped.
+
+The pace gate judges the stretch a take needs (the factor that brings its
+`wps` into the role's band, or to the target without a band); `wps` is held to
+the band widened by what that stretch range can pace (`low / high_stretch` to
+`high / low_stretch`), so the two never disagree.
+
+**Calibration (AGT-2321).** The artefacts and pace defaults were fitted with
+`gate calibrate` (the 5th percentile of approved takes; `stretch_range` is
+[p5, p95]) on 244 takes the author heard and used: the latest render of every
+episode of two narrated essays (90 lines) and of one radio-drama episode (154
+lines). Pooled fits: `bak` p5 3.736, `ovrl` p5 2.803, `stretch` [0.769, 1.200]
+(the essays alone: `ovrl` 3.31-3.41, `bak` 4.09-4.18; the drama's designed
+voices pulled the pool down, and the drama is where `cast --auto --design`
+runs). The old 4.0 / 3.5 refused 179 of the 244 on artefacts (`ovrl` never
+went above 3.61), and the old pace gate (raw `wps` in the band, which made the
+stretch range moot) refused 115. Defaults are the fits rounded down to 0.05;
+the stretch floor stays 0.75 (the fit, 0.769, was stricter). Words, identity
+and naturalness were not loosened.
 
 Pure Python: the scores come from `scorers.py` (or a stored record), so this
 module is what the default tests exercise.
@@ -46,10 +64,10 @@ DEFAULT_GATES: dict[str, object] = {
     "centroid_min_takes": 10,
     "utmos_min": 3.8,
     "pq_min": None,  # Audiobox PQ is a second opinion: reported, gated only when a card (or calibration) sets it
-    "bak_min": 4.0,
-    "ovrl_min": 3.5,
+    "bak_min": 3.7,  # AGT-2321: approved takes' p5 3.736 (was 4.0)
+    "ovrl_min": 2.8,  # AGT-2321: approved takes' p5 2.803 (was 3.5)
     "wps_band": [2.4, 3.4],
-    "stretch_range": [0.75, 1.05],
+    "stretch_range": [0.75, 1.2],  # AGT-2321: approved takes' [p5, p95] [0.769, 1.200] (was [0.75, 1.05])
     "duration_tolerance": 0.6,
 }
 
@@ -240,6 +258,96 @@ def derive(scores: Mapping[str, object], line: str | None, seconds: float | None
     return out
 
 
+def paceable_band(thresholds: Mapping[str, object]) -> list[float]:
+    """The words/s a take may be read at: the role's band widened by what the stretch range can pace.
+
+    A take at `wps` needs `edge / wps` to reach its band, so a stretch inside
+    [lo, hi] reaches it from `band_low / hi` up to `band_high / lo`.
+    """
+    low, high = (float(v) for v in thresholds["wps_band"])  # type: ignore[union-attr]
+    s_low, s_high = (float(v) for v in thresholds["stretch_range"])  # type: ignore[union-attr]
+    return [round(low / s_high, 3) if s_high > 0 else 0.0, round(high / s_low, 3) if s_low > 0 else float("inf")]
+
+
+def misses(verdict: Mapping[str, object]) -> dict[str, list[dict[str, object]]]:
+    """How far each failing hard gate missed, measure by measure (AGT-2321).
+
+    One entry per failing measure: `measure`, `value`, the `op` and `limit` it
+    was held to, and `miss`, the distance to the limit (None for a yes/no
+    measure, or a `reason` when the gate was not scored).
+    """
+    out: dict[str, list[dict[str, object]]] = {}
+    gates = verdict.get("gates") if isinstance(verdict.get("gates"), dict) else {}
+    for name in verdict.get("failing", []) or []:  # type: ignore[union-attr]
+        gate = gates.get(name) if isinstance(gates, dict) else None
+        if not isinstance(gate, dict):
+            continue
+        if "reason" in gate:
+            out[str(name)] = [{"reason": gate["reason"]}]
+            continue
+        measures = gate.get("measures", {})
+        entries: list[dict[str, object]] = []
+        for label, limit in (gate.get("thresholds") or {}).items():
+            measure, op = str(label).rsplit(" ", 1)
+            value = measures.get(measure)
+            miss: float | None = None
+            if op == "is":
+                if value is limit:
+                    continue
+            elif op == "in":
+                low, high = limit  # type: ignore[misc]
+                if low <= value <= high:  # type: ignore[operator]
+                    continue
+                miss = round(low - value if value < low else value - high, 3)  # type: ignore[operator]
+            elif op == ">=":
+                if value >= limit:  # type: ignore[operator]
+                    continue
+                miss = round(limit - value, 3)  # type: ignore[operator]
+            elif op == "<=":
+                if value <= limit:  # type: ignore[operator]
+                    continue
+                miss = round(value - limit, 3)  # type: ignore[operator]
+            entries.append({"measure": measure, "value": value, "op": op, "limit": limit, "miss": miss})
+        out[str(name)] = entries
+    return out
+
+
+def miss_size(entries: Sequence[Mapping[str, object]]) -> float:
+    """One gate's miss as a single number to compare candidates by: the worst miss relative to its limit."""
+    worst = 0.0
+    for entry in entries:
+        miss, limit = entry.get("miss"), entry.get("limit")
+        if not isinstance(miss, (int, float)):
+            return float("inf")  # a yes/no measure failed, or the gate was not scored
+        if isinstance(limit, list):
+            scale = max(abs(float(limit[0])), abs(float(limit[1])), 1e-9)
+        else:
+            scale = max(abs(float(limit)), 1e-9)  # type: ignore[arg-type]
+        worst = max(worst, float(miss) / scale)
+    return worst
+
+
+def describe_misses(found: Mapping[str, Sequence[Mapping[str, object]]]) -> str:
+    """`misses()` as one line: `artefacts: ovrl 2.71 vs >= 2.8 (short 0.09); pace: stretch 1.31 vs 0.75-1.2 (out 0.11)`."""
+    parts: list[str] = []
+    for name, entries in found.items():
+        said: list[str] = []
+        for entry in entries:
+            if "reason" in entry:
+                said.append(str(entry["reason"]))
+                continue
+            value, op, limit, miss = entry["value"], entry["op"], entry["limit"], entry["miss"]
+            if op == "is":
+                said.append(f"{entry['measure']} {value} (needs {limit})")
+            elif op == "in":
+                low, high = limit  # type: ignore[misc]
+                said.append(f"{entry['measure']} {value} vs {low:g}-{high:g} (out {miss:g})")
+            else:
+                said.append(f"{entry['measure']} {value} vs {op} {limit:g} ({'short' if op == '>=' else 'over'} {miss:g})")
+        parts.append(f"{name}: {', '.join(said)}")
+    return "; ".join(parts)
+
+
 def _num(scores: Mapping[str, object], key: str) -> float | None:
     value = scores.get(key)
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
@@ -316,7 +424,7 @@ def evaluate(
         ("ovrl", _num(scores, "ovrl"), ">=", thresholds["ovrl_min"]),
     ])
     gate("pace", True, [
-        ("wps", _num(scores, "wps"), "in", thresholds["wps_band"]),
+        ("wps", _num(scores, "wps"), "in", paceable_band(thresholds)),
         ("stretch", _num(scores, "stretch"), "in", thresholds["stretch_range"]),
     ])
 

@@ -7,7 +7,7 @@ import statistics
 
 import pytest
 
-from pablo_casting.calibrate import FEW, calibrate, fit_threshold, percentile
+from pablo_casting.calibrate import FEW, calibrate, fit_range, fit_threshold, percentile
 
 
 def test_percentile_interpolates_like_numpy() -> None:
@@ -101,3 +101,22 @@ def test_records_without_a_score_are_skipped_and_bad_values_ignored() -> None:
     fits = calibrate(approved, [])
     assert fits["utmos_min"].n_approved == 2
     assert fits["sim_min"].n_approved == 1
+
+
+def test_the_stretch_range_is_fitted_two_sided_and_holds_one() -> None:
+    # AGT-2321: a take can need slowing or speeding, so the pace gate's range is [p5, p95] of the approved takes.
+    approved = [1.0] * 30 + [0.8, 0.85, 1.1, 1.15, 1.2, 1.25]
+    fit = fit_range("stretch_range", "stretch", approved)
+    assert fit.value == [round(percentile(approved, 5), 3), round(percentile(approved, 95), 3)]
+    assert fit.direction == "range" and fit.chose == "p5-p95" and fit.note is None
+    assert fit.as_body()["direction"] == "inside a range"
+    # Every approved take in its band (stretch 1.0) still yields a range that holds 1.0.
+    assert fit_range("stretch_range", "stretch", [1.0] * 25).value == [1.0, 1.0]
+    assert fit_range("stretch_range", "stretch", [1.1] * 25).value == [1.0, 1.1]
+
+
+def test_calibrate_fits_the_stretch_range_when_records_carry_stretch() -> None:
+    approved = [{"stretch": 1.0, "ovrl": 3.4} for _ in range(20)] + [{"stretch": 1.15, "ovrl": 3.0} for _ in range(6)]
+    fits = calibrate(approved, [])
+    assert set(fits) == {"ovrl_min", "stretch_range"}
+    assert fits["stretch_range"].value[0] == 1.0 and fits["stretch_range"].value[1] > 1.0  # type: ignore[index]

@@ -281,7 +281,8 @@ def test_malformed_role_traits_are_refused_before_any_design(env: dict[str, str]
     assert not (work / "outputs" / "radio" / "casting" / "cast.json").exists()
 
 
-# ---- AC2: no passing voice -> one retry with a re-phrased instruct, then a refusal naming the role; nothing admitted
+# ---- AC2: no passing voice -> one retry with a re-phrased instruct, then the best trialled candidate (AGT-2321),
+# or a refusal naming the role when none reached the trial; nothing admitted then
 
 
 def _assert_nothing_admitted(vault: Path, work: Path) -> None:
@@ -306,7 +307,11 @@ def test_no_natural_candidate_retries_once_then_refuses_naming_the_role(env: dic
     assert all(c["screen"]["failing"] == ["naturalness"] for r in refused["rounds"] for c in r["candidates"])
     # The refusal says which gate turned them away and what to do next.
     assert refused["failures"] == {"naturalness": 12}
-    assert "failures: naturalness 12" in str(body["message"]) and "auditions" in str(body["message"])
+    assert "screen failures: naturalness 12" in str(body["message"]) and "auditions" in str(body["message"])
+    # AGT-2321: how far the closest candidate missed each gate, so a too-strict gate shows.
+    [miss] = refused["nearestMisses"]["naturalness"]["misses"]
+    assert miss["measure"] == "utmos" and miss["limit"] == 3.8 and miss["miss"] == pytest.approx(3.8 - miss["value"], abs=1e-3)
+    assert "closest misses: naturalness: utmos" in str(body["message"])
     assert "pablo cast --role RAMON --slug ramon --candidate N" in str(body["message"])
     assert engines.made == []  # nothing passed the screen, so nothing reached the engine
     _assert_nothing_admitted(vault, work)
@@ -314,17 +319,74 @@ def test_no_natural_candidate_retries_once_then_refuses_naming_the_role(env: dic
     assert len(list((voice(vault, "ramon") / "auditions").glob("*.wav"))) == 12
 
 
-def test_a_failing_trial_retries_once_then_refuses(env: dict[str, str], vault: Path, work: Path) -> None:
+def test_a_failing_trial_retries_once_then_admits_the_best_of(env: dict[str, str], vault: Path, work: Path) -> None:
+    # AGT-2321: every candidate reaches the trial and misses identity; the run goes on with the best of them.
     body, code, _, engines = design(env, vault, work, scorers=lambda: fake_scorers(sim=0.3))
-    assert code == 2 and "no voice could be cast for RAMON" in str(body["message"])
-    [refused] = body["refused"]  # type: ignore[misc]
-    for summary in refused["rounds"]:
+    assert code == 0, body
+    assert body["ok"] is not False and body["complete"] is True and body["refused"] == []
+    [designed] = body["designed"]  # type: ignore[misc]
+    assert designed["role"] == "RAMON" and designed["admittedBy"] == "best-of" and len(designed["rounds"]) == 2
+    for summary in designed["rounds"]:
         for candidate in summary["candidates"]:
             assert candidate["screen"]["pass"] is True and candidate["trial"]["pass"] is False
             assert "identity" in candidate["trial"]["lines"][-1]["failing"]
-    assert refused["failures"] == {"trial:identity": 12}
-    assert len(engines.made) == 2  # one trial engine per round
-    _assert_nothing_admitted(vault, work)
+    assert designed["failures"] == {"trial:identity": 12}
+    assert len(engines.made) == 2  # one trial engine per round: both rounds ran before the best-of
+
+    # The card says how it got in, and how far it missed.
+    card = json.loads((voice(vault, "ramon") / "card.json").read_text(encoding="utf-8"))
+    assert card["admitted"]["by"] == "best-of" and card["admitted"]["gates"] == "fail"
+    assert card["admitted"]["failing"] == ["identity"]
+    [miss] = card["admitted"]["misses"]["identity"]
+    assert miss["measure"] == "sim_card" and miss["value"] == 0.3 and miss["op"] == ">=" and miss["miss"] == pytest.approx(miss["limit"] - 0.3, abs=1e-3)
+
+    # The binding is marked for review; the message names the best-of and the nearest miss per gate.
+    assert cast_json(work)["RAMON"]["by"] == "design" and cast_json(work)["RAMON"]["admitted"] == "best-of"
+    [binding] = [b for b in body["bindings"] if b["role"] == "RAMON"]  # type: ignore[union-attr]
+    assert binding["review"] is True and binding["admitted"] == "best-of"
+    message = str(body["message"])
+    assert "admitted.by: best-of" in message and "trial:identity: sim_card 0.3 vs >= 0.62 (short 0.32)" in message
+    assert "recast by ear" in message
+    assert designed["nearestMisses"]["trial:identity"]["misses"][0]["value"] == 0.3
+
+    # It is listed as auto-admitted, flagged best-of.
+    listed, _ = call(env, "voices", "list", "--auto-admitted", "--vault", str(vault))
+    assert [(row["slug"], row["admitted_by"]) for row in listed["voices"]] == [("ramon", "best-of")]  # type: ignore[union-attr]
+
+
+def test_the_best_of_prefers_a_candidate_whose_words_held(env: dict[str, str], vault: Path, work: Path) -> None:
+    # Odd-numbered candidates misread words and miss artefacts narrowly; even ones only miss artefacts, by more.
+    class Flaky(FakeScorer):
+        def score(self, take: Take) -> Mapping[str, object]:
+            odd = int(Path(str(take.card_embedding)).parent.name.rsplit("-", 1)[1]) % 2 == 1
+            if self.info is WHISPER:
+                return {"wer": 0.5 if odd else 0.0, "inserted_span": 0, "tail_ok": True, "cut": round(take.seconds, 3), "heard": take.line}
+            if self.info is DNSMOS:
+                return {"bak": 4.2, "ovrl": 2.79 if odd else 2.5}
+            return super().score(take)
+
+    def scorers() -> list[FakeScorer]:
+        return [Flaky(s.info, s.answer) for s in fake_scorers()]
+
+    body, code, _, _ = design(env, vault, work, scorers=scorers)
+    assert code == 0, body
+    [designed] = body["designed"]  # type: ignore[misc]
+    assert designed["admittedBy"] == "best-of"
+    assert "words" not in designed["failing"] and designed["failing"] == ["artefacts"]
+    assert designed["misses"]["artefacts"][0]["measure"] == "ovrl"
+    # The nearest artefacts miss across every candidate is reported, so a too-strict gate shows.
+    nearest = designed["nearestMisses"]
+    assert set(nearest) >= {"trial:words", "trial:artefacts"}
+    assert nearest["trial:artefacts"]["misses"][0]["value"] == 2.79
+
+
+def test_a_round_that_passes_is_admitted_by_auto_not_best_of(env: dict[str, str], vault: Path, work: Path) -> None:
+    body, code, _, _ = design(env, vault, work)
+    assert code == 0, body
+    [designed] = body["designed"]  # type: ignore[misc]
+    assert designed["admittedBy"] == "auto" and "admitted" not in cast_json(work)["RAMON"]
+    card = json.loads((voice(vault, "ramon") / "card.json").read_text(encoding="utf-8"))
+    assert card["admitted"]["by"] == "auto" and card["admitted"]["gates"] == "pass"
 
 
 def test_a_role_off_the_cast_line_is_refused_by_name(env: dict[str, str], vault: Path, work: Path) -> None:
@@ -398,12 +460,20 @@ def test_receipts_cover_the_design_and_the_trial(env: dict[str, str], vault: Pat
     assert admitted["voice"] == "ramon" and admitted["card_hash"] == body["designed"][0]["hash"]  # type: ignore[index]
 
 
-def test_a_refused_design_leaves_receipts_for_both_rounds(env: dict[str, str], vault: Path, work: Path) -> None:
+def test_a_best_of_design_leaves_receipts_for_both_rounds(env: dict[str, str], vault: Path, work: Path) -> None:
     design(env, vault, work, scorers=lambda: fake_scorers(sim=0.3))
     rows = receipts(work)
     assert [r["round"] for r in rows if r["intent"] == "design"] == [1, 2]
     assert [r["chosen"] for r in rows if r["intent"] == "design"] == [None, None]
     assert {r["round"] for r in rows if r.get("stage") == "design-trial" and r["intent"] == "take"} == {1, 2}
+    [admitted] = [r for r in rows if r["intent"] == "cast"]
+    assert admitted["voice"] == "ramon"
+
+
+def test_a_refused_design_leaves_receipts_for_both_rounds(env: dict[str, str], vault: Path, work: Path) -> None:
+    design(env, vault, work, mos=3.0)
+    rows = receipts(work)
+    assert [r["round"] for r in rows if r["intent"] == "design"] == [1, 2]
     assert not [r for r in rows if r["intent"] == "cast"]
 
 

@@ -24,10 +24,20 @@ unattended:
    frozen through `cards.cast` with `admitted.by: "auto"` and the trial's
    evidence in the `admitted` block, and the role is bound in `cast.json` with
    `by: "design"`. A later role in the same run is screened against it.
-6. **Refuse.** A round with no passing candidate is retried once with the
-   re-phrased instruct and fresh seeds; a second miss is a refusal (exit 2)
-   naming the role, and nothing is admitted for it. The candidates stay in
-   `auditions/` (untracked; nothing here deletes one).
+6. **Best of (AGT-2321).** A round with no passing candidate is retried once
+   with the re-phrased instruct and fresh seeds. After a second miss the best
+   candidate that reached the trial is admitted anyway, with `admitted.by:
+   "best-of"` in its card (the binding is marked `review`), so the run goes on
+   to perform and the author recasts by ear. "Best": no misread words on its
+   trial first (words are never what a best-of excuses quietly), then the
+   most trial lines passed, the fewest failing gates, the smallest miss, then
+   the naturalness/distinctness rank. Only when no candidate reached the trial
+   (every one failed the screen: naturalness, pitch, reference or
+   distinctness) is it a refusal (exit 2) naming the role, with nothing
+   admitted. Either way the result reports, per gate, how far the candidate
+   closest to passing it missed (`nearestMisses`), so a gate that is too
+   strict shows. The candidates stay in `auditions/` (untracked; nothing here
+   deletes one).
 
 Receipts: each candidate's `audition` receipt, every trial `load`, `take` and
 `gate` receipt (tagged `stage: design-trial` with the role, voice, round and
@@ -53,7 +63,7 @@ from pablo_casting.binding import read_cast, write_cast
 from pablo_casting.cards import DEFAULT_GATES as CARD_GATES
 from pablo_casting.cards import PACE_BAND, CastRequest, cast, freeze_reference
 from pablo_casting.engines import ENGINE_SPECS, EngineFactory, EngineUnavailable, Pass, PassLine, VoiceRef
-from pablo_casting.gates import DEFAULT_GATES, load_card
+from pablo_casting.gates import DEFAULT_GATES, describe_misses, load_card, miss_size, misses
 from pablo_casting.library import Library, card_hash, slugify
 from pablo_casting.matching import Voice, cosine, load_voices
 from pablo_casting.passage import PASSAGE
@@ -198,14 +208,24 @@ def screen(record: Mapping[str, object], embedding: np.ndarray, traits: Mapping[
     closest, similarity = _closest(embedding, voices)
     utmos_min = float(DEFAULT_GATES["utmos_min"])  # type: ignore[arg-type]
     failing: list[str] = []
+    missed: dict[str, list[dict[str, object]]] = {}
     if not isinstance(utmos, (int, float)) or utmos < utmos_min:
         failing.append("naturalness")
+        missed["naturalness"] = [{"measure": "utmos", "value": utmos, "op": ">=", "limit": utmos_min, "miss": round(utmos_min - utmos, 3)}] if isinstance(utmos, (int, float)) else [{"reason": "not scored: utmos"}]
     if not isinstance(pitch, (int, float)) or not band[0] <= pitch <= band[1]:
         failing.append("pitch")
+        missed["pitch"] = (
+            [{"measure": "pitch_hz", "value": pitch, "op": "in", "limit": list(band), "miss": round(band[0] - pitch if pitch < band[0] else pitch - band[1], 3)}]
+            if isinstance(pitch, (int, float))
+            else [{"reason": "not scored: pitch_hz"}]
+        )
     if not (isinstance(trim, dict) and trim.get("ok") is True):
         failing.append("reference")
+        problem = trim.get("problem") if isinstance(trim, dict) else None
+        missed["reference"] = [{"reason": str(problem or "no usable reference")}]
     if similarity is not None and similarity > distinct:
         failing.append("distinctness")
+        missed["distinctness"] = [{"measure": "ecapa", "value": similarity, "op": "<=", "limit": distinct, "miss": round(similarity - distinct, 3)}]
     return {
         "utmos": utmos,
         "utmos_min": utmos_min,
@@ -215,6 +235,7 @@ def screen(record: Mapping[str, object], embedding: np.ndarray, traits: Mapping[
         "closest": None if closest is None else {"slug": closest, "ecapa": similarity},
         "distinct_max": distinct,
         "failing": failing,
+        "misses": missed,
         "pass": not failing,
     }
 
@@ -328,6 +349,7 @@ def trial(
                         "attempt": kept.attempt,
                         "take": kept.key,
                         "failing": list(kept.verdict.get("failing", [])),  # type: ignore[call-overload]
+                        "misses": misses(kept.verdict),
                         "gates": {name: kept.scores.get(name) for name in TRIAL_GATES},
                     }
                 )
@@ -357,8 +379,56 @@ def _rank(candidate: Candidate) -> tuple[float, float, int]:
     )
 
 
+def _trial_failing(result: Mapping[str, object]) -> tuple[list[str], dict[str, list[dict[str, object]]]]:
+    """The gates a trial's last (failing) line missed, and by how much."""
+    lines = result.get("lines")
+    last = lines[-1] if isinstance(lines, list) and lines else {}
+    failing = [str(n) for n in last.get("failing", [])] if isinstance(last, dict) else []
+    found = last.get("misses") if isinstance(last, dict) and isinstance(last.get("misses"), dict) else {}
+    return failing, found  # type: ignore[return-value]
+
+
+def _best_of_key(candidate: Candidate, result: Mapping[str, object]) -> tuple[object, ...]:
+    """Best first, among candidates that reached the trial and missed: words intact, most lines passed, fewest gates, smallest miss."""
+    failing, found = _trial_failing(result)
+    lines = result.get("lines") or []
+    passed = sum(1 for line in lines if isinstance(line, dict) and line.get("pass"))  # type: ignore[union-attr]
+    total_miss = sum(miss_size(found.get(name, [{"reason": "?"}])) for name in failing)
+    return ("words" not in failing, passed, -len(failing), -total_miss, *_rank(candidate))
+
+
+def nearest_misses(rounds: Sequence[Mapping[str, object]]) -> dict[str, dict[str, object]]:
+    """Per gate that turned a candidate away, the candidate that came closest and how far it missed (AGT-2321).
+
+    Gate names as `failure_tally` counts them: screen gates by name, trial gates as `trial:<gate>`."""
+    best: dict[str, tuple[float, dict[str, object]]] = {}
+
+    def offer(name: str, entries: Sequence[Mapping[str, object]], round_no: object, number: object) -> None:
+        size = miss_size(entries)
+        if name not in best or size < best[name][0]:
+            best[name] = (size, {"round": round_no, "candidate": number, "misses": [dict(e) for e in entries]})
+
+    for summary in rounds:
+        for candidate in summary.get("candidates", []):  # type: ignore[union-attr]
+            screened = candidate.get("screen", {})
+            found = screened.get("misses", {}) if isinstance(screened, dict) else {}
+            for name in screened.get("failing", []) if isinstance(screened, dict) else []:
+                offer(str(name), found.get(name, [{"reason": "no measure"}]), summary.get("round"), candidate.get("candidate"))
+            trial_result = candidate.get("trial")
+            if isinstance(trial_result, dict) and not trial_result.get("pass"):
+                failing, trial_found = _trial_failing(trial_result)
+                for name in failing:
+                    offer(f"trial:{name}", trial_found.get(name, [{"reason": "no measure"}]), summary.get("round"), candidate.get("candidate"))
+    return {name: body for name, (_, body) in sorted(best.items())}
+
+
+def describe_nearest(nearest: Mapping[str, Mapping[str, object]]) -> str:
+    """`nearest_misses` as text: `trial:artefacts ovrl 2.71 vs >= 2.8 (short 0.09); ...`."""
+    return "; ".join(describe_misses({name: body["misses"]}) for name, body in nearest.items())  # type: ignore[dict-item]
+
+
 def design_role(work: Path, library: Library, role: DesignRole, settings: DesignSettings, machine: Machine) -> dict[str, object]:
-    """Designs, trials and admits one voice for `role`, retrying once; raises `DesignRefusal` on a second miss."""
+    """Designs, trials and admits one voice for `role`, retrying once; then admits the best of the trial (AGT-2321), or raises `DesignRefusal` when no candidate reached it."""
     if role.gender is None and "gender" not in role.traits:
         raise DesignRefusal(
             f"no voice could be cast for {role.role}: it speaks but is not on the CAST: line, so there is no gender or description to design from; "
@@ -367,6 +437,7 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
         )
     slug = design_slug(library, role.role)
     rounds: list[dict[str, object]] = []
+    trialled: list[tuple[int, str, int, Candidate, dict[str, object]]] = []  # (round, instruct, of, candidate, trial)
     for round_no in range(1, ROUNDS + 1):
         instruct = describe_traits(role.traits, role.free_text, variant=round_no - 1)
         seed = settings.seed + (round_no - 1) * settings.n
@@ -407,6 +478,7 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
             "chosen": chosen.number if chosen else None,
         }
         rounds.append(summary)
+        trialled.extend((round_no, instruct, len(candidates), c, trials[c.number]) for c in screened if c.number in trials)
         append_receipt(
             work,
             {
@@ -425,7 +497,6 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
         )
         if chosen is None:
             continue
-
         admission = {
             "gates": "pass",
             "round": round_no,
@@ -435,47 +506,97 @@ def design_role(work: Path, library: Library, role: DesignRole, settings: Design
             "screen": chosen.screen,
             "trial": trials[chosen.number],
         }
-        written = cast(
-            library,
-            CastRequest(
-                slug=slug,
-                candidate=chosen.number,
-                recast=False,
-                by="auto",
-                traits=role.traits,
-                notes=f"designed on demand for {role.role}: round {round_no}, candidate {chosen.number} of {len(candidates)}",
-                admission=admission,
-            ),
-            machine.toolkit,
-            machine.engines_config,
-            machine.now,
-            work,
-        )
-        return {
-            "role": role.role,
-            "slug": slug,
-            "hash": written["hash"],
-            "card": written["card"],
-            "round": round_no,
-            "candidate": chosen.number,
-            "instruct": instruct,
-            "traitsFrom": role.traits_from,
-            "rounds": rounds,
-        }
+        return _admit(work, library, role, slug, chosen, round_no, len(candidates), instruct, admission, rounds, machine)
 
     tried = sum(len(r["candidates"]) for r in rounds)  # type: ignore[arg-type]
     failed = failure_tally(rounds)
     tally = ", ".join(f"{name} {count}" for name, count in failed.items()) or "no gate recorded"
+    nearest = nearest_misses(rounds)
+    closest = f"; closest misses: {describe_nearest(nearest)}" if nearest else ""
+    if trialled:
+        # AGT-2321: admit the best of what reached the trial, so the run can go on to perform.
+        round_no, instruct, of, best, result = max(trialled, key=lambda row: _best_of_key(row[3], row[4]))
+        failing, found = _trial_failing(result)
+        admission = {
+            "gates": "fail",
+            "round": round_no,
+            "candidate": best.number,
+            "instruct": instruct,
+            "traits_from": role.traits_from,
+            "screen": best.screen,
+            "trial": result,
+            "failing": failing,
+            "misses": found,
+            "failures": failed,
+            "nearest_misses": nearest,
+        }
+        notice = (
+            f"no candidate for {role.role} passed every gate ({tried} over {len(rounds)} rounds; failures: {tally}); "
+            f"admitted the best, round {round_no} candidate {best.number}, as admitted.by: best-of"
+            + (f", which missed {describe_misses(found)}" if found else "")
+            + f"{closest}. Listen to it and recast by ear if it will not do (pablo cast --role {role.role} --slug {slug} --candidate N --recast)"
+        )
+        admitted = _admit(work, library, role, slug, best, round_no, of, instruct, admission, rounds, machine, by="best-of", notes=f"best of {tried} candidates for {role.role} (none passed every gate): round {round_no}, candidate {best.number} of {of}")
+        return {**admitted, "failing": failing, "misses": found, "failures": failed, "nearestMisses": nearest, "notice": notice}
+
     raise DesignRefusal(
         f"no voice could be cast for {role.role}: {tried} candidates over {len(rounds)} rounds (the second re-phrased), "
-        f"none passed every gate (failures: {tally}). Listen to {library.auditions(slug)}, then cast one by hand "
+        f"none reached the trial (screen failures: {tally}){closest}. Listen to {library.auditions(slug)}, then cast one by hand "
         f"(pablo cast --role {role.role} --slug {slug} --candidate N), or run again with more candidates (-n 12) "
         f"or different role-traits",
         role=role.role,
         slug=slug,
         failures=failed,
+        nearestMisses=nearest,
         rounds=rounds,
     )
+
+
+def _admit(
+    work: Path,
+    library: Library,
+    role: DesignRole,
+    slug: str,
+    chosen: Candidate,
+    round_no: int,
+    of: int,
+    instruct: str,
+    admission: Mapping[str, object],
+    rounds: list[dict[str, object]],
+    machine: Machine,
+    *,
+    by: str = "auto",
+    notes: str | None = None,
+) -> dict[str, object]:
+    """Freezes `chosen` as the role's card through `cards.cast`; `by` is its `admitted.by` (`auto`, or `best-of`)."""
+    written = cast(
+        library,
+        CastRequest(
+            slug=slug,
+            candidate=chosen.number,
+            recast=False,
+            by="auto",
+            traits=role.traits,
+            notes=notes or f"designed on demand for {role.role}: round {round_no}, candidate {chosen.number} of {of}",
+            admission={**admission, "by": by},
+        ),
+        machine.toolkit,
+        machine.engines_config,
+        machine.now,
+        work,
+    )
+    return {
+        "role": role.role,
+        "slug": slug,
+        "hash": written["hash"],
+        "card": written["card"],
+        "round": round_no,
+        "candidate": chosen.number,
+        "instruct": instruct,
+        "traitsFrom": role.traits_from,
+        "admittedBy": by,
+        "rounds": rounds,
+    }
 
 
 def failure_tally(rounds: Sequence[Mapping[str, object]]) -> dict[str, int]:
@@ -527,6 +648,7 @@ def design_needed(
                 missing=[missing.info.package],
             ) from missing
         roles = read_cast(work)
+        best_of = {"admitted": "best-of"} if result.get("admittedBy") == "best-of" else {}
         roles[role.role] = {
             "slug": result["slug"],
             "card_hash": result["hash"],
@@ -534,6 +656,7 @@ def design_needed(
             "at": machine.now(),
             "round": result["round"],
             "candidate": result["candidate"],
+            **best_of,
         }
         write_cast(work, roles)
         designed.append(result)
@@ -548,15 +671,18 @@ def design_needed(
                 "by": "design",
                 "score": None,
                 "runnerUp": None,
-                "review": False,
+                "review": result.get("admittedBy") == "best-of",  # AGT-2321: the author recasts a best-of by ear
+                **({"admitted": "best-of"} if result.get("admittedBy") == "best-of" else {}),
                 "new": True,
             }
         )
     still = [row for row in needs if row["role"] in {r["role"] for r in refused}]
     parts = [str(auto_body.get("message", ""))] if not needs else []
-    if designed:
-        admitted = ", ".join(f"{d['role']} -> {d['slug']}" for d in designed)
+    passing = [d for d in designed if d.get("admittedBy") != "best-of"]
+    if passing:
+        admitted = ", ".join(f"{d['role']} -> {d['slug']}" for d in passing)
         parts.append(f"designed and admitted {admitted}")
+    parts.extend(str(d["notice"]) for d in designed if d.get("admittedBy") == "best-of")
     if refused:
         parts.append("; ".join(str(r["message"]) for r in refused))
     body: dict[str, object] = {

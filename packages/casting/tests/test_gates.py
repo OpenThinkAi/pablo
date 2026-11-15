@@ -9,7 +9,11 @@ from pablo_casting.gates import (
     GATE_NAMES,
     GateRefusal,
     derive,
+    describe_misses,
     evaluate,
+    miss_size,
+    misses,
+    paceable_band,
     validate_gates,
 )
 from pablo_casting.words import Heard, norm_words, sound_key, words_check
@@ -146,10 +150,11 @@ def test_a_good_take_passes_every_hard_gate() -> None:
         ({"sim_card": 0.55}, "identity"),
         ({"sim_role_centroid": 0.60}, "consistency"),
         ({"utmos": 3.5}, "naturalness"),
-        ({"bak": 3.9}, "artefacts"),
-        ({"ovrl": 3.2}, "artefacts"),
-        ({"wps": 3.8}, "pace"),
+        ({"bak": 3.6}, "artefacts"),
+        ({"ovrl": 2.7}, "artefacts"),
+        ({"wps": 4.6}, "pace"),
         ({"stretch": 0.7}, "pace"),
+        ({"stretch": 1.25}, "pace"),
         ({"duration_ratio": 1.7}, "duration"),
         ({"duration_ratio": 0.3}, "duration"),
     ],
@@ -161,8 +166,51 @@ def test_each_hard_gate_fails_on_its_own_measure(over: dict[str, object], gate: 
 
 
 def test_thresholds_are_inclusive_at_the_boundary() -> None:
-    at = good_scores(wer=0.05, inserted_span=2, sim_card=0.60, utmos=3.8, bak=4.0, ovrl=3.5, wps=2.4, stretch=1.05, duration_ratio=1.6)
+    at = good_scores(wer=0.05, inserted_span=2, sim_card=0.60, utmos=3.8, bak=3.7, ovrl=2.8, wps=2.0, stretch=1.2, duration_ratio=1.6)
     assert evaluate(at, DEFAULT_GATES)["pass"] is True
+
+
+def test_the_artefacts_and_pace_defaults_are_the_agt_2321_calibration() -> None:
+    # Fitted on 244 takes the author used (docstring of gates.py): the old 4.0 / 3.5 and 0.75-1.05 refused most of them.
+    assert DEFAULT_GATES["bak_min"] == 3.7 and DEFAULT_GATES["ovrl_min"] == 2.8
+    assert DEFAULT_GATES["stretch_range"] == [0.75, 1.2]
+    # Words, identity and naturalness were not loosened.
+    assert DEFAULT_GATES["wer_max"] == 0.05 and DEFAULT_GATES["inserted_span_max"] == 2
+    assert DEFAULT_GATES["sim_min"] == 0.60 and DEFAULT_GATES["utmos_min"] == 3.8
+
+
+def test_a_used_essay_take_that_the_old_gates_refused_now_passes() -> None:
+    # A real narrated-essay line's scores (best_of_failed on artefacts under the old gates; the author used it).
+    used = {"wer": 0.026, "inserted_span": 0, "tail_ok": True, "clipped": False, "sim_card": 0.8373, "utmos": 4.444, "pq": 7.901,
+            "bak": 4.187, "ovrl": 3.477, "wps": 2.534, "stretch": 1.0, "duration_ratio": 1.03}
+    assert evaluate(used, {**DEFAULT_GATES, "bak_min": 4.0, "ovrl_min": 3.5})["failing"] == ["artefacts"]
+    assert evaluate(used, DEFAULT_GATES)["pass"] is True
+    # A slow read whose needed stretch (1.12) the mix can mostly pace passes; one needing 1.3 still fails.
+    assert evaluate(good_scores(wps=2.14, stretch=1.12), DEFAULT_GATES)["pass"] is True
+    assert evaluate(good_scores(wps=1.85, stretch=1.3), DEFAULT_GATES)["failing"] == ["pace"]
+
+
+def test_the_pace_gate_holds_wps_to_the_band_the_stretch_range_can_reach() -> None:
+    assert paceable_band(DEFAULT_GATES) == [2.0, round(3.4 / 0.75, 3)]
+    verdict = evaluate(good_scores(wps=1.9, stretch=1.0), DEFAULT_GATES)  # a stale stretch: wps alone still catches it
+    assert verdict["failing"] == ["pace"]
+    assert verdict["gates"]["pace"]["thresholds"]["wps in"] == [2.0, 4.533]  # type: ignore[index]
+
+
+def test_misses_say_how_far_each_failing_gate_missed() -> None:
+    verdict = evaluate(good_scores(ovrl=2.6, bak=3.9, stretch=1.31, wps=1.85, tail_ok=False), DEFAULT_GATES)
+    found = misses(verdict)
+    assert set(found) == {"tail", "artefacts", "pace"}
+    assert found["artefacts"] == [{"measure": "ovrl", "value": 2.6, "op": ">=", "limit": 2.8, "miss": 0.2}]
+    assert {e["measure"]: e["miss"] for e in found["pace"]} == {"wps": 0.15, "stretch": 0.11}
+    assert found["tail"] == [{"measure": "tail_ok", "value": False, "op": "is", "limit": True, "miss": None}]
+    assert miss_size(found["artefacts"]) == pytest.approx(0.2 / 2.8)
+    assert miss_size(found["tail"]) == float("inf")
+    text = describe_misses({"artefacts": found["artefacts"], "pace": found["pace"]})
+    assert text == "artefacts: ovrl 2.6 vs >= 2.8 (short 0.2); pace: wps 1.85 vs 2-4.533 (out 0.15), stretch 1.31 vs 0.75-1.2 (out 0.11)"
+    unscored = good_scores()
+    del unscored["ovrl"]
+    assert misses(evaluate(unscored, DEFAULT_GATES))["artefacts"] == [{"reason": "not scored: ovrl"}]
 
 
 def test_a_missing_score_fails_its_hard_gate_and_says_so() -> None:
