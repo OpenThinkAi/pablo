@@ -46,7 +46,7 @@ again is refused); `--thesis` is refused on nonfiction.
   ids. On a fiction work the pack carries the story, the distilled period facts, `facts.md`,
   cast, places and timeline instead of claims.
 - The writer cites each claim where it uses it. The section replaces its text in
-  `essay.md` and is committed on `draft/essay-NN`; a section that already has text needs
+  `essay.md` and is committed on `draft/<slug>/essay-NN`; a section that already has text needs
   `--force`. Default length is 600 words a section (1500 for a fiction essay with no
   `outline.md`).
 - On nonfiction, `check` flags `claim-unsupported` and `claim-uncited` sentences, see

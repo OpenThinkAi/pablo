@@ -24,7 +24,7 @@ Refused until the core has beats. It scaffolds `outputs/story/` (`plan.md`, `RUL
 | Revise a passage | `pablo revise --project ice-house --file outputs/story/story.md --passage "<text>" --instruction "<text>" --branch` |
 | Check | `pablo check --project ice-house --output story` |
 
-The draft lands on `draft/story` (a re-draft is `-v2`); you accept it with `pablo merge`
+The draft lands on `draft/<slug>/story` (a re-draft is `-v2`); you accept it with `pablo merge`
 or in the screen. The default length grows with the beats (600 words per beat, never below
 a chapter's default); `--words` overrides it. The track's checks run after the draft and
 report hits without rewriting it; `pablo story --no-check` and `write --no-check` skip

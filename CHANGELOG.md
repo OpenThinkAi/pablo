@@ -3,17 +3,70 @@
 Notable changes per release of `@openthink/pablo`, `@openthink/pablo-core` and
 `@openthink/pablo-tui` (they release together at one version). The newest is first.
 
-## Unreleased
+## 0.6.0
+
+### Changed (check before upgrading)
+
+- **Branch names are per work.** New change branches carry the work's slug:
+  `draft/<slug>/story`, `draft/<slug>/ch02`, `draft/<slug>/essay-01`, `draft/<slug>/radio-ep01`,
+  `plan/<slug>/<date>-<id>`, `edit/<slug>/<id>`, `revise/<slug>/<id>`. A vault holding several works no
+  longer numbers one work's first draft `-v3` because another work drafted first. Branches made before
+  0.6.0 still read and are never renamed. Anything that parses `branch` from `write --json`, `story`,
+  `status` or `resume` sees the new names.
+- **Quality gates recalibrated** against 244 takes an author used: artefacts BAK >= 3.7 and OVRL >= 2.8
+  (were 4.0 / 3.5), and pace allows a needed stretch of 0.75-1.2 (the mix still paces at most 0.75-1.05).
+  The pace gate now honours its stretch range. Words, identity and naturalness gates are unchanged.
+  On the calibration takes, passing lines went from 45 to 175 of 244.
+- **`cast --auto --design` admits the best candidate** (`admitted.by: best-of`, binding marked for
+  review) instead of refusing when none passes every gate, and reports how close the nearest candidate
+  came on each gate. It still refuses when every candidate fails the screen.
+- **Radio planning follows the request.** A prompt or premise asking for a single episode (or a total
+  length) plans that many episodes instead of one per beat, and says which it chose; the narrator,
+  announcer and music stay unless the premise switches them off.
 
 ### Added
 
-- **`pablo fix --stale`** re-records the performed lines whose take was made from an older
-  pronunciation (a `pronounce.md` edit or a spoken-form change since the unit was performed), and
-  says so ("3 lines re-recorded: pronunciation changed"). `pablo pronounce` reports how many
-  performed lines are stale, per unit.
-- **`pablo flag`** flags performed lines for `pablo fix` from the command line
-  (`--line I[,J|all] "<reason>"`), the same entry the review player writes, so re-recording a line
-  no longer needs a window or a hand-edited `flags.json`. Also an MCP tool.
+- **The pronounce gate.** `perform` and `fix` check, by phonemes, that each acronym read as letters (and
+  each lexicon respelling given an IPA, `AJ -> A J /eɪ dʒ eɪ/`) was actually said, and re-take a line
+  that dropped it (Whisper hears "eye" and "A I" alike). Pinned phoneme model in the `scorers` extra;
+  `"pronounce": {"gate": false}` in casting.json turns it off. `pablo pronounce --check` audits rendered
+  takes without re-rendering.
+- **The listener check.** `pablo check --output radio` gives a model only what a listener hears, has it
+  retell the story, list confusions and anything repeated or restarted, and compares the retelling to
+  the beats. `pablo story --output radio` redrafts a failing episode once and stops for review if the
+  redraft fails.
+- **Beat-by-beat radio drafting.** An episode over several beats is drafted one request per beat, each
+  with its share of the words and a stopping point, overruns trimmed, stitched under one `CAST:` line, so
+  long episodes reach their length.
+- **Whispers.** `(whispering)`, `(hushed)` and synonyms are a delivery: the auto mix lowers the line and
+  adds a close-mic EQ (`eq` on the clip). `gasping`, `courteous` and "almost X" map to the vocabulary.
+- **`pablo publish --output narrated --target audio [--gap <s>] [--chapters]`** joins every reading's
+  newest mix into one `.m4a` (ffmpeg on PATH), with optional chapter markers.
+- **`pablo pronounce --suggest`** asks the `plan` model for respellings of flagged names, heteronyms and
+  unknown abbreviations, as proposals on a `plan/` branch to hear before keeping; **`--all`** shows every
+  unresolved word (the default list now leaves out months, common words, first names and words used in
+  lower case elsewhere, and ranks the likeliest misreads first).
+- **`pablo fix --stale`** re-records the performed lines whose take was made from an older pronunciation,
+  and `pablo pronounce` reports how many are stale. **`pablo flag`** flags performed lines from the
+  command line (`--line I[,J|all] "<reason>"`), no window needed. Also MCP tools.
+- **`pablo audition --preview`** renders each candidate (or a library voice) cloned by the perform engine
+  reading the work's own lines, or a neutral expository passage, so a narrator is no longer judged on the
+  drama passage.
+- **The agent can build a nonfiction core**: `save` takes inline `content` over MCP (and `--content` on
+  the CLI), `read` and `search` open `core/`, and the tools state the claims and outline row layouts.
+- **`bind --output radio|narrated`** writes the right output's `cast.json`; unknown flags are refused.
+
+### Fixed
+
+- Prose drafts keep the space before a leading-dot decimal ("shot .376", not "shot.376").
+- Essay publish prints a source's retrieval date once.
+- `write --output essay --force` after an outline title edit replaces the section (matched by position)
+  instead of appending a duplicate; `status` and `check` report a section that matches no outline row.
+- On a nonfiction work, names in `core/claims.md` count as known for the name check.
+- `check --output narrated` no longer reports every sentence of an essay reading as uncited (claims are
+  checked on the source essay); narration drift is still reported.
+- `pablo story` research runs in batches of five items, every saved note must close an item, and a capped
+  session gets one carry-on before stopping with the branch to merge and how to resume.
 
 ## 0.5.0
 

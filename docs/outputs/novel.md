@@ -31,7 +31,7 @@ voice rules. The chapters themselves live in `chapters/`.
   (`pablo status --for "chapter 3"` shows the same list).
 - The chapter is written one sentence per line with frontmatter (`model`, `prompt_hash`,
   `words` and so on) and committed on `draft/chNN` (a re-draft is `-v2`). Default length
-  is 1800 words. Accept it with `pablo merge --project ice-house draft/ch03` or in the
+  is 1800 words. Accept it with `pablo merge --project ice-house draft/ice-house/ch03` or in the
   screen. `--dry-run` shows the pack without sending it.
 - After the draft, the track's checks run on that unit and report hits without
   rewriting. See the track page: [fiction](../tracks/fiction.md#checks),

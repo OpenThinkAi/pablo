@@ -25,7 +25,7 @@ export const USAGE_LINES: readonly string[] = [
     "  pablo resume --project <slug>            the structured session summary an agent picks a",
     "                                            project up from: stage per part, last event, open",
     "                                            decisions, next step",
-    "  pablo save --project <slug> [--stage acts|beats|premise|bible/<file>] [--file <path>]",
+    "  pablo save --project <slug> [--stage acts|beats|premise|bible/<file>|thesis|claims|outline] [--file <path> | --content <text>]",
     "                                            replace a planning target from --file, or stdin when",
     "                                            it is omitted, committed straight to the work's",
     "                                            current branch (main), with no review branch (a",

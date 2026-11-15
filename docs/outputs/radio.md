@@ -28,7 +28,7 @@ Scaffolds `outputs/radio/` (`plan.md`, `RULES.md`); scripts live in
 | Re-record flagged lines | `pablo fix --project ice-house --episode 1` (flag lines in `pablo review` or the mixer's punch list) |
 | Check | `pablo check --project ice-house --output radio` |
 
-The script is committed on `draft/radio-epNN`. `check` adds a `radio` block: stage
+The script is committed on `draft/<slug>/radio-epNN`. `check` adds a `radio` block: stage
 directions outside the vocabulary and roles with no voice. `pablo status --for "radio N"`
 and `resume` report each episode's stage. The track's checks run after the script like any
 other output's.
