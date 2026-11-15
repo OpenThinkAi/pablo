@@ -27,6 +27,7 @@ version exclusively.
              "in": 0.0, "out": 2.4, # seconds into the (paced) source that play
              "anchor": {"line": 2, "edge": "start" | "end", "offset": 0.35} | {"at": 0.0},
              "gain": 0.0,           # dB
+             "eq": {"low_cut": 150, "presence_db": 4.0},   # optional close-mic EQ: high-pass Hz, dB shelf above 3.5 kHz
              "fade_in":  {"len": 0.0, "curve": "linear" | "scurve" | "log" | "exp"},
              "fade_out": {"len": 0.0, "curve": ...}}
     point = {"anchor": <as a clip's>, "db": -6.0, "curve": "linear"}
@@ -160,6 +161,15 @@ class _Checker:
         length = value.get("len")
         return float(length) if _number(length) else 0.0  # type: ignore[arg-type]
 
+    def eq(self, value: object, at: str) -> None:
+        if not isinstance(value, Mapping):
+            self.add(at, "must be {low_cut, presence_db}")
+            return
+        for extra in sorted(set(value) - {"low_cut", "presence_db"}):
+            self.add(f"{at}.{extra}", "is not an eq field (low_cut, presence_db)")
+        self.number(value, "low_cut", at, minimum=0.0)
+        self.number(value, "presence_db", at)
+
     def clip(self, clip: object, at: str, track: str, ids: dict[str, str]) -> None:
         if not isinstance(clip, Mapping):
             self.add(at, "must be an object")
@@ -206,6 +216,8 @@ class _Checker:
         else:
             self.anchor(clip["anchor"], f"{at}.anchor")
         self.number(clip, "gain", at)
+        if "eq" in clip:
+            self.eq(clip["eq"], f"{at}.eq")
         fades = 0.0
         for name in ("fade_in", "fade_out"):
             if name in clip:

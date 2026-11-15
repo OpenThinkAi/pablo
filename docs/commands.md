@@ -711,7 +711,7 @@ With `--output` (or when the work has one output), it also runs the core check
 after the unit's year, and names the bible, `facts.md`, `facts/period.md`, the work's
 title and the output's continuity (on a nonfiction work, also `research/`) don't know.
 Headings and a word right after an opening quote are not names. On a work with radio scripts it adds a `radio` block: directions outside
-the vocabulary, and roles with no voice. A screenplay's scenes (`*.fountain`) also
+the vocabulary, and roles with no voice. A direction word that is a synonym maps to the nearest vocabulary word and is never dropped: `gasping` and `breathless` read as `urgent`, `courteous` as `warm`, `almost X` as a light `X`. `whisper` and `hushed` are delivery words that sit beside an emotion (`(whispering, afraid)`) or alone. No engine voices them, so `pablo mix` does: a whispered clip is lowered 8 dB (`hushed`: 4 dB) and given a close-mic EQ, a clip's `eq` (`low_cut` Hz, `presence_db`). The gain is editable in the mixer; the `eq` is edited in the mix document (`renders/epNN/mix.vN.json`), a re-take keeps both, and the mixer's preview plays the clip's `eq` flat (the exported file has it). A screenplay's scenes (`*.fountain`) also
 get the Fountain lint in `hits[]`: `fountain-no-heading` (the scene does not open
 with a scene heading), `fountain-heading-spacing` (a heading without a blank line
 before and after), `fountain-cue-no-dialogue`, `fountain-stray-parenthetical` (one

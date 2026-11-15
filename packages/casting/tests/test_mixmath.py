@@ -74,3 +74,20 @@ def test_edges():
         m.fade_curve("nope", 0.5)
     stereo = m.apply_fade(np.ones((10, 2), dtype=np.float32), "linear", 5, "in")
     assert stereo.shape == (10, 2) and stereo[0, 1] == 0.0 and stereo[9, 0] == 1.0
+
+
+def test_close_mic_eq_cuts_the_low_end_and_lifts_the_presence_band():
+    rate = 24_000
+    t = np.arange(rate) / rate
+
+    def level(freq: float, **eq: float) -> float:
+        out = m.apply_eq(np.sin(2 * np.pi * freq * t).astype(np.float32), rate, **eq)
+        return float(np.sqrt(np.mean(out[2000:-2000] ** 2)) / np.sqrt(0.5))
+
+    assert level(60, low_cut=180.0) < 0.15
+    assert abs(level(1000, low_cut=180.0) - 1.0) < 0.05
+    assert 1.4 < level(6000, presence_db=4.0) < 1.7  # ~ +4 dB
+    assert abs(level(300, presence_db=4.0) - 1.0) < 0.05
+    flat = np.ones(8, dtype=np.float32)
+    assert np.array_equal(m.apply_eq(flat, rate), flat)
+    assert m.apply_eq(np.ones((64, 2), dtype=np.float32), rate, low_cut=100.0).shape == (64, 2)

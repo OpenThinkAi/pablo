@@ -604,7 +604,7 @@ def _line_entry(
         "line": line.line,
         "speaker": line.speaker,
         "text": line.text,
-        "direction": None if line.direction is None else {"emotion": line.direction.emotion, "intensity": line.direction.intensity, "pace": line.direction.pace},
+        "direction": None if line.direction is None else {"emotion": line.direction.emotion, "intensity": line.direction.intensity, "pace": line.direction.pace, **({"delivery": line.direction.delivery} if line.direction.delivery else {})},
         "take": kept.key,
         "status": status,
         "attempt": kept.attempt,

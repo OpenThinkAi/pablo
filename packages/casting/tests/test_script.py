@@ -155,6 +155,36 @@ def test_direction_parses_against_the_vocabulary(raw: str, emotion: str | None, 
     assert (got.emotion, got.intensity, got.pace, got.status) == (emotion, intensity, pace, status)
 
 
+@pytest.mark.parametrize(
+    ("raw", "emotion", "delivery", "status"),
+    [
+        ("whisper", None, "whisper", "ok"),
+        ("hushed", None, "hushed", "ok"),
+        ("whispering", None, "whisper", "mapped"),
+        ("whispered", None, "whisper", "mapped"),
+        ("under breath", None, "whisper", "mapped"),
+        ("murmuring", None, "whisper", "mapped"),
+        ("whispering, afraid", "afraid", "whisper", "mapped"),
+        ("afraid, whispered", "afraid", "whisper", "mapped"),
+        ("whisper, tense", "tense", "whisper", "ok"),
+        ("gasping", "urgent", None, "mapped"),
+        ("breathless", "urgent", None, "mapped"),
+        ("courteous", "warm", None, "mapped"),
+        ("almost courteous", "warm", None, "mapped"),
+    ],
+)
+def test_delivery_and_the_breath_words_map_instead_of_dropping(raw: str, emotion: str | None, delivery: str | None, status: str) -> None:
+    got = parse_direction(raw)
+    assert (got.emotion, got.delivery, got.status) == (emotion, delivery, status)
+    assert got.unknown == ()
+    assert got.as_body()["delivery"] == delivery
+
+
+def test_almost_is_a_light_intensity_and_a_delivery_is_not_an_emotion() -> None:
+    assert parse_direction("almost courteous").intensity == 1
+    assert "whisper" not in EMOTIONS and len(EMOTIONS) == 12
+
+
 def test_unknown_direction_keeps_its_words_for_the_report() -> None:
     assert parse_direction("dry, approaching").unknown == ("approaching",)
 

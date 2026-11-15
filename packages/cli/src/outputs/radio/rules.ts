@@ -14,6 +14,9 @@
  * directions.py` (`EMOTIONS`); `test/radio-rules.test.ts` fails if they drift.
  */
 
+/** The delivery words (volume and breath), in `directions.py` `DELIVERIES` order (AGT-2319). */
+export const RADIO_DELIVERIES = ["whisper", "hushed"] as const;
+
 /** The closed emotion vocabulary, in `directions.py` order. */
 export const RADIO_EMOTIONS = [
   "neutral",
@@ -107,6 +110,11 @@ parenthesis, before the words:
   No other word, no synonym, no adverb: write \`dry\`, never \`dryly\`.
 - intensity, optional: \`a little\` or \`very\`.
 - pace, optional: \`slow\` or \`quick\`.
+- delivery, optional: ${RADIO_DELIVERIES.map((d) => `\`${d}\``).join(" or ")}, for a voice that is
+  lowered or breathed rather than felt. It goes in the same parenthesis, beside an
+  emotion or alone: \`(whisper, afraid)\`. The mix lowers the line and gives it a
+  close-mic EQ. The mixer changes the line's gain; the EQ lives in the mix
+  document, in the clip's \`eq\`.
 - A line takes at most one direction. Never a second parenthesis for delivery, and
   none for a sound or a movement: put sounds in an \`[SFX: ...]\` cue.
 - Inside a line an actor may make these sounds, sparingly:

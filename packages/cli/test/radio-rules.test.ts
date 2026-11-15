@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { addOutput } from "../src/output-verbs";
-import { RADIO_EMOTIONS, RADIO_NONVERBALS, RADIO_RULES_TEMPLATE } from "../src/outputs/radio/rules";
+import { RADIO_DELIVERIES, RADIO_EMOTIONS, RADIO_NONVERBALS, RADIO_RULES_TEMPLATE } from "../src/outputs/radio/rules";
 import { OUTPUTS } from "../src/outputs/registry";
 import { radioCheckLines } from "../src/radio";
 import { runWrite } from "../src/write";
@@ -66,6 +66,15 @@ test("the template's vocabulary is the Python side's closed emotion list, word f
   const nonverbals = /NONVERBALS: frozenset\[str\] = frozenset\(\s*\{([^}]*)\}/.exec(source);
   const known = [...(nonverbals?.[1] ?? "").matchAll(/"([a-z ]+)"/g)].map((m) => m[1]);
   for (const word of RADIO_NONVERBALS) expect(known).toContain(word);
+});
+
+test("the template's delivery words are the Python side's, word for word", () => {
+  const source = readFileSync(DIRECTIONS_PY, "utf8");
+  const block = /DELIVERIES: tuple\[str, \.\.\.\] = \(([^)]*)\)/.exec(source);
+  expect(block).not.toBeNull();
+  const words = [...(block?.[1] ?? "").matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
+  expect([...RADIO_DELIVERIES] as string[]).toEqual(words as string[]);
+  for (const word of RADIO_DELIVERIES) expect(RADIO_RULES_TEMPLATE).toContain(`\`${word}\``);
 });
 
 test("the template carries the script shape, the cues, the length, the direction grammar and the described CAST line", () => {
