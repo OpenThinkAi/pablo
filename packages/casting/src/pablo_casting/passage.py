@@ -69,3 +69,19 @@ def passage_by_sha(sha256: object) -> Passage | None:
 def passage_words(text: str = PASSAGE) -> list[str]:
     """The passage's words, lowercased and stripped of punctuation (what an aligner matches)."""
     return [word for word in re.findall(r"[a-z0-9']+", text.lower())]
+
+
+EXPOSITORY_ID = "preview-expository-v1"
+
+EXPOSITORY = (
+    "Most towns grew up beside water, because water carried both people and goods. "
+    "A mill needed a steady current, a market needed a landing, and a church needed neither but followed the crowds. "
+    "Over a few generations the streets settled into a pattern that still shows on a map today. "
+    "The records from those years are incomplete, but they agree on the main points: "
+    "the population doubled twice, the trade moved inland, and the river slowly lost its place at the centre of daily life."
+)
+"""A neutral expository passage (about 25 s): no urgent or shouted sentence, for hearing a narrator of nonfiction.
+
+Preview only (`audition --preview`, AGT-2298). It is deliberately not in `PASSAGES`: `passage_by_sha` never knows it,
+so no candidate is ever rendered reading it and no card's reference can be this text. The fixed passage stays every
+card's provenance."""

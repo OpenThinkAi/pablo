@@ -210,6 +210,8 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     "role-traits": { type: "string" }, // AGT-1699: cast --auto --design --role-traits
     gender: { type: "string" }, // AGT-1699: describe_voice --gender
     sounds: { type: "string" }, // AGT-1799: mix --sounds (mix --auto reuses `auto`)
+    preview: { type: "boolean", default: false }, // AGT-2298: audition --preview
+    lines: { type: "string" }, // AGT-2298: audition --preview --lines a-b
   });
 });
 

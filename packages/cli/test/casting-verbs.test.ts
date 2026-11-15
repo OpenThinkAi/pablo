@@ -358,7 +358,7 @@ describe("CLI argv to verb args", () => {
   test("-n and numeric flags become numbers; the zod shape validates", () => {
     const parsed = parseCliArgs(["audition", "--role", "CORA", "--describe", "a woman", "-n", "4", "--seed", "9"]);
     const built = verbArgsFromCli(verb("audition"), parsed.values, parsed.rest);
-    expect(built).toEqual({ ok: true, args: { role: "CORA", describe: "a woman", n: 4, seed: 9, "dry-run": false } });
+    expect(built).toEqual({ ok: true, args: { role: "CORA", describe: "a woman", n: 4, seed: 9, "dry-run": false, preview: false } });
   });
 
   test("a bad number or a designer outside the enum is an error naming the field", () => {
