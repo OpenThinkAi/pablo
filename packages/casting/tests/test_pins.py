@@ -295,3 +295,23 @@ def test_a_designer_override_on_a_branch_warns(monkeypatch: pytest.MonkeyPatch, 
     real_toolkit({}, {"designers": {"qwen3": {"model": "org/branchy", "revision": "main"}}}).designer("qwen3")
     assert loads == [("org/branchy", {"revision": "main"})]
     assert 'designer qwen3 model org/branchy is at "main", a branch or tag that can move' in capsys.readouterr().err
+
+
+def test_phoneme_recogniser_loads_from_the_pinned_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # AGT-2307: the model and its vocab.json come from the local snapshot at the pin, never the Hub's current revision.
+    (tmp_path / "vocab.json").write_text('{"<pad>": 0, "eɪ": 1}', encoding="utf-8")
+    asked: list[tuple[str, str]] = []
+    monkeypatch.setattr(scorers, "_snapshot", lambda repo, revision: asked.append((repo, revision)) or str(tmp_path))
+    loaded: list[str] = []
+
+    class FromPretrained:
+        @staticmethod
+        def from_pretrained(path: str) -> Any:
+            loaded.append(path)
+            return types.SimpleNamespace(eval=lambda: "model")
+
+    fake_torch(monkeypatch)
+    fake_module(monkeypatch, "transformers", AutoModelForCTC=FromPretrained, Wav2Vec2FeatureExtractor=FromPretrained)
+    _torch, _extractor, model, vocab = scorers.PhonemeScorer().model()  # type: ignore[misc]
+    assert asked == [("facebook/wav2vec2-lv-60-espeak-cv-ft", pinned("facebook/wav2vec2-lv-60-espeak-cv-ft"))]
+    assert loaded == [str(tmp_path), str(tmp_path)] and model == "model" and vocab == {0: "<pad>", 1: "eɪ"}

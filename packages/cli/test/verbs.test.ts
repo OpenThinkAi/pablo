@@ -205,6 +205,7 @@ test("deriveCliOptions matches the exact option set cli.ts accepted before this 
     "json-lines": { type: "boolean", default: false }, // AGT-1683: perform --json-lines
     version: { type: "string" }, // AGT-1684: mix --version k (cli.ts reads it as --mix-version; elsewhere --version prints the version)
     stream: { type: "boolean", default: false }, // AGT-1697: perform --stream (perform --all reuses `all`)
+    check: { type: "boolean", default: false }, // AGT-2307: pronounce --check
     design: { type: "boolean", default: false }, // AGT-1699: cast --auto --design
     stale: { type: "boolean", default: false }, // AGT-2305: fix --stale
     "role-traits": { type: "string" }, // AGT-1699: cast --auto --design --role-traits

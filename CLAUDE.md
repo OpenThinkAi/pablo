@@ -495,7 +495,16 @@ packages/casting  pablo-casting — Python 3.12 (`pyproject.toml`, `uv.lock`,
                 `scorers` extra (`emotion` for emotion2vec). Thresholds and
                 the pass/fail table are `gates.py`, the calibration rule
                 `calibrate.py`, the Whisper words/tail check (ported from the
-                radio prototype) `words.py`.
+                radio prototype) `words.py`. The pronounce gate (AGT-2307,
+                `phonemes.py`): `scorers.PhonemeScorer` (wav2vec2 espeak CTC,
+                decoded from its `vocab.json`, no `phonemizer`) transcribes a
+                take only when `Take.expect` is non-empty: the acronyms its
+                engine got as letters and the `pronounce.md` respellings with
+                an IPA field (`word -> respelling /ipa/`; the IPA is never in
+                the take key). Matching is vowel-class based and a schwa
+                never stands for a letter's vowel; casting.json
+                `pronounce.gate: false` turns it off, and `pronounce --check`
+                runs it over rendered takes.
                 Config: `$XDG_CONFIG_HOME/pablo/casting.json` (engines,
                 weights, library, pace; no weights by default). Receipts:
                 `<work>/.pablo/casting/receipts.jsonl`. Its tests are pytest;

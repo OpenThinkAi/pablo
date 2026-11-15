@@ -1298,8 +1298,8 @@ What that install fetches, and how it is pinned: the Python packages come from t
 committed `packages/casting/uv.lock` (`uv sync --frozen`, every package checked
 against its sha256 there). Every model pablo downloads by default is fetched at a
 fixed commit revision, never the repo's current one: the speech engines, the voice
-designers (Qwen3-TTS VoiceDesign, VoxCPM2), every gate scorer (Whisper, the aligner,
-ECAPA, UTMOS, Audiobox, emotion2vec; DNSMOS ships inside its pinned Python package)
+designers (Qwen3-TTS VoiceDesign, VoxCPM2), every gate scorer (Whisper, the phoneme
+recogniser behind the pronounce gate, the aligner, ECAPA, UTMOS, Audiobox, emotion2vec; DNSMOS ships inside its pinned Python package)
 and the Stable Audio Open model behind generated sound cues. Each engine load's
 receipt also records the weights' sha256. A model you name yourself in
 `casting.json`, under `weights` or as `engines.designers.<name>.model`, takes an
@@ -1326,7 +1326,7 @@ that each loader passes its pin through, without loading a model.
 | `pablo audition --preview --role R [--project <slug> --output narrated --unit N [--lines a-b]] [--voice <slug>] [--candidate n] [--passage work\|expository\|fixed]` | hears voices on the work's own text, not the drama test passage: each of the role's audition candidates (and the library voice in `--voice`) is cloned by the performance engine reading real lines of the unit (`--lines` numbers spoken lines as `perform` does, default the first ~60 words; with `--role`, only that role's lines), and one WAV each is written under the voice's `auditions/previews/`, the paths printed. Without a unit, a `--role NARRATOR` preview reads a neutral expository passage (no urgent or shouted sentence); `--passage` picks `work`, `expository` or the `fixed` audition passage. A preview casts and changes nothing: candidates and cards keep the fixed passage as their reference. Loads the performance engine, not the designer |
 | `pablo cast --role R --candidate n [--recast] [--notes "..."]` | freezes a candidate as a voice card in the shared library. `cast --auto --project <slug> [--episode N\|--all]` matches unbound roles to library voices; add `--design` to design voices for roles with no match. Synthetic voices only |
 | `pablo describe_voice --describe "..." [--gender f\|m\|x] [--role R]` | normalises a `CAST:` description into the voice traits vocabulary with the deterministic mapper: the traits found, the phrases it could not normalise, and the designer instruct. Loads no model and writes nothing; the same function as the MCP tool |
-| `pablo pronounce --project <slug> [--output radio\|narrated] [--unit N \| --episode N] [--all] [--suggest] [--json]` | shows what the engine will say before any render: for each script line whose engine input differs from its text, the line number, the speaker, each changed token (`"10-20%" -> "ten to twenty percent"`, `"AI" -> "A I"`) and the full engine text; then the capitalised or ALL-CAPS words no rule or lexicon entry decided, to consider for `pronounce.md` (words also written in lower case elsewhere in the output, month and weekday names, common English words and common first names are left out and counted; mixed-case tokens such as `ChatGPT` rank first, then words with unusual letter patterns; `--all` lists every word by count), and what the shorthand rules could not decide: links, abbreviation-like words ending in a full stop, and letters stuck to a number that are no known unit. Without `--output`, the work's one performed output (else radio); without a unit, every script of the output, and a unit with no script is refused naming the units there are. Read-only, loads no model; the same function as the MCP tool. `--suggest` is the one exception: see *Suggested respellings* below. See *What the engine reads* below |
+| `pablo pronounce --project <slug> [--output radio\|narrated] [--unit N \| --episode N] [--all] [--suggest] [--check] [--json]` | shows what the engine will say before any render: for each script line whose engine input differs from its text, the line number, the speaker, each changed token (`"10-20%" -> "ten to twenty percent"`, `"AI" -> "A I"`) and the full engine text; then the capitalised or ALL-CAPS words no rule or lexicon entry decided, to consider for `pronounce.md` (words also written in lower case elsewhere in the output, month and weekday names, common English words and common first names are left out and counted; mixed-case tokens such as `ChatGPT` rank first, then words with unusual letter patterns; `--all` lists every word by count), and what the shorthand rules could not decide: links, abbreviation-like words ending in a full stop, and letters stuck to a number that are no known unit. Without `--output`, the work's one performed output (else radio); without a unit, every script of the output, and a unit with no script is refused naming the units there are. Read-only, loads no model; the same function as the MCP tool. `--suggest` is the one exception: see *Suggested respellings* below. See *What the engine reads* below. `--check` runs the pronounce gate over what is already rendered instead: for each unit's newest version, every take that had an acronym read as letters or an IPA'd respelling is transcribed by the phoneme model, and the misses are listed with the line, the speaker and what was heard; nothing is re-rendered or written (flag the lines and re-take them with `fix`). It installs the `scorers` extra and ignores `casting.json`'s `pronounce.gate` (the check was asked for); a unit with no render is refused. See *The pronounce gate* below |
 | `pablo voices list [--auto-admitted] \| show <slug> \| retire <slug> [--reason "..."]` | the shared voice library; a retired voice still plays for stories already pinned to it |
 | `pablo bind --project <slug> --role <NAME> --voice <slug> [--output radio\|narrated]` | pins a script role to a library voice in the output's `cast.json` (radio's by default; `--output narrated` writes `outputs/narrated/casting/cast.json`, the file `cast --auto --output narrated` and `perform --output narrated` read; the binding covers every unit of the output, so there is no `--unit`). Any other flag is refused, not ignored |
 | `pablo perform --project <slug> --episode N [--engine chatterbox-turbo\|dia] [--json-lines]` | renders an episode's lines in their bound voices, retrying lines that fail the quality gates; refused while a role is uncast. `--stream` (with `--episode N` or `--all`) mixes and publishes as it goes, and never replaces a human mix: one that still fits is the one rendered, one that no longer fits is rebased onto the new take set (as `mix` does) |
@@ -1431,7 +1431,9 @@ against the script's own words.
    `SPEAKER: word -> respelling`, applied last, so an entry such as
    `NASA -> nasa` wins over the acronym rule, an entry for a word a shorthand
    rule would change (`vs -> verses`) leaves that word to the lexicon, and a
-   respelling keeps its own capitals (`Zinfandel -> zin-fan-DELL`).
+   respelling keeps its own capitals (`Zinfandel -> zin-fan-DELL`). A trailing
+   `/.../` is the entry's IPA, what the pronounce gate listens for
+   (`AJ -> A J /eɪ dʒ eɪ/`); it never reaches the engine or changes a take.
 
 Only takes whose engine text these rules change get a new take key, so a work's
 other takes are reused as they are. Run `pablo pronounce` to see the result.
@@ -1477,3 +1479,24 @@ wind), an abbreviation no rule knows. `pablo pronounce --suggest --project <slug
   have made the engine worse as often as better (`ah-moh-DAY-ee` was read as
   "Amo-day-eye"), and a model's are no different: hear each one (`pablo perform`,
   or render the one line) before you keep it, and delete any that sounds worse.
+
+### The pronounce gate
+
+Whisper writes "AI" whether a take said "ay eye", "eye" or "uh eye", so the words
+gate passes all three. The pronounce gate listens to the sounds instead: a phoneme
+recogniser (`facebook/wav2vec2-lv-60-espeak-cv-ft`, pinned, in the `scorers`
+extra, on the CPU) transcribes the take, and every acronym the engine was given as
+letters must be heard as its letter names (A "eɪ", I "aɪ", J "dʒ eɪ", ...), and
+every respelling with an IPA field in `pronounce.md` as that IPA. A respelling
+without one is checked only when it is itself spelled letters (`NASA -> N.A.S.A.`);
+otherwise nothing is expected of it. The match compares vowels in order and is
+tolerant of the recogniser's wobbles (a short `e` for `eɪ`, dropped consonants), but
+a schwa never counts as a letter's vowel ("uh jay" is a miss for `AJ`), the letters
+must be said in a row, and an acronym used twice in a line must be heard twice.
+
+A take with nothing to check never loads the model. A miss fails the take like any
+gate: `perform` and `fix` re-take it, and a line that never passes is kept as
+`best_of_failed` and auto-flagged with `pronounce` among its failing gates.
+Takes rendered before the gate existed are not re-judged; `pablo pronounce
+--check` finds their misses. Turn the gate off in `casting.json` with
+`"pronounce": {"gate": false}`.

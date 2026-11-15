@@ -65,11 +65,14 @@ Commands:
 - `check --work W [--episode N]`  unknown directions (with line numbers) and unbound roles.
 - `status --work W --episode N`   ready, or exit 2 with the unbound roles in `missing`.
 - `bind --work W --role R --voice SLUG [--vault V | --library DIR]`  pin a role to a library voice.
-- `pronounce --work W [--episode N] [--all]`  what the engine will say (AGT-2302, `pronounce.py`):
+- `pronounce --work W [--episode N] [--all] [--check]`  what the engine will say (AGT-2302, `pronounce.py`):
              each line whose engine input differs from its text, the tokens
              changed, the engine text, and the capitalised words no rule or
              lexicon entry decided (noise left out, the rest ranked; `--all`
              lists every word, AGT-2304). Read-only; no model is loaded.
+             With `--check` (AGT-2307): the pronounce gate over each rendered
+             unit's newest takes (the phoneme scorer, `scorers` extra), listing
+             the acronyms and respellings not heard; nothing is re-rendered.
 - `perform --work W --episode N [--engine chatterbox-turbo|dia] [--json-lines]
              [--vault V | --library DIR]`  render the episode through the decided
              engine with the gates, retakes and pace policy, into takes and
@@ -251,6 +254,8 @@ def _parser() -> _Parser:
     parser.add_argument("--approved")
     parser.add_argument("--others")
     parser.add_argument("--apply", action="store_true")
+    # pronounce
+    parser.add_argument("--check", action="store_true", help="pronounce: run the pronounce gate over the rendered takes (AGT-2307)")
     # mix
     parser.add_argument("--version", type=int, dest="mix_version")
     parser.add_argument("--cues", help="the cue library directory (default <library>/cues)")
@@ -1026,6 +1031,10 @@ def _dispatch(
     if args.command == "pronounce":
         from pablo_casting.pronounce import cmd_pronounce
 
+        if args.check:
+            from pablo_casting.pronounce import cmd_pronounce_check
+
+            return cmd_pronounce_check(work, _episode_number(args.episode), list((scorers or real_scorers)())), args.json
         return cmd_pronounce(work, _episode_number(args.episode), args.all_episodes), args.json
     if args.command == "castpanel":
         # The mixer's Cast panel (AGT-2157): the episode's roles and bindings, and a library voice read on one line.

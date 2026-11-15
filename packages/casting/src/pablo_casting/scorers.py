@@ -14,7 +14,9 @@ into a refusal naming the extra (or, for the soft emotion scorer, a skipped
 gate).
 
 Where they run (design, "Research: quality gates on Apple Silicon"): Whisper
-and the forced aligner on MLX; ECAPA, UTMOS, Audiobox and DNSMOS in PyTorch /
+and the forced aligner on MLX; the phoneme recogniser (the pronounce gate,
+AGT-2307) in PyTorch on the CPU, and only for a take that has an acronym or
+respelling to check; ECAPA, UTMOS, Audiobox and DNSMOS in PyTorch /
 ONNX on the CPU; emotion2vec in PyTorch on the CPU.
 """
 
@@ -27,6 +29,7 @@ from importlib.metadata import PackageNotFoundError, version as dist_version
 from pathlib import Path
 from typing import Protocol
 
+from pablo_casting.phonemes import Expectation, check as pronounce_check
 from pablo_casting.pins import pinned
 from pablo_casting.words import Heard, words_check
 
@@ -85,6 +88,9 @@ class Take:
     centroid: Sequence[float] | None = None
     # Lower-case script words the engine read respelt (AGT-1798): the words gate accepts whatever Whisper heard in their place.
     respelt: tuple[str, ...] = ()
+    # The acronyms and respellings the take must be heard to say (AGT-2307, `phonemes.expectations`); empty when
+    # there are none or the pronounce gate is off, and then the phoneme scorer loads nothing.
+    expect: tuple[Expectation, ...] = ()
     # Filled by earlier scorers in the stack (the aligner reads the line; nothing reads these yet).
     context: dict[str, object] = field(default_factory=dict)
 
@@ -114,6 +120,19 @@ WHISPER = ScorerInfo(
     package="mlx-whisper",
     module="mlx_whisper",
     runs="MLX",
+    extra="scorers",
+)
+PHONEMES = ScorerInfo(
+    name="phonemes",
+    gate="pronounce",
+    measures=("phonemes", "pronounce", "pronounce_missed"),
+    weights="facebook/wav2vec2-lv-60-espeak-cv-ft",
+    revision=pinned("facebook/wav2vec2-lv-60-espeak-cv-ft"),
+    license_code="Apache-2.0",
+    license_weights="Apache-2.0",
+    package="transformers",
+    module="transformers",
+    runs="CPU (PyTorch)",
     extra="scorers",
 )
 ALIGNER = ScorerInfo(
@@ -196,7 +215,7 @@ EMOTION = ScorerInfo(
     soft=True,
 )
 
-SCORERS: tuple[ScorerInfo, ...] = (WHISPER, ALIGNER, ECAPA, UTMOS, AUDIOBOX, DNSMOS, EMOTION)
+SCORERS: tuple[ScorerInfo, ...] = (WHISPER, PHONEMES, ALIGNER, ECAPA, UTMOS, AUDIOBOX, DNSMOS, EMOTION)
 
 
 def describe() -> list[dict[str, object]]:
@@ -298,6 +317,60 @@ class WhisperScorer(_Lazy):
         heard = [Heard(w["word"], float(w["start"]), float(w["end"])) for seg in result["segments"] for w in seg.get("words", [])]
         measured = words_check(take.line, heard, take.respelt)
         return {k: measured[k] for k in ("wer", "inserted_span", "tail_ok", "word_end")} | {"heard": " ".join(h.word.strip() for h in heard)}
+
+
+class PhonemeScorer(_Lazy):
+    """wav2vec2 CTC over espeak phonemes, greedy-decoded from the model's own `vocab.json`.
+
+    Its tokenizer class (`Wav2Vec2PhonemeCTCTokenizer`) needs the `phonemizer` package only to *encode* text,
+    which the gate never does, so the decode is done here and `phonemizer` is not a dependency.
+    """
+
+    info = PHONEMES
+
+    def _load(self) -> object:
+        import json
+
+        import torch
+        from transformers import AutoModelForCTC, Wav2Vec2FeatureExtractor
+
+        path = _snapshot(self.info.weights, _revision(self.info))
+        extractor = Wav2Vec2FeatureExtractor.from_pretrained(path)
+        model = AutoModelForCTC.from_pretrained(path).eval()
+        with open(Path(path) / "vocab.json", encoding="utf-8") as f:
+            vocab = {int(i): token for token, i in json.load(f).items()}
+        return (torch, extractor, model, vocab)
+
+    def transcribe(self, audio_path: Path) -> str:
+        """The take's phonemes, space-separated (`ð æ t eɪ aɪ k ə d`)."""
+        from pablo_casting.audio import read_audio, resample
+
+        torch, extractor, model, vocab = self.model()  # type: ignore[misc]
+        samples, rate = read_audio(audio_path)
+        inputs = extractor(resample(samples, rate, SR_16K), sampling_rate=SR_16K, return_tensors="pt")
+        with torch.no_grad():
+            ids = model(inputs.input_values).logits.argmax(-1)[0].tolist()
+        return ctc_decode(ids, vocab)
+
+    def score(self, take: Take) -> Mapping[str, object]:
+        if not take.expect:
+            return {}
+        return pronounce_check(take.expect, self.transcribe(take.audio))
+
+
+_CTC_SPECIAL = frozenset({"<pad>", "<s>", "</s>", "<unk>"})
+
+
+def ctc_decode(ids: Sequence[int], vocab: Mapping[int, str]) -> str:
+    """Greedy CTC: collapse repeats, drop the blank and special tokens."""
+    out: list[str] = []
+    previous = None
+    for i in ids:
+        token = vocab.get(i, "<unk>")
+        if i != previous and token not in _CTC_SPECIAL:
+            out.append(token)
+        previous = i
+    return " ".join(out)
 
 
 class AlignerScorer(_Lazy):
@@ -484,4 +557,4 @@ ScorerFactory = Callable[[], Sequence[Scorer]]
 
 def real_scorers() -> list[Scorer]:
     """The production stack, in `SCORERS` order. Nothing loads until a scorer scores."""
-    return [WhisperScorer(), AlignerScorer(), EcapaScorer(), UtmosScorer(), AudioboxScorer(), DnsmosScorer(), EmotionScorer()]
+    return [WhisperScorer(), PhonemeScorer(), AlignerScorer(), EcapaScorer(), UtmosScorer(), AudioboxScorer(), DnsmosScorer(), EmotionScorer()]

@@ -315,4 +315,7 @@ middle of the pane); both are off when the entry is absent.
 
 The experimental radio commands read a separate file,
 `$XDG_CONFIG_HOME/pablo/casting.json` (voice engines, model weights, the voice
-library, pacing). `pablo doctor` shows what they found.
+library, pacing). `pablo doctor` shows what they found. `"pronounce": {"gate":
+false}` turns off the pronounce gate (on by default), which re-takes a performed
+line whose acronyms or IPA'd respellings were not heard as written (see
+`commands.md`, *The pronounce gate*).

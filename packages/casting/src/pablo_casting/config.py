@@ -6,8 +6,9 @@ of `bind`, `review`, `distinct` and `weights`, each defaulting to the design's
 starting value; `matching.py` validates them), how a take ends (`ending`,
 AGT-1789: `{"air": 0.18}`, seconds kept after the voice, 0.05-0.6), the CC0
 sound library's directory (`sounds`) and per-kind cue loudness targets
-(`loudness`, AGT-1799). No weights are configured by default, so a fresh machine
-downloads nothing until the author (or a later ticket) names some.
+(`loudness`, AGT-1799) and whether perform and fix run the pronounce gate
+(`pronounce`, AGT-2307: `{"gate": false}` turns it off; on by default). No
+weights are configured by default, so a fresh machine downloads nothing until the author (or a later ticket) names some.
 """
 
 from __future__ import annotations
@@ -55,6 +56,8 @@ class CastingConfig:
     """The CC0 sound library's directory (AGT-1799); default `$XDG_DATA_HOME/pablo/sounds`."""
     loudness: dict[str, float] = field(default_factory=dict)
     """Per-kind cue loudness targets in LUFS (`SFX`, `BED`, `MUSIC`) over `loudness.DEFAULT_TARGETS`."""
+    pronounce_gate: bool = True
+    """`pronounce.gate`: perform and fix check each take's acronyms and respellings by their phonemes (AGT-2307)."""
 
     def as_body(self) -> dict[str, object]:
         return {
@@ -68,6 +71,7 @@ class CastingConfig:
             "ending": {"air": self.air},
             "sounds": self.sounds,
             "loudness": self.loudness,
+            "pronounce": {"gate": self.pronounce_gate},
         }
 
 
@@ -124,6 +128,10 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
     ):
         raise ConfigRefusal(f"{path}: `loudness` must map SFX, BED or MUSIC to a LUFS target between -70 and 0")
 
+    pronounce = raw.get("pronounce", {})
+    if not isinstance(pronounce, dict) or set(pronounce) - {"gate"} or not isinstance(pronounce.get("gate", True), bool):
+        raise ConfigRefusal(f"{path}: `pronounce` must be {{\"gate\": true|false}}")
+
     return CastingConfig(
         path=path,
         exists=True,
@@ -135,6 +143,7 @@ def load_config(env: Mapping[str, str] | None = None) -> CastingConfig:
         air=float(air),
         sounds=sounds,
         loudness={k: float(v) for k, v in loudness.items()},
+        pronounce_gate=bool(pronounce.get("gate", True)),
     )
 
 

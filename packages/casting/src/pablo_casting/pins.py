@@ -27,6 +27,8 @@ PINS: dict[str, str] = {
     "speechbrain/spkrec-ecapa-voxceleb": "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286",
     "facebook/audiobox-aesthetics": "9b1dd8e5df9af7216e836a98974fe3b82c56ded6",
     "emotion2vec/emotion2vec_plus_large": "6c303ba987b86b93193de93e34bb2b077a6bedc4",
+    # The pronounce gate's phoneme recogniser (AGT-2307), read from the Hub 2026-11-14.
+    "facebook/wav2vec2-lv-60-espeak-cv-ft": "ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4",
     # UTMOS goes through torch.hub (GitHub, not the Hub): the commit tag v1.2.0 points at
     # (git ls-remote, 2026-10-10).
     "tarepan/SpeechMOS": "ed25eacbfa42b99156c36ebec67a733b5dbb9b79",

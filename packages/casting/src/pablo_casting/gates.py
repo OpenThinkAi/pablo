@@ -10,6 +10,7 @@ every hard gate passes; the emotion gate is soft (a flag, never a failure).
 |-------------|-----------------------------|------------------------------|------|
 | words       | wer, inserted_span          | wer <= 0.05, span <= 2       | yes  |
 | tail        | tail_ok, clipped            | required; not clipped        | yes  |
+| pronounce   | pronounce_missed            | none missed                  | yes, when scored |
 | identity    | sim_card                    | >= 0.60                      | yes  |
 | consistency | sim_role_centroid           | >= 0.65                      | once >= 10 approved takes |
 | naturalness | utmos (and pq if pq_min)    | utmos >= 3.8                 | yes  |
@@ -17,6 +18,11 @@ every hard gate passes; the emotion gate is soft (a flag, never a failure).
 | pace        | wps, stretch                | band 2.4-3.4, stretch 0.75-1.05 | yes |
 | emotion     | emotion_top2                | top-2 holds the asked class  | no (flag) |
 | duration    | seconds vs words / wps      | within 60%                   | yes  |
+
+The pronounce gate (AGT-2307, `phonemes.py`) is judged only for a take that had
+an acronym or respelling to check (the phoneme scorer then sets
+`pronounce_missed`); otherwise, and when casting.json turns it off (the
+thresholds carry `pronounce: False`, `PRONOUNCE_OFF`), it is skipped.
 
 Pure Python: the scores come from `scorers.py` (or a stored record), so this
 module is what the default tests exercise.
@@ -47,8 +53,11 @@ DEFAULT_GATES: dict[str, object] = {
     "duration_tolerance": 0.6,
 }
 
-GATE_NAMES = ("words", "tail", "identity", "consistency", "naturalness", "artefacts", "pace", "emotion", "duration")
+GATE_NAMES = ("words", "tail", "pronounce", "identity", "consistency", "naturalness", "artefacts", "pace", "emotion", "duration")
 SOFT_GATES = frozenset({"emotion"})
+
+PRONOUNCE_OFF: dict[str, object] = {"pronounce": False}
+"""Merged into the thresholds when casting.json sets `pronounce.gate: false`; not a card threshold."""
 
 _PAIRS = ("wps_band", "stretch_range")
 _INTEGERS = ("inserted_span_max", "centroid_min_takes")
@@ -280,6 +289,13 @@ def evaluate(
     if isinstance(clipped, bool):  # the clipping detector (ending.py); a record from before it is judged on tail_ok alone
         tail_checks.append(("clipped", clipped, "is", False))
     gate("tail", True, tail_checks)
+    missed = scores.get("pronounce_missed")
+    if thresholds.get("pronounce", True) is False:
+        skip("pronounce", "off in casting.json (pronounce.gate)", {"pronounce_missed": missed})
+    elif not isinstance(missed, list):
+        skip("pronounce", "no acronym or respelling to check", {"pronounce_missed": None})
+    else:
+        gates["pronounce"] = {"hard": True, "pass": not missed, "measures": {"pronounce_missed": missed, "pronounce": scores.get("pronounce")}, "thresholds": {"pronounce_missed": []}}
     gate("identity", True, [("sim_card", _num(scores, "sim_card"), ">=", thresholds["sim_min"])])
 
     centroid = _num(scores, "sim_role_centroid")

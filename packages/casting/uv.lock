@@ -1126,6 +1126,7 @@ scorers = [
     { name = "speechmos" },
     { name = "torch" },
     { name = "torchaudio" },
+    { name = "transformers" },
 ]
 
 [package.dev-dependencies]
@@ -1156,6 +1157,7 @@ requires-dist = [
     { name = "torchaudio", marker = "extra == 'scorers'", specifier = ">=2.6" },
     { name = "torchsde", marker = "extra == 'mix'", specifier = ">=0.2.6" },
     { name = "transformers", marker = "extra == 'mix'", specifier = ">=4.50" },
+    { name = "transformers", marker = "extra == 'scorers'", specifier = ">=4.50" },
 ]
 provides-extras = ["scorers", "mix", "emotion"]
 

@@ -112,7 +112,7 @@ from pablo_casting.engines import (
     to_audio,
 )
 from pablo_casting.gate_command import run_scorers
-from pablo_casting.gates import Card, GateRefusal, derive, evaluate, load_card, pace_stretch, target_wps, thresholds_for
+from pablo_casting.gates import PRONOUNCE_OFF, Card, GateRefusal, derive, evaluate, load_card, pace_stretch, target_wps, thresholds_for
 from pablo_casting.library import card_hash
 from pablo_casting.config import ConfigRefusal, load_config
 from pablo_casting.cues import CueUnavailable
@@ -123,6 +123,7 @@ from pablo_casting.mix import mix as mix_episode
 from pablo_casting.organ import SoxUnavailable, require_sox
 from pablo_casting.receipts import append_receipt, now
 from pablo_casting.stream import EpisodeStream
+from pablo_casting.phonemes import expectations, ipa_map
 from pablo_casting.scorers import Scorer, ScorerUnavailable
 from pablo_casting.scorers import Take as ScoredTake
 from pablo_casting.script import Cue, Script, SpokenLine
@@ -383,6 +384,8 @@ class Performer:
     """Seconds of air a take keeps after its voice ends (`casting.json` `ending.air`); a non-default value is in the take key."""
     drama: PerformEngine | None = None
     """The dramatic engine (`engines.DRAMA_ENGINE`), loaded only when the episode has a `[DRAMA]` scene (AGT-1888)."""
+    pronounce: bool = True
+    """The pronounce gate (AGT-2307, casting.json `pronounce.gate`): each take's acronyms and respellings heard by their phonemes."""
 
     def __post_init__(self) -> None:
         if self.lexicon is None:
@@ -400,7 +403,7 @@ class Performer:
 
     def thresholds(self, card: Card) -> dict[str, object]:
         # The pace policy holds the stretch the gate allows to [0.75, 1.05], whatever a card calibrated.
-        return {**thresholds_for(card), "stretch_range": [PACE_RANGE[0], PACE_RANGE[1]]}
+        return {**thresholds_for(card), "stretch_range": [PACE_RANGE[0], PACE_RANGE[1]], **({} if self.pronounce else PRONOUNCE_OFF)}
 
     def base_inputs(self, take_pass: Pass, spoken: Sequence[SpokenLine], reasons: Sequence[str] = ()) -> TakeInputs:
         first = spoken[take_pass.lines[0].i]
@@ -429,9 +432,11 @@ class Performer:
         path = self.scratch / f"attempt-{uuid.uuid4().hex[:8]}.wav"
         path.write_bytes(synthesis.audio.to_wav())
         started = time.monotonic()
+        # What the pronounce gate listens for: the acronyms the engine was given as letters and the IPA'd respellings.
+        expect = tuple(expectations(((line.speaker, line.text) for line in inputs.lines), inputs.params, ipa_map(self.lexicon or ()))) if self.pronounce else ()
         # The scratch copy goes when the run's temporary directory does.
         scores, ran = run_scorers(
-            ScoredTake(audio=path, line=text, seconds=synthesis.audio.duration, card_embedding=card.embedding, card_reference=card.reference, respelt=respelt_words(inputs.params.get(LEXICON_PARAM))),
+            ScoredTake(audio=path, line=text, seconds=synthesis.audio.duration, card_embedding=card.embedding, card_reference=card.reference, respelt=respelt_words(inputs.params.get(LEXICON_PARAM)), expect=expect),
             self.scorers,
         )
         wall = round(time.monotonic() - started, 6)
@@ -686,9 +691,10 @@ def perform(
     if spec is None:
         return _refused(f'unknown engine "{request.engine}": one of {", ".join(ENGINE_SPECS)}')
     try:
-        air = load_config(env).air
+        config = load_config(env)
     except ConfigRefusal as refusal:
         return _refused(str(refusal))
+    air = config.air
     found = versions(work, episode)
     if found:
         return _refused(
@@ -734,7 +740,7 @@ def perform(
         timeline = Timeline(work, cue_positions(script), mixer.cue_library(request.cues_dir), mixer.pacer, log=mixer.log)
         live = EpisodeStream(work, episode, timeline, lines_total=len(spoken), started=started, started_at=started_at)
     with tempfile.TemporaryDirectory(prefix="pablo-perform-") as scratch:
-        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), air=air, drama=drama)
+        performer = Performer(work=work, episode=episode, spec=spec, roles=roles, engine=engine, scorers=scorers, err=err, out=stream_out, scratch=Path(scratch), air=air, drama=drama, pronounce=config.pronounce_gate)
         try:
             for take_pass in passes:
                 kept, attempts, target, band, _ = performer.perform_pass(take_pass, spoken)

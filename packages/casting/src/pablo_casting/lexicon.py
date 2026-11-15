@@ -6,6 +6,11 @@ Blank lines, `#` comments and a leading `- ` bullet are ignored.
 
     Zinfandel -> zin-fan-DELL
     CORA: reach -> reech
+    AJ -> A J /eɪ dʒ eɪ/
+
+A trailing `/.../` is the entry's IPA (AGT-2307): what the pronounce gate
+(`phonemes.py`) listens for in a take that reads the respelling. It never
+reaches the engine or the take key.
 
 Entries apply to the text an engine reads, never to the script, manifest or
 display text: whole word, case-insensitive, punctuation kept. The entries that
@@ -32,6 +37,7 @@ NONFICTION = "nonfiction"
 
 _ARROW = re.compile(r"\s*(?:->|→)\s*")
 _SCOPE = re.compile(r"^([A-Z][A-Z0-9_ ]*):\s*(.+)$")
+_IPA = re.compile(r"\s*/([^/]+)/\s*$")
 _WORDS = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*")
 
 
@@ -40,6 +46,7 @@ class Entry:
     word: str  # lower-case
     respelling: str
     speaker: str | None = None  # upper-case, None = every speaker
+    ipa: str | None = None  # the pronounce gate's expected phonemes (AGT-2307); not part of the take key
 
     def row(self) -> tuple[str, str, str]:
         return (self.speaker or "", self.word, self.respelling)
@@ -60,7 +67,13 @@ def parse(text: str) -> list[Entry]:
         parts = _ARROW.split(line, maxsplit=1)
         if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
             continue
-        entries.append(Entry(parts[0].strip().lower(), parts[1].strip(), speaker))
+        respelling, ipa = parts[1].strip(), None
+        given = _IPA.search(respelling)
+        if given is not None:
+            respelling, ipa = respelling[: given.start()].strip(), " ".join(given.group(1).split())
+            if not respelling:
+                continue
+        entries.append(Entry(parts[0].strip().lower(), respelling, speaker, ipa))
     return entries
 
 

@@ -541,7 +541,21 @@ export function castingText(verb: string, body: Record<string, unknown>): string
     if (free.length > 0) lines.push(`  not normalised: ${free.join("; ")} (choose traits for these and pass --role-traits to cast --auto --design)`);
     lines.push(`  instruct: ${String(body["instruct"])}`);
   }
-  if (verb === "pronounce" && Array.isArray(body["units"])) {
+  if (verb === "pronounce" && body["check"] === true && Array.isArray(body["units"])) {
+    lines.push(`pablo: ${String(body["output"])}: ${String(body["checked"])} take(s) with acronyms or respellings checked, ${String(body["misses"])} not heard as written`);
+    for (const unit of body["units"] as Array<Record<string, unknown>>) {
+      for (const miss of (unit["misses"] as Array<Record<string, unknown>> | undefined) ?? []) {
+        const at = `unit ${String(unit["unit"])} v${String(unit["version"])} line ${((miss["lines"] as unknown[] | undefined) ?? []).join(",")}`;
+        if (typeof miss["error"] === "string") {
+          lines.push(`  ${at}: ${miss["error"]}`);
+          continue;
+        }
+        lines.push(`  ${at} ${String(miss["speaker"])}: missed ${((miss["missed"] as unknown[] | undefined) ?? []).join(", ")}`);
+        lines.push(`      heard: ${String(miss["phonemes"])}`);
+      }
+    }
+    if (Number(body["misses"]) > 0) lines.push("flag those lines (pablo review or the mixer) and re-take them with pablo fix");
+  } else if (verb === "pronounce" && Array.isArray(body["units"])) {
     lines.push(`pablo: ${String(body["output"])}: ${String(body["changedLines"])} line(s) said differently from the text${body["acronyms"] === true ? " (acronyms read as letters)" : ""}; lexicon ${String(body["lexicon"])} (${String(body["lexiconEntries"])} entries)`);
     if (typeof body["staleLines"] === "number" && body["staleLines"] > 0) {
       const where = (body["units"] as Array<Record<string, unknown>>)
