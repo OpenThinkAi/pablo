@@ -9,6 +9,8 @@
  * A leaf module, like `../radio/units.ts`: no imports from the rest of the cli.
  */
 
+import { unscopedBranch } from "../../branch-names";
+
 /** The narrated output's id in `pablo.json`'s `outputs` and in the registry. */
 export const NARRATED_ID = "narrated";
 
@@ -53,6 +55,7 @@ export function narratedBranch(unit: number): string {
 
 /** `draft/narrated-05` or `draft/narrated-05-v2` -> 5; undefined for any other branch. */
 export function narratedUnitOfBranch(branch: string): number | undefined {
+  branch = unscopedBranch(branch); // a per-work name (`draft/<slug>/...`, AGT-2292) reads as its base
   const m = /^draft\/narrated-(\d+)(?:-v\d+)?$/.exec(branch);
   return m ? Number(m[1]) : undefined;
 }

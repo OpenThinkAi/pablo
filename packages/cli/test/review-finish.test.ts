@@ -153,8 +153,8 @@ test("a written draft finishes through mergeDraft: accepted, it lands on main wi
     } finally {
       console.log = log;
     }
-    const edits = editsOf(vault, "draft/ch02");
-    const done = await finishReview(project, "draft/ch02", reject ? rejecting(edits) : none, { ...opts, extractor: adapter });
+    const edits = editsOf(vault, "draft/ice-house/ch02");
+    const done = await finishReview(project, "draft/ice-house/ch02", reject ? rejecting(edits) : none, { ...opts, extractor: adapter });
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     expect(existsSync(join(project, "chapters", "02-black-ice.md"))).toBe(!reject);

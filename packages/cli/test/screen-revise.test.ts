@@ -131,7 +131,7 @@ test("take commits the candidate on revise/<short-id> as the model with its rece
   const taken = await reviser.take({ ...SELECTION, instruction: "tighten it", candidate: r.candidate, offered: r.candidate, receipt: r.receipt, model: r.model });
   expect(taken.ok).toBe(true);
   if (!taken.ok) return;
-  expect(taken.branch).toBe(`revise/${r.receipt.slice(0, 7)}`);
+  expect(taken.branch).toBe(`revise/ice-house/${r.receipt.slice(0, 7)}`);
   expect(git(vault, "rev-parse", "main")).toBe(mainBefore);
   expect(readFileSync(join(project, FILE), "utf8")).toBe(`${HEAD}${BODY}\n`);
 
@@ -200,7 +200,7 @@ test("revisePassage runs revise and commits on revise/<id> as the model; the res
   expect(result.ok).toBe(true);
   if (!result.ok) return;
   expect(prompts.length).toBe(1);
-  expect(result.branch).toMatch(/^revise\/[0-9a-f]{7}$/);
+  expect(result.branch).toMatch(/^revise\/ice-house\/[0-9a-f]{7}$/);
   expect(result.path).toBe(FILE);
   expect(result.receipt["model"]).toBe("test-reviser-model");
   expect(JSON.stringify(result)).not.toContain("scale house. She wrote the time down first");
@@ -254,7 +254,7 @@ test("`pablo revise --branch` parses and lands the candidate on a revise/ branch
   expect(code).toBe(0);
   const body = JSON.parse(logged.join("\n")) as { ok: boolean; branch: string };
   expect(body.ok).toBe(true);
-  expect(body.branch).toMatch(/^revise\/[0-9a-f]{7}$/);
+  expect(body.branch).toMatch(/^revise\/ice-house\/[0-9a-f]{7}$/);
   expect(git(vault, "branch", "--list", "revise/*")).toContain(body.branch);
   expect(git(vault, "rev-parse", "main")).toBe(mainBefore);
 });

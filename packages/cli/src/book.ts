@@ -6,6 +6,7 @@
 
 import type { BookStage } from "@openthink/pablo-tui";
 import type { CoreState } from "./core/machine";
+import { unscopedBranch } from "./branch-names";
 import { readMarker } from "./marker";
 import { chapterPreconditions, readNovelState } from "./novel/machine";
 import type { NovelState } from "./novel/machine";
@@ -20,7 +21,7 @@ import { reportWithWords, unitWords } from "./work-state";
 export function waitingDraft(waiting: readonly string[], n: number): string | undefined {
   let best: { branch: string; v: number } | undefined;
   for (const branch of waiting) {
-    const m = /^draft\/ch0*(\d+)(?:-v(\d+))?$/.exec(branch);
+    const m = /^draft\/ch0*(\d+)(?:-v(\d+))?$/.exec(unscopedBranch(branch));
     if (!m || Number(m[1]) !== n) continue;
     const v = m[2] === undefined ? 1 : Number(m[2]);
     if (!best || v > best.v) best = { branch, v };

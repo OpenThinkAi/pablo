@@ -259,8 +259,8 @@ test("AGT-2184: --review stops on each historical step's branch, pablo's own inc
     body = result.body as Record<string, any>;
   }
   expect(waits).toEqual(["core:premise", "core:period", "core:research-plan", "core:research", "core:period-facts", "core:bible", "core:acts", "core:beats"]);
-  expect(body.waiting).toEqual({ step: "draft:story:1", branch: "draft/story" });
-  expect((await acceptBranchInProject(work, "draft/story", ctx.env, deps.writer)).exitCode).toBe(0);
+  expect(body.waiting).toEqual({ step: "draft:story:1", branch: `draft/${body.project}/story` });
+  expect((await acceptBranchInProject(work, `draft/${body.project}/story`, ctx.env, deps.writer)).exitCode).toBe(0);
   result = await runStory({ project: slug }, ctx, deps);
   body = result.body as Record<string, any>;
   expect(result.exitCode).toBe(0);

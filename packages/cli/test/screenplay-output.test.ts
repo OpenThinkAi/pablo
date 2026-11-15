@@ -176,9 +176,9 @@ test("AC2: write --output screenplay stores the Fountain line for line: no sente
   }
   expect(code).toBe(0);
   const body = JSON.parse(lines.join("\n"));
-  expect(body).toMatchObject({ ok: true, branch: "draft/screenplay-sc01" });
+  expect(body).toMatchObject({ ok: true, branch: "draft/ice-house/screenplay-sc01" });
   expect(body.path).toMatch(/^outputs\/screenplay\/scenes\/01-.*\.fountain$/);
-  const text = git(vault, "show", `draft/screenplay-sc01:novels/ice-house/${body.path}`);
+  const text = git(vault, "show", `draft/ice-house/screenplay-sc01:novels/ice-house/${body.path}`);
   expect(text).toContain(
     "\nINT. ICE HOUSE - NIGHT\n\nSawdust. CORA (40s) lifts a lantern. It sways.\n\nCORA\n(quietly)\nIt held. Mr. Hale said it would not. He was wrong.\n\nNED\nFine.",
   );

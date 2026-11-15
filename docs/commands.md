@@ -21,7 +21,7 @@ just that verb's usage, flags and an example; an unknown verb exits 1 naming it.
 
 Most writing verbs never touch `main`. They commit to a change branch (`draft/`,
 `revise/`, `edit/` or `plan/`), and you accept that branch when you have
-read it. See [Reviewing and accepting](#reviewing-and-accepting).
+read it. See [Reviewing and accepting](#reviewing-and-accepting). A change branch is per work (`draft/<slug>/story`), and `status`, `resume`, `merge` and the screen list only the work's own branches; older unscoped names still resolve.
 
 ---
 
@@ -553,8 +553,9 @@ frontmatter in this order: `<noun>`, `title`, `pov`, `story_date` (then `story_d
 `<noun>` is `chapter`.
 
 The file is committed in its own worktree on a draft branch, authored as the model,
-with the prompt hash as its `Receipt:` line. Branches are `draft/chNN` for a novel,
-`draft/story` for a story and `draft/radio-epNN` for radio; a re-draft gets `-v2`,
+with the prompt hash as its `Receipt:` line. Branches are `draft/<slug>/chNN` for a novel,
+`draft/<slug>/story` for a story and `draft/<slug>/radio-epNN` for radio (`<slug>` is the work's slug;
+branches from before that, such as `draft/story`, still read); a re-draft gets `-v2`,
 `-v3` and so on. `main` is not touched. A receipt (model, tokens, time to first
 token, wall time, temperature, seed, and the voice layers as `voice_layers`, plus
 `voice_missing` when a listed voice was not found) is appended to
@@ -628,7 +629,7 @@ on their own branch:
 | Branch | Made by |
 |---|---|
 | `draft/...` | `write` |
-| `revise/<id>` | revising in the screen, or the MCP `revise` tool with `branch` |
+| `revise/<slug>/<id>` | revising in the screen, or the MCP `revise` tool with `branch` |
 | `edit/...` | editing by hand in the screen |
 | `plan/...` | an agent session's planning writes; `promote`; `research save`; `fact record`; `agent --tag-facts` |
 | `reader/<round>` | nothing now; left over from the retired reader flow. It is not a review branch: `status` and `resume` never list it, and `pablo doctor` names any that remain with the command to delete them (it deletes nothing itself) |

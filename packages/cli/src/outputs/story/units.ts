@@ -9,6 +9,8 @@
  * A leaf module, like `../novel/units.ts`: no imports from the rest of the cli.
  */
 
+import { unscopedBranch } from "../../branch-names";
+
 /** The story output's id in `pablo.json`'s `outputs` and in the registry. */
 export const STORY_ID = "story";
 
@@ -41,5 +43,6 @@ export function storyBranch(_unit: number): string {
 
 /** `draft/story` or `draft/story-v2` -> 1; undefined for any other branch. */
 export function storyUnitOfBranch(branch: string): number | undefined {
+  branch = unscopedBranch(branch); // a per-work name (`draft/<slug>/...`, AGT-2292) reads as its base
   return /^draft\/story(?:-v\d+)?$/.test(branch) ? STORY_UNIT : undefined;
 }

@@ -151,9 +151,12 @@ track's choice with any shipped policy.
 
 ## Branches
 
-pablo never writes manuscript changes to `main` directly. A draft goes to `draft/chNN`
-(`draft/story`, `draft/radio-epNN` for other outputs), a revision to `revise/<id>`, a
-planning change from the agent to `plan/<id>`.
+pablo never writes manuscript changes to `main` directly. A draft goes to `draft/<slug>/chNN`
+(`draft/<slug>/story`, `draft/<slug>/radio-epNN` for other outputs), a revision to
+`revise/<slug>/<id>`, an edit of your own to `edit/<slug>/<id>`, a planning change from
+the agent to `plan/<slug>/<date>-<id>`. `<slug>` is the work's slug, so several works in one
+vault each number their own drafts (`-v2` counts within a work). Branches made before this
+(`draft/story`, `plan/<date>-<id>`) still work and are never renamed.
 Read them with `git diff`, or in the screen's review mode (bare `pablo`). Accept any
 kind whole with `pablo merge`, or drop one with `pablo merge --reject`; the screen's
 review mode also lets you take part of a change. Both run the same steps and remove

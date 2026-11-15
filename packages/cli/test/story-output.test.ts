@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Adapter, CompletionEvent } from "@openthink/pablo-core";
+import { listBranches, waitingForReview } from "../src/branch";
 import { addOutput } from "../src/output-verbs";
 import { OUTPUTS, outputIds } from "../src/outputs/registry";
 import { STORY } from "../src/outputs/story";
@@ -144,12 +145,12 @@ test("AC1: output add story, then write --output story drafts outputs/story/stor
 
   const prompts: string[] = [];
   const out = await write(v, { output: "story" }, prompts);
-  expect(out.body).toMatchObject({ ok: true, branch: "draft/story" });
+  expect(out.body).toMatchObject({ ok: true, branch: "draft/ice-house/story" });
   expect(out.code).toBe(0);
   // Drafted on draft/story, not main, and only that path was committed.
-  const files = git(v.vault, "show", "--name-only", "--format=", "draft/story");
+  const files = git(v.vault, "show", "--name-only", "--format=", "draft/ice-house/story");
   expect(files).toBe("novels/ice-house/outputs/story/story.md");
-  const text = git(v.vault, "show", "draft/story:novels/ice-house/outputs/story/story.md");
+  const text = git(v.vault, "show", "draft/ice-house/story:novels/ice-house/outputs/story/story.md");
   expect(text).toContain("story: 1");
   expect(text).toContain("status: draft");
   // AGT-2287: four beats on different dates: the frontmatter carries the range, first to last.
@@ -208,4 +209,37 @@ test("write --unit 2 is refused: the story has one unit", async () => {
 test("publish compiles the story: title, joined paragraphs, curled quotes, frontmatter dropped", () => {
   const compiled = compileStory("Ice House", '---\nstory: 1\ntitle: x\n---\n\nShe said, "Go."\nHe went.\n\nLater.\n');
   expect(compiled).toBe("# Ice House\n\nShe said, “Go.” He went.\n\nLater.\n");
+});
+
+test("AGT-2292: two works in one vault each draft on draft/<slug>/story, no -v2, and list only their own branches", async () => {
+  const v = vault();
+  expect(addOutput(v.vault, v.work, "story", { now: () => new Date(2026, 9, 12) })).toMatchObject({ ok: true });
+
+  // A second work in the same vault repository: a copy of the first under its own slug.
+  const other = join(v.vault, "novels", "other-work");
+  cpSync(v.work, other, { recursive: true });
+  const marker = JSON.parse(readFileSync(join(other, "pablo.json"), "utf8")) as Record<string, unknown>;
+  writeFileSync(join(other, "pablo.json"), `${JSON.stringify({ ...marker, slug: "other-work" }, null, 2)}\n`);
+  git(v.vault, "add", "--", "novels/other-work");
+  git(v.vault, "commit", "-q", "-m", "second work");
+
+  const first = await write(v, { output: "story" });
+  expect(first.body).toMatchObject({ ok: true, branch: "draft/ice-house/story" });
+  const second = await write({ ...v, work: other }, { output: "story" });
+  expect(second.body).toMatchObject({ ok: true, branch: "draft/other-work/story" });
+
+  // A re-draft numbers within the work.
+  const redraft = await write(v, { output: "story", force: true });
+  expect(redraft.body).toMatchObject({ ok: true, branch: "draft/ice-house/story-v2" });
+
+  // Each work lists only its own branches; the other's never waits here.
+  const mine = listBranches(v.vault, "ice-house");
+  expect(mine).toMatchObject({ ok: true, branches: { draft: ["draft/ice-house/story", "draft/ice-house/story-v2"] } });
+  expect(listBranches(v.vault, "other-work")).toMatchObject({ ok: true, branches: { draft: ["draft/other-work/story"] } });
+  expect(waitingForReview(v.work)).toEqual(["draft/ice-house/story", "draft/ice-house/story-v2"]);
+  expect(waitingForReview(other)).toEqual(["draft/other-work/story"]);
+
+  // Per-work names read as the output's own branch, and older unscoped names still do.
+  expect(STORY.unitOfBranch("draft/ice-house/story-v2")).toBe(1);
+  expect(STORY.unitOfBranch("draft/story")).toBe(1);
 });

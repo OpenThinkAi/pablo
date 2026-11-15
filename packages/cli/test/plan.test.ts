@@ -32,7 +32,7 @@ afterEach(() => {
 test("no branch exists until the session's first planning write", () => {
   const { repo, env } = setup();
   const s = startPlanSession(repo, "valley", { env, date: "2026-10-01", id: "ab12" });
-  expect(s.branch).toBe("plan/2026-10-01-ab12");
+  expect(s.branch).toBe("plan/valley/2026-10-01-ab12");
   const list = listBranches(repo);
   expect(list.ok && list.branches.plan).toEqual([]);
 });
@@ -45,8 +45,8 @@ test("two writes in one session land on one plan branch, authored as pablo, main
   expect(a.ok && b.ok).toBe(true);
 
   const list = listBranches(repo);
-  expect(list.ok && list.branches.plan).toEqual(["plan/2026-10-01-ab12"]);
-  const log = sh(repo, "log", "--format=%an|%ae|%s", "main..plan/2026-10-01-ab12").trim().split("\n");
+  expect(list.ok && list.branches.plan).toEqual(["plan/valley/2026-10-01-ab12"]);
+  const log = sh(repo, "log", "--format=%an|%ae|%s", "main..plan/valley/2026-10-01-ab12").trim().split("\n");
   expect(log).toEqual(["pablo|pablo@localhost|research note", "pablo|pablo@localhost|record fact"]);
 
   const wt = s.worktree as string;

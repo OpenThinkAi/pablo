@@ -174,3 +174,27 @@ test("branchDiff refuses a name that is not a change branch, and reports an unkn
   const missing = branchDiff(repo, "draft/none");
   expect(missing.ok).toBe(false);
 });
+
+test("AGT-2292: listBranches(repo, slug) lists the work's scoped branches and unscoped ones, never another work's", () => {
+  const { repo, env } = setup();
+  createBranch(repo, "valley", "draft/valley/story", env);
+  createBranch(repo, "crowns", "draft/crowns/story", env);
+  createBranch(repo, "valley", "plan/valley/2026-11-14-ab12cd", env);
+  createBranch(repo, "valley", "draft/ch09", env); // an older, unscoped name
+  const res = listBranches(repo, "valley");
+  expect(res).toMatchObject({ ok: true, branches: { draft: ["draft/ch09", "draft/valley/story"], plan: ["plan/valley/2026-11-14-ab12cd"] } });
+  expect(listBranches(repo, "crowns")).toMatchObject({ ok: true, branches: { draft: ["draft/ch09", "draft/crowns/story"], plan: [] } });
+  expect(listBranches(repo)).toMatchObject({ ok: true, branches: { draft: ["draft/ch09", "draft/crowns/story", "draft/valley/story"] } });
+});
+
+test("AGT-2292: branch-name helpers scope a base name and read both forms", async () => {
+  const { scopeBase, scopedBranch, branchWork, unscopedBranch, branchBelongsTo } = await import("../src/branch-names");
+  expect(scopeBase("draft/story", "crowns")).toBe("draft/crowns/story");
+  expect(scopedBranch("plan", "crowns", "2026-11-14-ab12cd")).toBe("plan/crowns/2026-11-14-ab12cd");
+  expect(branchWork("draft/crowns/story-v2")).toBe("crowns");
+  expect(branchWork("draft/story")).toBeUndefined();
+  expect(unscopedBranch("draft/crowns/story-v2")).toBe("draft/story-v2");
+  expect(unscopedBranch("edit/ab12cd")).toBe("edit/ab12cd");
+  expect(branchBelongsTo("draft/crowns/story", "valley")).toBe(false);
+  expect(branchBelongsTo("draft/story", "valley")).toBe(true);
+});

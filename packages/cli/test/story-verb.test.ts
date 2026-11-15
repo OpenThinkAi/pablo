@@ -337,7 +337,7 @@ test("AC2: --output novel --output story builds one core and both outputs", asyn
   expect(existsSync(join(work, "outputs", "story", "story.md"))).toBe(true);
   expect(Object.keys(JSON.parse(readFileSync(join(work, "pablo.json"), "utf8")).outputs)).toEqual(["novel", "story"]);
   expect(body.drafts.novel.map((d: { unit: number }) => d.unit)).toEqual([1, 2, 3, 4]);
-  expect(body.drafts.story.map((d: { branch: string }) => d.branch)).toEqual(["draft/story"]);
+  expect(body.drafts.story.map((d: { branch: string }) => d.branch)).toEqual([`draft/${body.project}/story`]);
   expect(existsSync(body.published.novel.where)).toBe(true);
   expect(existsSync(body.published.story.where)).toBe(true);
   expect(body.published.novel.where).not.toBe(body.published.story.where);
@@ -552,12 +552,12 @@ test("AC4: --review stops on every stage's branch, waits until it is accepted, r
   expect(harness.stages).toEqual(["research", "research", "premise", "bible", "acts", "beats"]);
 
   // The story's draft waits on its own branch; nothing is published yet.
-  expect(body.waiting).toEqual({ step: "draft:story:1", branch: "draft/story" });
+  expect(body.waiting).toEqual({ step: "draft:story:1", branch: `draft/${slug}/story` });
   expect(existsSync(join(work, "outputs", "story", "story.md"))).toBe(false);
   expect(existsSync(join(work, ".pablo", "out"))).toBe(false);
 
   // The author merges the draft (`pablo merge draft/story`); the run publishes and finishes.
-  const merged = await acceptBranchInProject(work, "draft/story", env, writer);
+  const merged = await acceptBranchInProject(work, `draft/${slug}/story`, env, writer);
   expect(merged.exitCode).toBe(0);
   result = await runStory({ project: slug }, ctx, deps);
   body = result.body as Record<string, any>;

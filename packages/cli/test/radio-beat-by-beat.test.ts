@@ -151,13 +151,13 @@ test("AC1/AC2: an episode over three beats is three requests, one CAST line, onl
   // Later requests are given the end of the script so far, line by line, never its CAST line.
   expect(prompts[1]).toContain("PART-ONE line.");
   expect(prompts[2]).toContain("PART-TWO reply.");
-  const text = git(v.vault, "show", "draft/radio-ep01:novels/ice-house/outputs/radio/episodes/01-the-last-full-cut.md");
+  const text = git(v.vault, "show", "draft/ice-house/radio-ep01:novels/ice-house/outputs/radio/episodes/01-the-last-full-cut.md");
   expect(text.match(/^CAST:/gm)).toHaveLength(1);
   expect(scriptRoles(text)).toEqual(["ANNOUNCER", "NARRATOR", "ODILE", "WILFRED", "MRS FRAYNE"]);
   expect(text.indexOf("PART-ONE")).toBeLessThan(text.indexOf("PART-TWO line"));
   expect(text.indexOf("PART-TWO line")).toBeLessThan(text.indexOf("PART-THREE"));
   expect(text.match(/^ANNOUNCER:/gm)).toHaveLength(2);
-  expect(git(v.vault, "rev-list", "--count", "main..draft/radio-ep01")).toBe("1");
+  expect(git(v.vault, "rev-list", "--count", "main..draft/ice-house/radio-ep01")).toBe("1");
   const receipt = out.body["receipt"] as { tokensWritten: number; tokensRead: number };
   expect(receipt.tokensWritten).toBe(36);
   expect(receipt.tokensRead).toBe(300);
@@ -176,7 +176,7 @@ test("a part that ran on into later beats (an early close) is trimmed at the bou
   const early = [OPEN, "ODILE: PART-ONE-RAN-ON line.", "[MUSIC: closing theme]", "ANNOUNCER: Early sign-off.", "[MUSIC: theme out]"].join("\n");
   const out = await write(v, {}, [early, MIDDLE, CLOSE]);
   expect(out.code).toBe(0);
-  const text = git(v.vault, "show", "draft/radio-ep01:novels/ice-house/outputs/radio/episodes/01-the-last-full-cut.md");
+  const text = git(v.vault, "show", "draft/ice-house/radio-ep01:novels/ice-house/outputs/radio/episodes/01-the-last-full-cut.md");
   expect(text).toContain("PART-ONE-RAN-ON");
   expect(text).not.toContain("Early sign-off");
   expect(text).not.toContain("closing theme");

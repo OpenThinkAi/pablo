@@ -14,6 +14,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { splitManuscript } from "@openthink/pablo-core";
 import type { Adapter, ReaderNote } from "@openthink/pablo-core";
+import { scopedBranch } from "./branch-names";
 import { branchExists, commitAs, createBranch, deleteBranch, ensureWorktree, repoRoot } from "./branch";
 import { readComments, writeComments } from "./comments";
 import { readMarker } from "./marker";
@@ -190,8 +191,9 @@ export function screenReviser(vaultRoot: string, projectPath: string, deps: Scre
       if (repo === undefined) return { ok: false, message: `pablo: revise needs ${projectPath} inside a git repository` };
       const slug = marker.marker.slug;
       const short = request.receipt.slice(0, 7) || "revise";
-      let branch = `revise/${short}`;
-      for (let v = 2; branchExists(repo, branch); v++) branch = `revise/${short}-v${v}`;
+      const base = scopedBranch("revise", slug, short);
+      let branch = base;
+      for (let v = 2; branchExists(repo, branch); v++) branch = `${base}-v${v}`;
 
       const created = createBranch(repo, slug, branch, env);
       if (!created.ok) return { ok: false, message: created.notice };

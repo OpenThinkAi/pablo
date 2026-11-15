@@ -218,14 +218,14 @@ test("AC1: write --unit 3 on a two-output work refuses naming the outputs; nothi
   expect(git(vault, "branch", "--list", "draft/*")).toBe("");
 });
 
-test("AC1: write --output novel --unit 3 drafts chapter 3 on draft/ch03, and the receipt names output and unit", async () => {
+test("AC1: write --output novel --unit 3 drafts chapter 3 on draft/ice-house/ch03, and the receipt names output and unit", async () => {
   const { vault, work, home } = vaultWith(TWO);
   const out = await write(vault, work, home, { output: "novel", unit: "3" });
   expect(out.code).toBe(0);
-  expect(out.body).toMatchObject({ ok: true, branch: "draft/ch03", path: "chapters/03-the-route.md" });
+  expect(out.body).toMatchObject({ ok: true, branch: "draft/ice-house/ch03", path: "chapters/03-the-route.md" });
   expect(out.body["receipt"]).toMatchObject({ output: "novel", unit: 3 });
-  expect(git(vault, "log", "-1", "--format=%s", "draft/ch03")).toBe("ice-house: draft chapter 3");
-  expect(git(vault, "show", "draft/ch03:novels/ice-house/chapters/03-the-route.md")).toContain("chapter: 3");
+  expect(git(vault, "log", "-1", "--format=%s", "draft/ice-house/ch03")).toBe("ice-house: draft chapter 3");
+  expect(git(vault, "show", "draft/ice-house/ch03:novels/ice-house/chapters/03-the-route.md")).toContain("chapter: 3");
 
   // AC3: the receipts.jsonl line carries them too.
   const lines = readFileSync(receiptsPath(work), "utf8").trim().split("\n");
@@ -236,7 +236,7 @@ test("AC1: --chapter 3 is the same draft on the same branch", async () => {
   const { vault, work, home } = vaultWith(TWO);
   const out = await write(vault, work, home, { chapter: "3" });
   expect(out.code).toBe(0);
-  expect(out.body).toMatchObject({ ok: true, branch: "draft/ch03", path: "chapters/03-the-route.md", receipt: { output: "novel", unit: 3 } });
+  expect(out.body).toMatchObject({ ok: true, branch: "draft/ice-house/ch03", path: "chapters/03-the-route.md", receipt: { output: "novel", unit: 3 } });
 });
 
 test("--chapter never addresses another output, and --chapter and --unit must agree", async () => {
@@ -257,14 +257,14 @@ test("write --output radio drafts into the radio output's directory on its own b
   git(vault, "add", ".");
   git(vault, "commit", "-q", "-m", "episodes");
   const out = await write(vault, work, home, { output: "radio", unit: "3" });
-  expect(out.body).toMatchObject({ ok: true, branch: "draft/radio-ep03", path: "outputs/radio/episodes/03-the-route.md", receipt: { output: "radio", unit: 3 } });
-  expect(git(vault, "show", "draft/radio-ep03:novels/ice-house/outputs/radio/episodes/03-the-route.md")).toContain("episode: 3");
+  expect(out.body).toMatchObject({ ok: true, branch: "draft/ice-house/radio-ep03", path: "outputs/radio/episodes/03-the-route.md", receipt: { output: "radio", unit: 3 } });
+  expect(git(vault, "show", "draft/ice-house/radio-ep03:novels/ice-house/outputs/radio/episodes/03-the-route.md")).toContain("episode: 3");
 });
 
 test("a one-output work needs no --output: write --unit 3 drafts the novel's chapter 3", async () => {
   const { vault, work, home } = vaultWith(undefined);
   const out = await write(vault, work, home, { unit: "3" });
-  expect(out.body).toMatchObject({ ok: true, branch: "draft/ch03" });
+  expect(out.body).toMatchObject({ ok: true, branch: "draft/ice-house/ch03" });
 });
 
 // --- AC3: the write verb, MCP and draft_unit --------------------------------
@@ -289,9 +289,9 @@ test("AC3: draft_unit reaches the same code as write: same refusal, same branch,
 
   const drafted = await verb("draft_unit").run({ project: "ice-house", output: "novel", n: 3, direction: "stay on Odile" }, ctx(vault, home));
   expect(drafted.exitCode).toBe(0);
-  expect(drafted.body).toMatchObject({ ok: true, branch: "draft/ch03", path: "chapters/03-the-route.md", receipt: { output: "novel", unit: 3 } });
+  expect(drafted.body).toMatchObject({ ok: true, branch: "draft/ice-house/ch03", path: "chapters/03-the-route.md", receipt: { output: "novel", unit: 3 } });
   expect(JSON.stringify(drafted.body)).not.toContain("nine stops");
-  expect(git(vault, "show", "draft/ch03:novels/ice-house/chapters/03-the-route.md")).toContain("direction: stay on Odile");
+  expect(git(vault, "show", "draft/ice-house/ch03:novels/ice-house/chapters/03-the-route.md")).toContain("direction: stay on Odile");
 });
 
 // --- status, check, publish ------------------------------------------

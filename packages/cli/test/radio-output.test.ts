@@ -226,7 +226,7 @@ async function callTool(server: McpServer, name: string, args: Record<string, un
 // The registry row
 // ---------------------------------------------------------------------------
 
-test("radio is a row of OUTPUTS: episodes in outputs/radio/episodes, draft/radio-epNN, its stages and targets", () => {
+test("radio is a row of OUTPUTS: episodes in outputs/radio/episodes, draft/ice-house/radio-epNN, its stages and targets", () => {
   const radio = OUTPUTS.radio;
   expect(outputIds()).toContain("radio");
   expect(radio.noun).toBe("episode");
@@ -365,8 +365,8 @@ test("write --output radio stores the script line for line: a cue never joins a 
     console.log = log;
   }
   expect(code).toBe(0);
-  expect(JSON.parse(lines.join("\n"))).toMatchObject({ ok: true, branch: "draft/radio-ep01", path: "outputs/radio/episodes/01-the-last-full-cut.md" });
-  const text = git(vault, "show", "draft/radio-ep01:novels/ice-house/outputs/radio/episodes/01-the-last-full-cut.md");
+  expect(JSON.parse(lines.join("\n"))).toMatchObject({ ok: true, branch: "draft/ice-house/radio-ep01", path: "outputs/radio/episodes/01-the-last-full-cut.md" });
+  const text = git(vault, "show", "draft/ice-house/radio-ep01:novels/ice-house/outputs/radio/episodes/01-the-last-full-cut.md");
   expect(text).toContain("episode: 1");
   expect(text).toContain('\nCAST: CORA=f "thirties, dry. exact", NED=m "forties, slow"\n[MUSIC: the theme. an organ swell]\nNARRATOR: Winter. The pond.\n');
   expect(text).toContain("\nCORA: (dry) I said no. I meant it. Mr. Hale knows.\n");

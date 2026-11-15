@@ -236,7 +236,7 @@ function readChecklistFor(
   const text = readIfPresent(join(projectPath, CHECKLIST_FILE));
   if (text === undefined) {
     const planned = planSessionFor?.(projectPath);
-    const listed = planned?.ok ? listBranches(planned.session.repo) : undefined;
+    const listed = planned?.ok ? listBranches(planned.session.repo, planned.session.slug) : undefined;
     const path = planned?.ok ? `${planned.dir ? `${planned.dir}/` : ""}${CHECKLIST_FILE}` : CHECKLIST_FILE;
     const holding = planned?.ok && listed?.ok ? listed.branches.plan.filter((b) => fileAt(planned.session.repo, b, path) !== undefined) : [];
     const where = holding.length > 0 ? `accept ${holding.join(", ")} first (it holds the planned checklist)` : "run `pablo research plan` and merge its branch first";
@@ -358,7 +358,7 @@ export interface PendingNote {
 function pendingNoteBranches(planSessionFor: PlanSessionFor, projectPath: string, id: string): string[] {
   const planned = planSessionFor(projectPath);
   if (!planned.ok) return [];
-  const listed = listBranches(planned.session.repo);
+  const listed = listBranches(planned.session.repo, planned.session.slug);
   if (!listed.ok) return [];
   const path = `${planned.dir ? `${planned.dir}/` : ""}research/${id}.md`;
   return listed.branches.plan.filter((branch) => {

@@ -73,13 +73,13 @@ test("v e makes an edit/<id> branch with a worktree, opens the file in it at the
   const r = await editInProject(project, { file: CH1, line: 9, editor: "vim" }, { env, run: editor.run, shortId: () => "ab12cd" });
   expect(r.ok).toBe(true);
   if (!r.ok) return;
-  expect(r.branch).toBe("edit/ab12cd");
-  const wt = worktreePath("ice-house", "edit/ab12cd", env);
+  expect(r.branch).toBe("edit/ice-house/ab12cd");
+  const wt = worktreePath("ice-house", "edit/ice-house/ab12cd", env);
   expect(editor.calls).toHaveLength(1);
   expect(editor.calls[0]!.cwd).toBe(wt);
   expect(editor.calls[0]!.argv).toEqual(["vim", "+9", "--", join(wt, "novels", "ice-house", CH1)]);
-  expect(git(vault, "log", "-1", "--format=%an <%ae>", "edit/ab12cd")).toBe("Matt Test <matt@example.com>");
-  expect(git(vault, "show", `edit/ab12cd:novels/ice-house/${CH1}`)).toContain("from the scale house");
+  expect(git(vault, "log", "-1", "--format=%an <%ae>", "edit/ice-house/ab12cd")).toBe("Matt Test <matt@example.com>");
+  expect(git(vault, "show", `edit/ice-house/ab12cd:novels/ice-house/${CH1}`)).toContain("from the scale house");
   // main is untouched until Save.
   expect(readFileSync(join(project, CH1), "utf8")).toBe(BASE);
   expect(git(vault, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
@@ -91,17 +91,17 @@ test("one open edit branch per work: a second v e goes back into the same worktr
   const second = await editInProject(project, { file: CH1, line: 9, editor: "vim" }, { env, run: fakeEditor(["horse.", "mare."]).run, shortId: () => "ffffff" });
   expect(first.ok && second.ok).toBe(true);
   if (!second.ok) return;
-  expect(second.branch).toBe("edit/ab12cd");
+  expect(second.branch).toBe("edit/ice-house/ab12cd");
   const listed = listBranches(vault);
-  expect(listed.ok && listed.branches.edit).toEqual(["edit/ab12cd"]);
-  expect(git(vault, "rev-list", "--count", "main..edit/ab12cd")).toBe("2");
+  expect(listed.ok && listed.branches.edit).toEqual(["edit/ice-house/ab12cd"]);
+  expect(git(vault, "rev-list", "--count", "main..edit/ice-house/ab12cd")).toBe("2");
 });
 
 test("an editor that changes nothing leaves no branch behind", async () => {
   const { project, vault, env } = setup();
   const r = await editInProject(project, { file: CH1, line: 8, editor: "vim" }, { env, run: fakeEditor().run, shortId: () => "ab12cd" });
   expect(r).toEqual({ ok: true, branch: null, lines: ["no change"] });
-  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(false);
+  expect(existsSync(worktreePath("ice-house", "edit/ice-house/ab12cd", env))).toBe(false);
   const listed = listBranches(vault);
   expect(listed.ok && listed.branches.edit).toEqual([]);
 });
@@ -113,11 +113,11 @@ test("refusals: a path outside the project, a file main does not have, an editor
   const missing = await editInProject(project, { file: "chapters/99-nope.md", line: 1, editor: "vim" }, { env, run: never.run, shortId: () => "aaaaaa" });
   expect(missing.ok).toBe(false);
   expect(never.calls).toEqual([]);
-  expect(existsSync(worktreePath("ice-house", "edit/aaaaaa", env))).toBe(false);
+  expect(existsSync(worktreePath("ice-house", "edit/ice-house/aaaaaa", env))).toBe(false);
   const broken = await editInProject(project, { file: CH1, line: 1, editor: "vim" }, { env, run: async () => { throw new Error("spawn ENOENT"); }, shortId: () => "bbbbbb" });
   expect(broken.ok).toBe(false);
   if (!broken.ok) expect(broken.message).toContain("could not run vim");
-  expect(existsSync(worktreePath("ice-house", "edit/bbbbbb", env))).toBe(false);
+  expect(existsSync(worktreePath("ice-house", "edit/ice-house/bbbbbb", env))).toBe(false);
 });
 
 test("a real editor process: a script on the command line is run in the worktree with +line and the absolute path", async () => {
@@ -129,8 +129,8 @@ test("a real editor process: a script on the command line is run in the worktree
   chmodSync(script, 0o755);
   const r = await screenEditor(project, { env, shortId: () => "c0ffee" })({ file: CH1, line: 8, editor: script });
   expect(r.ok).toBe(true);
-  expect(readFileSync(join(dir, "args.txt"), "utf8")).toContain(`+8 -- ${join(worktreePath("ice-house", "edit/c0ffee", env), "novels", "ice-house", CH1)}`);
-  expect(git(project, "show", `edit/c0ffee:novels/ice-house/${CH1}`)).toContain("under the mare");
+  expect(readFileSync(join(dir, "args.txt"), "utf8")).toContain(`+8 -- ${join(worktreePath("ice-house", "edit/ice-house/c0ffee", env), "novels", "ice-house", CH1)}`);
+  expect(git(project, "show", `edit/ice-house/c0ffee:novels/ice-house/${CH1}`)).toContain("under the mare");
 });
 
 test("Save: the edit branch merges into main through the review finish path, its worktree and branch go, the after-write steps run", async () => {
@@ -138,12 +138,12 @@ test("Save: the edit branch merges into main through the review finish path, its
   const edited = await editInProject(project, { file: CH1, line: 9, editor: "vim" }, { env, run: fakeEditor(["from the doorway", "from the scale house"]).run, shortId: () => "ab12cd" });
   expect(edited.ok).toBe(true);
   const extractor: Adapter = { async *complete() { yield { type: "text", text: "{}" } as never; } } as unknown as Adapter;
-  const saved = await screenFinisher(project, { env, extractor, now: () => new Date("2026-10-02T12:00:00.000Z") })("edit/ab12cd", { removed: [], added: [] });
+  const saved = await screenFinisher(project, { env, extractor, now: () => new Date("2026-10-02T12:00:00.000Z") })("edit/ice-house/ab12cd", { removed: [], added: [] });
   expect(saved.ok).toBe(true);
-  if (saved.ok) expect(saved.lines[0]).toContain("merged edit/ab12cd into main");
+  if (saved.ok) expect(saved.lines[0]).toContain("merged edit/ice-house/ab12cd into main");
   expect(readFileSync(join(project, CH1), "utf8")).toContain("from the scale house");
   expect(git(vault, "branch", "--list", "edit/*")).toBe("");
-  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(false);
+  expect(existsSync(worktreePath("ice-house", "edit/ice-house/ab12cd", env))).toBe(false);
   // The merged work's author stays Matt.
   expect(git(vault, "log", "--no-merges", "-1", "--format=%an", "main")).toBe("Matt Test");
 });
@@ -211,31 +211,31 @@ test("e in a review: refusals run no editor (not a change branch, a path out of 
 test("the pane opens the file on a new edit branch's worktree, and saving commits it there as the author; main is untouched", async () => {
   const { project, vault, env } = setup();
   const opened = await openForPane(project, CH1, { env, shortId: () => "ab12cd" });
-  expect(opened).toEqual({ ok: true, branch: "edit/ab12cd", text: BASE });
+  expect(opened).toEqual({ ok: true, branch: "edit/ice-house/ab12cd", text: BASE });
   const edited = BASE.replace("from the doorway", "from the scale house");
-  const saved = await saveFromPane(project, CH1, "edit/ab12cd", edited, { env });
+  const saved = await saveFromPane(project, CH1, "edit/ice-house/ab12cd", edited, { env });
   expect(saved.ok).toBe(true);
   if (!saved.ok) return;
-  expect(saved.lines[0]).toMatch(/^committed chapters\/01-the-last-full-cut\.md on edit\/ab12cd \([0-9a-f]{7}\)$/);
-  expect(git(vault, "show", `edit/ab12cd:novels/ice-house/${CH1}`)).toBe(edited.trimEnd());
-  expect(git(vault, "log", "-1", "--format=%an <%ae>|%s", "edit/ab12cd")).toBe(`Matt Test <matt@example.com>|edit ${CH1}`);
+  expect(saved.lines[0]).toMatch(/^committed chapters\/01-the-last-full-cut\.md on edit\/ice-house\/ab12cd \([0-9a-f]{7}\)$/);
+  expect(git(vault, "show", `edit/ice-house/ab12cd:novels/ice-house/${CH1}`)).toBe(edited.trimEnd());
+  expect(git(vault, "log", "-1", "--format=%an <%ae>|%s", "edit/ice-house/ab12cd")).toBe(`Matt Test <matt@example.com>|edit ${CH1}`);
   expect(readFileSync(join(project, CH1), "utf8")).toBe(BASE);
   // Saving what is already there commits nothing.
-  expect(await saveFromPane(project, CH1, "edit/ab12cd", edited, { env })).toEqual({ ok: true, branch: "edit/ab12cd", lines: [`no change to ${CH1}`] });
+  expect(await saveFromPane(project, CH1, "edit/ice-house/ab12cd", edited, { env })).toEqual({ ok: true, branch: "edit/ice-house/ab12cd", lines: [`no change to ${CH1}`] });
   // A second open reuses the open edit branch and reads the edited file from it; closing keeps it (it has a commit).
-  expect(await openForPane(project, CH1, { env, shortId: () => "ffffff" })).toEqual({ ok: true, branch: "edit/ab12cd", text: edited, unmerged: 1 });
-  await closePane(project, "edit/ab12cd", { env });
-  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ab12cd"] } });
+  expect(await openForPane(project, CH1, { env, shortId: () => "ffffff" })).toEqual({ ok: true, branch: "edit/ice-house/ab12cd", text: edited, unmerged: 1 });
+  await closePane(project, "edit/ice-house/ab12cd", { env });
+  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ice-house/ab12cd"] } });
 });
 
 test("closing the pane with nothing committed takes the branch it made away again", async () => {
   const { project, vault, env } = setup();
   const session = screenEditPane(project, { env, shortId: () => "ab12cd" });
   expect((await session.open(CH1)).ok).toBe(true);
-  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(true);
-  await session.close("edit/ab12cd");
+  expect(existsSync(worktreePath("ice-house", "edit/ice-house/ab12cd", env))).toBe(true);
+  await session.close("edit/ice-house/ab12cd");
   expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: [] } });
-  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(false);
+  expect(existsSync(worktreePath("ice-house", "edit/ice-house/ab12cd", env))).toBe(false);
 });
 
 test("the pane refuses a file that is not on main, a path outside the project, and saving to a branch that is not an edit branch", async () => {
@@ -259,13 +259,13 @@ test("autosaves are commits on the edit branch only: main's head is unchanged un
   let text = BASE;
   for (const [from, to] of [["from the doorway", "from the porch"], ["under the horse", "under the mare"], ["green book", "red book"]] as const) {
     text = text.replace(from, to);
-    expect((await session.save(CH1, "edit/ab12cd", text)).ok).toBe(true);
+    expect((await session.save(CH1, "edit/ice-house/ab12cd", text)).ok).toBe(true);
     expect(git(vault, "rev-parse", "main")).toBe(mainHead);
   }
-  expect(git(vault, "rev-list", "--count", "main..edit/ab12cd")).toBe("3");
+  expect(git(vault, "rev-list", "--count", "main..edit/ice-house/ab12cd")).toBe("3");
   expect(readFileSync(join(project, CH1), "utf8")).toBe(BASE);
   const extractor: Adapter = { async *complete() { yield { type: "text", text: "{}" } as never; } } as unknown as Adapter;
-  const saved = await screenFinisher(project, { env, extractor, now: () => new Date("2026-10-26T12:00:00.000Z") })("edit/ab12cd", { removed: [], added: [] });
+  const saved = await screenFinisher(project, { env, extractor, now: () => new Date("2026-10-26T12:00:00.000Z") })("edit/ice-house/ab12cd", { removed: [], added: [] });
   expect(saved.ok).toBe(true);
   expect(git(vault, "rev-parse", "main")).not.toBe(mainHead);
   expect(readFileSync(join(project, CH1), "utf8")).toContain("red book");
@@ -276,37 +276,37 @@ test("reopening after an earlier session left an unmerged edit branch (its workt
   const first = screenEditPane(project, { env, shortId: () => "ab12cd" });
   expect((await first.open(CH1)).ok).toBe(true);
   const edited = BASE.replace("from the doorway", "from the porch");
-  expect((await first.save(CH1, "edit/ab12cd", edited)).ok).toBe(true);
+  expect((await first.save(CH1, "edit/ice-house/ab12cd", edited)).ok).toBe(true);
   // The session ends and its worktree is cleaned away; the branch with its autosave stays.
-  git(vault, "worktree", "remove", "--force", worktreePath("ice-house", "edit/ab12cd", env));
-  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(false);
+  git(vault, "worktree", "remove", "--force", worktreePath("ice-house", "edit/ice-house/ab12cd", env));
+  expect(existsSync(worktreePath("ice-house", "edit/ice-house/ab12cd", env))).toBe(false);
   const again = await openForPane(project, CH1, { env, shortId: () => "ffffff" });
-  expect(again).toEqual({ ok: true, branch: "edit/ab12cd", text: edited, unmerged: 1 });
-  expect(existsSync(worktreePath("ice-house", "edit/ab12cd", env))).toBe(true);
-  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ab12cd"] } });
+  expect(again).toEqual({ ok: true, branch: "edit/ice-house/ab12cd", text: edited, unmerged: 1 });
+  expect(existsSync(worktreePath("ice-house", "edit/ice-house/ab12cd", env))).toBe(true);
+  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ice-house/ab12cd"] } });
   // Closing does not throw the resumed work away.
-  await closePane(project, "edit/ab12cd", { env });
-  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ab12cd"] } });
+  await closePane(project, "edit/ice-house/ab12cd", { env });
+  expect(listBranches(vault)).toMatchObject({ ok: true, branches: { edit: ["edit/ice-house/ab12cd"] } });
 });
 
 test("an edit branch with nothing main lacks is not resumed: a fresh one is made", async () => {
   const { project, vault, env } = setup();
   git(vault, "branch", "edit/stale1");
   const opened = await openForPane(project, CH1, { env, shortId: () => "ab12cd" });
-  expect(opened).toEqual({ ok: true, branch: "edit/ab12cd", text: BASE });
+  expect(opened).toEqual({ ok: true, branch: "edit/ice-house/ab12cd", text: BASE });
 });
 
 test("the pane refuses to write through a symlink in the worktree", async () => {
   const { project, env } = setup();
   const opened = await openForPane(project, CH1, { env, shortId: () => "ab12cd" });
   expect(opened.ok).toBe(true);
-  const wt = worktreePath("ice-house", "edit/ab12cd", env);
+  const wt = worktreePath("ice-house", "edit/ice-house/ab12cd", env);
   const inTree = join(wt, "novels", "ice-house", CH1);
   const outside = join(dirname(wt), "outside.md");
   writeFileSync(outside, "untouched\n");
   rmSync(inTree);
   symlinkSync(outside, inTree);
-  const saved = await saveFromPane(project, CH1, "edit/ab12cd", "overwritten\n", { env });
+  const saved = await saveFromPane(project, CH1, "edit/ice-house/ab12cd", "overwritten\n", { env });
   expect(saved).toEqual({ ok: false, message: `pablo: edit: ${CH1} is a symbolic link; not writing through it; make it a plain file on the branch first` });
   expect(readFileSync(outside, "utf8")).toBe("untouched\n");
 });
