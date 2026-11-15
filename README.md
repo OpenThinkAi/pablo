@@ -13,7 +13,7 @@ chapter 1: not ready
   bible/timeline.md has no row dated 1911 or earlier
 
 $ pablo write --project lighthouse --chapter 1
-wrote chapters/01-the-fall.md (333 words) on branch draft/ch01
+wrote chapters/01-the-fall.md (333 words) on branch draft/lighthouse/ch01
 ```
 
 Two rules shape everything:

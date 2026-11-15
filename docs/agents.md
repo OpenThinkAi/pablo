@@ -119,8 +119,8 @@ you:    pick up The Lighthouse
 agent:  resume → "chapter 2 is next; its beat has no POV yet"
 you:    Ada again. The inspector should almost catch her.
 agent:  save beats (updated row 2) → status --for "chapter 2" → ready
-agent:  write chapter 2 → "draft/ch02 is waiting: 340 words, check found nothing"
-you:    (reads it, then) pablo merge --project lighthouse draft/ch02
+agent:  write chapter 2 → "draft/lighthouse/ch02 is waiting: 340 words, check found nothing"
+you:    (reads it, then) pablo merge --project lighthouse draft/lighthouse/ch02
 ```
 
 ## The tools

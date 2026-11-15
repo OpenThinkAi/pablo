@@ -203,7 +203,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 type: one unit (`soleUnit`, so `write --output story` needs
                 no `--unit`) over every beat, or the beats its `plan.md` row
                 names (a chosen act), in `outputs/story/story.md` on
-                `draft/story`; the outline is one pack slice and the length
+                `draft/<slug>/story`; the outline is one pack slice and the length
                 is `--words`, else 600 words a beat.
                 `screenplay` (AGT-2132, `src/outputs/screenplay/`): one
                 scene per beat in `outputs/screenplay/scenes/NN-slug.fountain`
@@ -215,7 +215,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `*.fountain` path; publish `fountain` compiles every scene.
                 `radio` (AGT-1686, `src/outputs/radio/`) is another row:
                 one episode per beat in `outputs/radio/episodes/NN-slug.md`
-                on `draft/radio-epNN`, `rulesTemplate` the radio rules
+                on `draft/<slug>/radio-epNN`, `rulesTemplate` the radio rules
                 (`rules.ts`), stages script -> cast -> perform -> mix -> fix
                 -> publish. Its `preconditions` are the script stage
                 (episode N-1, the beats, picks, timeline); its pack is the
@@ -269,7 +269,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 `essay` (AGT-2134, `src/outputs/essay/`, D-7, on every
                 track): on nonfiction one section per `core/outline.md`
                 row, every section in `outputs/essay/essay.md` under a
-                `## <title>` heading (`sections.ts`), on `draft/essay-NN`;
+                `## <title>` heading (`sections.ts`), on `draft/<slug>/essay-NN`;
                 the optional `shared` field (`has`/`put`) is how `write`,
                 `merge` and conformance put one unit into a shared file,
                 and `unitText` is what `narrated` reads (citations
@@ -307,7 +307,7 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 (or that is not registered) is refused before anything is
                 written; an unrequested type's `ensure()` is never called.
                 Merges find a draft branch's output by `outputForBranch`, so
-                `draft/story` merges on a work that also has a novel. Tests
+                `draft/<slug>/story` merges on a work that also has a novel. Tests
                 run the real loop on a scripted model that calls pablo's own
                 tools (`StoryDeps.agent`, `test/scripted-agent.ts`).
                 `--output radio` (AGT-1700) runs the radio chain after the

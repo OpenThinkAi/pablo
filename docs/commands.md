@@ -466,7 +466,7 @@ previous section. Research notes themselves are never sent: a claim's sources go
 as ids. The writer is told to cite each claim it uses, where it uses it; `check`
 flags a claim without one (`claim-uncited`). The section is put into
 `outputs/essay/essay.md` (any heading the writer added is dropped, the other
-sections are kept) and committed on `draft/essay-NN`; the file's frontmatter is
+sections are kept) and committed on `draft/<slug>/essay-NN`; the file's frontmatter is
 the provenance of the section written last. A section that already has text is
 refused without `--force`. On a fiction track a section's pack also carries the cast (every character
 file, as below), and a section about one act (`Act I`, as `output add essay` names them) carries that act's
@@ -645,7 +645,7 @@ pablo merge --project <slug> --reject <branch>
 
 Accepts any change branch pablo made (`draft/`, `revise/`, `edit/`, `plan/`) onto
 `main`, the way accepting it in the screen does with nothing rejected. A draft
-branch (`draft/chNN`, `draft/story`, ...) merges and runs the after-write steps for
+branch (`draft/<slug>/chNN`, `draft/<slug>/story`, ...) merges and runs the after-write steps for
 that unit, in this order:
 
 1. **Outline tick**: the unit's row in the beats file moves to `draft`.

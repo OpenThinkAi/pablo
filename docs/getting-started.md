@@ -238,7 +238,7 @@ pablo write --project lighthouse --chapter 1 --words 400
 ```
 
 ```
-wrote chapters/01-the-fall.md (333 words) on branch draft/ch01
+wrote chapters/01-the-fall.md (333 words) on branch draft/lighthouse/ch01
 read 1523 tokens in 0.6s, wrote 404 in 16.5s
 ```
 
@@ -250,14 +250,14 @@ a branch for you to read first.
 Read the draft any way you like:
 
 ```sh
-git diff main draft/ch01
+git diff main draft/lighthouse/ch01
 ```
 
 or run bare `pablo` inside the work for the full-terminal screen, which has a review
 mode for exactly this. When you are happy, accept it:
 
 ```sh
-pablo merge --project lighthouse draft/ch01
+pablo merge --project lighthouse draft/lighthouse/ch01
 ```
 
 `merge` brings the chapter onto `main` and runs the after-write steps: it ticks the
