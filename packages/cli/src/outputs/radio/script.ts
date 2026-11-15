@@ -22,7 +22,19 @@ const QUOTES = new Set(['"', "“", "”"]);
 
 /** Whether the text has a `CAST:` line (`script.py`'s `has_cast_line`). */
 export function hasCastLine(text: string): boolean {
-  return text.split(/\r?\n/).some((raw) => raw.trim().replace(/\*/g, "").toUpperCase().startsWith("CAST:"));
+  return text.split(/\r?\n/).some(isCastLine);
+}
+
+/** Whether one line is a `CAST:` line. */
+export function isCastLine(line: string): boolean {
+  return line.trim().replace(/\*/g, "").toUpperCase().startsWith("CAST:");
+}
+
+/** The speaker of a spoken line (`ANNOUNCER`, `ODILE`), or undefined for a cue, a `CAST:` line or anything else. */
+export function speakerOf(line: string): string | undefined {
+  const raw = line.trim().replace(/\*/g, "");
+  if (isCastLine(raw) || CUE.test(raw)) return undefined;
+  return LINE.exec(raw)?.[1]?.trim();
 }
 
 /** How many lines the frontmatter takes (0 when there is none, or the fence is unclosed). */
@@ -76,4 +88,22 @@ export function scriptRoles(text: string): string[] {
     if (!speakers.includes(speaker)) speakers.push(speaker);
   }
   return [...declared, ...speakers.filter((s) => !declared.includes(s))];
+}
+
+/** The `CAST:` entries of a script's `CAST:` lines, `NAME=m "description"` each, in order, first of a name winning. */
+export function castEntries(text: string): string[] {
+  const seen = new Set<string>();
+  const entries: string[] = [];
+  for (const rawLine of text.split("\n")) {
+    const raw = rawLine.trim().replace(/\*/g, "");
+    if (!raw.toUpperCase().startsWith("CAST:")) continue;
+    for (const part of splitUnquoted(raw.slice(5), ",")) {
+      if (!part.includes("=")) continue;
+      const name = (part.split("=", 1)[0] ?? "").trim().toUpperCase();
+      if (name === "" || seen.has(name)) continue;
+      seen.add(name);
+      entries.push(part.trim());
+    }
+  }
+  return entries;
 }

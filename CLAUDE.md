@@ -222,7 +222,12 @@ packages/cli    @openthink/pablo — the `pablo` bin: argument parsing, verb
                 core slices plus `outputs/radio/RULES.md`, its own ledger
                 and the previous episode's summary (never a novel chapter,
                 never research); `manuscript: "lines"` makes `write` store
-                a script line for line (never sentence-split). The stages
+                a script line for line (never sentence-split). An episode
+                whose plan row tells several beats is drafted beat by beat
+                (AGT-2322, `parts` = `pack.ts`'s `radioParts`, the story's
+                AGT-2286 form): each request is told the next beat to stop
+                before, `trimRadioPart` cuts what ran past it, and
+                `stitchRadioParts` writes one `CAST:` line (union). The stages
                 after the script are `state.ts`'s `radioStageCheck`, read
                 from disk with no Python (`script.ts` reads role names the
                 way `script.py` does; `packages/casting/tests/fixtures/

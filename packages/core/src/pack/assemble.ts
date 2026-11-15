@@ -261,6 +261,30 @@ function spanEditSpecs(inputs: SpanEditInputs): BuiltSpecs {
 }
 
 /**
+ * The task lines for one part of a script drafted beat by beat (AGT-2322): only the first part opens the
+ * episode, only the last closes it, and every earlier part is told exactly where to stop, with the opening of the
+ * next beat named, because a writer given one beat will otherwise run on into the beats after it.
+ */
+function scriptPartTask(part: NonNullable<DraftingInputs["part"]>, wordTarget: number): string[] {
+  const last = part.number === part.of;
+  return [
+    `Write part ${part.number} of ${part.of} of the episode now: the script for this beat alone. About ${wordTarget} spoken words, within ten percent.`,
+    "Start with a CAST: line for the roles who speak in this part, each described as the rules say.",
+    part.number === 1
+      ? "Open the episode: the theme, then the announcer with the title and episode number."
+      : "Do not open the episode: no theme, no announcer opening, no recap. Continue straight on from the end of the script so far.",
+    ...(last
+      ? ["This is the last part: end on a sting or a held moment, then the announcer closes and the theme plays."]
+      : [
+          "Stop where this beat ends. Do not close the episode: no announcer sign-off, no closing theme. Every beat after this one belongs to a later request; do not write any of it, not even a line of it.",
+          ...(part.next === undefined
+            ? []
+            : [`The next beat is "${part.next.title}"${part.next.beat === "" ? "" : `: ${part.next.beat}`}. Your part ends before that beat's first line; do not write it.`]),
+        ]),
+  ];
+}
+
+/**
  * Drafting: `bin/draft-chapter`'s pack, in its order — the chapter, the prose
  * rules (the layered voice, AGT-2139: global and vault in `style`, the work's
  * in `workRules`, the output's in `outputRules`, then every voice's `never`),
@@ -516,11 +540,13 @@ function draftingSpecs(inputs: DraftingInputs): BuiltSpecs {
       heading: "",
       text: [
         ...(inputs.part !== undefined
-          ? [
-              `Write part ${inputs.part.number} of ${inputs.part.of} now, as scenes, not summary. About ${inputs.wordTarget} words, within ten percent.`,
-              inputs.part.number === 1 ? "Open the piece." : "Continue straight on from the end of the text so far; do not recap it.",
-              inputs.part.number === inputs.part.of ? "This is the last part: close the piece." : "Do not close the piece; later parts carry on.",
-            ]
+          ? inputs.part.script === true
+            ? scriptPartTask(inputs.part, inputs.wordTarget)
+            : [
+                `Write part ${inputs.part.number} of ${inputs.part.of} now, as scenes, not summary. About ${inputs.wordTarget} words, within ten percent.`,
+                inputs.part.number === 1 ? "Open the piece." : "Continue straight on from the end of the text so far; do not recap it.",
+                inputs.part.number === inputs.part.of ? "This is the last part: close the piece." : "Do not close the piece; later parts carry on.",
+              ]
           : script
           ? [`Write the scene now: one scene, not a sequence of them. Scene, not summary. About ${inputs.wordTarget} words, within ten percent.`]
           : [
