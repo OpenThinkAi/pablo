@@ -762,10 +762,10 @@ test("AGT-2323: an episode a first-time listener cannot follow is redrafted once
     expect(writer.prompts[1]).toContain("who is speaking, and where are we?");
     expect(writer.prompts[0]).not.toContain("first-time listener");
     // The first draft's branch is gone; the redraft was accepted and the episode cast.
-    expect(git(vault, "branch", "--list", "draft/radio-ep01")).toBe("");
+    expect(git(vault, "branch", "--list", `draft/${body.project}/radio-ep01`)).toBe("");
     const ep1 = body.drafts.radio.find((d: { unit: number }) => d.unit === 1);
-    expect(ep1.branch).toBe("draft/radio-ep01-v2");
-    expect(ep1.listener).toMatchObject({ verdict: "yes", passed: true, redrafted: { from: "draft/radio-ep01", verdict: "mostly", hits: 2 } });
+    expect(ep1.branch).toBe(`draft/${body.project}/radio-ep01-v2`);
+    expect(ep1.listener).toMatchObject({ verdict: "yes", passed: true, redrafted: { from: `draft/${body.project}/radio-ep01`, verdict: "mostly", hits: 2 } });
     expect(streamIndex(work).map((c) => c.episode)).toEqual([1, 2, 3, 4]);
   } finally {
     seam.restore();
@@ -784,15 +784,15 @@ test("AGT-2323: an episode still not followed after one redraft stops the run fo
     const result = await runStory({ prompt: SPEC, output: ["radio"] }, ctx, deps);
     const body = result.body as Record<string, any>;
     expect(result.exitCode).toBe(0);
-    expect(body.waiting).toMatchObject({ step: "draft:radio:1", branch: "draft/radio-ep01-v2", review: "listener", output: "radio", unit: 1 });
-    expect(body.waiting.listener).toMatchObject({ verdict: "mostly", passed: false, redrafted: { from: "draft/radio-ep01" } });
+    expect(body.waiting).toMatchObject({ step: "draft:radio:1", branch: `draft/${body.project}/radio-ep01-v2`, review: "listener", output: "radio", unit: 1 });
+    expect(body.waiting.listener).toMatchObject({ verdict: "mostly", passed: false, redrafted: { from: `draft/${body.project}/radio-ep01` } });
     expect(body.waiting.listener.hits.map((h: { kind: string }) => h.kind)).toEqual(["confusion", "repeat"]);
     expect(body.missing[0]).toContain("episode 1 cannot be followed by ear");
-    expect(body.next).toContain("pablo merge draft/radio-ep01-v2");
+    expect(body.next).toContain(`pablo merge draft/${body.project}/radio-ep01-v2`);
     // Nothing was cast, performed or merged; only the two drafts were written.
     expect(machine.calls).toEqual([]);
     expect(writer.calls).toBe(2);
-    expect(git(vault, "branch", "--list", "draft/radio-ep01")).toBe("");
+    expect(git(vault, "branch", "--list", `draft/${body.project}/radio-ep01`)).toBe("");
     const work = join(vault, "stories", body.project);
     expect(existsSync(join(work, "outputs", "radio", "episodes"))).toBe(false);
 
@@ -802,7 +802,7 @@ test("AGT-2323: an episode still not followed after one redraft stops the run fo
     expect(writer.calls).toBe(2);
 
     // The author fixes and accepts it; the run goes on from there.
-    expect((await acceptBranchInProject(work, "draft/radio-ep01-v2", env, writer)).exitCode).toBe(0);
+    expect((await acceptBranchInProject(work, `draft/${body.project}/radio-ep01-v2`, env, writer)).exitCode).toBe(0);
     lost = false;
     const resumed = await runStory({ project: body.project }, ctx, deps);
     expect((resumed.body as Record<string, any>).message).toBeUndefined();

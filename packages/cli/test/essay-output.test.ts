@@ -219,7 +219,7 @@ test("AGT-2296: a leading-dot decimal keeps its space through write --output ess
   const reply = "Opponents shot .376 from three, above the league's .346.";
   const result = await write(vault, work, home, "1", {}, fakeEssayWriter(reply));
   expect(result.code).toBe(0);
-  const onBranch = git(vault, "show", "draft/essay-01:essays/the-press/outputs/essay/essay.md");
+  const onBranch = git(vault, "show", "draft/the-press/essay-01:essays/the-press/outputs/essay/essay.md");
   expect(onBranch).toContain("shot .376 from three");
   expect(onBranch).toContain("league's .346.");
 });
@@ -434,7 +434,7 @@ test("AGT-2294 AC1: sections are found by outline position, so a renamed row is 
 test("AGT-2294 AC3: renaming an outline row then write --force replaces the section under the new heading", async () => {
   const { vault, work, home } = nonfiction({ essay: true });
   expect((await write(vault, work, home, "1")).code).toBe(0);
-  const merged = await mergeDraft(work, "draft/essay-01", { slug: "the-press", env: { PATH: NO_THINK_PATH }, now: NOW });
+  const merged = await mergeDraft(work, "draft/the-press/essay-01", { slug: "the-press", env: { PATH: NO_THINK_PATH }, now: NOW });
   expect(merged.ok).toBe(true);
   writeFileSync(join(work, "core", "outline.md"), OUTLINE.replace("| 1 | The press arrives |", "| 1 | The press arrives, renamed |"));
   const redo = await write(vault, work, home, "1", { force: true }, fakeEssayWriter("A second draft of section one [#1]."));
