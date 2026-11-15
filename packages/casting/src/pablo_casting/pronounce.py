@@ -55,7 +55,7 @@ _SENTENCES = re.compile(r"(?<=[.!?])\s+")
 # Common English heteronyms: spelled alike, sounded differently by sense. The engine reads one default; whether a line
 # means the other is a judgement for the model and the author (`pronounce --suggest`).
 HETERONYMS = frozenset(
-    "bass bow close content converse desert does dove entrance invalid lead live minute moderate object permit "
+    "bass bow close content converse desert dove entrance invalid lead live minute moderate object permit "
     "polish present produce project read record refuse resume row separate sewer sow subject tear wind wound".split()
 )
 _SENTENCE_END = re.compile(r"(?:^|[.!?:])[\s\"'“”‘’()\[\]—–-]*$")
@@ -93,7 +93,7 @@ def _sentence(text: str, token: str) -> str:
 def _heteronyms(text: str, speaker: str, entries: Sequence[Entry]) -> list[str]:
     """The `HETERONYMS` in a line, once each in order, that no lexicon entry for this speaker decides."""
     known = _known(entries, speaker)
-    masked, _links = mask(text)
+    masked, _ = mask(text)
     found: list[str] = []
     for match in _WORD.finditer(masked):
         word = match.group(0).lower()
@@ -161,7 +161,7 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
     units: list[dict[str, object]] = []
     counts: Counter[str] = Counter()
     first: dict[str, tuple[str, int, int]] = {}  # token -> (kind, unit, line)
-    where: dict[str, tuple[str, str]] = {}  # token -> (speaker, sentence) of its first occurrence
+    context: dict[str, tuple[str, str]] = {}  # token -> (speaker, sentence) of its first occurrence
     heteronyms: list[dict[str, object]] = []
     changed = 0
     stale_total = 0
@@ -178,7 +178,7 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
             for word, kind in _unresolved(spoken.text, spoken.speaker, entries, acronyms, changes):
                 counts[word] += 1
                 first.setdefault(word, (kind, number, spoken.line))
-                where.setdefault(word, (spoken.speaker, _sentence(spoken.text, word)))
+                context.setdefault(word, (spoken.speaker, _sentence(spoken.text, word)))
             for word in _heteronyms(spoken.text, spoken.speaker, entries):
                 heteronyms.append({"word": word, "unit": number, "line": spoken.line, "speaker": spoken.speaker, "sentence": _sentence(spoken.text, word)})
             if engine == spoken.text:
@@ -224,8 +224,8 @@ def cmd_pronounce(work: Path, episode: int | None, everything: bool = False) -> 
                 "kind": first[token][0],
                 "count": counts[token],
                 "first": {"unit": first[token][1], "line": first[token][2]},
-                "speaker": where[token][0],
-                "sentence": where[token][1],
+                "speaker": context[token][0],
+                "sentence": context[token][1],
             }
             for token in ordered
         ],

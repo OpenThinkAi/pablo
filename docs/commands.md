@@ -1454,11 +1454,13 @@ wind), an abbreviation no rule knows. `pablo pronounce --suggest --project <slug
 - It runs `pronounce`, then sends every token `pronounce` flagged (capitalised and
   ALL-CAPS words, abbreviations, unknown units; links are not sent, a respelling only
   ever matches a word) and every word of a built-in list of common English heteronyms
-  (`bass bow close content converse desert does dove entrance invalid lead live
-  minute moderate object permit polish present produce project read record refuse
+  (`bass bow close content converse desert dove entrance invalid lead live minute
+  moderate object permit polish present produce project read record refuse
   resume row separate sewer sow subject tear wind wound`), each with its sentence and
   speaker, to the provider the `plan` intent routes to. It asks for a `word ->
-  respelling` entry and a one-line reason.
+  respelling` entry and a one-line reason. A heteronym is sent once per speaker,
+  with how many of their lines use it and up to three of its sentences, since the
+  lexicon keeps one entry per speaker and word.
 - A token the lexicon already decides for that speaker is never sent. With no model
   configured the verb is refused before it runs anything.
 - pablo checks every proposal (it must name a token that was sent, with a one-line

@@ -234,7 +234,32 @@ test("pablo checks every proposal: unknown ids, a different word, an empty or ar
     items,
   );
   expect(suggestions.map((s) => s.word)).toEqual(["Acemoglu"]);
-  expect(rejected.map((r) => r.word).sort()).toEqual(["Nobody", "Hale", "lead", "read", "read"].sort());
+  expect(rejected.map((r) => r.word).sort()).toEqual(["Acemoglu", "Nobody", "Hale", "lead", "read", "read"].sort());
+  expect(rejected.find((r) => r.word === "Acemoglu")?.reason).toContain("already proposed");
+});
+
+test("a heteronym used on many lines is one item per speaker and word, with its count and a couple more sentences", () => {
+  const many = {
+    ...PRONOUNCED,
+    unresolved: [],
+    heteronyms: [
+      { word: "read", unit: 1, line: 4, speaker: "NARRATOR", sentence: "She read the report last night." },
+      { word: "read", unit: 1, line: 8, speaker: "NARRATOR", sentence: "He read it twice." },
+      { word: "read", unit: 2, line: 1, speaker: "NARRATOR", sentence: "They read the minutes." },
+      { word: "read", unit: 2, line: 3, speaker: "NARRATOR", sentence: "We read on." },
+      { word: "read", unit: 2, line: 5, speaker: "HALE", sentence: "I read it." },
+    ],
+  };
+  const items = suggestItems(many);
+  expect(items.map((i) => [i.id, i.word, i.speaker, i.count, i.unit, i.line])).toEqual([
+    [1, "read", "NARRATOR", 4, 1, 4],
+    [2, "read", "HALE", 1, 2, 5],
+  ]);
+  expect(items[0]!.more).toEqual(["He read it twice.", "They read the minutes."]);
+  const prompt = suggestPrompt(items);
+  expect(prompt).toContain("1. [heteronym] read (speaker NARRATOR, 4 of their lines; first at unit 1 line 4): She read the report last night. | also: He read it twice. | also: They read the minutes.");
+  expect(prompt).toContain("2. [heteronym] read (speaker HALE, unit 2 line 5): I read it.");
+  expect(prompt).not.toContain("We read on.");
 });
 
 test("appended entries are in the lexicon's own form and keep a comment on where each came from", () => {

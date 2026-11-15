@@ -856,7 +856,6 @@ export function castingVerbs(deps: (env: Env) => CastingDeps = realCastingDeps):
     name: "pronounce",
     description:
       "Show what the voice engine will say for a performed output's script lines, before any render: for each line whose engine input differs from its text, the line number, the speaker, each changed token (\"10-20%\" -> \"ten to twenty percent\", \"AI\" -> \"A.I.\" on a nonfiction work, shorthand such as \"Gov.\", \"3:00 p.m.\", \"$7T\" or \"1/3\", a pronounce.md respelling) and the full engine text; then the capitalised or all-caps words no rule or lexicon entry decided, which the author may want to add to the output's pronounce.md, and the links, abbreviation-like words and unknown units it left as written. The word list leaves out month and weekday names, common English words, common first names and words also written in lower case elsewhere, and ranks mixed-case tokens (ChatGPT) and unusual letter patterns first; `all` lists every word. Read-only; loads no model and writes nothing. With suggest: sends each flagged token and heteronym, with its sentence, to the plan intent's model for a respelling and a reason, and writes the proposals into the output's pronounce.md on a new plan/ branch for the author to review (never applied; hear each before keeping it); refused with no model configured.",
-
     args: PRONOUNCE_ARGS,
     run: async (args, ctx) => {
       const where = locate(ctx, args.project);

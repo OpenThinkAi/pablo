@@ -28,6 +28,10 @@ export interface SuggestItem {
   readonly unit: number;
   readonly line: number;
   readonly sentence: string;
+  /** A heteronym: how many of the speaker's lines use it (one item stands for all of them). */
+  readonly count?: number;
+  /** A heteronym: up to two more of the speaker's sentences with it, so the model can judge their usual sense. */
+  readonly more?: readonly string[];
 }
 
 /** A proposal pablo accepted: ready to be a lexicon entry. */
@@ -68,9 +72,14 @@ const KINDS = new Set(["caps", "capitalised", "abbreviation", "unit"]);
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 const int = (v: unknown): number => (typeof v === "number" && Number.isInteger(v) ? v : 0);
 
+/** How many sentences besides the first a heteronym item carries. */
+const MORE_SENTENCES = 2;
+
 /**
  * What `pronounce`'s JSON asks the model about: every undecided token (links excepted: a respelling only ever
  * matches a word, and a link is rewritten by hand) and every heteronym, in the order `pronounce` listed them.
+ * `pronounce` lists a heteronym once per line, but the lexicon can only keep one entry per speaker and word, so the
+ * occurrences collapse to one item per (speaker, word): the first line, the count, and a couple more sentences.
  */
 export function suggestItems(body: Record<string, unknown>): SuggestItem[] {
   const items: Omit<SuggestItem, "id">[] = [];
@@ -80,17 +89,34 @@ export function suggestItems(body: Record<string, unknown>): SuggestItem[] {
     if (!KINDS.has(kind) || word === "") continue;
     items.push({ word, kind: kind as SuggestItem["kind"], speaker: text(raw.speaker), unit: int(raw.first?.unit), line: int(raw.first?.line), sentence: text(raw.sentence) });
   }
+  const heteronyms = new Map<string, { item: Omit<SuggestItem, "id" | "count" | "more">; count: number; more: string[] }>();
   for (const raw of (Array.isArray(body["heteronyms"]) ? body["heteronyms"] : []) as PronounceHeteronym[]) {
     const word = text(raw.word);
     if (word === "") continue;
-    items.push({ word, kind: "heteronym", speaker: text(raw.speaker), unit: int(raw.unit), line: int(raw.line), sentence: text(raw.sentence) });
+    const speaker = text(raw.speaker);
+    const sentence = text(raw.sentence);
+    const key = `${speaker.toUpperCase()}|${word.toLowerCase()}`;
+    const seen = heteronyms.get(key);
+    if (seen === undefined) {
+      heteronyms.set(key, { item: { word, kind: "heteronym", speaker, unit: int(raw.unit), line: int(raw.line), sentence }, count: 1, more: [] });
+      continue;
+    }
+    seen.count += 1;
+    if (seen.more.length < MORE_SENTENCES && sentence !== seen.item.sentence && !seen.more.includes(sentence)) seen.more.push(sentence);
   }
+  for (const { item, count, more } of heteronyms.values()) items.push({ ...item, count, ...(more.length > 0 ? { more } : {}) });
   return items.map((item, i) => ({ ...item, id: i + 1 }));
 }
 
 /** The prompt the planner answers. Pure. */
 export function suggestPrompt(items: readonly SuggestItem[]): string {
-  const rows = items.map((i) => `${i.id}. [${i.kind}] ${i.word} (speaker ${i.speaker || "?"}, unit ${i.unit} line ${i.line}): ${i.sentence}`).join("\n");
+  const rows = items
+    .map((i) => {
+      const lines = (i.count ?? 1) > 1 ? `, ${i.count} of their lines; first at unit ${i.unit} line ${i.line}` : `, unit ${i.unit} line ${i.line}`;
+      const more = (i.more ?? []).map((m) => ` | also: ${m}`).join("");
+      return `${i.id}. [${i.kind}] ${i.word} (speaker ${i.speaker || "?"}${lines}): ${i.sentence}${more}`;
+    })
+    .join("\n");
   return [
     "You help a writer fix how a text-to-speech engine says words. The engine reads English from plain spelling. It cannot be told phonemes: a respelling is just different spelling it then reads, so it must be a plain-letter spelling, with the stressed syllable in CAPITALS and syllables joined by hyphens (`Zinfandel -> zin-fan-DELL`).",
     "Below are tokens the rules could not decide: unusual names, abbreviations, and heteronyms (words spelled alike but sounded by sense, such as read, lead, live, close, tear, wind), each with the sentence it stands in.",
@@ -107,8 +133,9 @@ const clean = (v: unknown): string => (typeof v === "string" ? v.replace(/[\u000
 /**
  * The proposals worth keeping, checked by pablo: each names a token that was sent (by id, with the same word) and has
  * a respelling that is one line, differs from the word and holds no arrow. A token proposed twice keeps its first
- * proposal; a heteronym or a token the speaker's name cannot scope is never written unscoped. Throws when the reply
- * is not the JSON asked for.
+ * proposal and reports the rest as rejected. A heteronym is always written scoped to its speaker, so one whose
+ * speaker's name cannot be a lexicon scope is dropped; names, abbreviations and units are written for every speaker.
+ * Throws when the reply is not the JSON asked for.
  */
 export function parseSuggestions(reply: string, items: readonly SuggestItem[]): { suggestions: Suggestion[]; rejected: RejectedSuggestion[] } {
   let value: unknown;
@@ -149,7 +176,10 @@ export function parseSuggestions(reply: string, items: readonly SuggestItem[]): 
       continue;
     }
     const key = `${item.kind === "heteronym" ? speaker : ""}|${item.word.toLowerCase()}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      drop(`"${item.word}" was already proposed; the first proposal is kept`);
+      continue;
+    }
     seen.add(key);
     suggestions.push({
       word: item.word,
@@ -183,7 +213,11 @@ export function appendSuggestions(current: string, suggestions: readonly Suggest
   return `${body}${lines.join("\n")}\n`;
 }
 
-/** The work's current lexicon text, `""` when it has none. */
+/**
+ * The work's current lexicon text, `""` when it has none. It is read from the work tree, while the suggestions land on
+ * a `plan/` branch cut from the plan base: the two agree because pablo works from a checkout of that base (the vault's
+ * main), as every `plan/` writer does.
+ */
 export function readLexicon(workDir: string, relPath: string): string {
   const path = join(workDir, relPath);
   return existsSync(path) ? readFileSync(path, "utf8") : "";
