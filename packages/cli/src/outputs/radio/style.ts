@@ -53,10 +53,13 @@ function numberOf(word: string): number | undefined {
   return NUMBER_WORDS[w] ?? (/^\d+$/.test(w) ? Number(w) : undefined);
 }
 
+/** A word that may describe an episode's format between "single"/"one" and "episode". */
+const SINGLE_FORMAT_WORD = "(?:radio|audio|drama|audio-drama|radio-drama|short|long|full|complete|standalone|self-contained|half-hour|hour-long|~?\\d+(?:\\.\\d+)?[- ]?(?:minute|min|hour)(?:[- ]long)?|\\d+[- ]?(?:minutes?|mins?))";
+
 /** The episode count one text asks for: a count, a single episode, or a total length; `source` names the text in the reason. */
 export function episodeCue(text: string, source: "request" | "premise" = "request"): EpisodeCue | undefined {
   const the = `the ${source}`;
-  const count = /\b(\d+|two|three|four|five|six|seven|eight|nine|ten|twelve)[- ]?(?:part\s+)?episodes?\b(?!\s+per\b)/i.exec(text);
+  const count = /\b(\d+|two|three|four|five|six|seven|eight|nine|ten|twelve)[- ]?(?:part\s+)?episodes?\b(?!\s+(?:per|of)\b)/i.exec(text);
   const counted = count?.[1] === undefined ? undefined : numberOf(count[1]);
   if (counted !== undefined && counted >= 1) return { episodes: counted, reason: `${the} asks for ${counted} episode${counted === 1 ? "" : "s"}` };
 
@@ -68,7 +71,10 @@ export function episodeCue(text: string, source: "request" | "premise" = "reques
   const minutes = len === undefined ? undefined : (numberOf(len.n as string) ?? (/^an?$/i.test(len.n as string) ? 1 : Number(len.n))) * (/^h/i.test(len.unit as string) ? 60 : 1);
   const singular = len !== undefined && /^episode$/i.test(len.noun as string);
 
-  const single = /\b(?:single|one|1|standalone)\b[^.\n]{0,40}?\bepisode\b(?!s)(?!\s+per\b)/i.exec(text);
+  // Only format words may sit between the quantifier and "episode" ("a single radio episode", "one ~10-minute
+  // episode", "a standalone audio-drama episode"); story prose ("one bad episode in his life") never counts, and
+  // "episode of ..." is how prose talks about an event, not a format.
+  const single = new RegExp(`\\b(?:single|one|1|standalone|self-contained)\\s+(?:${SINGLE_FORMAT_WORD}\\s+){0,3}episode\\b(?!s)(?!\\s+(?:per|of)\\b)`, "i").exec(text);
   if (single !== null || singular) {
     const len1 = minutes !== undefined && Number.isFinite(minutes) && minutes > 0 ? minutes : undefined;
     return { episodes: 1, reason: `${the} asks for ${singular && single === null ? "one episode" : "a single episode"}${len1 !== undefined ? ` of about ${len1} minutes` : ""}`, ...(len1 !== undefined ? { minutes: len1 } : {}) };
