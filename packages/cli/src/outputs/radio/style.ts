@@ -53,10 +53,16 @@ function numberOf(word: string): number | undefined {
   return NUMBER_WORDS[w] ?? (/^\d+$/.test(w) ? Number(w) : undefined);
 }
 
+/** A word that may describe an episode's format between "single"/"one" and "episode". */
+const SINGLE_FORMAT_WORD = "(?:radio|audio|drama|play|serial|audio-drama|radio-drama|radio-play|short|long|full|complete|standalone|self-contained|half[- ]hour|hour-long|~?\\d+(?:\\.\\d+)?[- ]?(?:minutes?|mins?|hours?)(?:[- ]long)?)";
+/** Number words a count or a length may use. */
+const COUNT_WORDS = "two|three|four|five|six|seven|eight|nine|ten|twelve";
+
 /** The episode count one text asks for: a count, a single episode, or a total length; `source` names the text in the reason. */
 export function episodeCue(text: string, source: "request" | "premise" = "request"): EpisodeCue | undefined {
   const the = `the ${source}`;
-  const count = /\b(\d+|two|three|four|five|six|seven|eight|nine|ten|twelve)[- ]?(?:part\s+)?episodes?\b(?!\s+per\b)/i.exec(text);
+  // "of" ends a count only when no length follows it: "two episodes of fever" is prose, "four episodes of ten minutes" is not.
+  const count = new RegExp(`\\b(\\d+|${COUNT_WORDS})[- ]?(?:part\\s+)?episodes?\\b(?!\\s+per\\b)(?!\\s+of\\b(?!\\s+(?:about\\s+|around\\s+|~)?(?:\\d+|an?|${COUNT_WORDS}|fifteen|twenty|thirty)[- ](?:minutes?|mins?|hours?)\\b))`, "i").exec(text);
   const counted = count?.[1] === undefined ? undefined : numberOf(count[1]);
   if (counted !== undefined && counted >= 1) return { episodes: counted, reason: `${the} asks for ${counted} episode${counted === 1 ? "" : "s"}` };
 
@@ -68,7 +74,14 @@ export function episodeCue(text: string, source: "request" | "premise" = "reques
   const minutes = len === undefined ? undefined : (numberOf(len.n as string) ?? (/^an?$/i.test(len.n as string) ? 1 : Number(len.n))) * (/^h/i.test(len.unit as string) ? 60 : 1);
   const singular = len !== undefined && /^episode$/i.test(len.noun as string);
 
-  const single = /\b(?:single|one|1|standalone)\b[^.\n]{0,40}?\bepisode\b(?!s)(?!\s+per\b)/i.exec(text);
+  // Only format words may sit between the quantifier and "episode" ("a single radio episode", "a single-episode
+  // drama", "one 10-minute episode"); story prose ("one bad episode in his life") never counts. "single",
+  // "standalone" and "self-contained" are format words themselves, so "a single episode of a mystery serial" counts;
+  // after a bare "one", "episode of ..." is how prose talks about an event ("one episode of fainting") and does not.
+  const format = `(?:${SINGLE_FORMAT_WORD}[\\s-]+){0,3}`;
+  const single =
+    new RegExp(`\\b(?:single|standalone|self-contained)[\\s-]+${format}episode\\b(?!s)(?!\\s+per\\b)`, "i").exec(text) ??
+    new RegExp(`\\b(?:one|1)[\\s-]+${format}episode\\b(?!s)(?!\\s+(?:per|of)\\b)`, "i").exec(text);
   if (single !== null || singular) {
     const len1 = minutes !== undefined && Number.isFinite(minutes) && minutes > 0 ? minutes : undefined;
     return { episodes: 1, reason: `${the} asks for ${singular && single === null ? "one episode" : "a single episode"}${len1 !== undefined ? ` of about ${len1} minutes` : ""}`, ...(len1 !== undefined ? { minutes: len1 } : {}) };

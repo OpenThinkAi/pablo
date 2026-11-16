@@ -1344,6 +1344,12 @@ one episode per beat, unless the request (the quote in `README.md`) or the premi
 (`bible/overview.md`) asks for a single episode, a count ("three episodes") or a
 total length ("a 10-minute episode", about 12 minutes to an episode): then the beats
 are dealt into that many contiguous episodes (never more than there are beats).
+A single episode is read only as a format: "single", "standalone" or "one" with nothing
+but format words before "episode" ("a single radio episode", "a single-episode drama",
+"one 10-minute episode"); story prose ("one bad episode in his life") never counts. After
+a bare "one", "episode of ..." reads as prose ("one episode of fainting"), so write "a
+single episode of ..." to ask for one. A count followed by "of" counts only when a length
+follows ("four episodes of ten minutes each" counts; "two episodes of fever" does not).
 `output add` returns the choice as `planned`, a story run prints it, and `plan.md`
 says `Planned: ...` under its heading. The `RULES.md` scaffolded is the old-time-radio
 template (announcer, narrator, `[MUSIC]` cues) unless the premise or request says "no
