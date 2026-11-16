@@ -75,6 +75,15 @@ test("episodeCue reads a single episode, a count and a total length, and ignores
   expect(episodeCue("He has had one bad episode in his life, years ago.")).toBeUndefined();
   expect(episodeCue("after one episode of fainting at the desk")).toBeUndefined();
   expect(episodeCue("she survived two episodes of fever that winter")).toBeUndefined();
+  // ...but a count with a length after "of" still counts, and hyphenated or "single ... of" requests still count.
+  expect(episodeCue("four episodes of ten minutes each")).toMatchObject({ episodes: 4 });
+  expect(episodeCue("3 episodes of about 10 minutes")).toMatchObject({ episodes: 3 });
+  expect(episodeCue("a single-episode radio drama")).toMatchObject({ episodes: 1 });
+  expect(episodeCue("a one-episode story")).toMatchObject({ episodes: 1 });
+  expect(episodeCue("A single episode of an old-time mystery serial")).toMatchObject({ episodes: 1 });
+  expect(episodeCue("one episode of 10 minutes")).toMatchObject({ episodes: 1 });
+  expect(episodeCue("a single radio-play episode")).toMatchObject({ episodes: 1 });
+  expect(episodeCue("one half hour radio episode")).toMatchObject({ episodes: 1 });
   expect(episodeCue("a ghost story in a harbor town")).toBeUndefined();
 });
 
